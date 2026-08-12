@@ -1,11 +1,26 @@
-# deepstream-app: both cameras in, boxes and detections out.
+# deepstream-app: one camera in, boxes and detections out.
 #
-# The entrypoint expands ${RTSP_IN}, ${RTSP_IN_2}, ${MQTT_HOST}, ${MQTT_PORT},
-# ${MQTT_TOPIC}, ${ANNOTATED_ENABLE}, ${DS_WIDTH} and ${DS_HEIGHT} from the
-# environment and writes the
-# result to /tmp/perception.
-# Edit this file on the host and restart the container:
-#     docker compose restart perception
+# One pipeline for each camera, not one batched pipeline for both.
+#
+# Why one each
+# ------------
+# Batching both cameras through a single pipeline and splitting them again with
+# nvstreamdemux produced two payload streams in different coordinate spaces.
+# From the outside that looked intermittent: identical configuration, and
+# repeated measurements of one camera alternating between correct boxes and
+# boxes at two thirds of their true position, depending on which payload
+# arrived first. The demuxed annotated streams never produced a frame either.
+#
+# A single source per pipeline has none of that. There is one coordinate space,
+# one message converter, and one RTSP sink, which is the arrangement that was
+# working before batching was introduced. The cost is a second deepstream-app
+# process and a second TensorRT context; the model is small and the engine file
+# is shared, so that is cheap next to a class of bug that cannot be reasoned
+# about from the outside.
+#
+# The entrypoint expands ${RTSP_IN}, ${DS_SENSOR_ID}, ${DS_WIDTH}, ${DS_HEIGHT},
+# ${DS_RTSP_PORT}, ${DS_UDP_PORT}, ${DS_PAYLOAD_DIR} and ${ANNOTATED_ENABLE},
+# then writes the result into a run directory of its own for each camera.
 #
 # Relative paths resolve against this file's directory.
 
@@ -13,19 +28,12 @@
 enable-perf-measurement=1
 perf-measurement-interval-sec=30
 
-# Tiled display is off, but these two keys still matter, and this is the
-# trap in this file.
+# Off, and with no width or height.
 #
-# [tiled-display] width and height set the coordinate space deepstream-app
-# reports detection metadata in. [streammux] does not. Leave them out and
-# deepstream-app uses its built-in 1280x720 whatever the cameras send, so with
-# 1080p cameras every box arrives at two thirds of its true position and size:
-# a plausible looking box on the wrong part of the image, with no error
-# anywhere to explain it.
-#
-# Keep these equal to the streammux size below. Compose sets both from
-# DS_WIDTH and DS_HEIGHT, and feeds the same pair to detections_bridge, so the
-# three cannot drift apart.
+# Those two keys set the coordinate space deepstream-app reports detection
+# metadata in, and setting them was measured to move the boxes into 1280x720
+# rather than out of it. Left out, the metadata stays in streammux coordinates,
+# which is what the rest of the stack expects.
 [tiled-display]
 enable=0
 rows=1
@@ -33,9 +41,6 @@ columns=1
 
 # ------------------------------------------------------------------ the input
 # type=4 is an RTSP URI source.
-# Both cameras go through one pipeline. deepstream-app batches them, so the
-# GPU cost is close to a single stream and the detections carry a sensorId that
-# says which camera they came from.
 [source0]
 enable=1
 type=4
@@ -49,27 +54,17 @@ latency=200
 rtsp-reconnect-interval-sec=10
 rtsp-reconnect-attempts=-1
 
-[source1]
-enable=1
-type=4
-uri=${RTSP_IN_2}
-num-sources=1
-gpu-id=0
-cudadec-memtype=0
-latency=200
-rtsp-reconnect-interval-sec=10
-rtsp-reconnect-attempts=-1
-
 [streammux]
 gpu-id=0
 live-source=1
-# One slot for each source. Leave it at 1 and the second camera never reaches
-# the detector.
-batch-size=2
+# One source, so one slot.
+batch-size=1
 batched-push-timeout=40000
-# Match the cameras. Scaling down here would throw away resolution before the
-# detector sees it, and small distant targets are exactly what this is looking
-# for. Set DS_WIDTH and DS_HEIGHT in compose to the camera resolution.
+# The camera's own resolution. Matching it means nvstreammux neither scales
+# down, which would throw away detail before the detector sees it, nor scales
+# up, which would cost bandwidth for no new information. It is also the
+# coordinate space the boxes come back in, so the ROS side can take the image
+# size from CameraInfo and find that the two already agree.
 width=${DS_WIDTH}
 height=${DS_HEIGHT}
 enable-padding=0
@@ -109,23 +104,17 @@ show-clock=0
 process-mode=1
 
 # ------------------------------------------------------- output 1: annotated video
-# One RTSP server for each camera, with the boxes drawn into the pixels.
+# type=4 starts an RTSP server inside this container at
+#   rtsp://perception:${DS_RTSP_PORT}/ds-test
+# The video router pulls that and republishes it as <camera>_annotated, so
+# consumers keep one address for every stream.
 #
-# link-to-demux=1 is what makes this per camera. The two streams are batched
-# through one detector, and the demuxer splits them again afterwards, so each
-# sink gets its own source rather than a tiled mosaic of both. source-id picks
-# which: 0 is ${RTSP_IN}, 1 is ${RTSP_IN_2}.
+# No link-to-demux here. There is one source, so the sink takes the pipeline
+# output directly, which is the arrangement that was serving frames before.
 #
-# A DeepStream RTSP sink always mounts at /ds-test, so the two are told apart
-# by port. The video router pulls both and republishes them under names, so
-# consumers keep one address for every stream:
-#     rtsp://perception:8554/ds-test  ->  rtsp://video-router:8554/nadir_annotated
-#     rtsp://perception:8555/ds-test  ->  rtsp://video-router:8554/gimbal_annotated
-#
-# Set ANNOTATED_STREAMS=0 in compose to turn both off. The boxes still reach
-# ROS as messages, and Foxglove still overlays them on the plain streams; what
-# is saved is two H.264 encodes. Turn them off on a busy GPU, or leave them on
-# for a recording that carries its own annotation.
+# Set ANNOTATED_STREAMS=0 in compose to turn this off for both cameras. The
+# boxes still reach ROS as messages, and Foxglove still overlays them on the
+# plain streams; what is saved is one H.264 encode for each camera.
 [sink0]
 enable=${ANNOTATED_ENABLE}
 type=4
@@ -135,25 +124,9 @@ enc-type=0
 sync=0
 bitrate=4000000
 iframeinterval=30
-rtsp-port=8554
-udp-port=5400
+rtsp-port=${DS_RTSP_PORT}
+udp-port=${DS_UDP_PORT}
 gpu-id=0
-link-to-demux=1
-source-id=0
-
-[sink3]
-enable=${ANNOTATED_ENABLE}
-type=4
-codec=1
-enc-type=0
-sync=0
-bitrate=4000000
-iframeinterval=30
-rtsp-port=8555
-udp-port=5401
-gpu-id=0
-link-to-demux=1
-source-id=1
 
 # ---------------------------------------------------- output 2: the detections
 # The DeepStream MQTT adapter is broken against Mosquitto 2, so this sink stays
@@ -192,7 +165,9 @@ msg-conv-msg2p-new-api=1
 # Publish every Nth frame. 5 gives 6 Hz from a 30 fps stream, which is enough
 # for a planner and keeps the bus quiet.
 msg-conv-frame-interval=5
-debug-payload-dir=/tmp/ds-payloads
+# One directory for each camera, so two pipelines never read each other's
+# payloads and the forwarder for one cannot delete the other's work.
+debug-payload-dir=${DS_PAYLOAD_DIR}
 
 # ------------------------------------------------------ output 3: a local window
 # Off by default. The container has no X11 mount.

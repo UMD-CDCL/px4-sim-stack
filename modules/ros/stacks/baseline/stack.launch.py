@@ -18,9 +18,9 @@ What runs here
 
 One pipeline for each camera
 ----------------------------
-DeepStream infers on both streams in one batched pipeline, and every stage
-after it runs once for each camera: an annotator, a ground projector, a
-localizer and a scorer. Nothing merges the two.
+DeepStream runs one pipeline for each camera, and every stage after it runs
+once for each camera too: an annotator, a ground projector, a localizer and a
+scorer. Nothing merges the two.
 
 That is deliberate. The nadir camera looks straight down over a small patch and
 localizes it well; the gimbal looks out and gets worse as it tilts toward the
@@ -78,7 +78,7 @@ def optical_for(camera: str) -> str:
 
 PERCEPTION_ANCHOR = anchor_for(PERCEPTION_CAMERA)
 
-# The second camera DeepStream runs. Both go through one pipeline, and the
+# The second camera DeepStream runs. Each has its own pipeline, and the
 # payload's sensorId says which one a detection came from.
 PERCEPTION_CAMERA_2 = os.environ.get("PERCEPTION_CAMERA_2", "gimbal")
 CAMERA_OPTICAL = {"gimbal": GIMBAL_OPTICAL, "nadir": NADIR_OPTICAL}
@@ -232,10 +232,10 @@ def generate_launch_description() -> LaunchDescription:
                 "source_width": int(os.environ.get("DS_WIDTH", "1920")),
                 "source_height": int(os.environ.get("DS_HEIGHT", "1080")),
                 # Per camera corrections, as "camera=WxH", comma separated.
-                # The two sources in one DeepStream pipeline have been seen
-                # reporting in different spaces at the same time, so a single
-                # global size cannot always be right. Empty means every camera
-                # uses the pair above.
+                # Each camera now has its own pipeline at its own resolution,
+                # so the boxes should already match the image and this should
+                # stay empty. It is kept because the failure it corrects is
+                # silent, and one env var beats a code change at 2 am.
                 "source_size_overrides": [
                     part.strip() for part in
                     os.environ.get("DS_COORD_OVERRIDES", "").split(",")

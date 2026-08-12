@@ -320,9 +320,28 @@ and then publishes with `mosquitto_publish_v5()`. Mosquitto answers with a
 protocol error and closes the connection, and the pipeline stops. `new-api=1`
 does not change the code path.
 
-`[sink1]` in `gimbal_detector.txt` is therefore disabled, and
+`[sink1]` in `camera_detector.txt` is therefore disabled, and
 `payload_forwarder.py` does the publishing. If you turned that sink back on,
 turn it off again.
+
+### The annotated RTSP streams serve no frames
+
+Check that both pipelines are alive, since there is one for each camera:
+
+```bash
+docker compose logs perception | grep -i "annotated\|rtsp"
+docker compose exec perception bash -lc 'pgrep -a deepstream-app'
+```
+
+Two processes should be listed. Each serves `rtsp://perception:<port>/ds-test`,
+8554 for the first camera and 8555 for the second, and the video router
+republishes them as `<camera>_annotated`.
+
+This used to be one batched pipeline that split the cameras again with
+nvstreamdemux, and those demuxed sinks never served a frame. One pipeline for
+each camera replaced it. If the streams are still empty, check
+`ANNOTATED_STREAMS` is not 0, and remember the router pulls them on demand, so
+nothing connects until something asks for the stream.
 
 ### Detection boxes sit off the target, in pixel coordinates
 
@@ -344,14 +363,16 @@ DS_COORD_OVERRIDES=nadir=1280x720
 `detections_bridge` then scales that camera's boxes into the image and logs
 what it is doing. Correct the cameras separately. The two sources in one
 DeepStream pipeline have been seen reporting in different spaces at the same
-time, which reads from the outside as an intermittent fault: identical
-configuration, one camera correct and the other two thirds of the way to the
-top left. Watching a single camera makes it look as if the fault comes and
-goes, because a global correction fixes one camera and breaks the other.
+time. That was one batched pipeline feeding two demuxed outputs, and it read
+from the outside as an intermittent fault: identical configuration, and one
+camera correct while the other sat two thirds of the way to the top left.
 
-The underlying cause is that DeepStream's coordinate space is not necessarily
-the image size and is not stated anywhere in the payload. `[streammux]` width
-and height do not settle it, and neither does `[tiled-display]`. Rather than
+There is now one pipeline for each camera, each at that camera's resolution, so
+the boxes and the image should already agree and the scale should read 1.00.
+The correction stays available because the failure it fixes is silent.
+
+DeepStream states its coordinate space nowhere in the payload, and neither
+`[streammux]` nor `[tiled-display]` settles it from the outside. Rather than
 guess, the bridge takes the image size from CameraInfo, which is what the image
 panels and the projection maths already use, and scales into it.
 

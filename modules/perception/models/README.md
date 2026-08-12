@@ -51,7 +51,7 @@ wget 'https://api.ngc.nvidia.com/v2/models/nvidia/tao/peoplenet/versions/deploya
 
 Then copy `config_infer_person.txt`, point `onnx-file` and `labelfile-path` at
 the new files, set `num-detected-classes=3`, and give `model-engine-file` a new
-path in `cache/`. Point `config-file` in `gimbal_detector.txt` at your copy.
+path in `cache/`. Point `config-file` in `camera_detector.txt` at your copy.
 
 ## Your own YOLO
 

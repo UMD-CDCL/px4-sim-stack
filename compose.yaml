@@ -330,13 +330,13 @@ services:
     runtime: nvidia
     environment:
       <<: *gpu-env
-      DS_CONFIG: ${DS_CONFIG:-gimbal_detector.txt}
+      DS_CONFIG: ${DS_CONFIG:-camera_detector.txt}
       # msgconv.txt turns these into the sensor ids that tag each payload,
       # which is how the ROS side tells the two cameras apart.
       PERCEPTION_CAMERA: ${PERCEPTION_CAMERA:-nadir}
       RTSP_IN: rtsp://video-router:8554/${PERCEPTION_CAMERA:-nadir}
-      # The second camera. Both run through one DeepStream pipeline, and the
-      # payload's sensorId says which one a detection came from.
+      # The second camera. Each camera gets its own deepstream-app process,
+      # and the payload's sensorId says which one a detection came from.
       RTSP_IN_2: rtsp://video-router:8554/${PERCEPTION_CAMERA_2:-gimbal}
       PERCEPTION_CAMERA_2: ${PERCEPTION_CAMERA_2:-gimbal}
       # Burn the boxes into an RTSP stream for each camera, served as
@@ -344,10 +344,11 @@ services:
       # on a busy GPU: the detections still reach ROS, and Foxglove still draws
       # the boxes over the plain streams.
       ANNOTATED_STREAMS: ${ANNOTATED_STREAMS:-1}
-      # The resolution the detector works in. Keep it equal to the camera
-      # resolution so inference sees every pixel the sensor rendered. It is
-      # also the coordinate space DeepStream reports boxes in, and the ros
-      # service reads the same pair to check that the boxes match the image.
+      # The resolution each pipeline works in. Keep it equal to the camera
+      # resolution: nvstreammux then neither scales down, which would throw
+      # away detail before the detector sees it, nor up, which would cost
+      # bandwidth for no new information. It is also the coordinate space the
+      # boxes come back in, and the ros service reads the same pair.
       DS_WIDTH: ${DS_WIDTH:-1920}
       DS_HEIGHT: ${DS_HEIGHT:-1080}
       MQTT_HOST: message-bus

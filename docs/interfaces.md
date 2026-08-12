@@ -118,7 +118,7 @@ clean, so `git status` there shows only your own work.
 |---|---|---|---|---|
 | `gimbal` | 3-axis gimbal camera | 1280x720 | 30 | 4 Mbit/s |
 | `nadir` | Fixed downward camera | 1280x720 | 15 | 2.5 Mbit/s |
-| `gimbal_annotated` | DeepStream, with boxes | 1280x720 | 30 | 4 Mbit/s |
+| `<camera>_annotated` | DeepStream, with boxes | 1280x720 | 30 | 4 Mbit/s |
 
 ### Reading
 

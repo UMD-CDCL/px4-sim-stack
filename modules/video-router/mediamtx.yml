@@ -79,13 +79,13 @@ paths:
     source: publisher
 
   # ------------------------------------------------------- from perception
-  # DeepStream draws boxes and serves its own RTSP, one server for each camera.
-  # The router pulls both in, so consumers keep one address for every stream.
+  # DeepStream draws boxes and serves its own RTSP. There is one deepstream-app
+  # process for each camera, each with its own server, and the router pulls both
+  # in so consumers keep one address for every stream.
   #
-  # The port says which source, not which camera: 8554 is DeepStream's source 0
-  # and 8555 is source 1. Those are RTSP_IN and RTSP_IN_2, which compose sets
-  # from PERCEPTION_CAMERA and PERCEPTION_CAMERA_2. Swap those two variables and
-  # these two names swap with them.
+  # The port follows the camera order, not the camera name: 8554 belongs to
+  # PERCEPTION_CAMERA and 8555 to PERCEPTION_CAMERA_2. Swap those two variables
+  # and these two names swap with them.
   #
   # sourceOnDemand means the router only connects when something asks, so with
   # ANNOTATED_STREAMS=0 these paths simply stay empty instead of erroring.

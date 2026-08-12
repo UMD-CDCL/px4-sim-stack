@@ -20,8 +20,7 @@ Why this exists
 DeepStream reports boxes in its own coordinate space, and that space is not
 always the image size. When it disagrees, every box is still a plausible
 looking box, just on the wrong part of the image, and nothing logs an error.
-The two sources in one pipeline have also been seen disagreeing with each other
-at the same time, so the check is per camera.
+Each camera has its own pipeline, so the check is per camera.
 
 Reading the result
 ------------------

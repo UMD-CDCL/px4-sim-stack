@@ -49,12 +49,10 @@ So the boxes are scaled here, into the size the live CameraInfo reports. When
 the two agree the scale is 1 and nothing happens, which is the normal case;
 when they disagree the boxes still land in the right place.
 
-The correction is per camera, and it has to be. Two sources in one DeepStream
-pipeline have been seen reporting in different spaces at the same time, which
-looks from the outside like an intermittent fault: identical configuration,
-boxes correct on one camera and two thirds of the way to the top left on the
-other. `source_size_overrides` names the camera, so one can be corrected
-without disturbing the other.
+The correction is per camera. Each camera has its own DeepStream pipeline at
+its own resolution, so the two should already agree and the scale should be 1;
+`source_size_overrides` exists because the failure it corrects is silent, and
+naming the camera means one can be fixed without disturbing the other.
 
 The scale factor is logged for each camera the first time it is used. If it is
 not 1.0, something has changed and it is worth knowing why.
@@ -68,8 +66,8 @@ Parameters
     source_width   the coordinate space DeepStream reports in
     source_height
     source_size_overrides
-                   per camera, as "camera=WxH". The two sources in one pipeline
-                   do not always agree, so this corrects one without the other.
+                   per camera, as "camera=WxH". Corrects one camera without
+                   disturbing the other.
     frame_id       frame_id on the published messages
     time_offset    seconds added to the payload timestamp, for calibration
     max_age        drop a payload older than this, in seconds
@@ -123,12 +121,18 @@ class DetectionsBridge(Node):
         self.declare_parameter("frame_id", "camera_optical_frame")
         self.declare_parameter("time_offset", 0.0)
         self.declare_parameter("max_age", 2.0)
-        # DeepStream runs both cameras through one pipeline and tags each
+        # DeepStream runs a pipeline for each camera and tags each
         # payload with sensorId. These two lists map that id to the camera's
         # optical frame, and detections are republished per camera so a
         # consumer can pick one without filtering. The first entry is the
         # primary camera, which also keeps the plain /perception/detections
         # topic that the localizer and the older layout expect.
+        # The unqualified /perception/detections topic, which carried the
+        # primary camera's detections before every stage became per camera.
+        # Off by default: with it on, the primary camera's detections appear on
+        # two topics, and anything left on the old default subscribes to a feed
+        # that silently holds one camera out of two.
+        self.declare_parameter("publish_unqualified", False)
         self.declare_parameter("sensor_ids", ["nadir", "gimbal"])
         self.declare_parameter("sensor_frames",
                                ["nadir_camera_optical_frame",
@@ -140,6 +144,7 @@ class DetectionsBridge(Node):
         self.max_age = float(self.get_parameter("max_age").value)
         self.count = 0
         self.malformed = 0
+        self.unrouted = 0
         self.no_stamp = 0
         self.stale = 0
         self.lag_sum = 0.0
@@ -150,9 +155,10 @@ class DetectionsBridge(Node):
         self.frame_for = dict(zip(ids, frames))
         self.primary = ids[0] if ids else None
 
-        self.pub = self.create_publisher(
-            Detection2DArray, "/perception/detections", DETECTION_QOS
-        )
+        self.publish_unqualified = bool(self.get_parameter("publish_unqualified").value)
+        self.pub = (self.create_publisher(
+            Detection2DArray, "/perception/detections", DETECTION_QOS)
+            if self.publish_unqualified else None)
         self.source_size = (int(self.get_parameter("source_width").value),
                             int(self.get_parameter("source_height").value))
         self.source_override: dict[str, tuple[int, int]] = {}
@@ -250,10 +256,18 @@ class DetectionsBridge(Node):
 
         if sensor in self.per_camera:
             self.per_camera[sensor].publish(array)
-        # The primary camera also keeps the unqualified topic, so the localizer
-        # and anything older need no change.
-        if sensor == self.primary or sensor not in self.per_camera:
+        # A camera with no publisher of its own has nowhere else to go, so it
+        # falls back to the unqualified topic when that is enabled at all.
+        if self.pub is not None and (sensor == self.primary
+                                     or sensor not in self.per_camera):
             self.pub.publish(array)
+        elif sensor not in self.per_camera:
+            self.unrouted += 1
+            if self.unrouted in (1, 500):
+                self.get_logger().warn(
+                    f"detections tagged sensorId={sensor!r}, which is not in "
+                    f"sensor_ids {list(self.per_camera)}. They are dropped. "
+                    f"Check the id in the deepstream msgconv config.")
         self.count += len(detections)
 
     # -------------------------------------------------------------- timestamp

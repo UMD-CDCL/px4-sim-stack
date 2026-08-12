@@ -1,47 +1,54 @@
 #!/usr/bin/env bash
-# Wait for the video stream, expand the config, then run deepstream-app.
+# Wait for the video streams, expand a config for each camera, then run one
+# deepstream-app for each.
+#
+# One pipeline per camera, not one batched pipeline for both. Batching and then
+# splitting with nvstreamdemux produced two payload streams in different
+# coordinate spaces, which read from the outside as boxes that were sometimes
+# correct and sometimes at two thirds of their true position, and the demuxed
+# annotated streams never served a frame. See configs/camera_detector.txt.
+#
+# Each camera gets its own run directory, its own payload directory, its own
+# RTSP port and its own sensor id. Nothing is shared but the model and the
+# TensorRT engine file, which is the point: two pipelines cannot disagree about
+# a coordinate space they do not share.
 set -euo pipefail
 
-DS_CONFIG=${DS_CONFIG:-gimbal_detector.txt}
-SRC=/opt/perception/configs/$DS_CONFIG
-RUN_DIR=/tmp/perception
-RTSP_IN=${RTSP_IN:-rtsp://video-router:8554/gimbal}
+DS_CONFIG=${DS_CONFIG:-camera_detector.txt}
+SRC_DIR=/opt/perception/configs
 MQTT_HOST=${MQTT_HOST:-message-bus}
 MQTT_PORT=${MQTT_PORT:-1883}
 MQTT_TOPIC=${MQTT_TOPIC:-perception/detections}
-RTSP_IN_2=${RTSP_IN_2:-rtsp://video-router:8554/gimbal}
-# The resolution the detector works in, and the coordinate space it reports
-# boxes in. Both [streammux] and [tiled-display] read these. See the config.
+
+# The cameras, in order. The first gets RTSP port 8554, the second 8555, and
+# the video router maps those to <camera>_annotated by that order.
+PERCEPTION_CAMERA=${PERCEPTION_CAMERA:-nadir}
+PERCEPTION_CAMERA_2=${PERCEPTION_CAMERA_2:-gimbal}
+RTSP_BASE=${RTSP_BASE:-rtsp://video-router:8554}
+RTSP_IN=${RTSP_IN:-$RTSP_BASE/$PERCEPTION_CAMERA}
+RTSP_IN_2=${RTSP_IN_2:-$RTSP_BASE/$PERCEPTION_CAMERA_2}
+
+# The resolution each pipeline works in, and the coordinate space it reports
+# boxes in. Keep it equal to the camera so nvstreammux neither scales down nor
+# up, and the ROS side finds that the boxes already match the image.
 DS_WIDTH=${DS_WIDTH:-1920}
 DS_HEIGHT=${DS_HEIGHT:-1080}
-# The annotated RTSP outputs, one for each camera, with the boxes burned into
-# the pixels. On by default. The config reads ANNOTATED_ENABLE, so translate
-# anything falsey to the 0 or 1 deepstream-app expects.
+
 case "${ANNOTATED_STREAMS:-1}" in
 0 | false | no | off) ANNOTATED_ENABLE=0 ;;
 *) ANNOTATED_ENABLE=1 ;;
 esac
 
-export RTSP_IN RTSP_IN_2 MQTT_HOST MQTT_PORT MQTT_TOPIC ANNOTATED_ENABLE
-export DS_WIDTH DS_HEIGHT
+export MQTT_HOST MQTT_PORT MQTT_TOPIC DS_WIDTH DS_HEIGHT ANNOTATED_ENABLE
 
 log()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[33m    %s\033[0m\n' "$*"; }
 
-[ -f "$SRC" ] || {
-	echo "No config at $SRC. Available:"
-	ls /opt/perception/configs/
+[ -f "$SRC_DIR/$DS_CONFIG" ] || {
+	echo "No config at $SRC_DIR/$DS_CONFIG. Available:"
+	ls "$SRC_DIR"
 	exit 1
 }
-
-# deepstream-app resolves relative paths against the config file's directory,
-# so the whole directory is copied and expanded together.
-rm -rf "$RUN_DIR"
-mkdir -p "$RUN_DIR"
-for f in /opt/perception/configs/*; do
-	[ -f "$f" ] || continue
-	envsubst < "$f" > "$RUN_DIR/$(basename "$f")"
-done
 
 # Wait for the video router to accept connections. Do not try to pull a frame
 # here: deepstream-app has rtsp-reconnect-attempts=-1 and retries the stream
@@ -70,28 +77,72 @@ if [ ! -d /opt/perception/models/Primary_Detector ]; then
 	cp -r "$DS_MODELS/Primary_Detector" /opt/perception/models/
 fi
 
-# nvmsgconv writes payloads here, the forwarder publishes and deletes them.
-mkdir -p /tmp/ds-payloads
-if [ "${PAYLOAD_FORWARDER:-1}" = "1" ]; then
-	python3 /opt/perception/app/payload_forwarder.py \
-		--dir /tmp/ds-payloads --host "$MQTT_HOST" --port "$MQTT_PORT" \
-		--topic "$MQTT_TOPIC" --poll 0.02 &
-fi
+pids=""
 
-log "Starting deepstream-app with $DS_CONFIG"
+# Stop both pipelines together. Without this, killing the container leaves one
+# deepstream-app holding the GPU while the other has already gone.
+shutdown() {
+	trap - TERM INT
+	[ -n "$pids" ] && kill $pids 2>/dev/null || true
+	wait 2>/dev/null || true
+	exit 0
+}
+trap shutdown TERM INT
+
+# start_camera <name> <uri> <rtsp-port> <udp-port>
+start_camera() {
+	local name=$1 uri=$2 rtsp_port=$3 udp_port=$4
+	local run_dir=/tmp/perception-$name
+	local payload_dir=/tmp/ds-payloads-$name
+
+	rm -rf "$run_dir"
+	mkdir -p "$run_dir" "$payload_dir"
+
+	# envsubst reads the environment, so these have to be exported rather than
+	# passed as a command prefix.
+	export DS_SENSOR_ID=$name RTSP_IN=$uri DS_RTSP_PORT=$rtsp_port
+	export DS_UDP_PORT=$udp_port DS_PAYLOAD_DIR=$payload_dir
+
+	# deepstream-app resolves relative paths against the config file's
+	# directory, so the whole directory is copied and expanded together.
+	for f in "$SRC_DIR"/*; do
+		[ -f "$f" ] || continue
+		envsubst < "$f" > "$run_dir/$(basename "$f")"
+	done
+
+	# One forwarder for each payload directory. They publish to the same MQTT
+	# topic, and the sensorId in each payload says which camera it came from.
+	if [ "${PAYLOAD_FORWARDER:-1}" = "1" ]; then
+		python3 /opt/perception/app/payload_forwarder.py \
+			--dir "$payload_dir" --host "$MQTT_HOST" --port "$MQTT_PORT" \
+			--topic "$MQTT_TOPIC" --poll 0.02 &
+		pids="$pids $!"
+	fi
+
+	( cd "$run_dir" && exec deepstream-app -c "$run_dir/$DS_CONFIG" ) &
+	pids="$pids $!"
+	printf '    %-8s %s\n' "$name" "$uri"
+	printf '    %-8s annotated rtsp://perception:%s/ds-test -> %s_annotated\n' \
+		"" "$rtsp_port" "$name"
+}
+
+log "Starting deepstream-app for each camera with $DS_CONFIG"
 cat <<EOF
-    sources     $RTSP_IN
-                $RTSP_IN_2
-    detector    ${DS_WIDTH}x${DS_HEIGHT}, which is also the box coordinate space
+    detector    ${DS_WIDTH}x${DS_HEIGHT} for each camera, which is also the box
+                coordinate space the ROS side reads
     detections  mqtt://$MQTT_HOST:$MQTT_PORT topic $MQTT_TOPIC
     annotated   $([ "$ANNOTATED_ENABLE" = 1 ] && echo "on" || echo "off (ANNOTATED_STREAMS=0)")
-                rtsp://perception:8554/ds-test  source 0
-                rtsp://perception:8555/ds-test  source 1
-                also served as rtsp://localhost:8554/<camera>_annotated
 
     The first run builds a TensorRT engine, which takes one to three minutes.
     The engine is cached in modules/perception/models/cache/.
+
 EOF
 
-cd "$RUN_DIR"
-exec deepstream-app -c "$RUN_DIR/$DS_CONFIG"
+start_camera "$PERCEPTION_CAMERA" "$RTSP_IN" 8554 5400
+start_camera "$PERCEPTION_CAMERA_2" "$RTSP_IN_2" 8555 5401
+
+# Exit when the first pipeline exits, so a crash is visible to compose rather
+# than leaving the container up with half a perception stack.
+wait -n $pids
+warn "A pipeline exited. Stopping the rest."
+shutdown

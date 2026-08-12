@@ -242,10 +242,10 @@ version must match the one that release of QGroundControl expects. Look at
 ## DeepStream
 
 There is no application code. `deepstream-app` reads
-`modules/perception/configs/gimbal_detector.txt`.
+`modules/perception/configs/camera_detector.txt`.
 
 ```bash
-vim modules/perception/configs/gimbal_detector.txt
+vim modules/perception/configs/camera_detector.txt
 docker compose restart perception
 make logs S=perception
 ```
