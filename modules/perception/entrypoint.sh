@@ -77,6 +77,66 @@ if [ ! -d /opt/perception/models/Primary_Detector ]; then
 	cp -r "$DS_MODELS/Primary_Detector" /opt/perception/models/
 fi
 
+# The first value of a key in a deepstream-app config. The anchor keeps
+# config-file= from also matching the tracker's ll-config-file=.
+config_value() {
+	[ -f "$1" ] || return 0
+	sed -n "s/^[[:space:]]*$2=[[:space:]]*//p" "$1" | head -1
+}
+
+engine_loads() {
+	[ -f "$1" ] || return 1
+	python3 /opt/perception/app/engine_check.py "$1" >/dev/null 2>&1
+}
+
+# Hold until the engine on disk loads, so the second camera never joins a build
+# that is still running.
+wait_for_engine() {
+	local engine=$1
+	local deadline=$(( $(date +%s) + ${ENGINE_WAIT_SECONDS:-900} ))
+	while [ "$(date +%s)" -lt "$deadline" ]; do
+		if engine_loads "$engine"; then
+			log "The engine is built. Starting the second camera."
+			return 0
+		fi
+		sleep 5
+	done
+	warn "No usable engine after ${ENGINE_WAIT_SECONDS:-900} s. Starting the second camera anyway."
+	return 1
+}
+
+# Both cameras run the same model, and nvinfer saves the plan next to the ONNX
+# under a name it generates rather than the model-engine-file path, so the two
+# processes write one file whatever the config says.
+#
+# Building it in both at once leaves a plan that loads in neither. The next
+# start then fails to deserialize, rebuilds in both again, and corrupts it
+# again: it never settles, and every start pays the build.
+#
+# So a plan that loads means both cameras start together, and anything else
+# means the first builds it alone while the second waits.
+ENGINE=""
+infer_config=$(config_value "$SRC_DIR/$DS_CONFIG" config-file)
+if [ -n "$infer_config" ]; then
+	case "$infer_config" in
+	/*) infer_path=$infer_config ;;
+	*) infer_path=$SRC_DIR/$infer_config ;;
+	esac
+	ENGINE=$(config_value "$infer_path" model-engine-file)
+fi
+
+ENGINE_READY=0
+if [ -z "$ENGINE" ]; then
+	warn "No model-engine-file in the config. Both cameras start together and may each build an engine."
+elif engine_loads "$ENGINE"; then
+	ENGINE_READY=1
+elif [ -f "$ENGINE" ]; then
+	# Left by a build that raced, by another GPU, or by another TensorRT.
+	# nvinfer would overwrite it anyway; removing it keeps the state readable.
+	warn "The cached engine does not load. Removing it and building once."
+	rm -f "$ENGINE"
+fi
+
 pids=""
 
 # Stop both pipelines together. Without this, killing the container leaves one
@@ -134,11 +194,17 @@ cat <<EOF
     annotated   $([ "$ANNOTATED_ENABLE" = 1 ] && echo "on" || echo "off (ANNOTATED_STREAMS=0)")
 
     The first run builds a TensorRT engine, which takes one to three minutes.
-    The engine is cached in modules/perception/models/cache/.
+    The first camera builds it and the second waits, so one plan is written
+    once. The engine is cached next to the model in
+    modules/perception/models/Primary_Detector/ and reused on later starts.
 
 EOF
 
 start_camera "$PERCEPTION_CAMERA" "$RTSP_IN" 8554 5400
+if [ "$ENGINE_READY" = 0 ] && [ -n "$ENGINE" ]; then
+	log "Building the TensorRT engine in the first camera, so it is written once"
+	wait_for_engine "$ENGINE"
+fi
 start_camera "$PERCEPTION_CAMERA_2" "$RTSP_IN_2" 8555 5401
 
 # Exit when the first pipeline exits, so a crash is visible to compose rather
