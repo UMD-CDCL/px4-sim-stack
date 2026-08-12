@@ -100,6 +100,18 @@
         },
         "/scoring/markers": {
           "visible": true
+        },
+        "/camera/nadir/ground_projection": {
+          "visible": true,
+          "pointSize": 3,
+          "colorMode": "rgb",
+          "colorField": "rgb"
+        },
+        "/camera/gimbal/ground_projection": {
+          "visible": true,
+          "pointSize": 3,
+          "colorMode": "rgb",
+          "colorField": "rgb"
         }
       },
       "layers": {},
@@ -137,17 +149,24 @@
     },
     "map!world": {
       "center": null,
-      "customTileProviders": [],
+      "customTileProviders": [
+        {
+          "name": "Satellite",
+          "url": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+          "attribution": "Esri World Imagery"
+        }
+      ],
       "disabledTopics": [],
       "followTopic": "/mavros/global_position/global",
-      "layer": "map",
+      "layer": "custom",
       "topicColors": {
         "/mavros/global_position/global": "#ff7043",
         "/ground_truth/geojson": "#2ecc71",
         "/map_overlays/geojson": "#4dd0e1"
       },
-      "zoomLevel": 18,
-      "maxNativeZoom": 19
+      "zoomLevel": 19,
+      "maxNativeZoom": 19,
+      "customLayer": "Satellite"
     },
     "Plot!scoring": {
       "paths": [

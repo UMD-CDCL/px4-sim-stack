@@ -64,6 +64,9 @@ class MapOverlays(Node):
         self.local_xy: tuple[float, float] | None = None
         self.footprints: dict[str, list[tuple[float, float]]] = {}
         self.detections: list[tuple[float, float, str, str]] = []
+        self.raw: list[tuple[float, float, str]] = []
+        self.raw_stamp = 0.0
+        self.verdict_stamp = 0.0
         self.truth: list[tuple[float, float, str]] = []
 
         if not HAVE_GEOJSON:
@@ -84,6 +87,12 @@ class MapOverlays(Node):
                                  self._on_fix, qos_profile_sensor_data)
         self.create_subscription(Detection3DArray, "/scoring/verdicts",
                                  self._on_verdicts, 10)
+        # Localized detections direct from the localizer, so they appear on the
+        # map whether or not the scorer has anything to compare them against.
+        # Scoring needs ground truth, and ground truth only exists in
+        # simulation; a detection is worth plotting regardless.
+        self.create_subscription(Detection3DArray, "/perception/detections_3d",
+                                 self._on_detections, 10)
         self.create_subscription(Detection3DArray, "/ground_truth/truth_3d",
                                  self._on_truth, LATCHED)
 
@@ -114,6 +123,12 @@ class MapOverlays(Node):
             out.append((d.bbox.center.position.x, d.bbox.center.position.y,
                         verdict, d.id))
         self.detections = out
+        self.verdict_stamp = self.get_clock().now().nanoseconds / 1e9
+
+    def _on_detections(self, msg: Detection3DArray) -> None:
+        self.raw = [(d.bbox.center.position.x, d.bbox.center.position.y, d.id)
+                    for d in msg.detections]
+        self.raw_stamp = self.get_clock().now().nanoseconds / 1e9
 
     def _on_truth(self, msg: Detection3DArray) -> None:
         self.truth = [(d.bbox.center.position.x, d.bbox.center.position.y, d.id)
@@ -153,13 +168,19 @@ class MapOverlays(Node):
                                "marker-color": "#2ecc71", "marker-symbol": "circle"},
             })
 
-        for x, y, verdict, track in self.detections:
+        # Verdicts when the scorer is running and current, otherwise the raw
+        # localizations, marked unjudged rather than coloured as if they had
+        # been checked.
+        now = self.get_clock().now().nanoseconds / 1e9
+        shown = (self.detections if (now - self.verdict_stamp) < 3.0
+                 else [(x, y, "", t) for x, y, t in self.raw])
+        for x, y, verdict, track in shown:
             features.append({
                 "type": "Feature",
                 "geometry": {"type": "Point", "coordinates": self._ll(x, y)},
                 "properties": {"name": f"{verdict} {track}".strip(),
-                               "kind": "detection", "verdict": verdict,
-                               "marker-color": VERDICT_COLOUR.get(verdict, "#e74c3c")},
+                               "kind": "detection", "verdict": verdict or "unjudged",
+                               "marker-color": VERDICT_COLOUR.get(verdict, "#bdc3c7")},
             })
 
         msg = GeoJSON()

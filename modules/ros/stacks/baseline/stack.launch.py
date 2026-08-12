@@ -61,8 +61,12 @@ CAMERA_OPTICAL = {"gimbal": GIMBAL_OPTICAL, "nadir": NADIR_OPTICAL}
 # Field of view of each camera, in radians, from the sensor definitions in
 # modules/sim/scenes/models/x500_recon/model.sdf. rtsp_camera builds its
 # CameraInfo from these, and every projection depends on them being right.
-GIMBAL_HFOV = 2.0
-NADIR_HFOV = 1.74
+# Horizontal field of view in radians, from the sensor definitions in
+# modules/sim/scenes/models/x500_recon/model.sdf. Both are overridable, so the
+# nadir camera can be trimmed without touching the gimbal, whose projection is
+# already correct.
+GIMBAL_HFOV = float(os.environ.get("GIMBAL_HFOV", "2.0"))
+NADIR_HFOV = float(os.environ.get("NADIR_HFOV", "1.74"))
 
 # The RTSP jitter buffer, in milliseconds. It is also the largest known part of
 # the delay between capture and an image reaching ROS, so rtsp_camera subtracts
@@ -333,11 +337,12 @@ def generate_launch_description() -> LaunchDescription:
             name="detection_scorer",
             output="screen",
             parameters=[{
-                # Eight metres is generous. It is wide enough that a correct
-                # detection is never called a miss on a bad frame, and narrow
-                # enough that two targets cannot be confused: the closest pair
-                # in the shipped scenario is further apart than that.
-                "gate_radius": 8.0,
+                # An estimate counts as finding a target only if it lands
+                # within this many metres of it. Two metres is a statement
+                # about what the localization is for: a position good enough to
+                # send someone to. A wider gate scores geometry that is not
+                # actually useful as a success.
+                "gate_radius": float(os.environ.get("SCORING_GATE_M", "2.0")),
                 "window": 100,
                 "reference_frame": REFERENCE_FRAME,
                 "footprint_topic": f"/camera/{PERCEPTION_CAMERA}/footprint",
@@ -358,6 +363,29 @@ def generate_launch_description() -> LaunchDescription:
                 "rate_hz": 2.0,
             }],
         ),
+
+        # The live image laid flat on the ground plane, so the 3D view shows
+        # the camera's own picture in the place the localizer thinks it is.
+        *[
+            Node(
+                package="sim_bridge",
+                executable="image_ground_projector",
+                name=f"{cam}_ground_image",
+                namespace=f"camera/{cam}",
+                output="screen",
+                parameters=[{
+                    "image_topic": f"/camera/{cam}/image_raw",
+                    "camera_info_topic": f"/camera/{cam}/camera_info",
+                    "optical_frame": CAMERA_OPTICAL.get(cam, NADIR_OPTICAL),
+                    "reference_frame": REFERENCE_FRAME,
+                    "use_rel_alt": True,
+                    # 8 turns 1280x720 into about 14 thousand points.
+                    "step": int(os.environ.get("GROUND_IMAGE_STEP", "8")),
+                    "rate_hz": float(os.environ.get("GROUND_IMAGE_RATE", "2.0")),
+                }],
+            )
+            for cam in (PERCEPTION_CAMERA, PERCEPTION_CAMERA_2)
+        ],
 
         # ------------------------------------------------- observability
         Node(

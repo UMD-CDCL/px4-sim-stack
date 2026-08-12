@@ -239,6 +239,13 @@ services:
       MQTT_HOST: message-bus
       # Gimbal frame handling. GIMBAL_SOURCE is auto, setpoint or status.
       # The offsets are the constant the scene_tf diagnostic reports.
+      # Camera fields of view, radians. Trim nadir without touching gimbal.
+      # An estimate must land within this many metres of a target to count.
+      SCORING_GATE_M: ${SCORING_GATE_M:-2.0}
+      GIMBAL_HFOV: ${GIMBAL_HFOV:-2.0}
+      NADIR_HFOV: ${NADIR_HFOV:-1.74}
+      GROUND_IMAGE_STEP: ${GROUND_IMAGE_STEP:-8}
+      GROUND_IMAGE_RATE: ${GROUND_IMAGE_RATE:-2.0}
       GIMBAL_SOURCE: ${GIMBAL_SOURCE:-auto}
       # follow_vehicle takes yaw from the airframe and pitch from the
       # gimbal. report trusts the reported yaw too.
