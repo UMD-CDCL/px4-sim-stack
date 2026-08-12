@@ -20,8 +20,13 @@ the world origin. PX4's local frame starts at the point where the EKF
 initialized, which is where the vehicle spawned, so the two line up. When they
 do not, `origin_offset_xyz` shifts them.
 
-Latitude and longitude come from `/mavros/global_position/gp_origin`, so the map
-view lines up with the drone's own fix rather than a number copied from .env.
+Latitude and longitude are derived from the drone itself. PX4 does not send
+GPS_GLOBAL_ORIGIN unless something asks, so `/mavros/global_position/gp_origin`
+stays silent and cannot be relied on. Instead this pairs the drone's global fix
+with its local position: if the aircraft sits at local (x, y) and reports a
+given latitude and longitude, then local (0, 0) is that fix walked back by
+(x, y). The result tracks the same EKF the local frame comes from, so the map
+view and the 3D view agree, and no coordinate is copied from .env.
 
 Publishes
     /ground_truth/markers      visualization_msgs/MarkerArray  (3D panel)
@@ -48,6 +53,9 @@ from vision_msgs.msg import (
     ObjectHypothesisWithPose,
 )
 from visualization_msgs.msg import Marker, MarkerArray
+
+from geometry_msgs.msg import PoseStamped
+from sensor_msgs.msg import NavSatFix
 
 try:
     from geographic_msgs.msg import GeoPointStamped
@@ -107,9 +115,16 @@ class GroundTruth(Node):
                 "foxglove_msgs is missing, so the Map panel gets no ground truth. "
                 "Install ros-$ROS_DISTRO-foxglove-msgs.")
 
+        # gp_origin is preferred when it appears, and usually it does not.
         if HAVE_GEO:
             self.create_subscription(GeoPointStamped, "/mavros/global_position/gp_origin",
                                      self._on_origin, qos_profile_sensor_data)
+        self.local_xy: tuple[float, float] | None = None
+        self.create_subscription(PoseStamped, "/mavros/local_position/pose",
+                                 self._on_local, qos_profile_sensor_data)
+        self.create_subscription(NavSatFix, "/mavros/global_position/global",
+                                 self._on_fix, qos_profile_sensor_data)
+        self.origin_from_fix = False
 
         rate = float(self.get_parameter("rate_hz").value)
         self.create_timer(1.0 / max(rate, 0.1), self._publish)
@@ -150,6 +165,27 @@ class GroundTruth(Node):
         if msg.position.latitude or msg.position.longitude:
             self.origin_lat = msg.position.latitude
             self.origin_lon = msg.position.longitude
+            self.origin_from_fix = False
+
+    def _on_local(self, msg) -> None:
+        self.local_xy = (msg.pose.position.x, msg.pose.position.y)
+
+    def _on_fix(self, msg) -> None:
+        # Walk the drone's own fix back to local (0, 0). Skip it once gp_origin
+        # has given a real answer, and skip a fix with no lock.
+        if self.origin_lat is not None and not self.origin_from_fix:
+            return
+        if self.local_xy is None or msg.status.status < 0:
+            return
+        x, y = self.local_xy
+        lat = msg.latitude - math.degrees(y / EARTH_R)
+        lon = msg.longitude - math.degrees(x / (EARTH_R * math.cos(math.radians(msg.latitude))))
+        first = self.origin_lat is None
+        self.origin_lat, self.origin_lon = lat, lon
+        self.origin_from_fix = True
+        if first:
+            self.get_logger().info(
+                f"map origin from the vehicle fix: {lat:.7f}, {lon:.7f}")
 
     def _to_latlon(self, x: float, y: float) -> tuple[float, float] | None:
         """Local ENU metres to WGS84, flat-earth about the origin.

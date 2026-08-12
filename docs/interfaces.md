@@ -417,3 +417,38 @@ To separate them, put a target directly under the drone. If the error goes to
 nearly zero there and grows toward the edges of the frame, it is the camera
 orientation or the intrinsics. If it stays constant everywhere, it is the
 ground truth position or the box.
+
+### Correcting a frame offset with a fiducial
+
+Some of that error is a frame difference rather than a mistake, and on real
+hardware most of it is. Positions land in `map`, the vehicle's own EKF frame,
+built from the vehicle's own receiver. Any other frame, a surveyed map or a
+second aircraft, is built from a different receiver and sits metres away. The
+shapes agree and the origins do not.
+
+That offset is measured once, against a point whose position is known, and then
+subtracted. `fiducial_alignment` does it:
+
+| Parameter | Meaning |
+|---|---|
+| `FIDUCIAL_SURVEYED_LAT/LON/ALT` | Where the fiducial truly is |
+| `FIDUCIAL_MEASURED_LAT/LON/ALT` | Where this pipeline put it |
+| `FIDUCIAL_ENABLED` | `1` turns the correction on |
+
+The node converts both to local metres, takes the difference, and publishes a
+transform from `map` to `fiducial`. With it enabled, `detection_localizer`
+publishes in `fiducial`, so every position carries the correction and nothing
+downstream does arithmetic of its own.
+
+In simulation neither value has to be flown for. The true position is in the
+scenario file, and the measured one can be read off a localization, so both are
+simply written down.
+
+**Do not survey a target you also score against.** Fitting the correction to a
+scored target and then reporting the error against that same target measures
+the arithmetic and nothing else. Use a fiducial no detector is graded on.
+
+Verified by injecting a known offset: a fiducial surveyed 3 m east and 5 m
+north of its measured position produced `east +3.00 m, north +5.00 m`, a
+transform of `[-3.000, -5.000, 0.000]`, and detections published in
+`frame_id: fiducial`.

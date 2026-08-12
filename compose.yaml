@@ -242,6 +242,13 @@ services:
       # looks straight down, which is what an overhead search wants, and
       # it needs no gimbal pointing to work.
       PERCEPTION_CAMERA: ${PERCEPTION_CAMERA:-nadir}
+      FIDUCIAL_ENABLED: ${FIDUCIAL_ENABLED:-0}
+      FIDUCIAL_SURVEYED_LAT: ${FIDUCIAL_SURVEYED_LAT:-0.0}
+      FIDUCIAL_SURVEYED_LON: ${FIDUCIAL_SURVEYED_LON:-0.0}
+      FIDUCIAL_SURVEYED_ALT: ${FIDUCIAL_SURVEYED_ALT:-0.0}
+      FIDUCIAL_MEASURED_LAT: ${FIDUCIAL_MEASURED_LAT:-0.0}
+      FIDUCIAL_MEASURED_LON: ${FIDUCIAL_MEASURED_LON:-0.0}
+      FIDUCIAL_MEASURED_ALT: ${FIDUCIAL_MEASURED_ALT:-0.0}
     volumes:
       - ./modules/ros/stacks:/stacks
       - ./src/ros2_ws:/ws

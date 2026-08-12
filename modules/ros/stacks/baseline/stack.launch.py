@@ -232,6 +232,11 @@ def generate_launch_description() -> LaunchDescription:
                 "range_variance_scale": 0.0004,
                 "target_height": 1.7,
                 "marker_lifetime": 3.0,
+                # Empty means the reference frame. Set FIDUCIAL_ENABLED=1
+                # and this becomes the corrected frame.
+                "output_frame": ("fiducial"
+                                 if os.environ.get("FIDUCIAL_ENABLED", "0") == "1"
+                                 else ""),
             }],
         ),
 
@@ -254,6 +259,31 @@ def generate_launch_description() -> LaunchDescription:
                 "origin_offset_xyz": [0.0, 0.0, 0.0],
                 "target_height": 1.7,
                 "rate_hz": 1.0,
+            }],
+        ),
+
+        # Frame alignment against a surveyed point. Off until you have one.
+        # Two GPS-derived frames disagree by metres, and this is where that gets
+        # removed. Do not survey a target you also score against.
+        Node(
+            package="sim_bridge",
+            executable="fiducial_alignment",
+            name="fiducial_alignment",
+            output="screen",
+            parameters=[{
+                "enabled": os.environ.get("FIDUCIAL_ENABLED", "0") == "1",
+                "surveyed_lla": [
+                    float(os.environ.get("FIDUCIAL_SURVEYED_LAT", "0.0")),
+                    float(os.environ.get("FIDUCIAL_SURVEYED_LON", "0.0")),
+                    float(os.environ.get("FIDUCIAL_SURVEYED_ALT", "0.0")),
+                ],
+                "measured_lla": [
+                    float(os.environ.get("FIDUCIAL_MEASURED_LAT", "0.0")),
+                    float(os.environ.get("FIDUCIAL_MEASURED_LON", "0.0")),
+                    float(os.environ.get("FIDUCIAL_MEASURED_ALT", "0.0")),
+                ],
+                "fiducial_frame": "fiducial",
+                "reference_frame": REFERENCE_FRAME,
             }],
         ),
 

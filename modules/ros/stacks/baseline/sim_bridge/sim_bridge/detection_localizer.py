@@ -103,6 +103,10 @@ class DetectionLocalizer(Node):
         self.declare_parameter("range_variance_scale", 0.0004)
         self.declare_parameter("target_height", 1.7)
         self.declare_parameter("marker_lifetime", 3.0)
+        # Publish results in this frame. Leave it as the reference frame to get
+        # raw vehicle-frame positions. Set it to the fiducial frame to get
+        # positions with the surveyed bias removed. See fiducial_alignment.py.
+        self.declare_parameter("output_frame", "")
 
         self.optical = self.get_parameter("optical_frame").value
         self.reference = self.get_parameter("reference_frame").value
@@ -114,6 +118,8 @@ class DetectionLocalizer(Node):
         self.range_scale = float(self.get_parameter("range_variance_scale").value)
         self.target_height = float(self.get_parameter("target_height").value)
         self.marker_lifetime = float(self.get_parameter("marker_lifetime").value)
+        self.output_frame = self.get_parameter("output_frame").value or self.reference
+        self.warned_output = False
 
         self.tf_buffer = Buffer(cache_time=Duration(seconds=10.0))
         # spin_thread=True is not optional here. The listener otherwise
@@ -187,7 +193,7 @@ class DetectionLocalizer(Node):
 
         out3d = Detection3DArray()
         out3d.header.stamp = msg.header.stamp
-        out3d.header.frame_id = self.reference
+        out3d.header.frame_id = self.output_frame
         poses = PoseArray()
         poses.header = out3d.header
         markers = MarkerArray()
@@ -202,6 +208,10 @@ class DetectionLocalizer(Node):
             hit = intersect_ground(origin, direction, ground_z, self.max_range)
             if hit is None:
                 self.no_ground += 1
+                continue
+
+            hit = self._to_output(hit, msg.header.stamp)
+            if hit is None:
                 continue
 
             rng = slant_range(origin, hit)
@@ -243,6 +253,26 @@ class DetectionLocalizer(Node):
             self.pose_pub.publish(poses)
             self.marker_pub.publish(markers)
 
+    def _to_output(self, hit, stamp):
+        """Move a point into the output frame, if that is not the reference."""
+        if self.output_frame == self.reference:
+            return hit
+        try:
+            tf = self.tf_buffer.lookup_transform(
+                self.output_frame, self.reference, Time())
+        except Exception as exc:
+            if not self.warned_output:
+                self.warned_output = True
+                self.get_logger().warn(
+                    f"output_frame is '{self.output_frame}' but there is no "
+                    f"transform from '{self.reference}' to it ({exc}). Is "
+                    f"fiducial_alignment enabled? Publishing nothing until it is.")
+            return None
+        t = tf.transform.translation
+        r = tf.transform.rotation
+        moved = quat_rotate((r.x, r.y, r.z, r.w), hit)
+        return (moved[0] + t.x, moved[1] + t.y, moved[2] + t.z)
+
     def _clamped_lookup(self, stamp: Time, first_error: Exception):
         """Fall back to the newest transform when the frame time runs ahead.
 
@@ -278,7 +308,7 @@ class DetectionLocalizer(Node):
         def make(ns, mid, kind):
             m = Marker()
             m.header.stamp = stamp
-            m.header.frame_id = self.reference
+            m.header.frame_id = self.output_frame
             m.ns = ns
             m.id = mid
             m.type = kind
