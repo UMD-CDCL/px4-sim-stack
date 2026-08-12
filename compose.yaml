@@ -240,6 +240,11 @@ services:
       # Gimbal frame handling. GIMBAL_SOURCE is auto, setpoint or status.
       # The offsets are the constant the scene_tf diagnostic reports.
       GIMBAL_SOURCE: ${GIMBAL_SOURCE:-auto}
+      # follow_vehicle takes yaw from the airframe and pitch from the
+      # gimbal. report trusts the reported yaw too.
+      GIMBAL_YAW_MODE: ${GIMBAL_YAW_MODE:-report}
+      # Which side the vehicle attitude is divided off: left or right.
+      GIMBAL_COMPOSE: ${GIMBAL_COMPOSE:-right}
       GIMBAL_OFFSET_ROLL: ${GIMBAL_OFFSET_ROLL:-0.0}
       GIMBAL_OFFSET_PITCH: ${GIMBAL_OFFSET_PITCH:-0.0}
       GIMBAL_OFFSET_YAW: ${GIMBAL_OFFSET_YAW:-0.0}

@@ -154,6 +154,8 @@ def generate_launch_description() -> LaunchDescription:
                 "nadir_xyz": [0.10, 0.0, -0.06],
                 "gimbal_reference": "earth",
                 "gimbal_source": os.environ.get("GIMBAL_SOURCE", "auto"),
+                "gimbal_yaw_mode": os.environ.get("GIMBAL_YAW_MODE", "report"),
+                "gimbal_compose": os.environ.get("GIMBAL_COMPOSE", "right"),
                 # Any constant left after the frame handling. The scene_tf
                 # diagnostic prints the number to put here: with the gimbal
                 # centred, "gimbal rel body" should read near zero.

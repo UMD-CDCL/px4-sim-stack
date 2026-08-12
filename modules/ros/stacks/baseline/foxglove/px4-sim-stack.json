@@ -64,6 +64,12 @@
         },
         "frame:gimbal_setpoint_camera_optical_frame": {
           "visible": false
+        },
+        "frame:gimbal_left_camera_link": {
+          "visible": true
+        },
+        "frame:gimbal_right_camera_link": {
+          "visible": true
         }
       },
       "topics": {
