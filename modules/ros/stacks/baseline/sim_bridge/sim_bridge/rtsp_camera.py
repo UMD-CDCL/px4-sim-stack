@@ -26,8 +26,20 @@ Stamping
     frame time and detections_bridge carries it through.
 
 Topics
-    <ns>/image_raw    sensor_msgs/Image, rgb8
-    <ns>/camera_info  sensor_msgs/CameraInfo
+    <ns>/image_raw             sensor_msgs/Image, rgb8
+    <ns>/image_raw/compressed  sensor_msgs/CompressedImage, jpeg
+    <ns>/camera_info           sensor_msgs/CameraInfo
+
+Why both
+    A 1280x720 rgb8 frame is 2.76 MB. At the rate these cameras run that is
+    about 24 MB/s on one topic, and foxglove_bridge ships with a 10 MB send
+    buffer, so the raw stream cannot fit through the websocket and the image
+    panel stays empty. JPEG at quality 75 is roughly a hundredth of that and
+    goes through comfortably.
+
+    The raw topic stays, because the ground projector reads it inside the same
+    container where the cost is shared memory rather than a socket. Point
+    Foxglove at the compressed topic and everything else at the raw one.
 """
 
 from __future__ import annotations
@@ -43,7 +55,7 @@ from gi.repository import Gst  # noqa: E402
 import rclpy  # noqa: E402
 from rclpy.node import Node  # noqa: E402
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy  # noqa: E402
-from sensor_msgs.msg import CameraInfo, Image  # noqa: E402
+from sensor_msgs.msg import CameraInfo, CompressedImage, Image  # noqa: E402
 
 
 SENSOR_QOS = QoSProfile(
@@ -65,6 +77,8 @@ class RtspCamera(Node):
         self.declare_parameter("decoder", "avdec_h264")
         self.declare_parameter("hfov", 2.0)
         self.declare_parameter("time_offset", 0.0)
+        self.declare_parameter("publish_compressed", True)
+        self.declare_parameter("jpeg_quality", 75)
 
         self.url = self.get_parameter("url").value
         self.frame_id = self.get_parameter("frame_id").value
@@ -75,11 +89,17 @@ class RtspCamera(Node):
             + float(self.get_parameter("time_offset").value)
 
         self.image_pub = self.create_publisher(Image, "image_raw", SENSOR_QOS)
+        self.compressed = bool(self.get_parameter("publish_compressed").value)
+        self.jpeg_pub = (self.create_publisher(
+            CompressedImage, "image_raw/compressed", SENSOR_QOS)
+            if self.compressed else None)
         self.info_pub = self.create_publisher(CameraInfo, "camera_info", SENSOR_QOS)
 
         Gst.init(None)
         self.pipeline = None
         self.appsink = None
+        self.jpegsink = None
+        self.last_stamp = None
         self.frames = 0
         self.stop = threading.Event()
 
@@ -96,13 +116,23 @@ class RtspCamera(Node):
         protocols = self.get_parameter("protocols").value
         decoder = self.get_parameter("decoder").value
 
+        quality = int(self.get_parameter("jpeg_quality").value)
+        # One decode, two sinks. Encoding the JPEG here rather than in a
+        # separate republish node keeps it off the Python side entirely.
         desc = (
             f"rtspsrc location={self.url} latency={latency} protocols={protocols} "
             f"drop-on-latency=true "
-            f"! rtph264depay ! h264parse ! {decoder} "
-            f"! videoconvert ! video/x-raw,format=RGB "
+            f"! rtph264depay ! h264parse ! {decoder} ! videoconvert ! tee name=t "
+            f"t. ! queue max-size-buffers=2 leaky=downstream "
+            f"! video/x-raw,format=RGB "
             f"! appsink name=sink max-buffers=1 drop=true sync=false"
         )
+        if self.compressed:
+            desc += (
+                f" t. ! queue max-size-buffers=2 leaky=downstream ! videoconvert "
+                f"! jpegenc quality={quality} "
+                f"! appsink name=jpeg max-buffers=1 drop=true sync=false"
+            )
         try:
             self.pipeline = Gst.parse_launch(desc)
         except Exception as exc:  # noqa: BLE001 - Gst raises a bare GError
@@ -110,6 +140,7 @@ class RtspCamera(Node):
             return False
 
         self.appsink = self.pipeline.get_by_name("sink")
+        self.jpegsink = self.pipeline.get_by_name("jpeg") if self.compressed else None
         if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
             self.get_logger().error("cannot start the pipeline")
             self._teardown()
@@ -121,6 +152,8 @@ class RtspCamera(Node):
             self.pipeline.set_state(Gst.State.NULL)
         self.pipeline = None
         self.appsink = None
+        self.jpegsink = None
+        self.last_stamp = None
 
     # ------------------------------------------------------------------- loop
     def _run(self) -> None:
@@ -138,6 +171,7 @@ class RtspCamera(Node):
                 continue
 
             self._publish(sample)
+            self._publish_jpeg()
 
     def _pipeline_failed(self) -> bool:
         bus = self.pipeline.get_bus()
@@ -162,6 +196,11 @@ class RtspCamera(Node):
         try:
             stamp = (self.get_clock().now()
                      + rclpy.duration.Duration(seconds=self.stamp_shift)).to_msg()
+            # Held for the JPEG branch, which carries the same decoded frame and
+            # must therefore carry the same capture time, not a later reading of
+            # the clock. Anything downstream that syncs on the stamp needs the
+            # two encodings of one frame to agree.
+            self.last_stamp = stamp
 
             image = Image()
             image.header.stamp = stamp
@@ -176,6 +215,27 @@ class RtspCamera(Node):
 
             self.info_pub.publish(self._camera_info(stamp, width, height))
             self.frames += 1
+        finally:
+            buf.unmap(info)
+
+    def _publish_jpeg(self) -> None:
+        """Drain whatever the JPEG branch has ready. Never blocks the raw path."""
+        if self.jpegsink is None or self.last_stamp is None:
+            return
+        sample = self.jpegsink.emit("try-pull-sample", 0)
+        if sample is None:
+            return
+        buf = sample.get_buffer()
+        ok, info = buf.map(Gst.MapFlags.READ)
+        if not ok:
+            return
+        try:
+            msg = CompressedImage()
+            msg.header.stamp = self.last_stamp
+            msg.header.frame_id = self.frame_id
+            msg.format = "jpeg"
+            msg.data = bytes(info.data)
+            self.jpeg_pub.publish(msg)
         finally:
             buf.unmap(info)
 

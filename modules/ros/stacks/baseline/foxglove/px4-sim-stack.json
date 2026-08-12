@@ -124,7 +124,7 @@
       "imageMode": {}
     },
     "Image!nadir": {
-      "imageTopic": "/camera/nadir/image_raw",
+      "imageTopic": "/camera/nadir/image_raw/compressed",
       "calibrationTopic": "/camera/nadir/camera_info",
       "annotations": {
         "/camera/nadir/annotations": {
@@ -137,7 +137,7 @@
       "flipVertical": false
     },
     "Image!gimbal": {
-      "imageTopic": "/camera/gimbal/image_raw",
+      "imageTopic": "/camera/gimbal/image_raw/compressed",
       "calibrationTopic": "/camera/gimbal/camera_info",
       "annotations": {
         "/camera/gimbal/annotations": {

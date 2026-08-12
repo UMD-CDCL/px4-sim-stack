@@ -261,9 +261,17 @@ The baseline stack publishes:
 | `/mavros/global_position/rel_alt` | `std_msgs/Float64` |
 | `/mavros/rangefinder_pub` | `sensor_msgs/Range` |
 | `/camera/gimbal/image_raw` | `sensor_msgs/Image`, rgb8 |
+| `/camera/gimbal/image_raw/compressed` | `sensor_msgs/CompressedImage`, jpeg |
 | `/camera/gimbal/camera_info` | `sensor_msgs/CameraInfo` |
 | `/camera/nadir/image_raw` | `sensor_msgs/Image`, rgb8 |
+| `/camera/nadir/image_raw/compressed` | `sensor_msgs/CompressedImage`, jpeg |
 | `/camera/nadir/camera_info` | `sensor_msgs/CameraInfo` |
+
+Each camera publishes the same frame twice. Use the raw topic inside the ROS
+container, where a large message costs shared memory. Use the compressed topic
+in Foxglove, because the raw one is too large to cross the websocket. The two
+carry the same header stamp, so they refer to one capture, and the Foxglove
+layout points its image panels at the compressed topics.
 | `/perception/detections` | `vision_msgs/Detection2DArray` |
 
 The rangefinder topic is `/mavros/rangefinder_pub`, not

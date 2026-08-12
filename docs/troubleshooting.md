@@ -324,6 +324,31 @@ does not change the code path.
 `payload_forwarder.py` does the publishing. If you turned that sink back on,
 turn it off again.
 
+### The image panel is empty, but the topic is listed
+
+Point the panel at `/camera/<name>/image_raw/compressed` rather than at
+`/camera/<name>/image_raw`.
+
+A raw 1280x720 rgb8 frame is 2.76 MB. At 12 frames a second that is 33 MB/s on
+one topic, and `foxglove_bridge` holds a 10 MB send buffer. The bridge
+advertises the topic, and it subscribes to it when the panel asks, so the topic
+appears in the list and the panel offers it. The frames then never reach the
+browser. Nothing is logged, which is what makes this hard to see: the symptom is
+an empty panel next to a topic that looks healthy.
+
+To confirm it, compare the two encodings of the same frames:
+
+    ros2 topic bw /camera/nadir/image_raw
+    ros2 topic bw /camera/nadir/image_raw/compressed
+
+The compressed topic runs about a fortieth of the raw one. Both come from one
+node with one QoS profile, so size is the only difference between the topic that
+arrives and the topic that does not.
+
+`ros2 topic hz` understates the raw rate for the same reason. A Python
+subscriber cannot keep up with 33 MB/s either, so it drops frames and reports a
+rate below the true one. Measure the rate on the compressed topic.
+
 ### The boxes in ROS are in the wrong place
 
 The object string format changed between DeepStream releases. Switch the
