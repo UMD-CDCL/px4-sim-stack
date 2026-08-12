@@ -52,6 +52,18 @@
         },
         "frame:nadir_camera_optical_frame": {
           "visible": true
+        },
+        "frame:gimbal_status_camera_link": {
+          "visible": true
+        },
+        "frame:gimbal_setpoint_camera_link": {
+          "visible": true
+        },
+        "frame:gimbal_status_camera_optical_frame": {
+          "visible": false
+        },
+        "frame:gimbal_setpoint_camera_optical_frame": {
+          "visible": false
         }
       },
       "topics": {

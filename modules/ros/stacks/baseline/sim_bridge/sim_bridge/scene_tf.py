@@ -50,6 +50,9 @@ try:
 except ImportError:  # pragma: no cover - only when mavros_extras is absent
     HAVE_GIMBAL_MSG = False
 
+# GIMBAL_DEVICE_FLAGS_YAW_LOCK
+YAW_LOCK = 16
+
 LATCHED = QoSProfile(
     durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
     history=QoSHistoryPolicy.KEEP_LAST,
@@ -94,7 +97,31 @@ FRD_TO_FLU = (1.0, 0.0, 0.0, 0.0)
 
 
 def aerospace_to_ros(q):
+    """An absolute attitude, NED reference and FRD body, into ENU and FLU.
+
+    Both ends change, so a rotation is needed on each side.
+    """
     return quat_mul(quat_mul(NED_TO_ENU, q), FRD_TO_FLU)
+
+
+def body_frd_to_flu(q):
+    """A rotation *relative to the body*, from FRD axes to FLU axes.
+
+    This is a similarity transform, not the one above. A relative rotation has
+    no reference frame to change: the parent is the body in both conventions,
+    so only the axis convention differs, and conjugating by a half turn about x
+    reduces to negating y and z.
+
+    Using aerospace_to_ros on a relative rotation, or this on an absolute
+    attitude, both produce a frame that looks plausible and tracks the aircraft
+    incorrectly.
+    """
+    return (q[0], -q[1], -q[2], q[3])
+
+
+def yaw_only(q):
+    """The yaw part of a quaternion, as a rotation about z."""
+    return quat_from_rpy(0.0, 0.0, math.radians(quat_yaw_deg(q)))
 
 
 def quat_yaw_deg(q) -> float:
@@ -139,6 +166,34 @@ class SceneTf(Node):
         # Set "vehicle" if you run a gimbal that reports honestly, or if you
         # applied patches/px4-gzgimbal-frame.patch to PX4.
         self.declare_parameter("gimbal_reference", "earth")
+        # Where the gimbal orientation comes from.
+        #
+        #   setpoint  GIMBAL_DEVICE_SET_ATTITUDE, the angles the gimbal manager
+        #             commands. PX4 builds this in output_mavlink.cpp from
+        #             _q_setpoint and tags each axis with a LOCK flag: unlocked
+        #             means the angle is relative to the airframe, locked means
+        #             it is relative to the earth. Those semantics are the
+        #             standard ones and PX4 honours them, which is why
+        #             `gimbal test pitch` behaves correctly against the drone.
+        #             This is the default.
+        #   status    GIMBAL_DEVICE_ATTITUDE_STATUS, what the device reports.
+        #             In simulation that value is absolute while claiming to be
+        #             vehicle relative, so it needs the vehicle attitude divided
+        #             back out and is easy to get wrong.
+        #
+        #   auto      prefer the setpoint, fall back to the status. This is
+        #             the default, and it is the default because PX4 only
+        #             publishes a setpoint once something has commanded the
+        #             gimbal. An untouched gimbal produces no setpoint at all,
+        #             so a stack pinned to "setpoint" would sit at identity
+        #             until the first command and then jump.
+        #
+        # The setpoint is a command rather than a measurement, so it leads the
+        # real gimbal slightly and shows no stall or slew limit. For a simulated
+        # gimbal that tracks its command exactly, it is the better source.
+        self.declare_parameter("gimbal_source", "auto")
+        # How long a setpoint stays authoritative after it arrives.
+        self.declare_parameter("setpoint_timeout", 3.0)
         # MAVROS republishes the gimbal attitude untouched, with frame_id
         # base_link_frd. That value is aerospace convention on both ends: the
         # body axes are forward-right-down and the reference is NED. Every ROS
@@ -184,6 +239,26 @@ class SceneTf(Node):
         off = [float(v) for v in self.get_parameter("gimbal_offset_rpy_deg").value]
         self.gimbal_offset = quat_from_rpy(*(math.radians(v) for v in off))
         self.gimbal_abs = (0.0, 0.0, 0.0, 1.0)
+        self.gimbal_source = self.get_parameter("gimbal_source").value
+        self.setpoint_timeout = float(self.get_parameter("setpoint_timeout").value)
+        self.logged_lock = False
+        self.last_setpoint = None
+        # Both derivations are published all the time, side by side, so they can
+        # be compared instead of argued about. gimbal_camera_link follows
+        # gimbal_source; the other two are always what their own source says.
+        #
+        #   gimbal_status_camera_link    from GIMBAL_DEVICE_ATTITUDE_STATUS,
+        #                                absolute, with the vehicle attitude
+        #                                divided back out.
+        #   gimbal_setpoint_camera_link  from GIMBAL_DEVICE_SET_ATTITUDE,
+        #                                already relative to the airframe.
+        #
+        # When the two agree, the frame handling is right and either source can
+        # be trusted. When they diverge, the difference is the bug, and the
+        # diagnostic below prints it in degrees.
+        self.q_status = (0.0, 0.0, 0.0, 1.0)
+        self.q_setpoint = (0.0, 0.0, 0.0, 1.0)
+        self.have_setpoint = False
 
         self.static_bc = StaticTransformBroadcaster(self)
         self.dyn_bc = TransformBroadcaster(self)
@@ -207,10 +282,8 @@ class SceneTf(Node):
                 GimbalDeviceAttitudeStatus,
                 "/mavros/gimbal_control/device/attitude_status",
                 self._on_gimbal, 10)
-            # The commanded attitude, used only when the device reports no
-            # status of its own. A setpoint is where the gimbal was told to go
-            # rather than where it is, so it lags and it never shows a stall,
-            # but it beats leaving the camera pointing along the airframe.
+            # The commanded attitude. This is the default source, and also the
+            # fallback when gimbal_source is "status" and the device is silent.
             try:
                 from mavros_msgs.msg import GimbalDeviceSetAttitude
                 self.create_subscription(
@@ -258,6 +331,12 @@ class SceneTf(Node):
             self._static(self.base, "gimbal_mount", mount, identity),
             self._static("gimbal_camera_link", "gimbal_camera_optical_frame",
                          (0, 0, 0), LINK_TO_OPTICAL),
+            self._static("gimbal_status_camera_link",
+                         "gimbal_status_camera_optical_frame",
+                         (0, 0, 0), LINK_TO_OPTICAL),
+            self._static("gimbal_setpoint_camera_link",
+                         "gimbal_setpoint_camera_optical_frame",
+                         (0, 0, 0), LINK_TO_OPTICAL),
             # Pitched a quarter turn so the link's x axis looks straight down,
             # matching the sensor pose in x500_recon/model.sdf.
             self._static(self.base, "nadir_cam_link", nadir,
@@ -272,17 +351,36 @@ class SceneTf(Node):
         self.vehicle_q = (q.x, q.y, q.z, q.w)
 
     def _on_gimbal_setpoint(self, msg) -> None:
-        # Only while the device itself is silent.
-        now = self.get_clock().now().nanoseconds / 1e9
-        if self.last_status is not None and now - self.last_status < 2.0:
-            return
-        if not self.gimbal_from_setpoint:
+        if self.gimbal_source == "status":
+            return          # the device report is the source; ignore commands
+
+        self.last_setpoint = self.get_clock().now().nanoseconds / 1e9
+
+        # The setpoint is already relative to the airframe on any axis whose
+        # LOCK flag is clear, which is the normal case and what `gimbal test`
+        # produces. So it needs the body axis conversion and nothing else: no
+        # vehicle attitude to divide out, and no chance of counting it twice.
+        flags = int(getattr(msg, "flags", 0))
+        body = body_frd_to_flu((msg.q.x, msg.q.y, msg.q.z, msg.q.w))
+
+        if flags & YAW_LOCK:
+            # Yaw is earth referenced on this axis, so take the vehicle heading
+            # back out to get a rotation that belongs under gimbal_mount.
+            body = quat_mul(quat_conj(yaw_only(self.vehicle_q)), body)
+            if not self.logged_lock:
+                self.logged_lock = True
+                self.get_logger().info(
+                    "gimbal yaw is earth locked, removing the vehicle heading")
+
+        if not self.gimbal_seen or self.gimbal_from_setpoint is False:
+            self.gimbal_seen = True
             self.gimbal_from_setpoint = True
-            self.get_logger().warn(
-                "no gimbal device status, falling back to the commanded "
-                "attitude. That is where the gimbal was told to go, not where "
-                "it is.")
-        self._store(msg.q)
+            self.get_logger().info(
+                f"gimbal orientation from the commanded setpoint, flags={flags}"
+                f"{' (yaw locked)' if flags & YAW_LOCK else ' (vehicle relative)'}")
+
+        self.q_setpoint = quat_mul(body, self.gimbal_offset)
+        self.have_setpoint = True
 
     def _store(self, q) -> None:
         raw = (q.x, q.y, q.z, q.w)
@@ -298,12 +396,19 @@ class SceneTf(Node):
         else:
             body = raw
         # Any remaining fixed mounting rotation.
-        self.gimbal_q = quat_mul(body, self.gimbal_offset)
+        self.q_status = quat_mul(body, self.gimbal_offset)
 
     def _on_gimbal(self, msg) -> None:
         self.last_status = self.get_clock().now().nanoseconds / 1e9
-        self.gimbal_from_setpoint = False
+        # Always store it: gimbal_status_camera_link is published whatever
+        # gimbal_source says, so the two can be compared.
         self._store(msg.q)
+
+    def _setpoint_fresh(self) -> bool:
+        if self.last_setpoint is None:
+            return False
+        now = self.get_clock().now().nanoseconds / 1e9
+        return (now - self.last_setpoint) < self.setpoint_timeout
         if not self.gimbal_seen:
             self.gimbal_seen = True
             # flags bit 32 is YAW_IN_VEHICLE_FRAME, 64 is YAW_IN_EARTH_FRAME.
@@ -320,20 +425,36 @@ class SceneTf(Node):
                     "PX4's simulated gimbal sets that flag while reporting an "
                     "absolute attitude. See the note in scene_tf.py.")
 
+    def _primary(self):
+        """The rotation gimbal_camera_link follows."""
+        if self.gimbal_source == "setpoint":
+            return self.q_setpoint
+        if self.gimbal_source == "auto" and self._setpoint_fresh():
+            return self.q_setpoint
+        return self.q_status
+
     def _publish_gimbal(self) -> None:
         # Always under gimbal_mount. An earth referenced report has already had
         # the vehicle attitude divided out in _store, so by this point the
         # rotation is vehicle relative either way.
-        parent = "gimbal_mount"
-        t = TransformStamped()
-        t.header.stamp = self.get_clock().now().to_msg()
-        t.header.frame_id = parent
-        t.child_frame_id = "gimbal_camera_link"
-        t.transform.rotation.x = self.gimbal_q[0]
-        t.transform.rotation.y = self.gimbal_q[1]
-        t.transform.rotation.z = self.gimbal_q[2]
-        t.transform.rotation.w = self.gimbal_q[3]
-        self.dyn_bc.sendTransform(t)
+        stamp = self.get_clock().now().to_msg()
+        self.gimbal_q = self._primary()
+        self.gimbal_abs = quat_mul(self.vehicle_q, self.gimbal_q)
+
+        out = []
+        for child, q in (("gimbal_camera_link", self.gimbal_q),
+                         ("gimbal_status_camera_link", self.q_status),
+                         ("gimbal_setpoint_camera_link", self.q_setpoint)):
+            t = TransformStamped()
+            t.header.stamp = stamp
+            t.header.frame_id = "gimbal_mount"
+            t.child_frame_id = child
+            t.transform.rotation.x = q[0]
+            t.transform.rotation.y = q[1]
+            t.transform.rotation.z = q[2]
+            t.transform.rotation.w = q[3]
+            out.append(t)
+        self.dyn_bc.sendTransform(out)
 
     # ---------------------------------------------------------------- markers
     def _publish_markers(self) -> None:
@@ -385,7 +506,20 @@ class SceneTf(Node):
         self.get_logger().info(
             f"yaw deg: vehicle {v:+7.1f}  gimbal absolute {a:+7.1f}  "
             f"gimbal rel body {rel:+7.1f}  (absolute minus vehicle "
-            f"{((a - v + 540) % 360) - 180:+7.1f})")
+            f"{((a - v + 540) % 360) - 180:+7.1f})  source="
+            f"{'setpoint' if self._setpoint_fresh() else 'status'}")
+        if self.have_setpoint:
+            st = quat_yaw_deg(self.q_status)
+            sp = quat_yaw_deg(self.q_setpoint)
+            delta = ((sp - st + 540) % 360) - 180
+            verdict = "agree" if abs(delta) < 5.0 else "DISAGREE"
+            self.get_logger().info(
+                f"  gimbal yaw rel body: status {st:+7.1f}  setpoint {sp:+7.1f}"
+                f"  difference {delta:+7.1f}  {verdict}")
+        else:
+            self.get_logger().info(
+                "  no setpoint yet, so only the status frame is populated. "
+                "Command the gimbal to compare them.")
 
     def _report(self) -> None:
         if not self.gimbal_seen:
