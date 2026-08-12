@@ -384,16 +384,36 @@ gate and reports recall, precision and mean position error. Only targets inside
 the current camera footprint count, so flying away from the scene does not read
 as a collapse in recall.
 
+Every camera is localized and scored on its own, under `/perception/<camera>/`
+and `/scoring/<camera>/`. Nothing merges them. A camera looking straight down
+and a camera looking at the horizon have different error, and one combined
+recall figure would describe neither.
+
 | Topic | Type |
 |---|---|
 | `/ground_truth/markers` | `visualization_msgs/MarkerArray` |
 | `/ground_truth/truth_3d` | `vision_msgs/Detection3DArray` |
 | `/ground_truth/geojson` | `foxglove_msgs/GeoJSON`, for the Map panel |
-| `/perception/detections_3d` | `vision_msgs/Detection3DArray` with covariance |
-| `/perception/markers` | `visualization_msgs/MarkerArray` |
-| `/camera/<name>/footprint` | `geometry_msgs/PolygonStamped` |
-| `/scoring/position_error` | `std_msgs/Float64`, metres |
-| `/scoring/recall`, `/scoring/precision` | `std_msgs/Float64` |
+| `/perception/<camera>/detections_3d` | `vision_msgs/Detection3DArray` with covariance |
+| `/perception/<camera>/targets` | `geometry_msgs/PoseArray` |
+| `/perception/<camera>/markers` | `visualization_msgs/MarkerArray` |
+| `/perception/<camera>/detections_navsat` | `sensor_msgs/NavSatFix`, one per estimate |
+| `/camera/<camera>/footprint` | `geometry_msgs/PolygonStamped` |
+| `/scoring/<camera>/verdicts` | `vision_msgs/Detection3DArray`, each labelled TP, FP or FN |
+| `/scoring/<camera>/markers` | `visualization_msgs/MarkerArray`, verdicts as pillars |
+| `/scoring/<camera>/position_error` | `std_msgs/Float64`, metres |
+| `/scoring/<camera>/recall`, `/scoring/<camera>/precision` | `std_msgs/Float64` |
+| `/map_overlays/geojson` | `foxglove_msgs/GeoJSON`, footprints and estimates |
+
+The Map panel gets the estimates twice, and both are useful. `detections_navsat`
+is a plain NavSatFix that the panel plots with no conversion. The GeoJSON in
+`/map_overlays/geojson` carries the verdict colour and the label. Turn either
+off in the layout without losing the other.
+
+In the 3D view a localization is drawn the way a target is drawn: a pillar the
+height of a person, with a label above it. Only the colour differs. Green means
+the estimate landed within `SCORING_GATE_M` of a real target, red means it did
+not, and yellow is a target inside the footprint that nothing found.
 
 Covariance comes from parameters, not from a derivation. `covariance_diagonal`
 defaults to a two metre standard deviation in x and y, and

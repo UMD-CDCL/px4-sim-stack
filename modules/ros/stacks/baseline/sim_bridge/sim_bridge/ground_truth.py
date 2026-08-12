@@ -20,13 +20,10 @@ the world origin. PX4's local frame starts at the point where the EKF
 initialized, which is where the vehicle spawned, so the two line up. When they
 do not, `origin_offset_xyz` shifts them.
 
-Latitude and longitude are derived from the drone itself. PX4 does not send
-GPS_GLOBAL_ORIGIN unless something asks, so `/mavros/global_position/gp_origin`
-stays silent and cannot be relied on. Instead this pairs the drone's global fix
-with its local position: if the aircraft sits at local (x, y) and reports a
-given latitude and longitude, then local (0, 0) is that fix walked back by
-(x, y). The result tracks the same EKF the local frame comes from, so the map
-view and the 3D view agree, and no coordinate is copied from .env.
+Latitude and longitude come from sim_bridge.geo.MapOrigin, which derives the
+position of local (0, 0) from the drone's own fix. map_overlays and
+detection_localizer use the same helper, so every layer of the Map panel is
+drawn about one origin. See geo.py for how it is derived and why.
 
 Publishes
     /ground_truth/markers      visualization_msgs/MarkerArray  (3D panel)
@@ -37,14 +34,13 @@ Publishes
 from __future__ import annotations
 
 import json
-import math
 import os
 from pathlib import Path
 
 import rclpy
 import yaml
 from rclpy.node import Node
-from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, qos_profile_sensor_data
+from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile
 from std_msgs.msg import ColorRGBA
 from vision_msgs.msg import (
     BoundingBox3D,
@@ -54,8 +50,7 @@ from vision_msgs.msg import (
 )
 from visualization_msgs.msg import Marker, MarkerArray
 
-from geometry_msgs.msg import PoseStamped
-from sensor_msgs.msg import NavSatFix
+from sim_bridge.geo import MapOrigin
 
 try:
     from geographic_msgs.msg import GeoPointStamped
@@ -72,7 +67,6 @@ except ImportError:
 LATCHED = QoSProfile(durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
                      history=QoSHistoryPolicy.KEEP_LAST, depth=1)
 
-EARTH_R = 6378137.0
 
 
 class GroundTruth(Node):
@@ -102,9 +96,6 @@ class GroundTruth(Node):
         self.height = float(self.get_parameter("target_height").value)
         self.filters = [s.lower() for s in self.get_parameter("target_name_filters").value]
 
-        self.origin_lat: float | None = None
-        self.origin_lon: float | None = None
-
         self.targets = self._load()
         if not self.targets:
             self.get_logger().warn(
@@ -123,16 +114,7 @@ class GroundTruth(Node):
                 "foxglove_msgs is missing, so the Map panel gets no ground truth. "
                 "Install ros-$ROS_DISTRO-foxglove-msgs.")
 
-        # gp_origin is preferred when it appears, and usually it does not.
-        if HAVE_GEO:
-            self.create_subscription(GeoPointStamped, "/mavros/global_position/gp_origin",
-                                     self._on_origin, qos_profile_sensor_data)
-        self.local_xy: tuple[float, float] | None = None
-        self.create_subscription(PoseStamped, "/mavros/local_position/pose",
-                                 self._on_local, qos_profile_sensor_data)
-        self.create_subscription(NavSatFix, "/mavros/global_position/global",
-                                 self._on_fix, qos_profile_sensor_data)
-        self.origin_from_fix = False
+        self.origin = MapOrigin(self, use_gp_origin=HAVE_GEO)
 
         rate = float(self.get_parameter("rate_hz").value)
         self.create_timer(1.0 / max(rate, 0.1), self._publish)
@@ -182,46 +164,9 @@ class GroundTruth(Node):
             })
         return out
 
-    def _on_origin(self, msg) -> None:
-        # PX4 sends the origin once the EKF has one. Before that the map view
-        # simply has no ground truth, which is better than placing it at 0, 0
-        # in the Gulf of Guinea.
-        if msg.position.latitude or msg.position.longitude:
-            self.origin_lat = msg.position.latitude
-            self.origin_lon = msg.position.longitude
-            self.origin_from_fix = False
-
-    def _on_local(self, msg) -> None:
-        self.local_xy = (msg.pose.position.x, msg.pose.position.y)
-
-    def _on_fix(self, msg) -> None:
-        # Walk the drone's own fix back to local (0, 0). Skip it once gp_origin
-        # has given a real answer, and skip a fix with no lock.
-        if self.origin_lat is not None and not self.origin_from_fix:
-            return
-        if self.local_xy is None or msg.status.status < 0:
-            return
-        x, y = self.local_xy
-        lat = msg.latitude - math.degrees(y / EARTH_R)
-        lon = msg.longitude - math.degrees(x / (EARTH_R * math.cos(math.radians(msg.latitude))))
-        first = self.origin_lat is None
-        self.origin_lat, self.origin_lon = lat, lon
-        self.origin_from_fix = True
-        if first:
-            self.get_logger().info(
-                f"map origin from the vehicle fix: {lat:.7f}, {lon:.7f}")
-
     def _to_latlon(self, x: float, y: float) -> tuple[float, float] | None:
-        """Local ENU metres to WGS84, flat-earth about the origin.
-
-        Good to a few centimetres over the hundreds of metres a scene covers,
-        which is far below the localization error being measured.
-        """
-        if self.origin_lat is None:
-            return None
-        lat = self.origin_lat + math.degrees(y / EARTH_R)
-        lon = self.origin_lon + math.degrees(x / (EARTH_R * math.cos(math.radians(self.origin_lat))))
-        return lat, lon
+        """Local ENU metres to WGS84. None until the vehicle has a fix."""
+        return self.origin.to_lla(x, y)
 
     # ---------------------------------------------------------------- output
     def _publish(self) -> None:

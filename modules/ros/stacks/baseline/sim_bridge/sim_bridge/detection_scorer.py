@@ -20,12 +20,24 @@ recall a statement about "what the camera could see".
 That gate is why this subscribes to the footprint. Without one, flying away
 from the scene would look like a collapse in recall.
 
-Publishes
-    /scoring/summary        visualization_msgs/Marker, a text overlay
-    /scoring/error_lines    visualization_msgs/MarkerArray, estimate to truth
-    /scoring/position_error std_msgs/Float64, metres, per matched detection
-    /scoring/recall         std_msgs/Float64, over the running window
-    /scoring/precision      std_msgs/Float64, over the running window
+One node for each camera
+------------------------
+Each camera is scored on its own detections against its own footprint, and
+publishes under /scoring/<camera>/. A combined number would answer a question
+nobody asked: the nadir camera looking straight down and the gimbal looking out
+to the horizon have different error, and merging them into one recall figure
+hides which one is carrying the result.
+
+Publishes, under /scoring/<camera>/
+    verdicts        vision_msgs/Detection3DArray, every estimate and target,
+                    each labelled TP, FP or FN
+    markers         visualization_msgs/MarkerArray, the same verdicts drawn in
+                    the 3D view
+    summary         visualization_msgs/Marker, a text overlay
+    error_lines     visualization_msgs/MarkerArray, estimate to truth
+    position_error  std_msgs/Float64, metres, per matched detection
+    recall          std_msgs/Float64, over the running window
+    precision       std_msgs/Float64, over the running window
 """
 
 from __future__ import annotations
@@ -66,6 +78,14 @@ class DetectionScorer(Node):
     def __init__(self) -> None:
         super().__init__("detection_scorer")
 
+        # Names this camera in log lines, marker namespaces and the summary
+        # text. Topic names come from the launch namespace.
+        self.declare_parameter("camera", "gimbal")
+        self.declare_parameter("detections_topic", "/perception/detections_3d")
+        self.declare_parameter("target_height", 1.7)
+        # Height of the floating summary text. One per camera, so give each a
+        # different height or they overlap into an unreadable smear.
+        self.declare_parameter("summary_z", 30.0)
         self.declare_parameter("gate_radius", 8.0)
         self.declare_parameter("window", 100)
         self.declare_parameter("reference_frame", "map")
@@ -73,6 +93,8 @@ class DetectionScorer(Node):
         self.declare_parameter("footprint_topic", "/camera/nadir/footprint")
 
         self.gate = float(self.get_parameter("gate_radius").value)
+        self.camera = self.get_parameter("camera").value
+        self.target_height = float(self.get_parameter("target_height").value)
         self.reference = self.get_parameter("reference_frame").value
         self.require_footprint = bool(self.get_parameter("require_in_footprint").value)
         window = int(self.get_parameter("window").value)
@@ -86,7 +108,8 @@ class DetectionScorer(Node):
 
         self.create_subscription(Detection3DArray, "/ground_truth/truth_3d",
                                  self._on_truth, LATCHED)
-        self.create_subscription(Detection3DArray, "/perception/detections_3d",
+        self.create_subscription(Detection3DArray,
+                                 self.get_parameter("detections_topic").value,
                                  self._on_detections, 10)
         self.create_subscription(PolygonStamped,
                                  self.get_parameter("footprint_topic").value,
@@ -95,14 +118,14 @@ class DetectionScorer(Node):
         # One message carrying every estimate and target with its verdict, so
         # the image overlay and the map colour the same things the same way
         # instead of each deciding for itself.
-        self.verdict_pub = self.create_publisher(
-            Detection3DArray, "/scoring/verdicts", 10)
-        self.err_pub = self.create_publisher(Float64, "/scoring/position_error", 10)
-        self.recall_pub = self.create_publisher(Float64, "/scoring/recall", 10)
-        self.precision_pub = self.create_publisher(Float64, "/scoring/precision", 10)
-        self.summary_pub = self.create_publisher(Marker, "/scoring/summary", LATCHED)
-        self.lines_pub = self.create_publisher(MarkerArray, "/scoring/error_lines", 10)
-        self.markers_pub = self.create_publisher(MarkerArray, "/scoring/markers", 10)
+        # Relative names. The launch file puts this node in /scoring/<camera>.
+        self.verdict_pub = self.create_publisher(Detection3DArray, "verdicts", 10)
+        self.err_pub = self.create_publisher(Float64, "position_error", 10)
+        self.recall_pub = self.create_publisher(Float64, "recall", 10)
+        self.precision_pub = self.create_publisher(Float64, "precision", 10)
+        self.summary_pub = self.create_publisher(Marker, "summary", LATCHED)
+        self.lines_pub = self.create_publisher(MarkerArray, "error_lines", 10)
+        self.markers_pub = self.create_publisher(MarkerArray, "markers", 10)
 
         self.create_timer(1.0, self._publish_summary)
 
@@ -192,7 +215,7 @@ class DetectionScorer(Node):
         for n, (ex, ey, target, dist) in enumerate(pairs):
             m = Marker()
             m.header = msg.header
-            m.ns = "error"
+            m.ns = f"{self.camera}_error"
             m.id = n
             m.type = Marker.LINE_LIST
             m.action = Marker.ADD
@@ -207,7 +230,20 @@ class DetectionScorer(Node):
             self.lines_pub.publish(lines)
 
     def _verdict_markers(self, verdicts: Detection3DArray) -> MarkerArray:
-        """Spheres in the 3D view, coloured the same way as everywhere else."""
+        """The verdicts as pillars, in the shape ground truth already uses.
+
+        A localization and a target are the same kind of thing in the 3D view,
+        so they are drawn the same way: a pillar the height of a person, with a
+        label above it. Only the colour differs, and the colour is the whole
+        message. Green means this estimate landed within the gate of a real
+        target. Red means it did not. Yellow is a target inside the footprint
+        that nothing found, which has no estimate to draw and is therefore
+        drawn at the target.
+
+        Matching spheres to pillars was the earlier form and it read badly: a
+        sphere floating beside a pillar looks like a different class of object
+        rather than the same object, found or missed.
+        """
         colours = {"TP": (0.18, 0.80, 0.44), "FP": (0.91, 0.30, 0.24),
                    "FN": (0.95, 0.77, 0.06)}
         life = rclpy.duration.Duration(seconds=4.0).to_msg()
@@ -215,18 +251,46 @@ class DetectionScorer(Node):
         for i, d in enumerate(verdicts.detections):
             v = d.results[0].hypothesis.class_id if d.results else "FP"
             r, g, b = colours.get(v, (0.6, 0.6, 0.6))
-            m = Marker()
-            m.header = verdicts.header
-            m.ns = f"verdict_{v}"
-            m.id = i
-            m.type = Marker.SPHERE
-            m.action = Marker.ADD
-            m.lifetime = life
-            m.pose = d.bbox.center
-            m.pose.orientation.w = 1.0
-            m.scale.x = m.scale.y = m.scale.z = 1.6
-            m.color = ColorRGBA(r=r, g=g, b=b, a=0.9)
-            out.markers.append(m)
+            x = d.bbox.center.position.x
+            y = d.bbox.center.position.y
+            z = d.bbox.center.position.z
+
+            pillar = Marker()
+            pillar.header = verdicts.header
+            # Namespaced by camera and verdict, so the 3D panel can switch off
+            # the gimbal's false positives without touching the nadir camera.
+            pillar.ns = f"{self.camera}_{v}"
+            pillar.id = i
+            pillar.type = Marker.CYLINDER
+            pillar.action = Marker.ADD
+            pillar.lifetime = life
+            pillar.pose.position.x = x
+            pillar.pose.position.y = y
+            pillar.pose.position.z = z + self.target_height / 2.0
+            pillar.pose.orientation.w = 1.0
+            pillar.scale.x = pillar.scale.y = 0.6
+            pillar.scale.z = self.target_height
+            # Solid enough to read against the satellite ground, translucent
+            # enough to see a ground truth pillar through it when they overlap,
+            # which is what a hit looks like.
+            pillar.color = ColorRGBA(r=r, g=g, b=b, a=0.55)
+            out.markers.append(pillar)
+
+            label = Marker()
+            label.header = verdicts.header
+            label.ns = f"{self.camera}_{v}_labels"
+            label.id = i
+            label.type = Marker.TEXT_VIEW_FACING
+            label.action = Marker.ADD
+            label.lifetime = life
+            label.pose.position.x = x
+            label.pose.position.y = y
+            label.pose.position.z = z + self.target_height + 0.6
+            label.pose.orientation.w = 1.0
+            label.scale.z = 0.7
+            label.color = ColorRGBA(r=r, g=g, b=b, a=0.95)
+            label.text = f"{self.camera} {v} {d.id}".strip()
+            out.markers.append(label)
         return out
 
     # ---------------------------------------------------------------- summary
@@ -243,15 +307,16 @@ class DetectionScorer(Node):
         m = Marker()
         m.header.stamp = self.get_clock().now().to_msg()
         m.header.frame_id = self.reference
-        m.ns = "scoring"
+        m.ns = f"scoring_{self.camera}"
         m.id = 0
         m.type = Marker.TEXT_VIEW_FACING
         m.action = Marker.ADD
-        m.pose.position.z = 30.0
+        m.pose.position.z = float(self.get_parameter("summary_z").value)
         m.pose.orientation.w = 1.0
         m.scale.z = 2.0
         m.color = ColorRGBA(r=1.0, g=1.0, b=1.0, a=0.9)
-        m.text = (f"visible truth {len(self._visible_truth())}/{len(self.truth)}   "
+        m.text = (f"{self.camera}   "
+                  f"visible truth {len(self._visible_truth())}/{len(self.truth)}   "
                   f"hits {tp}  false {fp}  missed {fn}\n"
                   f"recall {recall:.2f}  precision {precision:.2f}  "
                   f"mean error {mean_err:.1f} m")

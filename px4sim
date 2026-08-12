@@ -86,7 +86,8 @@ endpoints() {
               udp://mavlink-hub:14551   MAVROS, inside the network
   ${BOLD}Video${OFF}       rtsp://localhost:8554/gimbal
               rtsp://localhost:8554/nadir
-              rtsp://localhost:8554/gimbal_annotated   ${DIM}(perception)${OFF}
+              rtsp://localhost:8554/nadir_annotated    ${DIM}(perception, boxes drawn in)${OFF}
+              rtsp://localhost:8554/gimbal_annotated   ${DIM}(perception, boxes drawn in)${OFF}
               http://localhost:8889/gimbal             ${DIM}(WebRTC, browser)${OFF}
   ${BOLD}Detections${OFF}  mqtt://localhost:1883     topic perception/detections
   ${BOLD}Foxglove${OFF}    ws://localhost:8765       ${DIM}(ros)${OFF}

@@ -9,8 +9,16 @@ RTSP_IN=${RTSP_IN:-rtsp://video-router:8554/gimbal}
 MQTT_HOST=${MQTT_HOST:-message-bus}
 MQTT_PORT=${MQTT_PORT:-1883}
 MQTT_TOPIC=${MQTT_TOPIC:-perception/detections}
+RTSP_IN_2=${RTSP_IN_2:-rtsp://video-router:8554/gimbal}
+# The annotated RTSP outputs, one for each camera, with the boxes burned into
+# the pixels. On by default. The config reads ANNOTATED_ENABLE, so translate
+# anything falsey to the 0 or 1 deepstream-app expects.
+case "${ANNOTATED_STREAMS:-1}" in
+0 | false | no | off) ANNOTATED_ENABLE=0 ;;
+*) ANNOTATED_ENABLE=1 ;;
+esac
 
-export RTSP_IN MQTT_HOST MQTT_PORT MQTT_TOPIC
+export RTSP_IN RTSP_IN_2 MQTT_HOST MQTT_PORT MQTT_TOPIC ANNOTATED_ENABLE
 
 log()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[33m    %s\033[0m\n' "$*"; }
@@ -67,10 +75,13 @@ fi
 
 log "Starting deepstream-app with $DS_CONFIG"
 cat <<EOF
-    source      $RTSP_IN
+    sources     $RTSP_IN
+                $RTSP_IN_2
     detections  mqtt://$MQTT_HOST:$MQTT_PORT topic $MQTT_TOPIC
-    annotated   rtsp://perception:8554/ds-test
-                also served as rtsp://localhost:8554/gimbal_annotated
+    annotated   $([ "$ANNOTATED_ENABLE" = 1 ] && echo "on" || echo "off (ANNOTATED_STREAMS=0)")
+                rtsp://perception:8554/ds-test  source 0
+                rtsp://perception:8555/ds-test  source 1
+                also served as rtsp://localhost:8554/<camera>_annotated
 
     The first run builds a TensorRT engine, which takes one to three minutes.
     The engine is cached in modules/perception/models/cache/.

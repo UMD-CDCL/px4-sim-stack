@@ -38,10 +38,24 @@ lens calibration, an assumed flat ground and an attitude estimate from a small
 EKF. `range_variance_scale` optionally grows the estimate with slant range,
 because a shallow look angle stretches a pixel across much more ground.
 
-Publishes
-    /perception/detections_3d   vision_msgs/Detection3DArray, for other nodes
-    /perception/targets         geometry_msgs/PoseArray, one pose per target
-    /perception/markers         visualization_msgs/MarkerArray, for the 3D view
+One node for each camera
+------------------------
+Every camera localizes independently, in its own namespace, because the two
+answer different questions. The nadir camera sees a small patch directly below
+and localizes it well; the gimbal sees far and localizes worse as it tilts
+toward the horizon. Averaging them into one topic hides exactly the difference
+worth measuring, so the topics stay separate and the scorer runs once per
+camera.
+
+Publishes, under /perception/<camera>/
+    detections_3d       vision_msgs/Detection3DArray, for the scorer
+    targets             geometry_msgs/PoseArray, one pose per target
+    markers             visualization_msgs/MarkerArray, for the 3D view
+    detections_navsat   sensor_msgs/NavSatFix, one per estimate, for the Map
+                        panel. The panel plots NavSatFix directly, so this is
+                        the localization in the map's own vocabulary. Altitude
+                        is dropped, because a point on the ground plane has no
+                        height worth plotting.
 """
 
 from __future__ import annotations
@@ -66,8 +80,9 @@ from vision_msgs.msg import (
 )
 from visualization_msgs.msg import Marker, MarkerArray
 
-from sensor_msgs.msg import CameraInfo
+from sensor_msgs.msg import CameraInfo, NavSatFix, NavSatStatus
 
+from sim_bridge.geo import MapOrigin
 from sim_bridge.projection import intersect_ground, quat_rotate, ray_in_optical, slant_range
 
 
@@ -75,6 +90,10 @@ class DetectionLocalizer(Node):
     def __init__(self) -> None:
         super().__init__("detection_localizer")
 
+        # Names this camera in log lines and marker namespaces. Topic names
+        # come from the launch namespace, not from here.
+        self.declare_parameter("camera", "gimbal")
+        self.declare_parameter("publish_navsat", True)
         self.declare_parameter("detections_topic", "/perception/detections")
         self.declare_parameter("camera_info_topic", "/camera/gimbal/camera_info")
         self.declare_parameter("optical_frame", "gimbal_camera_optical_frame")
@@ -120,6 +139,7 @@ class DetectionLocalizer(Node):
         self.marker_lifetime = float(self.get_parameter("marker_lifetime").value)
         self.output_frame = self.get_parameter("output_frame").value or self.reference
         self.warned_output = False
+        self.camera = self.get_parameter("camera").value
 
         self.tf_buffer = Buffer(cache_time=Duration(seconds=10.0))
         # spin_thread=True is not optional here. The listener otherwise
@@ -150,15 +170,23 @@ class DetectionLocalizer(Node):
                                  self.get_parameter("detections_topic").value,
                                  self._on_detections, detections_qos)
 
-        self.det3d_pub = self.create_publisher(Detection3DArray, "/perception/detections_3d", 10)
-        self.pose_pub = self.create_publisher(PoseArray, "/perception/targets", 10)
-        self.marker_pub = self.create_publisher(MarkerArray, "/perception/markers", 10)
+        # Relative names. The launch file puts this node in /perception/<camera>,
+        # so these become /perception/<camera>/detections_3d and so on, and two
+        # cameras never write to one topic.
+        self.det3d_pub = self.create_publisher(Detection3DArray, "detections_3d", 10)
+        self.pose_pub = self.create_publisher(PoseArray, "targets", 10)
+        self.marker_pub = self.create_publisher(MarkerArray, "markers", 10)
+        self.navsat_pub = None
+        self.origin = None
+        if bool(self.get_parameter("publish_navsat").value):
+            self.navsat_pub = self.create_publisher(NavSatFix, "detections_navsat", 10)
+            self.origin = MapOrigin(self)
 
         self.localized = self.no_tf = self.no_ground = self.clamped = 0
         self.create_timer(30.0, self._report)
         self.get_logger().info(
-            f"localizing into {self.reference} from {self.optical}, "
-            f"anchor={self.anchor}")
+            f"localizing {self.camera} into {self.reference} from "
+            f"{self.optical}, anchor={self.anchor}")
 
     def _on_info(self, msg: CameraInfo) -> None:
         self.info = msg
@@ -246,12 +274,41 @@ class DetectionLocalizer(Node):
             out3d.detections.append(d3)
             poses.poses.append(pose)
             markers.markers.extend(self._markers(i, det.id, label, hit, cov, msg.header.stamp))
+            self._publish_navsat(hit, cov, msg.header.stamp)
             self.localized += 1
 
         if out3d.detections:
             self.det3d_pub.publish(out3d)
             self.pose_pub.publish(poses)
             self.marker_pub.publish(markers)
+
+    def _publish_navsat(self, hit, cov, stamp) -> None:
+        """One fix per estimate, for the Map panel.
+
+        The panel reads NavSatFix and needs no conversion of its own, which is
+        the point: the map and the 3D view then plot one number computed once.
+        Nothing is published before the origin is known, because a fix at
+        (0, 0) is a point in the Atlantic rather than a missing value.
+        """
+        if self.navsat_pub is None or self.origin is None or not self.origin.ready:
+            return
+        ll = self.origin.to_lla(float(hit[0]), float(hit[1]))
+        if ll is None:
+            return
+        fix = NavSatFix()
+        fix.header.stamp = stamp
+        fix.header.frame_id = self.output_frame
+        fix.status.status = NavSatStatus.STATUS_FIX
+        fix.status.service = NavSatStatus.SERVICE_GPS
+        fix.latitude, fix.longitude = ll
+        # The estimate sits on the ground plane by construction, so it carries
+        # no useful height. Say so rather than imply a measurement.
+        fix.altitude = float("nan")
+        fix.position_covariance = [cov[0], 0.0, 0.0,
+                                   0.0, cov[7], 0.0,
+                                   0.0, 0.0, cov[14]]
+        fix.position_covariance_type = NavSatFix.COVARIANCE_TYPE_DIAGONAL_KNOWN
+        self.navsat_pub.publish(fix)
 
     def _to_output(self, hit, stamp):
         """Move a point into the output frame, if that is not the reference."""
@@ -317,7 +374,7 @@ class DetectionLocalizer(Node):
             m.pose.orientation.w = 1.0
             return m
 
-        pillar = make("targets", idx, Marker.CYLINDER)
+        pillar = make(f"{self.camera}_targets", idx, Marker.CYLINDER)
         pillar.pose.position.x, pillar.pose.position.y = float(hit[0]), float(hit[1])
         pillar.pose.position.z = float(hit[2]) + self.target_height / 2.0
         pillar.scale.x = pillar.scale.y = 0.5
@@ -325,7 +382,7 @@ class DetectionLocalizer(Node):
         pillar.color = ColorRGBA(r=0.95, g=0.35, b=0.1, a=0.85)
 
         # One-sigma ellipse, flattened onto the ground.
-        ellipse = make("uncertainty", idx, Marker.CYLINDER)
+        ellipse = make(f"{self.camera}_uncertainty", idx, Marker.CYLINDER)
         ellipse.pose.position.x, ellipse.pose.position.y = float(hit[0]), float(hit[1])
         ellipse.pose.position.z = float(hit[2]) + 0.05
         ellipse.scale.x = 2.0 * math.sqrt(cov[0])
@@ -333,7 +390,7 @@ class DetectionLocalizer(Node):
         ellipse.scale.z = 0.05
         ellipse.color = ColorRGBA(r=0.95, g=0.75, b=0.1, a=0.30)
 
-        text = make("labels", idx, Marker.TEXT_VIEW_FACING)
+        text = make(f"{self.camera}_labels", idx, Marker.TEXT_VIEW_FACING)
         text.pose.position.x, text.pose.position.y = float(hit[0]), float(hit[1])
         text.pose.position.z = float(hit[2]) + self.target_height + 0.5
         text.scale.z = 0.8
@@ -345,7 +402,7 @@ class DetectionLocalizer(Node):
     def _report(self) -> None:
         if self.localized or self.no_tf or self.no_ground:
             self.get_logger().info(
-                f"{self.localized} localized ({self.clamped} clamped to the "
+                f"{self.camera}: {self.localized} localized ({self.clamped} clamped to the "
                 f"newest transform), {self.no_tf} dropped with no transform at "
                 f"the frame time, {self.no_ground} rays that missed the ground")
         self.localized = self.no_tf = self.no_ground = self.clamped = 0

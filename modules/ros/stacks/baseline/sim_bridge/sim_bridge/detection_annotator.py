@@ -65,6 +65,10 @@ class DetectionAnnotator(Node):
         self.declare_parameter("text_size", 14.0)
         self.declare_parameter("show_score", False)
         self.declare_parameter("colour_by_verdict", True)
+        # Each camera is scored on its own, so read the verdicts for this one.
+        # Reading another camera's would colour these boxes by whether a
+        # different lens found something.
+        self.declare_parameter("verdicts_topic", "/scoring/verdicts")
 
         self.thickness = float(self.get_parameter("line_thickness").value)
         self.text_size = float(self.get_parameter("text_size").value)
@@ -84,7 +88,8 @@ class DetectionAnnotator(Node):
 
         self.verdicts: dict[str, str] = {}
         if bool(self.get_parameter("colour_by_verdict").value):
-            self.create_subscription(Detection3DArray, "/scoring/verdicts",
+            self.create_subscription(Detection3DArray,
+                                     self.get_parameter("verdicts_topic").value,
                                      self._on_verdicts, 10)
         self.count = 0
         self.create_timer(60.0, self._report)

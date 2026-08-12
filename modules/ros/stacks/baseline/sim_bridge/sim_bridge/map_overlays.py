@@ -6,18 +6,25 @@ longitude and reads GeoJSON. This converts one to the other so the same
 information appears in both, with no second source of truth.
 
 What it draws
-    camera fields of regard  one polygon per camera, the ground each one covers
-    localized detections     one point per estimate, coloured by verdict
-    ground truth             one point per target
+    camera fields of regard  one polygon for each camera, the ground it covers
+    localized detections     one point for each estimate, coloured by verdict
+                             and named by the camera that produced it
+    ground truth             one point for each target
+
+Every camera is drawn separately. Two cameras looking at one scene disagree,
+and that disagreement is the measurement, so merging their estimates into one
+set of points would erase it.
 
 Colours match the 3D view and the image overlays:
     green   a true positive, an estimate that matched a target
     red     a false positive, an estimate with no target near it
     yellow  a false negative, a target inside the footprint that nothing found
 
-The origin comes from the vehicle's own fix paired with its local position, the
-same derivation the ground truth node uses, so the map and the 3D view agree
-rather than drifting apart on separate assumptions.
+This draws the same estimates that detection_localizer publishes as NavSatFix
+on /perception/<camera>/detections_navsat. Both are useful and they are not
+redundant: the Map panel plots a NavSatFix topic as a live point with no
+styling, and GeoJSON carries the verdict colour and the label. Turn either off
+in the layout without losing the other.
 
 Publishes
     /map_overlays/geojson    foxglove_msgs/GeoJSON
@@ -26,15 +33,15 @@ Publishes
 from __future__ import annotations
 
 import json
-import math
 
 import rclpy
-from geometry_msgs.msg import PolygonStamped, PoseStamped
+from geometry_msgs.msg import PolygonStamped
 from rclpy.node import Node
 from rclpy.qos import (QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile,
-                       QoSReliabilityPolicy, qos_profile_sensor_data)
-from sensor_msgs.msg import NavSatFix
+                       QoSReliabilityPolicy)
 from vision_msgs.msg import Detection3DArray
+
+from sim_bridge.geo import MapOrigin
 
 try:
     from foxglove_msgs.msg import GeoJSON
@@ -47,26 +54,36 @@ LATCHED = QoSProfile(durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
 BEST_EFFORT = QoSProfile(reliability=QoSReliabilityPolicy.BEST_EFFORT,
                          history=QoSHistoryPolicy.KEEP_LAST, depth=5)
 
-EARTH_R = 6378137.0
 VERDICT_COLOUR = {"TP": "#2ecc71", "FP": "#e74c3c", "FN": "#f1c40f"}
+# One outline colour for each camera, in the order they are listed. The 3D
+# panel uses the same two, so a footprint is recognisable across both views.
+FOOTPRINT_COLOUR = ["#4dd0e1", "#ffb74d", "#ba68c8", "#aed581"]
 
 
 class MapOverlays(Node):
     def __init__(self) -> None:
         super().__init__("map_overlays")
 
-        self.declare_parameter("footprint_topics",
-                               ["/camera/nadir/footprint", "/camera/gimbal/footprint"])
-        self.declare_parameter("footprint_names", ["nadir", "gimbal"])
+        self.declare_parameter("cameras", ["nadir", "gimbal"])
+        # Topic patterns, so a stack that names things differently can say so
+        # without editing this file. {cam} expands to the camera name.
+        self.declare_parameter("footprint_pattern", "/camera/{cam}/footprint")
+        self.declare_parameter("verdict_pattern", "/scoring/{cam}/verdicts")
+        self.declare_parameter("detection_pattern", "/perception/{cam}/detections_3d")
+        self.declare_parameter("truth_topic", "/ground_truth/truth_3d")
         self.declare_parameter("rate_hz", 2.0)
+        # How long a verdict stays authoritative. Past this the raw
+        # localizations are drawn instead, marked unjudged.
+        self.declare_parameter("verdict_timeout", 3.0)
 
-        self.origin: tuple[float, float] | None = None
-        self.local_xy: tuple[float, float] | None = None
+        self.cameras = [str(c) for c in self.get_parameter("cameras").value]
+        self.timeout = float(self.get_parameter("verdict_timeout").value)
+
         self.footprints: dict[str, list[tuple[float, float]]] = {}
-        self.detections: list[tuple[float, float, str, str]] = []
-        self.raw: list[tuple[float, float, str]] = []
-        self.raw_stamp = 0.0
-        self.verdict_stamp = 0.0
+        # Per camera, so one camera going quiet cannot blank the other.
+        self.verdicts: dict[str, list[tuple[float, float, str, str]]] = {}
+        self.verdict_stamp: dict[str, float] = {}
+        self.raw: dict[str, list[tuple[float, float, str]]] = {}
         self.truth: list[tuple[float, float, str]] = []
 
         if not HAVE_GEOJSON:
@@ -74,114 +91,112 @@ class MapOverlays(Node):
                 "foxglove_msgs is missing, so the Map panel gets no overlays.")
             return
 
-        topics = list(self.get_parameter("footprint_topics").value)
-        names = list(self.get_parameter("footprint_names").value)
-        for topic, name in zip(topics, names):
-            self.create_subscription(
-                PolygonStamped, topic,
-                lambda msg, n=name: self._on_footprint(n, msg), BEST_EFFORT)
+        self.origin = MapOrigin(self)
 
-        self.create_subscription(PoseStamped, "/mavros/local_position/pose",
-                                 self._on_local, qos_profile_sensor_data)
-        self.create_subscription(NavSatFix, "/mavros/global_position/global",
-                                 self._on_fix, qos_profile_sensor_data)
-        self.create_subscription(Detection3DArray, "/scoring/verdicts",
-                                 self._on_verdicts, 10)
-        # Localized detections direct from the localizer, so they appear on the
-        # map whether or not the scorer has anything to compare them against.
-        # Scoring needs ground truth, and ground truth only exists in
-        # simulation; a detection is worth plotting regardless.
-        self.create_subscription(Detection3DArray, "/perception/detections_3d",
-                                 self._on_detections, 10)
-        self.create_subscription(Detection3DArray, "/ground_truth/truth_3d",
+        foot = self.get_parameter("footprint_pattern").value
+        verdict = self.get_parameter("verdict_pattern").value
+        detection = self.get_parameter("detection_pattern").value
+        for cam in self.cameras:
+            self.create_subscription(
+                PolygonStamped, foot.format(cam=cam),
+                lambda msg, c=cam: self._on_footprint(c, msg), BEST_EFFORT)
+            self.create_subscription(
+                Detection3DArray, verdict.format(cam=cam),
+                lambda msg, c=cam: self._on_verdicts(c, msg), 10)
+            # Straight from the localizer, so estimates appear whether or not
+            # the scorer has anything to compare them against. Scoring needs
+            # ground truth, and ground truth only exists in simulation; a
+            # detection is worth plotting regardless.
+            self.create_subscription(
+                Detection3DArray, detection.format(cam=cam),
+                lambda msg, c=cam: self._on_detections(c, msg), 10)
+
+        self.create_subscription(Detection3DArray,
+                                 self.get_parameter("truth_topic").value,
                                  self._on_truth, LATCHED)
 
         self.pub = self.create_publisher(GeoJSON, "/map_overlays/geojson", LATCHED)
         rate = float(self.get_parameter("rate_hz").value)
         self.create_timer(1.0 / max(rate, 0.2), self._publish)
+        self.get_logger().info(f"drawing {', '.join(self.cameras)} on the Map panel")
 
     # ------------------------------------------------------------------ input
-    def _on_local(self, msg) -> None:
-        self.local_xy = (msg.pose.position.x, msg.pose.position.y)
+    def _on_footprint(self, cam: str, msg: PolygonStamped) -> None:
+        self.footprints[cam] = [(p.x, p.y) for p in msg.polygon.points]
 
-    def _on_fix(self, msg) -> None:
-        if self.local_xy is None or msg.status.status < 0:
-            return
-        x, y = self.local_xy
-        self.origin = (
-            msg.latitude - math.degrees(y / EARTH_R),
-            msg.longitude - math.degrees(x / (EARTH_R * math.cos(math.radians(msg.latitude)))),
-        )
+    def _on_verdicts(self, cam: str, msg: Detection3DArray) -> None:
+        self.verdicts[cam] = [
+            (d.bbox.center.position.x, d.bbox.center.position.y,
+             d.results[0].hypothesis.class_id if d.results else "FP", d.id)
+            for d in msg.detections
+        ]
+        self.verdict_stamp[cam] = self.get_clock().now().nanoseconds / 1e9
 
-    def _on_footprint(self, name: str, msg: PolygonStamped) -> None:
-        self.footprints[name] = [(p.x, p.y) for p in msg.polygon.points]
-
-    def _on_verdicts(self, msg: Detection3DArray) -> None:
-        out = []
-        for d in msg.detections:
-            verdict = d.results[0].hypothesis.class_id if d.results else "FP"
-            out.append((d.bbox.center.position.x, d.bbox.center.position.y,
-                        verdict, d.id))
-        self.detections = out
-        self.verdict_stamp = self.get_clock().now().nanoseconds / 1e9
-
-    def _on_detections(self, msg: Detection3DArray) -> None:
-        self.raw = [(d.bbox.center.position.x, d.bbox.center.position.y, d.id)
-                    for d in msg.detections]
-        self.raw_stamp = self.get_clock().now().nanoseconds / 1e9
+    def _on_detections(self, cam: str, msg: Detection3DArray) -> None:
+        self.raw[cam] = [(d.bbox.center.position.x, d.bbox.center.position.y, d.id)
+                         for d in msg.detections]
 
     def _on_truth(self, msg: Detection3DArray) -> None:
         self.truth = [(d.bbox.center.position.x, d.bbox.center.position.y, d.id)
                       for d in msg.detections]
 
     # ----------------------------------------------------------------- output
-    def _ll(self, x: float, y: float) -> list[float]:
+    def _ll(self, x: float, y: float) -> list[float] | None:
         """Local ENU metres to [longitude, latitude], which is GeoJSON order."""
-        lat0, lon0 = self.origin
-        return [lon0 + math.degrees(x / (EARTH_R * math.cos(math.radians(lat0)))),
-                lat0 + math.degrees(y / EARTH_R)]
+        ll = self.origin.to_lla(x, y)
+        return None if ll is None else [ll[1], ll[0]]
 
     def _publish(self) -> None:
-        if self.origin is None:
+        if not self.origin.ready:
             return
         features = []
 
-        for name, poly in self.footprints.items():
+        for i, cam in enumerate(self.cameras):
+            poly = self.footprints.get(cam, [])
             if len(poly) < 3:
                 continue
             ring = [self._ll(x, y) for x, y in poly]
+            if any(p is None for p in ring):
+                continue
             ring.append(ring[0])            # GeoJSON rings must close
+            colour = FOOTPRINT_COLOUR[i % len(FOOTPRINT_COLOUR)]
             features.append({
                 "type": "Feature",
                 "geometry": {"type": "Polygon", "coordinates": [ring]},
-                "properties": {"name": f"{name} field of regard", "kind": "footprint",
-                               "stroke": "#4dd0e1" if name == "nadir" else "#ffb74d",
-                               "stroke-width": 2, "fill": "#4dd0e1",
-                               "fill-opacity": 0.08},
+                "properties": {"name": f"{cam} field of regard",
+                               "kind": "footprint", "camera": cam,
+                               "stroke": colour, "stroke-width": 2,
+                               "fill": colour, "fill-opacity": 0.08},
             })
 
         for x, y, name in self.truth:
+            point = self._ll(x, y)
+            if point is None:
+                continue
             features.append({
                 "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": self._ll(x, y)},
+                "geometry": {"type": "Point", "coordinates": point},
                 "properties": {"name": name, "kind": "ground_truth",
                                "marker-color": "#2ecc71", "marker-symbol": "circle"},
             })
 
-        # Verdicts when the scorer is running and current, otherwise the raw
-        # localizations, marked unjudged rather than coloured as if they had
-        # been checked.
         now = self.get_clock().now().nanoseconds / 1e9
-        shown = (self.detections if (now - self.verdict_stamp) < 3.0
-                 else [(x, y, "", t) for x, y, t in self.raw])
-        for x, y, verdict, track in shown:
-            features.append({
-                "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": self._ll(x, y)},
-                "properties": {"name": f"{verdict} {track}".strip(),
-                               "kind": "detection", "verdict": verdict or "unjudged",
-                               "marker-color": VERDICT_COLOUR.get(verdict, "#bdc3c7")},
-            })
+        for cam in self.cameras:
+            fresh = (now - self.verdict_stamp.get(cam, 0.0)) < self.timeout
+            shown = (self.verdicts.get(cam, []) if fresh
+                     else [(x, y, "", t) for x, y, t in self.raw.get(cam, [])])
+            for x, y, verdict, track in shown:
+                point = self._ll(x, y)
+                if point is None:
+                    continue
+                features.append({
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": point},
+                    "properties": {"name": f"{cam} {verdict} {track}".strip(),
+                                   "kind": "detection", "camera": cam,
+                                   "verdict": verdict or "unjudged",
+                                   "marker-color": VERDICT_COLOUR.get(verdict, "#bdc3c7")},
+                })
 
         msg = GeoJSON()
         msg.geojson = json.dumps({"type": "FeatureCollection", "features": features})

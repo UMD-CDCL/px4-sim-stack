@@ -1,7 +1,8 @@
-# deepstream-app: gimbal camera in, boxes and detections out.
+# deepstream-app: both cameras in, boxes and detections out.
 #
-# The entrypoint expands ${RTSP_IN}, ${MQTT_HOST}, ${MQTT_PORT} and
-# ${MQTT_TOPIC} from the environment and writes the result to /tmp/perception.
+# The entrypoint expands ${RTSP_IN}, ${RTSP_IN_2}, ${MQTT_HOST}, ${MQTT_PORT},
+# ${MQTT_TOPIC} and ${ANNOTATED_ENABLE} from the environment and writes the
+# result to /tmp/perception.
 # Edit this file on the host and restart the container:
 #     docker compose restart perception
 #
@@ -52,8 +53,11 @@ live-source=1
 # the detector.
 batch-size=2
 batched-push-timeout=40000
-width=1280
-height=720
+# The cameras render 1920x1080. Scaling down here would throw away the
+# resolution before the detector sees it, and small distant targets are exactly
+# what this is looking for.
+width=1920
+height=1080
 enable-padding=0
 nvbuf-memory-type=0
 attach-sys-ts-as-ntp=0
@@ -91,12 +95,25 @@ show-clock=0
 process-mode=1
 
 # ------------------------------------------------------- output 1: annotated video
-# type=4 starts an RTSP server inside this container at
-#   rtsp://perception:8554/ds-test
-# The video router pulls that and republishes it as /gimbal_annotated, so
-# consumers keep one address for every stream.
+# One RTSP server for each camera, with the boxes drawn into the pixels.
+#
+# link-to-demux=1 is what makes this per camera. The two streams are batched
+# through one detector, and the demuxer splits them again afterwards, so each
+# sink gets its own source rather than a tiled mosaic of both. source-id picks
+# which: 0 is ${RTSP_IN}, 1 is ${RTSP_IN_2}.
+#
+# A DeepStream RTSP sink always mounts at /ds-test, so the two are told apart
+# by port. The video router pulls both and republishes them under names, so
+# consumers keep one address for every stream:
+#     rtsp://perception:8554/ds-test  ->  rtsp://video-router:8554/nadir_annotated
+#     rtsp://perception:8555/ds-test  ->  rtsp://video-router:8554/gimbal_annotated
+#
+# Set ANNOTATED_STREAMS=0 in compose to turn both off. The boxes still reach
+# ROS as messages, and Foxglove still overlays them on the plain streams; what
+# is saved is two H.264 encodes. Turn them off on a busy GPU, or leave them on
+# for a recording that carries its own annotation.
 [sink0]
-enable=1
+enable=${ANNOTATED_ENABLE}
 type=4
 codec=1
 # enc-type 0 is the GPU encoder. Set 1 if NVENC is busy or unavailable.
@@ -107,6 +124,22 @@ iframeinterval=30
 rtsp-port=8554
 udp-port=5400
 gpu-id=0
+link-to-demux=1
+source-id=0
+
+[sink3]
+enable=${ANNOTATED_ENABLE}
+type=4
+codec=1
+enc-type=0
+sync=0
+bitrate=4000000
+iframeinterval=30
+rtsp-port=8555
+udp-port=5401
+gpu-id=0
+link-to-demux=1
+source-id=1
 
 # ---------------------------------------------------- output 2: the detections
 # The DeepStream MQTT adapter is broken against Mosquitto 2, so this sink stays

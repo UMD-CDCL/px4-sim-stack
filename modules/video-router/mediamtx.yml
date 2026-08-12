@@ -79,10 +79,23 @@ paths:
     source: publisher
 
   # ------------------------------------------------------- from perception
-  # DeepStream draws boxes and serves its own RTSP. The router pulls that in,
-  # so consumers keep one address for every stream.
-  gimbal_annotated:
+  # DeepStream draws boxes and serves its own RTSP, one server for each camera.
+  # The router pulls both in, so consumers keep one address for every stream.
+  #
+  # The port says which source, not which camera: 8554 is DeepStream's source 0
+  # and 8555 is source 1. Those are RTSP_IN and RTSP_IN_2, which compose sets
+  # from PERCEPTION_CAMERA and PERCEPTION_CAMERA_2. Swap those two variables and
+  # these two names swap with them.
+  #
+  # sourceOnDemand means the router only connects when something asks, so with
+  # ANNOTATED_STREAMS=0 these paths simply stay empty instead of erroring.
+  nadir_annotated:
     source: rtsp://perception:8554/ds-test
+    sourceOnDemand: true
+    sourceOnDemandStartTimeout: 20s
+
+  gimbal_annotated:
+    source: rtsp://perception:8555/ds-test
     sourceOnDemand: true
     sourceOnDemandStartTimeout: 20s
 

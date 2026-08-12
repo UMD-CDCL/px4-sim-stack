@@ -70,10 +70,16 @@
         "/ground_truth/markers": {
           "visible": true
         },
-        "/perception/markers": {
+        "/scoring/nadir/markers": {
           "visible": true
         },
-        "/perception/targets": {
+        "/scoring/nadir/error_lines": {
+          "visible": true
+        },
+        "/scoring/nadir/summary": {
+          "visible": true
+        },
+        "/perception/nadir/markers": {
           "visible": false
         },
         "/camera/nadir/footprint": {
@@ -81,36 +87,39 @@
           "lineWidth": 0.4,
           "color": "#4dd0e1"
         },
+        "/camera/nadir/boresight": {
+          "visible": true
+        },
+        "/camera/nadir/ground_projection": {
+          "visible": true,
+          "pointSize": 4,
+          "colorMode": "rgb",
+          "colorField": "rgb",
+          "decayTime": 0
+        },
+        "/scoring/gimbal/markers": {
+          "visible": true
+        },
+        "/scoring/gimbal/error_lines": {
+          "visible": true
+        },
+        "/scoring/gimbal/summary": {
+          "visible": true
+        },
+        "/perception/gimbal/markers": {
+          "visible": false
+        },
         "/camera/gimbal/footprint": {
           "visible": true,
           "lineWidth": 0.4,
           "color": "#ffb74d"
         },
-        "/camera/nadir/boresight": {
-          "visible": true
-        },
         "/camera/gimbal/boresight": {
           "visible": false
         },
-        "/scoring/error_lines": {
-          "visible": true
-        },
-        "/scoring/summary": {
-          "visible": true
-        },
-        "/scoring/markers": {
-          "visible": true
-        },
-        "/camera/nadir/ground_projection": {
-          "visible": true,
-          "pointSize": 6,
-          "colorMode": "rgb",
-          "colorField": "rgb",
-          "decayTime": 0
-        },
         "/camera/gimbal/ground_projection": {
           "visible": true,
-          "pointSize": 6,
+          "pointSize": 4,
           "colorMode": "rgb",
           "colorField": "rgb",
           "decayTime": 0
@@ -164,7 +173,9 @@
       "topicColors": {
         "/mavros/global_position/global": "#ff7043",
         "/ground_truth/geojson": "#2ecc71",
-        "/map_overlays/geojson": "#4dd0e1"
+        "/map_overlays/geojson": "#4dd0e1",
+        "/perception/nadir/detections_navsat": "#4dd0e1",
+        "/perception/gimbal/detections_navsat": "#ffb74d"
       },
       "zoomLevel": 18,
       "maxNativeZoom": 19
@@ -172,25 +183,46 @@
     "Plot!scoring": {
       "paths": [
         {
-          "value": "/scoring/position_error.data",
+          "value": "/scoring/nadir/recall.data",
           "enabled": true,
           "timestampMethod": "receiveTime",
-          "label": "position error (m)",
-          "color": "#ffb74d"
-        },
-        {
-          "value": "/scoring/recall.data",
-          "enabled": true,
-          "timestampMethod": "receiveTime",
-          "label": "recall",
+          "label": "nadir recall",
           "color": "#4dd0e1"
         },
         {
-          "value": "/scoring/precision.data",
+          "value": "/scoring/nadir/precision.data",
           "enabled": true,
           "timestampMethod": "receiveTime",
-          "label": "precision",
+          "label": "nadir precision",
           "color": "#81c784"
+        },
+        {
+          "value": "/scoring/nadir/position_error.data",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "nadir error (m)",
+          "color": "#9575cd"
+        },
+        {
+          "value": "/scoring/gimbal/recall.data",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "gimbal recall",
+          "color": "#ffb74d"
+        },
+        {
+          "value": "/scoring/gimbal/precision.data",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "gimbal precision",
+          "color": "#c5e1a5"
+        },
+        {
+          "value": "/scoring/gimbal/position_error.data",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "gimbal error (m)",
+          "color": "#f06292"
         }
       ],
       "showLegend": true,
@@ -228,7 +260,7 @@
       "diffMethod": "custom",
       "diffTopicPath": "",
       "showFullMessageForDiff": false,
-      "topicPath": "/scoring/summary.text"
+      "topicPath": "/scoring/nadir/summary.text"
     }
   },
   "globalVariables": {},

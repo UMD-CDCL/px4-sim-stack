@@ -11,9 +11,22 @@ What runs here
   rtsp_camera x2      the gimbal and nadir streams, as ROS images.
   scene_tf            the rest of the frame tree, and an airframe to look at.
   detections_bridge   DeepStream detections, stamped with the frame time.
-  ground_projector    what the gimbal covers on the ground.
+  ground_projector    what each camera covers on the ground.
   detection_localizer detections placed on the ground, with covariance.
+  detection_scorer    those positions against ground truth.
   foxglove_bridge     a websocket for the browser, on port 8765.
+
+One pipeline for each camera
+----------------------------
+DeepStream infers on both streams in one batched pipeline, and every stage
+after it runs once for each camera: an annotator, a ground projector, a
+localizer and a scorer. Nothing merges the two.
+
+That is deliberate. The nadir camera looks straight down over a small patch and
+localizes it well; the gimbal looks out and gets worse as it tilts toward the
+horizon. One combined recall figure would average those into a number that
+describes neither, so each camera keeps its own topics under
+/perception/<camera>/ and /scoring/<camera>/, and the layout shows both.
 
 Everything the 3D view needs is a stock ROS message: /tf, MarkerArray,
 PolygonStamped, PoseArray. Nothing here invents a schema, so the Foxglove
@@ -51,12 +64,28 @@ PERCEPTION_OPTICAL = NADIR_OPTICAL if PERCEPTION_CAMERA == "nadir" else GIMBAL_O
 # body projects around the point where they stand and the box centre is the
 # right anchor: taking the bottom edge there just shifts every estimate by half
 # a box in one image direction, which shows up as a constant offset in metres.
-PERCEPTION_ANCHOR = "centre" if PERCEPTION_CAMERA == "nadir" else "bottom"
+def anchor_for(camera: str) -> str:
+    return "centre" if camera == "nadir" else "bottom"
+
+
+def hfov_for(camera: str) -> float:
+    return NADIR_HFOV if camera == "nadir" else GIMBAL_HFOV
+
+
+def optical_for(camera: str) -> str:
+    return CAMERA_OPTICAL.get(camera, GIMBAL_OPTICAL)
+
+
+PERCEPTION_ANCHOR = anchor_for(PERCEPTION_CAMERA)
 
 # The second camera DeepStream runs. Both go through one pipeline, and the
 # payload's sensorId says which one a detection came from.
 PERCEPTION_CAMERA_2 = os.environ.get("PERCEPTION_CAMERA_2", "gimbal")
 CAMERA_OPTICAL = {"gimbal": GIMBAL_OPTICAL, "nadir": NADIR_OPTICAL}
+
+# Every per-camera node is built from this list. Add a third camera here and to
+# the DeepStream source list, and the rest follows.
+CAMERAS = [PERCEPTION_CAMERA, PERCEPTION_CAMERA_2]
 
 # Field of view of each camera, in radians, from the sensor definitions in
 # modules/sim/scenes/models/x500_recon/model.sdf. rtsp_camera builds its
@@ -222,76 +251,78 @@ def generate_launch_description() -> LaunchDescription:
                 parameters=[{
                     "detections_topic": f"/perception/{cam}/detections",
                     "annotations_topic": "annotations",
+                    # This camera's own verdicts. Reading the other camera's
+                    # would colour these boxes by what a different lens found.
+                    "verdicts_topic": f"/scoring/{cam}/verdicts",
                     "line_thickness": 2.0,
                     "text_size": 14.0,
                 }],
             )
-            for cam in (PERCEPTION_CAMERA, PERCEPTION_CAMERA_2)
+            for cam in CAMERAS
         ],
 
         # ------------------------------------------------------- ground
-        Node(
-            package="sim_bridge",
-            executable="ground_projector",
-            name="gimbal_ground_projector",
-            namespace="camera/gimbal",
-            output="screen",
-            parameters=[{
-                "camera_info_topic": "/camera/gimbal/camera_info",
-                "optical_frame": GIMBAL_OPTICAL,
-                "reference_frame": REFERENCE_FRAME,
-                "use_rel_alt": True,
-                "ground_z": 0.0,
-                "rate_hz": 5.0,
-            }],
-        ),
+        # What each camera covers on the ground, as a polygon and a boresight.
+        *[
+            Node(
+                package="sim_bridge",
+                executable="ground_projector",
+                name=f"{cam}_ground_projector",
+                namespace=f"camera/{cam}",
+                output="screen",
+                parameters=[{
+                    "camera_info_topic": f"/camera/{cam}/camera_info",
+                    "optical_frame": optical_for(cam),
+                    "reference_frame": REFERENCE_FRAME,
+                    "use_rel_alt": True,
+                    "ground_z": 0.0,
+                    "rate_hz": 5.0,
+                    # One ground marker is enough, so only the first draws it.
+                    "draw_ground_grid": i == 0,
+                }],
+            )
+            for i, cam in enumerate(CAMERAS)
+        ],
 
-        Node(
-            package="sim_bridge",
-            executable="ground_projector",
-            name="nadir_ground_projector",
-            namespace="camera/nadir",
-            output="screen",
-            parameters=[{
-                "camera_info_topic": "/camera/nadir/camera_info",
-                "optical_frame": NADIR_OPTICAL,
-                "reference_frame": REFERENCE_FRAME,
-                "use_rel_alt": True,
-                "ground_z": 0.0,
-                "rate_hz": 5.0,
-                # One ground marker is enough, and the gimbal projector draws it.
-                "draw_ground_grid": False,
-            }],
-        ),
-
-        Node(
-            package="sim_bridge",
-            executable="detection_localizer",
-            name="detection_localizer",
-            output="screen",
-            parameters=[{
-                "detections_topic": "/perception/detections",
-                "camera_info_topic": f"/camera/{PERCEPTION_CAMERA}/camera_info",
-                "optical_frame": PERCEPTION_OPTICAL,
-                "reference_frame": REFERENCE_FRAME,
-                "use_rel_alt": True,
-                "anchor": PERCEPTION_ANCHOR,
-                # A two metre standard deviation in x and y, one metre in z.
-                # These are estimates, not derived from a calibration. Raise
-                # them before you fuse this with anything that trusts them.
-                "covariance_diagonal": [4.0, 4.0, 1.0, 0.0, 0.0, 0.0],
-                # Two centimetres of extra standard deviation per metre of
-                # slant range, squared.
-                "range_variance_scale": 0.0004,
-                "target_height": 1.7,
-                "marker_lifetime": 3.0,
-                # Empty means the reference frame. Set FIDUCIAL_ENABLED=1
-                # and this becomes the corrected frame.
-                "output_frame": ("fiducial"
-                                 if os.environ.get("FIDUCIAL_ENABLED", "0") == "1"
-                                 else ""),
-            }],
-        ),
+        # One localizer for each camera, each in its own namespace, so the
+        # topics come out as /perception/<camera>/detections_3d and nothing
+        # overwrites anything.
+        *[
+            Node(
+                package="sim_bridge",
+                executable="detection_localizer",
+                name=f"{cam}_localizer",
+                namespace=f"perception/{cam}",
+                output="screen",
+                parameters=[{
+                    "camera": cam,
+                    "detections_topic": f"/perception/{cam}/detections",
+                    "camera_info_topic": f"/camera/{cam}/camera_info",
+                    "optical_frame": optical_for(cam),
+                    "reference_frame": REFERENCE_FRAME,
+                    "use_rel_alt": True,
+                    "anchor": anchor_for(cam),
+                    # A two metre standard deviation in x and y, one metre in z.
+                    # These are estimates, not derived from a calibration. Raise
+                    # them before you fuse this with anything that trusts them.
+                    "covariance_diagonal": [4.0, 4.0, 1.0, 0.0, 0.0, 0.0],
+                    # Two centimetres of extra standard deviation per metre of
+                    # slant range, squared.
+                    "range_variance_scale": 0.0004,
+                    "target_height": 1.7,
+                    "marker_lifetime": 3.0,
+                    # Each estimate also as a NavSatFix, which is what the Map
+                    # panel plots without any conversion of its own.
+                    "publish_navsat": True,
+                    # Empty means the reference frame. Set FIDUCIAL_ENABLED=1
+                    # and this becomes the corrected frame.
+                    "output_frame": ("fiducial"
+                                     if os.environ.get("FIDUCIAL_ENABLED", "0") == "1"
+                                     else ""),
+                }],
+            )
+            for cam in CAMERAS
+        ],
 
         # -------------------------------------------- ground truth and scoring
         # Simulation only. These two exist to measure the detector, not to fly
@@ -340,25 +371,38 @@ def generate_launch_description() -> LaunchDescription:
             }],
         ),
 
-        Node(
-            package="sim_bridge",
-            executable="detection_scorer",
-            name="detection_scorer",
-            output="screen",
-            parameters=[{
-                # An estimate counts as finding a target only if it lands
-                # within this many metres of it. Two metres is a statement
-                # about what the localization is for: a position good enough to
-                # send someone to. A wider gate scores geometry that is not
-                # actually useful as a success.
-                "gate_radius": float(os.environ.get("SCORING_GATE_M", "2.0")),
-                "window": 100,
-                "reference_frame": REFERENCE_FRAME,
-                "footprint_topic": f"/camera/{PERCEPTION_CAMERA}/footprint",
-                # Only score targets the camera can actually see.
-                "require_in_footprint": True,
-            }],
-        ),
+        # One scorer for each camera. Each judges its own estimates against the
+        # targets inside its own footprint, so recall means "of what this
+        # camera could see". The gate is shared, because it is a statement
+        # about the task rather than about a lens.
+        *[
+            Node(
+                package="sim_bridge",
+                executable="detection_scorer",
+                name=f"{cam}_scorer",
+                namespace=f"scoring/{cam}",
+                output="screen",
+                parameters=[{
+                    "camera": cam,
+                    "detections_topic": f"/perception/{cam}/detections_3d",
+                    # An estimate counts as finding a target only if it lands
+                    # within this many metres of it. Two metres is a statement
+                    # about what the localization is for: a position good enough
+                    # to send someone to. A wider gate scores geometry that is
+                    # not actually useful as a success.
+                    "gate_radius": float(os.environ.get("SCORING_GATE_M", "2.0")),
+                    "window": 100,
+                    "reference_frame": REFERENCE_FRAME,
+                    "footprint_topic": f"/camera/{cam}/footprint",
+                    # Only score targets the camera can actually see.
+                    "require_in_footprint": True,
+                    "target_height": 1.7,
+                    # Stack the summaries rather than let them overlap.
+                    "summary_z": 30.0 + 6.0 * i,
+                }],
+            )
+            for i, cam in enumerate(CAMERAS)
+        ],
 
         Node(
             package="sim_bridge",
@@ -366,9 +410,10 @@ def generate_launch_description() -> LaunchDescription:
             name="map_overlays",
             output="screen",
             parameters=[{
-                "footprint_topics": [f"/camera/{PERCEPTION_CAMERA}/footprint",
-                                     f"/camera/{PERCEPTION_CAMERA_2}/footprint"],
-                "footprint_names": [PERCEPTION_CAMERA, PERCEPTION_CAMERA_2],
+                "cameras": CAMERAS,
+                "footprint_pattern": "/camera/{cam}/footprint",
+                "verdict_pattern": "/scoring/{cam}/verdicts",
+                "detection_pattern": "/perception/{cam}/detections_3d",
                 "rate_hz": 2.0,
             }],
         ),
@@ -385,15 +430,21 @@ def generate_launch_description() -> LaunchDescription:
                 parameters=[{
                     "image_topic": f"/camera/{cam}/image_raw",
                     "camera_info_topic": f"/camera/{cam}/camera_info",
-                    "optical_frame": CAMERA_OPTICAL.get(cam, NADIR_OPTICAL),
+                    "optical_frame": optical_for(cam),
                     "reference_frame": REFERENCE_FRAME,
                     "use_rel_alt": True,
-                    # 8 turns 1280x720 into about 14 thousand points.
-                    "step": int(os.environ.get("GROUND_IMAGE_STEP", "4")),
+                    # Take every Nth pixel in each direction. The cameras render
+                    # 1920x1080, so step 1 projects the full frame: 2.07 million
+                    # points, 33 MB in one message. Step 2 gives a 960x540 grid
+                    # at 8.3 MB, which is dense enough to read as a picture and
+                    # cheap enough to publish twice a second. Raise
+                    # send_buffer_limit on foxglove_bridge below before setting
+                    # this to 1.
+                    "step": int(os.environ.get("GROUND_IMAGE_STEP", "2")),
                     "rate_hz": float(os.environ.get("GROUND_IMAGE_RATE", "2.0")),
                 }],
             )
-            for cam in (PERCEPTION_CAMERA, PERCEPTION_CAMERA_2)
+            for cam in CAMERAS
         ],
 
         # ------------------------------------------------- observability
@@ -408,6 +459,13 @@ def generate_launch_description() -> LaunchDescription:
                 # The 3D panel needs the transforms, and asset serving lets it
                 # fetch anything a future URDF refers to.
                 "asset_uri_allowlist": ["^package://(?!.*\\.\\.).*"],
+                # The default is 10 MB, and the ground projection clouds are
+                # megabytes each. Over that limit the bridge drops the channel
+                # silently: the topic still advertises and the panel stays
+                # empty, which is a slow thing to diagnose. See
+                # docs/troubleshooting.md.
+                "send_buffer_limit": int(os.environ.get(
+                    "FOXGLOVE_SEND_BUFFER", str(200 * 1024 * 1024))),
             }],
         ),
     ])

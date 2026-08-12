@@ -3,8 +3,8 @@
   x500_recon - the reconnaissance airframe for this stack.
 
   It carries three payloads:
-    gimbal camera   1280x720, 3-axis mount, from the PX4 gimbal model
-    nadir camera    1280x720, fixed, points straight down
+    gimbal camera   1920x1080, 3-axis mount, from the PX4 gimbal model
+    nadir camera    1920x1080, fixed, points straight down
     rangefinder     LW20 laser, points down, reaches 100 m
 
   Two names in this file are not free choices. PX4's Gazebo bridge subscribes
@@ -80,8 +80,8 @@
           <horizontal_fov>1.74</horizontal_fov>
           <image>
             <format>R8G8B8</format>
-            <width>1280</width>
-            <height>720</height>
+            <width>1920</width>
+            <height>1080</height>
           </image>
           <clip>
             <near>0.1</near>

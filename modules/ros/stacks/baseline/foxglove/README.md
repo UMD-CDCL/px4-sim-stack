@@ -30,13 +30,21 @@ Nothing in this layout needs a Foxglove extension or a custom schema:
 | Topic | Type |
 |---|---|
 | `/tf`, `/tf_static` | `tf2_msgs/TFMessage` |
-| `/drone/markers`, `/ground_truth/markers`, `/perception/markers` | `visualization_msgs/MarkerArray` |
+| `/drone/markers`, `/ground_truth/markers` | `visualization_msgs/MarkerArray` |
+| `/perception/<camera>/markers`, `/scoring/<camera>/markers` | `visualization_msgs/MarkerArray` |
 | `/camera/*/footprint` | `geometry_msgs/PolygonStamped` |
 | `/camera/*/boresight` | `geometry_msgs/PointStamped` |
-| `/camera/*/image_raw`, `/camera/*/camera_info` | `sensor_msgs/Image`, `CameraInfo` |
+| `/camera/*/image_raw/compressed` | `sensor_msgs/CompressedImage` |
+| `/camera/*/camera_info` | `sensor_msgs/CameraInfo` |
+| `/camera/*/annotations` | `foxglove_msgs/ImageAnnotations` |
+| `/camera/*/ground_projection` | `sensor_msgs/PointCloud2` |
 | `/mavros/global_position/global` | `sensor_msgs/NavSatFix` |
-| `/scoring/*` | `std_msgs/Float64`, `visualization_msgs/Marker` |
-| `/ground_truth/geojson` | `foxglove_msgs/GeoJSON` |
+| `/perception/*/detections_navsat` | `sensor_msgs/NavSatFix` |
+| `/scoring/*/*` | `std_msgs/Float64`, `visualization_msgs/Marker` |
+| `/ground_truth/geojson`, `/map_overlays/geojson` | `foxglove_msgs/GeoJSON` |
+
+The image panels read the compressed topics. The raw ones are too large to
+cross the websocket; see docs/troubleshooting.md.
 
 The last one is the single exception. It is the message the Foxglove Map panel
 reads for arbitrary geometry, and ROS ships no equivalent. A `NavSatFix` holds
@@ -68,7 +76,7 @@ The other usual cause is that the stack does not publish the topic yet:
 ```bash
 ./px4sim shell ros
 ros2 topic list
-ros2 topic hz /perception/detections_3d
+ros2 topic hz /perception/nadir/detections_3d
 ```
 
 Ground truth appears once `ground_truth` reads the scenario. The Map panel

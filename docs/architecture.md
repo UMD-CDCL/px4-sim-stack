@@ -22,7 +22,7 @@ The obvious design puts Gazebo and ROS in one container and bridges images with
   not, so the code paths diverge exactly where you stop testing them.
 - `ros_gz` on Jazzy pulls in ROS-vendored Gazebo packages. The simulator needs
   upstream Gazebo. Putting both in one image is a version fight with no winner.
-- A raw 1280x720 image topic is 2.6 MB per frame. H.264 at 4 Mbit/s is 17 kB.
+- A raw 1920x1080 image topic is 6.2 MB per frame. H.264 at 4 Mbit/s is 17 kB.
 
 So the simulator encodes, and the autonomy stack decodes. That is what happens
 on the aircraft, and now it is what happens on the desk.
