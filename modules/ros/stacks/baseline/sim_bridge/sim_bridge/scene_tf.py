@@ -265,7 +265,7 @@ class SceneTf(Node):
         # and compare against gimbal_status_camera_link to see the difference.
         self.declare_parameter("gimbal_yaw_mode", "report")
         # Which side the vehicle attitude is divided off. See _store.
-        self.declare_parameter("gimbal_compose", "right")
+        self.declare_parameter("gimbal_compose", "left")
         # Log the vehicle heading against the gimbal heading once a second, so
         # a constant offset is readable rather than inferred.
         self.declare_parameter("log_gimbal_diagnostics", True)
@@ -454,9 +454,34 @@ class SceneTf(Node):
             # a residual that turns with the aircraft on every axis, which is
             # the symptom reported here: not a bad axis, a bad order.
             #
-            # Both are published, as gimbal_left_camera_link and
-            # gimbal_right_camera_link. With the gimbal centred, the correct one
-            # holds still while the aircraft yaws.
+            # left is the correct one, and this is not a preference.
+            #
+            # An absolute attitude is the vehicle attitude followed by the
+            # gimbal's own rotation, q_abs = q_vehicle * q_rel, so recovering
+            # q_rel means dividing on the left. Dividing on the right gives
+            # q_vehicle * q_rel * conj(q_vehicle), which is a conjugation: the
+            # same rotation by the same angle, but about an axis rotated by the
+            # vehicle heading.
+            #
+            # That has a signature worth recognising, because it fooled this
+            # code once. Conjugation leaves identity alone, so a centred gimbal
+            # looks perfect at every aircraft heading. It only goes wrong once
+            # the gimbal moves off centre, and then it does not look like a
+            # rotation error, it looks like the axes swapped: with the aircraft
+            # at 90 degrees of yaw, a 30 degree gimbal pitch comes out as a 30
+            # degree roll.
+            #
+            # "Correct at zero, wrong off zero" therefore means conjugation, not
+            # a bad axis and not a missing offset.
+            #
+            # Both stay published, as gimbal_left_camera_link and
+            # gimbal_right_camera_link, so the difference stays visible.
+            #
+            # One caveat when judging this from the aircraft: a gimbal holding
+            # an ROI is earth locked, so its angle relative to the airframe
+            # genuinely changes as the aircraft yaws. That is correct behaviour
+            # and reads exactly like the fault. Centre the gimbal before
+            # deciding, or command it in vehicle relative mode.
             self.q_left = quat_mul(quat_conj(self.vehicle_q), raw)
             self.q_right = quat_mul(raw, quat_conj(self.vehicle_q))
             body = self.q_right if self.compose == "right" else self.q_left
