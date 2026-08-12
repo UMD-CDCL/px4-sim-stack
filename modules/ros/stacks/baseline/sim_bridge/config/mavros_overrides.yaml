@@ -1,0 +1,38 @@
+# MAVROS settings for this stack, applied over the upstream px4_config.yaml.
+#
+# The rangefinder is the reason this file exists, and it needs two things.
+#
+# 1. The plugin must be allowed to load. MAVROS ships px4_pluginlists.yaml with
+#    distance_sensor and rangefinder in plugin_denylist, so neither plugin
+#    starts and no topic appears. plugin_allowlist overrides the denylist,
+#    which is how MAVROS resolves the two lists against each other. Nothing
+#    else changes, because a plugin that is not in the denylist loads anyway.
+#
+# 2. The sensor must be described to the plugin. MAVROS 2 does not take the
+#    sensor list as nested parameters, the way MAVROS 1 did. It takes one
+#    string parameter called `config` on the plugin's own node, and that string
+#    holds the YAML. Writing it as a nested map produces no error and no topic.
+#
+# PX4 sends this sensor as id 0, orientation 25 (PITCH_270, downward).
+# Confirm on the PX4 side with:
+#   pxh> listener distance_sensor
+
+/**:
+  ros__parameters:
+    plugin_allowlist:
+      - distance_sensor
+
+/mavros/distance_sensor:
+  ros__parameters:
+    base_frame_id: "base_link"
+    # One entry, replacing the upstream examples. A name ending in _pub makes
+    # the plugin publish. A name ending in _sub makes it subscribe and send to
+    # the autopilot instead.
+    config: |
+      rangefinder_pub:
+        id: 0
+        frame_id: "lidar_sensor_link"
+        orientation: PITCH_270
+        field_of_view: 0.0
+        send_tf: false
+        sensor_position: {x: 0.0, y: 0.0, z: -0.05}

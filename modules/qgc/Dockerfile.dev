@@ -1,0 +1,95 @@
+# QGroundControl build environment.
+#
+# Use this when you change QGroundControl itself. The source is bind-mounted at
+# /qgc, so an edit needs a rebuild inside the container, not an image rebuild.
+#
+#   make bootstrap qgc          clone the source into ./src/qgroundcontrol
+#   COMPOSE_PROFILES=qgc-dev docker compose up -d qgc-dev
+#   docker compose exec qgc-dev qgc-build
+#   docker compose exec qgc-dev qgc-run
+#
+# Qt comes from aqtinstall, at the version the QGroundControl CI uses. Check
+# .github/workflows/linux.yml in the source tree before you change QT_VERSION.
+
+FROM ubuntu:24.04
+
+ARG QT_VERSION=6.8.3
+ARG UID=1000
+ARG GID=1000
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    QT_ROOT=/opt/Qt/${QT_VERSION}/gcc_64
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential ccache cmake ninja-build git curl ca-certificates \
+      python3 python3-pip python3-venv \
+      pkg-config \
+      libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
+      libxkbcommon-dev libxkbcommon-x11-dev \
+      libx11-dev libxext-dev libxi-dev libxrender-dev libxcb1-dev \
+      libxcb-glx0-dev libxcb-keysyms1-dev libxcb-image0-dev libxcb-shm0-dev \
+      libxcb-icccm4-dev libxcb-sync-dev libxcb-xfixes0-dev libxcb-shape0-dev \
+      libxcb-randr0-dev libxcb-render-util0-dev libxcb-util-dev \
+      libxcb-xinerama0-dev libxcb-xkb-dev libxcb-cursor0 \
+      libssl-dev libudev-dev libusb-1.0-0-dev libsdl2-dev \
+      libasound2-dev libpulse-dev libspeechd-dev libdbus-1-dev \
+      libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+      gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+      gstreamer1.0-plugins-bad gstreamer1.0-libav gstreamer1.0-x gstreamer1.0-gl \
+      libfontconfig1-dev libfreetype6-dev \
+      fonts-dejavu-core \
+      vim less \
+    && rm -rf /var/lib/apt/lists/*
+
+# The Qt modules match the QGroundControl CI workflow.
+RUN pip3 install --no-cache-dir --break-system-packages aqtinstall \
+    && aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 \
+         -m qtcharts qtlocation qtpositioning qtspeech qt5compat qtmultimedia \
+            qtserialport qtimageformats qtshadertools qtconnectivity \
+            qtquick3d qtsensors \
+         -O /opt/Qt \
+    && rm -rf /root/.cache
+
+RUN if getent passwd ${UID} >/dev/null; then \
+      userdel -rf "$(getent passwd ${UID} | cut -d: -f1)" || true; \
+    fi \
+    && groupadd -f -g ${GID} dev \
+    && useradd -m -u ${UID} -g ${GID} -G dialout -s /bin/bash dev \
+    # See modules/sim/Dockerfile: a named volume with no matching directory in
+    # the image is created root-owned, and ccache then fails on every build.
+    && mkdir -p /home/dev/.ccache /home/dev/.config \
+    && chown -R ${UID}:${GID} /home/dev
+
+# Two commands, so the build recipe lives in the image and not in your shell
+# history.
+RUN printf '%s\n' \
+      '#!/usr/bin/env bash' \
+      'set -euo pipefail' \
+      ': "${QGC_SRC:=/qgc}"' \
+      '[ -f "$QGC_SRC/CMakeLists.txt" ] || { echo "No QGroundControl source at $QGC_SRC. Run: ./scripts/bootstrap.sh qgc"; exit 1; }' \
+      'BUILD=${QGC_BUILD:-$QGC_SRC/build-docker}' \
+      'BUILD_TYPE=${QGC_BUILD_TYPE:-Debug}' \
+      '"$QT_ROOT/bin/qt-cmake" -S "$QGC_SRC" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE="$BUILD_TYPE"' \
+      'cmake --build "$BUILD" --parallel "$(nproc)"' \
+      'echo "Built. Run it with: qgc-run"' \
+      > /usr/local/bin/qgc-build \
+    && printf '%s\n' \
+      '#!/usr/bin/env bash' \
+      'set -euo pipefail' \
+      ': "${QGC_SRC:=/qgc}"' \
+      'BUILD=${QGC_BUILD:-$QGC_SRC/build-docker}' \
+      'BIN=$(find "$BUILD" -maxdepth 3 -type f -name QGroundControl -perm -u+x | head -1)' \
+      '[ -n "$BIN" ] || { echo "No binary in $BUILD. Run qgc-build first."; exit 1; }' \
+      'exec "$BIN" "$@"' \
+      > /usr/local/bin/qgc-run \
+    && chmod +x /usr/local/bin/qgc-build /usr/local/bin/qgc-run
+
+USER dev
+WORKDIR /qgc
+
+ENV CCACHE_DIR=/home/dev/.ccache \
+    QT_X11_NO_MITSHM=1 \
+    PATH=/opt/Qt/${QT_VERSION}/gcc_64/bin:/usr/lib/ccache:$PATH
+
+CMD ["sleep", "infinity"]

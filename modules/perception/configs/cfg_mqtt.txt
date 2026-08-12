@@ -1,0 +1,20 @@
+# The MQTT client, for the DeepStream message broker adapter.
+#
+# The broker in this stack is anonymous, so username and password are unused.
+# Set them, and the TLS options, when you point this at a real broker.
+
+[message-broker]
+client-id = px4simstack-perception
+#username =
+#password =
+#enable-tls = 1
+#tls-cafile =
+#tls-certfile =
+#tls-keyfile =
+keep-alive = 60
+loop-timeout = 2000
+share-connection = 1
+# Run the paho network loop on its own thread. Without it the adapter reports
+# "mqtt connection success" and then fails the first publish with "The client
+# is not currently connected", because nothing services the socket.
+set-threaded = 1

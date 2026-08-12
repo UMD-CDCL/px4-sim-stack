@@ -1,0 +1,77 @@
+# The video contract.
+#
+# Everything that produces video publishes here. Everything that consumes video
+# reads rtsp://video-router:8554/<name>. Swap the simulator for a real airframe
+# and the consumers do not change, because the names do not change.
+#
+# Ingest options for a producer:
+#   RTSP  rtspclientsink location=rtsp://video-router:8554/<name>   (what sim uses)
+#   RTMP  rtmpsink location=rtmp://video-router:1935/<name>
+#   RTP   set a path source to udp+rtp://0.0.0.0:<port>, see nadir_rtp below
+#
+# Read options for a consumer:
+#   RTSP     rtsp://video-router:8554/<name>
+#   WebRTC   http://localhost:8889/<name>        in a browser, lowest latency
+#   HLS      http://localhost:8888/<name>        wide compatibility, ~2 s behind
+
+logLevel: info
+logDestinations: [stdout]
+
+readTimeout: 10s
+writeTimeout: 10s
+writeQueueSize: 512
+
+rtsp: true
+rtspAddress: :8554
+# TCP first. On a docker bridge, UDP gives no real latency win and does lose
+# packets once several readers attach.
+rtspTransports: [tcp, udp]
+
+rtmp: true
+rtmpAddress: :1935
+
+hls: true
+hlsAddress: :8888
+hlsVariant: lowLatency
+hlsAlwaysRemux: false
+
+webrtc: true
+webrtcAddress: :8889
+# Add your LAN address here to reach the WebRTC player from another machine.
+webrtcAdditionalHosts: []
+
+srt: false
+
+pathDefaults:
+  source: publisher
+  # Hold the stream open for a few seconds after the last reader leaves, so
+  # that a DeepStream restart does not have to wait for a fresh keyframe.
+  sourceOnDemandCloseAfter: 10s
+
+paths:
+  # --------------------------------------------------------- from the vehicle
+  # The gimbal camera. sim publishes this over RTSP.
+  gimbal:
+    source: publisher
+
+  # The fixed nadir camera.
+  nadir:
+    source: publisher
+
+  # ------------------------------------------------------- from perception
+  # DeepStream draws boxes and serves its own RTSP. The router pulls that in,
+  # so consumers keep one address for every stream.
+  gimbal_annotated:
+    source: rtsp://perception:8554/ds-test
+    sourceOnDemand: true
+    sourceOnDemandStartTimeout: 20s
+
+  # --------------------------------------------------------------- examples
+  # A real camera that sends plain RTP, with no RTSP server of its own.
+  # Point the camera at video-router UDP 8100 and read rtsp://.../nadir_rtp.
+  # nadir_rtp:
+  #   source: udp+rtp://0.0.0.0:8100
+
+  # Anything else a producer invents. Remove this to enforce the named list.
+  all_others:
+    source: publisher

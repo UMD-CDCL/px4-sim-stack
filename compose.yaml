@@ -1,0 +1,313 @@
+name: px4simstack
+
+# ---------------------------------------------------------------------------
+# Reusable fragments.
+# ---------------------------------------------------------------------------
+x-gpu-env: &gpu-env
+  NVIDIA_VISIBLE_DEVICES: all
+  # `all` covers compute, graphics, video and display. Gazebo needs graphics,
+  # the GStreamer NVENC encoder needs video, DeepStream needs compute.
+  NVIDIA_DRIVER_CAPABILITIES: all
+
+x-x11-env: &x11-env
+  DISPLAY: ${DISPLAY:-:0}
+  XAUTHORITY: /tmp/.docker.xauth
+  QT_X11_NO_MITSHM: "1"
+
+x-ids: &ids
+  UID: ${HOST_UID:-1000}
+  GID: ${HOST_GID:-1000}
+
+services:
+
+  # -------------------------------------------------------------------------
+  # sim - the vehicle. PX4 SITL, Gazebo Harmonic, the sensors, and the camera
+  # encoders. This module owns physics and firmware. It publishes one MAVLink
+  # port and one video stream for each camera. Nothing else.
+  # -------------------------------------------------------------------------
+  sim:
+    build:
+      context: ./modules/sim
+      args:
+        <<: *ids
+        PX4_REF: ${PX4_REF:-v1.17.0}
+        GZ_DISTRO: ${GZ_DISTRO:-harmonic}
+    image: px4simstack/sim:${PX4_REF:-v1.17.0}
+    hostname: sim
+    runtime: nvidia
+    ipc: host
+    stdin_open: true
+    tty: true
+    environment:
+      <<: [*gpu-env, *x11-env]
+      PX4_DIR: /px4
+      SCENES_DIR: /scenes
+      SCENE: ${SCENE:-recon_field}
+      VEHICLE: ${VEHICLE:-x500_recon}
+      SCENARIO: ${SCENARIO:-}
+      GZ_GUI: ${GZ_GUI:-1}
+      VIDEO_SINK_BASE: rtsp://video-router:8554
+      # PX4 pushes telemetry to this fixed address, so a hub restart does not
+      # strand the link. See modules/sim/px4-rcS.
+      MAVLINK_HUB_IP: 172.28.0.11
+      MAVLINK_HUB_PORT: "14545"
+      # PX4 reads these directly. See docs/interfaces.md.
+      PX4_SYS_AUTOSTART: ${AIRFRAME:-4019}
+      PX4_SIM_MODEL: gz_${VEHICLE:-x500_recon}
+      PX4_GZ_STANDALONE: "1"
+      PX4_SIM_SPEED_FACTOR: ${SIM_SPEED_FACTOR:-1}
+      PX4_HOME_LAT: ${HOME_LAT:-38.9869}
+      PX4_HOME_LON: ${HOME_LON:--76.9426}
+      PX4_HOME_ALT: ${HOME_ALT:-20}
+      # rcS turns every PX4_PARAM_* variable into a `param set` before the
+      # MAVLink links start. This is the supported way to change PX4 parameters
+      # without a patch to the PX4 tree.
+      PX4_PARAM_MAV_0_FORWARD: "1"
+      PX4_PARAM_COM_RCL_EXCEPT: "4"
+    volumes:
+      - ./src/PX4-Autopilot:/px4
+      - ./modules/sim/scenes:/scenes
+      - ./logs/px4:/px4-logs
+      - sim-ccache:/home/dev/.ccache
+      - sim-fuel:/home/dev/.gz
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ${XAUTH_FILE:-./.xauth}:/tmp/.docker.xauth
+    networks:
+      simnet:
+        ipv4_address: 172.28.0.10
+    depends_on:
+      video-router:
+        condition: service_started
+    stop_grace_period: 20s
+
+  # -------------------------------------------------------------------------
+  # mavlink-hub - the MAVLink contract. Every consumer talks to this service,
+  # never to PX4 directly. Swap `sim` for a real airframe and nothing
+  # downstream changes.
+  # -------------------------------------------------------------------------
+  mavlink-hub:
+    build:
+      context: ./modules/mavlink-hub
+    image: px4simstack/mavlink-hub:1
+    hostname: mavlink-hub
+    environment:
+      PX4_HOST: 172.28.0.10   # sim
+      PX4_PORT: "18570"
+      QGC_HOST: 172.28.0.14   # qgc
+      QGC_PORT: "14550"
+      EXTRA_GCS_IP: ${HOST_GCS_IP:-}
+      # The keepalive injects a GCS heartbeat so PX4 learns where to send
+      # telemetry. See docs/interfaces.md for why this is needed.
+      KEEPALIVE: "1"
+    ports:
+      - "5760:5760"        # MAVLink over TCP, for MAVSDK and pymavlink
+      - "14550:14550/udp"  # a GCS on the host can bind this
+      - "14552:14552/udp"  # free slot for mission tooling
+    networks:
+      simnet:
+        ipv4_address: 172.28.0.11
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # video-router - the video contract. Every camera enters here and leaves as
+  # RTSP. Downstream modules know stream names, not encoders or transports.
+  # -------------------------------------------------------------------------
+  video-router:
+    image: bluenviron/mediamtx:${MEDIAMTX_TAG:-1}
+    hostname: video-router
+    volumes:
+      - ./modules/video-router/mediamtx.yml:/mediamtx.yml:ro
+    ports:
+      - "8554:8554"        # RTSP
+      - "1935:1935"        # RTMP ingest
+      - "8888:8888"        # HLS
+      - "8889:8889"        # WebRTC
+      - "8189:8189/udp"    # WebRTC ICE
+    networks:
+      simnet:
+        ipv4_address: 172.28.0.12
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # message-bus - the detection contract. DeepStream publishes here. Any ROS
+  # stack, or no ROS stack, can subscribe.
+  # -------------------------------------------------------------------------
+  message-bus:
+    image: eclipse-mosquitto:2
+    hostname: message-bus
+    volumes:
+      - ./modules/message-bus/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      - "1883:1883"
+      - "9001:9001"        # MQTT over websockets, for browser tools
+    networks:
+      simnet:
+        ipv4_address: 172.28.0.13
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # qgc - QGroundControl, the released build. Use the qgc-dev profile to build
+  # your own from source.
+  # -------------------------------------------------------------------------
+  qgc:
+    build:
+      context: ./modules/qgc
+      dockerfile: Dockerfile
+      args:
+        <<: *ids
+        QGC_REF: ${QGC_REF:-v5.0.8}
+    image: px4simstack/qgc:${QGC_REF:-v5.0.8}
+    hostname: qgc
+    runtime: nvidia
+    ipc: host
+    environment:
+      <<: [*gpu-env, *x11-env]
+    volumes:
+      - qgc-config:/home/dev/.config
+      - ./logs/qgc:/home/dev/Documents/QGroundControl
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ${XAUTH_FILE:-./.xauth}:/tmp/.docker.xauth
+    networks:
+      simnet:
+        ipv4_address: 172.28.0.14
+    depends_on: [mavlink-hub, video-router]
+
+  # -------------------------------------------------------------------------
+  # qgc-dev - a Qt build environment with the QGC source bind-mounted.
+  # Profile: qgc-dev
+  # -------------------------------------------------------------------------
+  qgc-dev:
+    profiles: [qgc-dev]
+    build:
+      context: ./modules/qgc
+      dockerfile: Dockerfile.dev
+      args:
+        <<: *ids
+        QT_VERSION: ${QT_VERSION:-6.8.3}
+    image: px4simstack/qgc-dev:${QT_VERSION:-6.8.3}
+    hostname: qgc-dev
+    runtime: nvidia
+    ipc: host
+    stdin_open: true
+    tty: true
+    environment:
+      <<: [*gpu-env, *x11-env]
+      QGC_SRC: /qgc
+    volumes:
+      - ./src/qgroundcontrol:/qgc
+      - qgc-config:/home/dev/.config
+      - qgc-dev-ccache:/home/dev/.ccache
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ${XAUTH_FILE:-./.xauth}:/tmp/.docker.xauth
+    networks:
+      simnet:
+        ipv4_address: 172.28.0.15
+
+  # -------------------------------------------------------------------------
+  # ros - the autonomy stack. It sees RTSP and MAVLink. It does not see
+  # Gazebo, and it does not link against PX4.
+  # Profile: ros
+  # -------------------------------------------------------------------------
+  ros:
+    profiles: [ros]
+    build:
+      context: ./modules/ros
+      args:
+        <<: *ids
+        ROS_DISTRO: ${ROS_DISTRO:-jazzy}
+    image: px4simstack/ros:${ROS_DISTRO:-jazzy}
+    hostname: ros
+    runtime: nvidia
+    ipc: host
+    stdin_open: true
+    tty: true
+    environment:
+      <<: [*gpu-env, *x11-env]
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
+      ROS_STACK: ${ROS_STACK:-baseline}
+      # The whole drone interface, in three variables.
+      FCU_URL: udp://:14555@mavlink-hub:14551
+      RTSP_BASE: rtsp://video-router:8554
+      MQTT_HOST: message-bus
+    volumes:
+      - ./modules/ros/stacks:/stacks
+      - ./src/ros2_ws:/ws
+      - ./logs/ros:/home/dev/.ros
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ${XAUTH_FILE:-./.xauth}:/tmp/.docker.xauth
+    ports:
+      - "8765:8765"        # Foxglove bridge
+    networks:
+      simnet:
+        ipv4_address: 172.28.0.16
+    depends_on: [mavlink-hub, video-router, message-bus]
+
+  # -------------------------------------------------------------------------
+  # perception - DeepStream inference. RTSP in, annotated RTSP and MQTT
+  # detections out. It has no ROS dependency.
+  # Profile: perception
+  # -------------------------------------------------------------------------
+  perception:
+    profiles: [perception]
+    build:
+      context: ./modules/perception
+      args:
+        DS_IMAGE: ${DS_IMAGE:-nvcr.io/nvidia/deepstream:8.0-samples-multiarch}
+    image: px4simstack/perception:ds8
+    hostname: perception
+    runtime: nvidia
+    environment:
+      <<: *gpu-env
+      DS_CONFIG: ${DS_CONFIG:-gimbal_detector.txt}
+      RTSP_IN: rtsp://video-router:8554/gimbal
+      MQTT_HOST: message-bus
+      MQTT_PORT: "1883"
+      MQTT_TOPIC: perception/detections
+    volumes:
+      - ./modules/perception/configs:/opt/perception/configs
+      - ./modules/perception/app:/opt/perception/app
+      - ./modules/perception/models:/opt/perception/models
+      - ./logs/perception:/opt/perception/logs
+      - perception-cache:/root/.cache
+    networks:
+      simnet:
+        ipv4_address: 172.28.0.17
+    depends_on: [video-router, message-bus]
+
+  # -------------------------------------------------------------------------
+  # xrce-agent - the uXRCE-DDS bridge. This puts PX4 uORB topics directly on
+  # the ROS 2 graph and breaks the MAVLink-only contract on purpose. Turn it on
+  # only for a stack that needs px4_msgs.
+  # Profile: xrce
+  # -------------------------------------------------------------------------
+  xrce-agent:
+    profiles: [xrce]
+    build:
+      context: ./modules/ros
+      dockerfile: Dockerfile.xrce
+      args:
+        XRCE_AGENT_REF: ${XRCE_AGENT_REF:-v2.4.2}
+    image: px4simstack/xrce-agent:${XRCE_AGENT_REF:-v2.4.2}
+    hostname: xrce-agent
+    environment:
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
+    command: ["MicroXRCEAgent", "udp4", "-p", "8888"]
+    networks:
+      simnet:
+        ipv4_address: 172.28.0.18
+
+networks:
+  simnet:
+    driver: bridge
+    ipam:
+      config:
+        # A fixed subnet keeps the PX4 broadcast address predictable and keeps
+        # the range clear of the usual corporate VPN ranges.
+        - subnet: 172.28.0.0/16
+
+volumes:
+  sim-ccache:
+  sim-fuel:
+  qgc-config:
+  qgc-dev-ccache:
+  perception-cache:

@@ -1,0 +1,143 @@
+# deepstream-app: gimbal camera in, boxes and detections out.
+#
+# The entrypoint expands ${RTSP_IN}, ${MQTT_HOST}, ${MQTT_PORT} and
+# ${MQTT_TOPIC} from the environment and writes the result to /tmp/perception.
+# Edit this file on the host and restart the container:
+#     docker compose restart perception
+#
+# Relative paths resolve against this file's directory.
+
+[application]
+enable-perf-measurement=1
+perf-measurement-interval-sec=30
+
+[tiled-display]
+enable=0
+rows=1
+columns=1
+
+# ------------------------------------------------------------------ the input
+# type=4 is an RTSP URI source.
+[source0]
+enable=1
+type=4
+uri=${RTSP_IN}
+num-sources=1
+gpu-id=0
+cudadec-memtype=0
+# Jitter buffer in ms. Lower is fresher, and drops more on a busy GPU.
+latency=200
+# The video router restarts, the simulator restarts. Reconnect, do not exit.
+rtsp-reconnect-interval-sec=10
+rtsp-reconnect-attempts=-1
+
+[streammux]
+gpu-id=0
+live-source=1
+batch-size=1
+batched-push-timeout=40000
+width=1280
+height=720
+enable-padding=0
+nvbuf-memory-type=0
+attach-sys-ts-as-ntp=1
+
+# -------------------------------------------------------------- the detector
+[primary-gie]
+enable=1
+gpu-id=0
+gie-unique-id=1
+nvbuf-memory-type=0
+config-file=config_infer_person.txt
+
+# --------------------------------------------------------------- the tracker
+# The tracker gives each object a stable id across frames. Without it every
+# frame reports new objects and a mission cannot count anything.
+[tracker]
+enable=1
+tracker-width=640
+tracker-height=384
+gpu-id=0
+ll-lib-file=/opt/nvidia/deepstream/deepstream/lib/libnvds_nvmultiobjecttracker.so
+ll-config-file=/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_tracker_NvDCF_perf.yml
+display-tracking-id=1
+
+# ------------------------------------------------------------------- the boxes
+[osd]
+enable=1
+gpu-id=0
+border-width=3
+text-size=14
+text-color=1;1;1;1
+text-bg-color=0.0;0.0;0.0;0.6
+font=Serif
+show-clock=0
+process-mode=1
+
+# ------------------------------------------------------- output 1: annotated video
+# type=4 starts an RTSP server inside this container at
+#   rtsp://perception:8554/ds-test
+# The video router pulls that and republishes it as /gimbal_annotated, so
+# consumers keep one address for every stream.
+[sink0]
+enable=1
+type=4
+codec=1
+# enc-type 0 is the GPU encoder. Set 1 if NVENC is busy or unavailable.
+enc-type=0
+sync=0
+bitrate=4000000
+iframeinterval=30
+rtsp-port=8554
+udp-port=5400
+gpu-id=0
+
+# ---------------------------------------------------- output 2: the detections
+# The DeepStream MQTT adapter is broken against Mosquitto 2, so this sink stays
+# off. See modules/perception/app/payload_forwarder.py for the evidence and for
+# what replaces it. Set enable=1 here, and PAYLOAD_FORWARDER=0 in compose, if a
+# future DeepStream fixes the adapter.
+[sink1]
+enable=0
+type=6
+msg-conv-config=msgconv.txt
+msg-conv-payload-type=1
+msg-conv-msg2p-new-api=1
+msg-conv-frame-interval=5
+msg-broker-proto-lib=/opt/nvidia/deepstream/deepstream/lib/libnvds_mqtt_proto.so
+msg-broker-conn-str=${MQTT_HOST};${MQTT_PORT}
+topic=${MQTT_TOPIC}
+msg-broker-config=cfg_mqtt.txt
+
+# The common message converter. It runs whether or not a broker sink exists, so
+# the detections still get built. debug-payload-dir makes nvmsgconv write each
+# payload as a file, and payload_forwarder.py publishes and deletes them.
+#
+# msg-conv-msg2p-new-api=1 is the line that matters. Without it nvmsgconv waits
+# for per-object metadata that deepstream-app never creates, and the directory
+# stays empty with no error.
+[message-converter]
+enable=1
+msg-conv-config=msgconv.txt
+# Name the library. deepstream-app passes the literal string "null" for the
+# common converter when this key is missing, nvmsgconv tries to dlopen it, and
+# the pipeline stops with "Could not initialize supporting library". The sink
+# group does not have that problem, so the omission is easy to miss.
+msg-conv-msg2p-lib=/opt/nvidia/deepstream/deepstream/lib/libnvds_msgconv.so
+msg-conv-payload-type=1
+msg-conv-msg2p-new-api=1
+# Publish every Nth frame. 5 gives 6 Hz from a 30 fps stream, which is enough
+# for a planner and keeps the bus quiet.
+msg-conv-frame-interval=5
+debug-payload-dir=/tmp/ds-payloads
+
+# ------------------------------------------------------ output 3: a local window
+# Off by default. The container has no X11 mount.
+[sink2]
+enable=0
+type=2
+sync=0
+gpu-id=0
+
+[tests]
+file-loop=0

@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  recon_field - the default scene.
+
+  A flat field with a few blocks that cast shadows and hide targets from some
+  angles. It stays light, so the frame rate leaves room for the encoders and
+  for DeepStream.
+
+  The <world name> must match the file name. The entrypoint checks this,
+  because PX4 addresses the world by its declared name and a mismatch hangs
+  with no error.
+
+  Scenario targets are not in this file. spawn_scenario.py adds them at run
+  time, so one scene serves many test cases. See docs/scenarios.md.
+-->
+<sdf version="1.9">
+  <world name="recon_field">
+
+    <physics type="ode">
+      <max_step_size>0.004</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>250</real_time_update_rate>
+    </physics>
+    <gravity>0 0 -9.8</gravity>
+    <magnetic_field>6e-06 2.3e-05 -4.2e-05</magnetic_field>
+    <atmosphere type="adiabatic"/>
+
+    <scene>
+      <grid>false</grid>
+      <ambient>0.45 0.45 0.45 1</ambient>
+      <background>0.62 0.72 0.85 1</background>
+      <shadows>true</shadows>
+    </scene>
+
+    <light name="sunUTC" type="directional">
+      <pose>0 0 500 0 0 0</pose>
+      <cast_shadows>true</cast_shadows>
+      <intensity>1</intensity>
+      <direction>0.3 0.5 -0.81</direction>
+      <diffuse>0.95 0.93 0.88 1</diffuse>
+      <specular>0.3 0.3 0.3 1</specular>
+      <attenuation>
+        <range>2000</range>
+        <linear>0</linear>
+        <constant>1</constant>
+        <quadratic>0</quadratic>
+      </attenuation>
+      <spot>
+        <inner_angle>0</inner_angle>
+        <outer_angle>0</outer_angle>
+        <falloff>0</falloff>
+      </spot>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane><normal>0 0 1</normal><size>1 1</size></plane>
+          </geometry>
+          <surface><friction><ode/></friction><bounce/><contact/></surface>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane><normal>0 0 1</normal><size>600 600</size></plane>
+          </geometry>
+          <material>
+            <ambient>0.32 0.38 0.24 1</ambient>
+            <diffuse>0.36 0.44 0.26 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- A dirt track through the middle. It gives the detector a background
+         that is not uniform grass, and it gives the pilot a landmark. -->
+    <model name="track">
+      <static>true</static>
+      <pose>0 0 0.01 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>240 7 0.02</size></box>
+          </geometry>
+          <material>
+            <ambient>0.45 0.38 0.28 1</ambient>
+            <diffuse>0.52 0.44 0.32 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Three blocks. They occlude targets and give the rangefinder
+         something other than flat ground to measure. -->
+    <model name="block_a">
+      <static>true</static>
+      <pose>28 14 4 0 0 0.35</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>14 10 8</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>14 10 8</size></box></geometry>
+          <material>
+            <ambient>0.62 0.60 0.56 1</ambient>
+            <diffuse>0.72 0.70 0.66 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="block_b">
+      <static>true</static>
+      <pose>-22 -18 3 0 0 -0.2</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>11 11 6</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>11 11 6</size></box></geometry>
+          <material>
+            <ambient>0.55 0.52 0.50 1</ambient>
+            <diffuse>0.66 0.63 0.60 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="block_c">
+      <static>true</static>
+      <pose>48 -30 5.5 0 0 1.1</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>18 12 11</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>18 12 11</size></box></geometry>
+          <material>
+            <ambient>0.58 0.56 0.53 1</ambient>
+            <diffuse>0.69 0.67 0.64 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- PX4 overwrites these at start from PX4_HOME_LAT, PX4_HOME_LON and
+         PX4_HOME_ALT. The values here are the fallback. -->
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <world_frame_orientation>ENU</world_frame_orientation>
+      <latitude_deg>38.9869</latitude_deg>
+      <longitude_deg>-76.9426</longitude_deg>
+      <elevation>20</elevation>
+    </spherical_coordinates>
+
+  </world>
+</sdf>

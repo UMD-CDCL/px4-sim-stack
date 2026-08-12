@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+# px4sim - one command for the whole stack.
+#
+#   ./px4sim start        bring everything up
+#   ./px4sim stop         shut everything down
+#   ./px4sim status       what is running
+#
+# Run `./px4sim` with no arguments for the full list. Every command works from
+# any directory. The Makefile stays available for the same jobs.
+set -euo pipefail
+
+cd "$(dirname "$(readlink -f "$0")")"
+
+DC="docker compose"
+# Every profile, so `stop` and `clean` reach containers that `start` did not
+# create. Compose ignores a service whose profile is not selected, which
+# otherwise leaves the ros and perception containers behind.
+ALL_PROFILES="ros,perception,xrce,qgc-dev"
+
+BOLD=$'\033[1m'; DIM=$'\033[2m'; GRN=$'\033[32m'; RED=$'\033[31m'; YEL=$'\033[33m'; OFF=$'\033[0m'
+say()  { printf '%s==> %s%s\n' "$BOLD" "$*" "$OFF"; }
+warn() { printf '%s    %s%s\n' "$YEL" "$*" "$OFF"; }
+die()  { printf '%s!!! %s%s\n' "$RED" "$*" "$OFF" >&2; exit 1; }
+
+[ -f .env ] || { warn "No .env yet. Creating it from .env.example."; cp .env.example .env; }
+# shellcheck disable=SC1091
+set -a; . ./.env; set +a
+
+need_sources() {
+	[ -d src/PX4-Autopilot ] || die "No PX4 source. Run: ./px4sim setup"
+}
+
+usage() {
+	cat <<EOF
+${BOLD}px4sim${OFF} - PX4, Gazebo, ROS 2 and DeepStream in containers
+
+  ${BOLD}Getting started${OFF}
+    doctor              Check the host: driver, docker, GPU runtime, X11, disk
+    setup               Clone PX4 and create the ROS workspace (a few minutes)
+    build               Build the images (about 20 minutes the first time)
+
+  ${BOLD}Every day${OFF}
+    start [profiles]    Start everything. Default profiles: ${COMPOSE_PROFILES:-none}
+    stop                Stop and remove the containers. Volumes stay.
+    restart [service]   Restart one service, or all of them
+    status              What is running, and the addresses to use
+    logs [service]      Follow the logs
+    console             The PX4 pxh> prompt. Detach with Ctrl-P Ctrl-Q
+    shell <service>     A shell inside sim, ros, qgc, perception or hub
+
+  ${BOLD}Scenes and targets${OFF}
+    scene <name>        Switch the world and restart the simulator
+    scenario [name]     Place the targets again, with no restart
+    reset               Remove the targets from the running world
+
+  ${BOLD}Housekeeping${OFF}
+    check               Validate the compose file and lint the docs
+    clean               Remove containers, networks and volumes
+    nuke                clean, and delete the cloned sources in ./src
+
+  Current: scene ${SCENE:-?}, vehicle ${VEHICLE:-?}, ros stack ${ROS_STACK:-?}
+EOF
+}
+
+endpoints() {
+	cat <<EOF
+
+  ${BOLD}MAVLink${OFF}     udp://localhost:14550     a ground station on this host
+              tcp://localhost:5760      MAVSDK, pymavlink
+              udp://mavlink-hub:14551   MAVROS, inside the network
+  ${BOLD}Video${OFF}       rtsp://localhost:8554/gimbal
+              rtsp://localhost:8554/nadir
+              rtsp://localhost:8554/gimbal_annotated   ${DIM}(perception)${OFF}
+              http://localhost:8889/gimbal             ${DIM}(WebRTC, browser)${OFF}
+  ${BOLD}Detections${OFF}  mqtt://localhost:1883     topic perception/detections
+  ${BOLD}Foxglove${OFF}    ws://localhost:8765       ${DIM}(ros)${OFF}
+
+EOF
+}
+
+cmd=${1:-help}
+[ $# -gt 0 ] && shift || true
+
+case "$cmd" in
+
+doctor)   ./scripts/preflight.sh ;;
+setup)    ./scripts/bootstrap.sh "$@" ;;
+
+build)
+	./scripts/x11-allow.sh
+	$DC build "$@"
+	;;
+
+start|up)
+	# A profile list can be given: ./px4sim start ros,perception
+	[ $# -gt 0 ] && export COMPOSE_PROFILES="$1"
+	need_sources
+	./scripts/x11-allow.sh
+	say "Starting: ${COMPOSE_PROFILES:-core services only}"
+	$DC up -d
+	echo
+	$DC ps --format 'table {{.Service}}\t{{.Status}}'
+	endpoints
+	if [ ! -x src/PX4-Autopilot/build/px4_sitl_default/bin/px4 ]; then
+		warn "PX4 has not been built yet. The first start compiles it, which"
+		warn "takes 10 to 20 minutes. Watch it with: ./px4sim logs sim"
+	fi
+	;;
+
+stop|down)
+	say "Stopping everything"
+	COMPOSE_PROFILES="$ALL_PROFILES" $DC down --remove-orphans
+	;;
+
+restart)
+	if [ $# -gt 0 ]; then
+		COMPOSE_PROFILES="$ALL_PROFILES" $DC restart "$@"
+	else
+		COMPOSE_PROFILES="$ALL_PROFILES" $DC restart
+	fi
+	;;
+
+status|ps)
+	COMPOSE_PROFILES="$ALL_PROFILES" $DC ps \
+		--format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
+	endpoints
+	;;
+
+logs)     COMPOSE_PROFILES="$ALL_PROFILES" $DC logs -f --tail=100 "$@" ;;
+
+console)
+	id=$($DC ps -q sim) || true
+	[ -n "${id:-}" ] || die "The sim container is not running. Run: ./px4sim start"
+	say "Attaching to pxh>. Detach with Ctrl-P Ctrl-Q, not Ctrl-C."
+	docker attach "$id"
+	;;
+
+shell|sh)
+	svc=${1:-sim}
+	case "$svc" in
+		hub) svc=mavlink-hub ;;
+	esac
+	$DC exec "$svc" bash 2>/dev/null || $DC exec "$svc" sh
+	;;
+
+scene)
+	[ $# -gt 0 ] || die "Give a scene name. Try: recon_field, forest, baylands, walls"
+	say "Switching to scene '$1'"
+	SCENE="$1" $DC up -d --force-recreate sim
+	;;
+
+scenario)
+	name=${1:-${SCENARIO:-}}
+	[ -n "$name" ] || die "Give a scenario name, or set SCENARIO in .env"
+	$DC exec sim /scenes/spawn_scenario.py \
+		--world "${SCENE:-recon_field}" --scenario "/scenes/scenarios/${name}.yaml"
+	;;
+
+reset)
+	$DC exec sim /scenes/spawn_scenario.py --world "${SCENE:-recon_field}" --clear
+	;;
+
+check)
+	$DC config -q && echo "compose.yaml OK"
+	./scripts/lint-docs.sh
+	;;
+
+clean)
+	say "Removing containers, networks and volumes"
+	COMPOSE_PROFILES="$ALL_PROFILES" $DC down -v --remove-orphans
+	;;
+
+nuke)
+	printf 'This deletes the containers, the volumes and ./src (%s). Continue? [y/N] ' \
+		"$(du -sh src 2>/dev/null | cut -f1 || echo 'not present')"
+	read -r reply
+	case "$reply" in
+		[yY]*) COMPOSE_PROFILES="$ALL_PROFILES" $DC down -v --remove-orphans
+		       rm -rf src/PX4-Autopilot src/qgroundcontrol src/ros2_ws
+		       say "Gone. Run ./px4sim setup to start again." ;;
+		*)     echo "Nothing was removed." ;;
+	esac
+	;;
+
+help|-h|--help) usage ;;
+*)              echo "Unknown command: $cmd"; echo; usage; exit 1 ;;
+esac

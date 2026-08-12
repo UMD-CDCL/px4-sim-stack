@@ -1,0 +1,41 @@
+name: urban_casualties
+description: Six people around the blocks, two of them out of sight from above.
+
+# Each entity becomes one Gazebo model.
+#   name    unique in the world
+#   uri     model://<name> for a local model, or a Fuel URL
+#   pose    x y z roll pitch yaw, in world ENU metres and radians
+#   static  true keeps the model still. Default is true.
+#
+# A Fuel URI downloads on first use and then comes from the cache volume.
+# To use your own mesh, put it in modules/sim/scenes/models/<name>/ and write
+# uri: model://<name>. See docs/scenarios.md.
+
+entities:
+  # ------------------------------------------------ in the open, easy targets
+  - name: person_track_01
+    uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Standing person
+    pose: [18, 1.5, 0, 0, 0, 2.1]
+
+  - name: person_track_02
+    uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Casual female
+    pose: [34, -2.0, 0, 0, 0, -1.2]
+
+  - name: person_field_03
+    uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Standing person
+    pose: [-12, 22, 0, 0, 0, 0.4]
+
+  # -------------------------------------- against a wall, hard from most angles
+  - name: person_wall_04
+    uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Casual female
+    pose: [21.5, 10.5, 0, 0, 0, 1.9]
+
+  # ------------------------------ beside the tall block, in shadow for half the day
+  - name: person_shadow_05
+    uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Standing person
+    pose: [39.0, -27.0, 0, 0, 0, 0.9]
+
+  # ------------------------------------------------------------ a wheelchair
+  - name: casualty_chair_06
+    uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/PatientWheelChair
+    pose: [-19, -11, 0, 0, 0, 2.6]

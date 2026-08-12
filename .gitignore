@@ -1,0 +1,12 @@
+.env
+/src/
+/logs/
+*.pyc
+__pycache__/
+.DS_Store
+.xauth
+
+# Seeded from the DeepStream image on first start, and the TensorRT engine is
+# rebuilt for each GPU, driver and TensorRT version. Neither belongs in git.
+modules/perception/models/Primary_Detector/
+*.engine
