@@ -238,6 +238,7 @@ services:
       RTSP_BASE: rtsp://video-router:8554
       MQTT_HOST: message-bus
       GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO:-urban_casualties}.yaml
+      RESOLVED_TRUTH_FILE: /scenes/ground_truth_actual.yaml
       # Which camera feeds detection and localization. The nadir camera
       # looks straight down, which is what an overhead search wants, and
       # it needs no gimbal pointing to work.

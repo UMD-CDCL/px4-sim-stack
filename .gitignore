@@ -5,6 +5,7 @@
 __pycache__/
 .DS_Store
 .xauth
+modules/sim/scenes/ground_truth_actual.yaml
 
 # Seeded from the DeepStream image on first start, and the TensorRT engine is
 # rebuilt for each GPU, driver and TensorRT version. Neither belongs in git.

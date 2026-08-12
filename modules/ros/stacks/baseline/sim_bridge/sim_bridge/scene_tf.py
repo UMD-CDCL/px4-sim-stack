@@ -150,12 +150,40 @@ class SceneTf(Node):
         # aircraft and in the opposite direction. The conversion needs a
         # rotation on each side, which is what NED_TO_ENU and FRD_TO_FLU do.
         self.declare_parameter("gimbal_is_frd", True)
+        # A fixed rotation applied to the gimbal attitude after it has been
+        # made body relative, in degrees, as roll, pitch, yaw.
+        #
+        # Everything upstream of this is now pinned down:
+        #
+        #   PX4  src/modules/simulation/gz_bridge/GZGimbal.cpp reads the gimbal
+        #        IMU, which Gazebo reports against the world, converts it with
+        #        q_ENU_to_NED * q * q_FLU_to_FRD^-1, and then labels the result
+        #        DEVICE_FLAGS_YAW_IN_VEHICLE_FRAME even though it is absolute.
+        #   MAVROS  gimbal_control.cpp calls mavlink_to_quaternion and nothing
+        #        else, so the quaternion arrives exactly as PX4 sent it. Its
+        #        frame_id, base_link_frd, is honest.
+        #   Model  in the gimbal SDF the camera_imu and the camera sensor carry
+        #        the same rotation, 0 0 3.14, and differ only in x. So the IMU
+        #        measures the camera's own frame and no extra rotation is due
+        #        between them.
+        #
+        # This node undoes each of those in turn. If a constant offset still
+        # remains, it belongs here rather than buried in the maths, because a
+        # constant is a mounting convention and not a bug in the conversion.
+        # The diagnostic below prints the number to put in it.
+        self.declare_parameter("gimbal_offset_rpy_deg", [0.0, 0.0, 0.0])
+        # Log the vehicle heading against the gimbal heading once a second, so
+        # a constant offset is readable rather than inferred.
+        self.declare_parameter("log_gimbal_diagnostics", True)
         self.declare_parameter("gimbal_rate_hz", 30.0)
         self.declare_parameter("publish_markers", True)
 
         self.base = self.get_parameter("base_frame").value
         self.gimbal_reference = self.get_parameter("gimbal_reference").value
         self.gimbal_is_frd = bool(self.get_parameter("gimbal_is_frd").value)
+        off = [float(v) for v in self.get_parameter("gimbal_offset_rpy_deg").value]
+        self.gimbal_offset = quat_from_rpy(*(math.radians(v) for v in off))
+        self.gimbal_abs = (0.0, 0.0, 0.0, 1.0)
 
         self.static_bc = StaticTransformBroadcaster(self)
         self.dyn_bc = TransformBroadcaster(self)
@@ -205,6 +233,8 @@ class SceneTf(Node):
             self.create_timer(1.0, self._publish_markers)
 
         self.create_timer(30.0, self._report)
+        if self.get_parameter("log_gimbal_diagnostics").value:
+            self.create_timer(1.0, self._diagnostics)
 
     # ------------------------------------------------------------------ static
     def _static(self, parent: str, child: str, xyz, q) -> TransformStamped:
@@ -257,13 +287,18 @@ class SceneTf(Node):
     def _store(self, q) -> None:
         raw = (q.x, q.y, q.z, q.w)
         if self.gimbal_is_frd:
+            # Undo PX4's ENU to NED and FLU to FRD conversion. MAVROS passes the
+            # quaternion through untouched, so this is the only place it happens.
             raw = aerospace_to_ros(raw)
+        self.gimbal_abs = raw
         if self.gimbal_reference == "earth":
             # The report is absolute, so remove the vehicle attitude to get the
             # rotation that belongs under gimbal_mount.
-            self.gimbal_q = quat_mul(quat_conj(self.vehicle_q), raw)
+            body = quat_mul(quat_conj(self.vehicle_q), raw)
         else:
-            self.gimbal_q = raw
+            body = raw
+        # Any remaining fixed mounting rotation.
+        self.gimbal_q = quat_mul(body, self.gimbal_offset)
 
     def _on_gimbal(self, msg) -> None:
         self.last_status = self.get_clock().now().nanoseconds / 1e9
@@ -335,6 +370,22 @@ class SceneTf(Node):
         add(30, Marker.SPHERE, tuple(self.get_parameter("gimbal_mount_xyz").value),
             (0.07, 0.07, 0.07), (0.9, 0.75, 0.1, 1.0))
         self.marker_pub.publish(arr)
+
+    def _diagnostics(self) -> None:
+        """Print the three headings that matter, so an offset is readable.
+
+        With the gimbal centred and untouched, `gimbal rel body` should read
+        about zero at every aircraft heading. A constant elsewhere is the
+        number for gimbal_offset_rpy_deg. A value that moves with the aircraft
+        means the frame handling is still wrong, not the mounting.
+        """
+        v = quat_yaw_deg(self.vehicle_q)
+        a = quat_yaw_deg(self.gimbal_abs)
+        rel = quat_yaw_deg(self.gimbal_q)
+        self.get_logger().info(
+            f"yaw deg: vehicle {v:+7.1f}  gimbal absolute {a:+7.1f}  "
+            f"gimbal rel body {rel:+7.1f}  (absolute minus vehicle "
+            f"{((a - v + 540) % 360) - 180:+7.1f})")
 
     def _report(self) -> None:
         if not self.gimbal_seen:

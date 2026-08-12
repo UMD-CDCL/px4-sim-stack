@@ -151,6 +151,7 @@ fi
 # -------------------------------------------------------- 6. the scenario props
 if [ -n "$SCENARIO" ] && [ -f "$SCENES_DIR/scenarios/$SCENARIO.yaml" ]; then
 	log "Placing scenario '$SCENARIO'"
+	export RESOLVED_TRUTH_FILE="$SCENES_DIR/ground_truth_actual.yaml"
 	"$SCENES_DIR/spawn_scenario.py" --world "$SCENE" \
 		--scenario "$SCENES_DIR/scenarios/$SCENARIO.yaml" || warn "Scenario spawn failed."
 elif [ -n "$SCENARIO" ]; then

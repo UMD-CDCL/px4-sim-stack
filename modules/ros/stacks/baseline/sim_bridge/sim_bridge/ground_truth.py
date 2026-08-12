@@ -81,6 +81,14 @@ class GroundTruth(Node):
 
         self.declare_parameter("scenario_file", os.environ.get(
             "GROUND_TRUTH_FILE", "/scenes/scenarios/urban_casualties.yaml"))
+        # The scenario file says where entities were asked to go. After
+        # spawning, spawn_scenario.py reads back where Gazebo actually put them
+        # and writes this file. Prefer it: a mesh whose origin is not at its
+        # feet, a model that settled under gravity, or one that failed to spawn
+        # and left an older copy behind all make the request and the result
+        # differ, and scoring against the request measures the wrong thing.
+        self.declare_parameter("resolved_file", os.environ.get(
+            "RESOLVED_TRUTH_FILE", "/scenes/ground_truth_actual.yaml"))
         self.declare_parameter("reference_frame", "map")
         self.declare_parameter("origin_offset_xyz", [0.0, 0.0, 0.0])
         self.declare_parameter("target_height", 1.7)
@@ -131,7 +139,23 @@ class GroundTruth(Node):
 
     # ------------------------------------------------------------------ input
     def _load(self) -> list[dict]:
-        path = Path(self.get_parameter("scenario_file").value)
+        resolved = Path(self.get_parameter("resolved_file").value)
+        if resolved.is_file():
+            targets = self._load_file(resolved)
+            if targets:
+                self.get_logger().info(
+                    f"using the poses read back from Gazebo, {resolved}")
+                return targets
+            self.get_logger().warn(
+                f"{resolved} has no usable entities, falling back to the scenario")
+        else:
+            self.get_logger().warn(
+                f"no {resolved}; using the scenario file, which records where "
+                f"entities were asked to go rather than where they are. Re-run "
+                f"the scenario to produce it: px4sim scenario")
+        return self._load_file(Path(self.get_parameter("scenario_file").value))
+
+    def _load_file(self, path: Path) -> list[dict]:
         if not path.is_file():
             self.get_logger().error(f"no scenario file at {path}")
             return []

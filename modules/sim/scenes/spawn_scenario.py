@@ -20,12 +20,16 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import yaml
 
 STATE_FILE = Path("/tmp/px4simstack-scenario.json")
 SCENES_DIR = Path(os.environ.get("SCENES_DIR", "/scenes"))
+# Where the spawner records the poses Gazebo actually gave each entity. The
+# ROS ground truth node prefers this over the scenario file.
+RESOLVED_FILE = Path(os.environ.get("RESOLVED_TRUTH_FILE", "/tmp/ground_truth_actual.yaml"))
 
 
 def gz_service(service: str, reqtype: str, req: str, timeout_ms: int = 8000) -> bool:
@@ -75,6 +79,71 @@ def spawn(world: str, entity: dict) -> bool:
 def remove(world: str, name: str) -> bool:
     req = f'name: "{name}", type: MODEL'
     return gz_service(f"/world/{world}/remove", "gz.msgs.Entity", req)
+
+
+def read_world_poses(world: str) -> dict[str, tuple[float, float, float]]:
+    """Ask Gazebo where every model actually is.
+
+    The scenario file says where entities were *asked* to go. This reads back
+    where they ended up. A model whose mesh origin is not at its feet, or one
+    that settles under gravity, or one that failed to spawn and left an older
+    copy in place, all show up as a difference between the two. Scoring against
+    the request rather than the result quietly measures the wrong thing.
+    """
+    cmd = ["gz", "topic", "-e", "-t", f"/world/{world}/pose/info", "-n", "1"]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=15).stdout
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return {}
+
+    poses: dict[str, tuple[float, float, float]] = {}
+    name = None
+    pending: dict[str, float] = {}
+    in_position = False
+    for line in out.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("name:"):
+            # Only the outermost name of each pose block matters; link names
+            # appear too, so keep the first and let the next block replace it.
+            name = stripped.split('"')[1] if '"' in stripped else None
+            pending, in_position = {}, False
+        elif stripped.startswith("position"):
+            in_position = True
+        elif in_position and stripped.startswith(("x:", "y:", "z:")):
+            key, _, value = stripped.partition(":")
+            try:
+                pending[key.strip()] = float(value)
+            except ValueError:
+                pass
+            if len(pending) == 3 and name:
+                poses.setdefault(name, (pending["x"], pending["y"], pending["z"]))
+                in_position = False
+    return poses
+
+
+def write_resolved(world: str, entities: list[dict]) -> None:
+    """Record the actual pose of every entity we placed."""
+    actual = read_world_poses(world)
+    if not actual:
+        print("    could not read back poses from Gazebo; scoring will use the "
+              "scenario file", file=sys.stderr)
+        return
+    resolved = []
+    for entity in entities:
+        name = entity["name"]
+        if name not in actual:
+            continue
+        x, y, z = actual[name]
+        asked = list(entity.get("pose", [0, 0, 0]))[:3]
+        drift = max(abs(a - b) for a, b in zip(asked + [0, 0, 0], [x, y, z]))
+        resolved.append({"name": name, "uri": entity.get("uri", ""),
+                         "pose": [x, y, z], "requested": asked,
+                         "drift_m": round(drift, 3)})
+    RESOLVED_FILE.write_text(yaml.safe_dump(
+        {"world": world, "entities": resolved}, sort_keys=False))
+    worst = max((e["drift_m"] for e in resolved), default=0.0)
+    print(f"    recorded {len(resolved)} actual poses to {RESOLVED_FILE} "
+          f"(largest difference from the request: {worst:.2f} m)")
 
 
 def load_state() -> dict:
@@ -137,6 +206,9 @@ def cmd_spawn(world: str, path: Path) -> int:
             print(f"    placed {entity['name']:24s} {entity['uri']}")
 
     save_state(world, placed)
+    # Give Gazebo a moment to settle before reading poses back.
+    time.sleep(1.5)
+    write_resolved(world, [e for e in entities if e.get("name") in placed])
     print(f"Scenario '{data.get('name', path.stem)}': {len(placed)} of {len(entities)} entities placed.")
     if len(placed) < len(entities):
         print("A Fuel model downloads on first use. Check the network and try again.",
