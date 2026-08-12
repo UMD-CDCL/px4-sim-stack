@@ -158,15 +158,14 @@
       ],
       "disabledTopics": [],
       "followTopic": "/mavros/global_position/global",
-      "layer": "custom",
+      "layer": "satellite",
       "topicColors": {
         "/mavros/global_position/global": "#ff7043",
         "/ground_truth/geojson": "#2ecc71",
         "/map_overlays/geojson": "#4dd0e1"
       },
-      "zoomLevel": 19,
-      "maxNativeZoom": 19,
-      "customLayer": "Satellite"
+      "zoomLevel": 18,
+      "maxNativeZoom": 19
     },
     "Plot!scoring": {
       "paths": [

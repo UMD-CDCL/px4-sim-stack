@@ -62,6 +62,7 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo, ROS 2 and DeepStream in containers
     view [stream]       Play a stream. Default: gimbal
     detections          Follow the MQTT detection topic
     topics              List the ROS topics
+    layout              Where the Foxglove layout lives, and how to load it
 
   ${BOLD}Scenes and targets${OFF}
     scene <name>        Switch the world and restart the simulator
@@ -206,6 +207,22 @@ detections)
 topics)
 	$DC exec ros bash -lc 'ros2 topic list' 2>/dev/null \
 		|| die "The ros container is not running. Run: ./px4sim start ros"
+	;;
+
+layout)
+	f="$PWD/modules/ros/stacks/baseline/foxglove/px4-sim-stack.json"
+	say "Foxglove layout"
+	echo "  $f"
+	echo
+	echo "  1. Open Foxglove, desktop or https://app.foxglove.dev"
+	echo "  2. Connect to ws://localhost:8765"
+	echo "  3. Layout, then Import from file, and pick the file above"
+	echo
+	echo "  It draws the airframe and its frames, both camera images with"
+	echo "  detection boxes, the ground each camera covers, the live imagery"
+	echo "  laid on the ground plane, ground truth in green, and the scoring"
+	echo "  plots. Detections are green for a hit, red for a false positive"
+	echo "  and yellow for a miss."
 	;;
 
 scene)
