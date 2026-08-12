@@ -237,33 +237,6 @@ class SceneTf(Node):
         # constant is a mounting convention and not a bug in the conversion.
         # The diagnostic below prints the number to put in it.
         self.declare_parameter("gimbal_offset_rpy_deg", [0.0, 0.0, 0.0])
-        # How the gimbal's yaw is decided.
-        #
-        #   follow_vehicle  the camera points along the airframe in yaw, and
-        #                   only its pitch and roll come from the gimbal. This
-        #                   is the default.
-        #   report          trust the reported yaw as well.
-        #
-        # Why follow_vehicle is the default, and it is not a fudge:
-        #
-        # Pitch and roll are measured against gravity, so they mean the same
-        # thing in NED and in ENU and do not change with heading. Yaw is
-        # measured against a compass direction, and that is precisely the axis
-        # where the conventions differ and where PX4's simulated gimbal reports
-        # an absolute attitude while labelling it vehicle relative. So pitch
-        # survives the disagreement and yaw does not.
-        #
-        # Measured on this airframe: with the gimbal centred, the yaw derived
-        # from the device status moves with the aircraft instead of staying
-        # near zero, while the pitch behaves correctly. Taking yaw from the
-        # vehicle, which is where the gimbal points when nothing has commanded
-        # it elsewhere, gives a frame that tracks the aircraft correctly and
-        # keeps the pitch that actually matters for pointing at the ground.
-        #
-        # The cost is honest: a gimbal genuinely yawed away from the nose is not
-        # represented. Set this to "report" once the yaw source is trustworthy,
-        # and compare against gimbal_status_camera_link to see the difference.
-        self.declare_parameter("gimbal_yaw_mode", "report")
         # Which side the vehicle attitude is divided off. See _store.
         self.declare_parameter("gimbal_compose", "left")
         # Log the vehicle heading against the gimbal heading once a second, so
@@ -279,11 +252,7 @@ class SceneTf(Node):
         self.gimbal_offset = quat_from_rpy(*(math.radians(v) for v in off))
         self.gimbal_abs = (0.0, 0.0, 0.0, 1.0)
         self.gimbal_source = self.get_parameter("gimbal_source").value
-        self.yaw_mode = self.get_parameter("gimbal_yaw_mode").value
         self.compose = self.get_parameter("gimbal_compose").value
-        self.gimbal_rp = (0.0, 0.0)
-        self.q_left = (0.0, 0.0, 0.0, 1.0)
-        self.q_right = (0.0, 0.0, 0.0, 1.0)
         self.setpoint_timeout = float(self.get_parameter("setpoint_timeout").value)
         self.logged_lock = False
         self.last_setpoint = None
@@ -378,15 +347,6 @@ class SceneTf(Node):
             self._static("gimbal_status_camera_link",
                          "gimbal_status_camera_optical_frame",
                          (0, 0, 0), LINK_TO_OPTICAL),
-            self._static("gimbal_setpoint_camera_link",
-                         "gimbal_setpoint_camera_optical_frame",
-                         (0, 0, 0), LINK_TO_OPTICAL),
-            self._static("gimbal_left_camera_link",
-                         "gimbal_left_camera_optical_frame",
-                         (0, 0, 0), LINK_TO_OPTICAL),
-            self._static("gimbal_right_camera_link",
-                         "gimbal_right_camera_optical_frame",
-                         (0, 0, 0), LINK_TO_OPTICAL),
             # Pitched a quarter turn so the link's x axis looks straight down,
             # matching the sensor pose in x500_recon/model.sdf.
             self._static(self.base, "nadir_cam_link", nadir,
@@ -474,26 +434,16 @@ class SceneTf(Node):
             # "Correct at zero, wrong off zero" therefore means conjugation, not
             # a bad axis and not a missing offset.
             #
-            # Both stay published, as gimbal_left_camera_link and
-            # gimbal_right_camera_link, so the difference stays visible.
-            #
             # One caveat when judging this from the aircraft: a gimbal holding
             # an ROI is earth locked, so its angle relative to the airframe
             # genuinely changes as the aircraft yaws. That is correct behaviour
             # and reads exactly like the fault. Centre the gimbal before
             # deciding, or command it in vehicle relative mode.
-            self.q_left = quat_mul(quat_conj(self.vehicle_q), raw)
-            self.q_right = quat_mul(raw, quat_conj(self.vehicle_q))
-            body = self.q_right if self.compose == "right" else self.q_left
+            body = (quat_mul(raw, quat_conj(self.vehicle_q))
+                    if self.compose == "right"
+                    else quat_mul(quat_conj(self.vehicle_q), raw))
         else:
             body = raw
-            self.q_left = self.q_right = raw
-        # Roll and pitch are heading independent, so they are taken from the
-        # gimbal's absolute attitude and are unaffected by any residual yaw
-        # convention error.
-        roll, pitch, _ = quat_to_rpy(raw)
-        self.gimbal_rp = (roll, pitch)
-
         # Any remaining fixed mounting rotation.
         self.q_status = quat_mul(body, self.gimbal_offset)
 
@@ -541,11 +491,11 @@ class SceneTf(Node):
         self.gimbal_abs = quat_mul(self.vehicle_q, self.gimbal_q)
 
         out = []
+        # The primary frame, and the raw status derivation beside it. The
+        # second is cheap and makes a future disagreement visible instead of
+        # silent.
         for child, q in (("gimbal_camera_link", self.gimbal_q),
-                         ("gimbal_status_camera_link", self.q_status),
-                         ("gimbal_setpoint_camera_link", self.q_setpoint),
-                         ("gimbal_left_camera_link", self.q_left),
-                         ("gimbal_right_camera_link", self.q_right)):
+                         ("gimbal_status_camera_link", self.q_status)):
             t = TransformStamped()
             t.header.stamp = stamp
             t.header.frame_id = "gimbal_mount"
@@ -609,25 +559,6 @@ class SceneTf(Node):
             f"gimbal rel body {rel:+7.1f}  (absolute minus vehicle "
             f"{((a - v + 540) % 360) - 180:+7.1f})  source="
             f"{'setpoint' if self._setpoint_fresh() else 'status'}")
-        lr, lp, ly = (math.degrees(v) for v in quat_to_rpy(self.q_left))
-        rr, rp, ry = (math.degrees(v) for v in quat_to_rpy(self.q_right))
-        self.get_logger().info(
-            f"  rel body, left  order: roll {lr:+7.1f} pitch {lp:+7.1f} yaw {ly:+7.1f}")
-        self.get_logger().info(
-            f"  rel body, right order: roll {rr:+7.1f} pitch {rp:+7.1f} yaw {ry:+7.1f}"
-            f"   (using {self.compose})")
-        if self.have_setpoint:
-            st = quat_yaw_deg(self.q_status)
-            sp = quat_yaw_deg(self.q_setpoint)
-            delta = ((sp - st + 540) % 360) - 180
-            verdict = "agree" if abs(delta) < 5.0 else "DISAGREE"
-            self.get_logger().info(
-                f"  gimbal yaw rel body: status {st:+7.1f}  setpoint {sp:+7.1f}"
-                f"  difference {delta:+7.1f}  {verdict}")
-        else:
-            self.get_logger().info(
-                "  no setpoint yet, so only the status frame is populated. "
-                "Command the gimbal to compare them.")
 
     def _report(self) -> None:
         if not self.gimbal_seen:

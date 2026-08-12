@@ -23,7 +23,7 @@ from __future__ import annotations
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
-from vision_msgs.msg import Detection2DArray
+from vision_msgs.msg import Detection2DArray, Detection3DArray
 
 try:
     from foxglove_msgs.msg import (
@@ -39,6 +39,12 @@ except ImportError:
 
 BEST_EFFORT = QoSProfile(reliability=QoSReliabilityPolicy.BEST_EFFORT,
                          history=QoSHistoryPolicy.KEEP_LAST, depth=10)
+
+# Green for a true positive, red for a false positive. A false negative has no
+# box to draw, because nothing detected it; it appears in the 3D and map views
+# instead. Grey means the scorer has not judged this track yet.
+VERDICT_COLOUR = {"TP": (0.18, 0.80, 0.44), "FP": (0.91, 0.30, 0.24)}
+UNJUDGED = (0.75, 0.75, 0.78)
 
 PALETTE = [
     (0.99, 0.45, 0.10),
@@ -58,6 +64,7 @@ class DetectionAnnotator(Node):
         self.declare_parameter("line_thickness", 2.0)
         self.declare_parameter("text_size", 14.0)
         self.declare_parameter("show_score", False)
+        self.declare_parameter("colour_by_verdict", True)
 
         self.thickness = float(self.get_parameter("line_thickness").value)
         self.text_size = float(self.get_parameter("text_size").value)
@@ -75,13 +82,27 @@ class DetectionAnnotator(Node):
             Detection2DArray, self.get_parameter("detections_topic").value,
             self._on_detections, BEST_EFFORT)
 
+        self.verdicts: dict[str, str] = {}
+        if bool(self.get_parameter("colour_by_verdict").value):
+            self.create_subscription(Detection3DArray, "/scoring/verdicts",
+                                     self._on_verdicts, 10)
         self.count = 0
         self.create_timer(60.0, self._report)
         self.get_logger().info(
             f"annotating {self.get_parameter('detections_topic').value} -> "
             f"{self.get_parameter('annotations_topic').value}")
 
+    def _on_verdicts(self, msg: Detection3DArray) -> None:
+        self.verdicts = {
+            d.id: (d.results[0].hypothesis.class_id if d.results else "FP")
+            for d in msg.detections
+        }
+
     def _colour(self, track_id: str):
+        if self.verdicts:
+            v = self.verdicts.get(track_id)
+            r, g, b = VERDICT_COLOUR.get(v, UNJUDGED) if v else UNJUDGED
+            return Color(r=r, g=g, b=b, a=1.0)
         try:
             idx = int(track_id) % len(PALETTE)
         except (TypeError, ValueError):

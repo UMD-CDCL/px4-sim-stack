@@ -39,7 +39,7 @@ from rclpy.node import Node
 from rclpy.qos import (QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile,
                        QoSReliabilityPolicy)
 from std_msgs.msg import ColorRGBA, Float64
-from vision_msgs.msg import Detection3DArray
+from vision_msgs.msg import Detection3D, Detection3DArray, ObjectHypothesisWithPose
 from visualization_msgs.msg import Marker, MarkerArray
 
 LATCHED = QoSProfile(durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
@@ -92,11 +92,17 @@ class DetectionScorer(Node):
                                  self.get_parameter("footprint_topic").value,
                                  self._on_footprint, BEST_EFFORT)
 
+        # One message carrying every estimate and target with its verdict, so
+        # the image overlay and the map colour the same things the same way
+        # instead of each deciding for itself.
+        self.verdict_pub = self.create_publisher(
+            Detection3DArray, "/scoring/verdicts", 10)
         self.err_pub = self.create_publisher(Float64, "/scoring/position_error", 10)
         self.recall_pub = self.create_publisher(Float64, "/scoring/recall", 10)
         self.precision_pub = self.create_publisher(Float64, "/scoring/precision", 10)
         self.summary_pub = self.create_publisher(Marker, "/scoring/summary", LATCHED)
         self.lines_pub = self.create_publisher(MarkerArray, "/scoring/error_lines", 10)
+        self.markers_pub = self.create_publisher(MarkerArray, "/scoring/markers", 10)
 
         self.create_timer(1.0, self._publish_summary)
 
@@ -139,6 +145,49 @@ class DetectionScorer(Node):
         for _ in unclaimed:
             self.fn.append(1)
 
+        # Verdicts, in the vocabulary the whole stack uses:
+        #   TP  an estimate that matched a target
+        #   FP  an estimate with no target within the gate
+        #   FN  a visible target that nothing found
+        verdicts = Detection3DArray()
+        verdicts.header = msg.header
+        for det, (ex, ey, target, dist) in zip(msg.detections, pairs):
+            v = Detection3D()
+            v.header = msg.header
+            v.id = det.id
+            v.bbox.center.position.x, v.bbox.center.position.y = ex, ey
+            v.bbox.center.orientation.w = 1.0
+            h = ObjectHypothesisWithPose()
+            h.hypothesis.class_id = "TP"
+            h.hypothesis.score = float(dist)
+            v.results.append(h)
+            verdicts.detections.append(v)
+        matched_ids = {d.id for d in verdicts.detections}
+        for det in msg.detections:
+            if det.id in matched_ids:
+                continue
+            v = Detection3D()
+            v.header = msg.header
+            v.id = det.id
+            v.bbox.center = det.bbox.center
+            h = ObjectHypothesisWithPose()
+            h.hypothesis.class_id = "FP"
+            v.results.append(h)
+            verdicts.detections.append(v)
+        for i in unclaimed:
+            name, tx, ty = visible[i]
+            v = Detection3D()
+            v.header = msg.header
+            v.id = name
+            v.bbox.center.position.x, v.bbox.center.position.y = tx, ty
+            v.bbox.center.orientation.w = 1.0
+            h = ObjectHypothesisWithPose()
+            h.hypothesis.class_id = "FN"
+            v.results.append(h)
+            verdicts.detections.append(v)
+        self.verdict_pub.publish(verdicts)
+        self.markers_pub.publish(self._verdict_markers(verdicts))
+
         lines = MarkerArray()
         for n, (ex, ey, target, dist) in enumerate(pairs):
             m = Marker()
@@ -156,6 +205,29 @@ class DetectionScorer(Node):
             lines.markers.append(m)
         if lines.markers:
             self.lines_pub.publish(lines)
+
+    def _verdict_markers(self, verdicts: Detection3DArray) -> MarkerArray:
+        """Spheres in the 3D view, coloured the same way as everywhere else."""
+        colours = {"TP": (0.18, 0.80, 0.44), "FP": (0.91, 0.30, 0.24),
+                   "FN": (0.95, 0.77, 0.06)}
+        life = rclpy.duration.Duration(seconds=4.0).to_msg()
+        out = MarkerArray()
+        for i, d in enumerate(verdicts.detections):
+            v = d.results[0].hypothesis.class_id if d.results else "FP"
+            r, g, b = colours.get(v, (0.6, 0.6, 0.6))
+            m = Marker()
+            m.header = verdicts.header
+            m.ns = f"verdict_{v}"
+            m.id = i
+            m.type = Marker.SPHERE
+            m.action = Marker.ADD
+            m.lifetime = life
+            m.pose = d.bbox.center
+            m.pose.orientation.w = 1.0
+            m.scale.x = m.scale.y = m.scale.z = 1.6
+            m.color = ColorRGBA(r=r, g=g, b=b, a=0.9)
+            out.markers.append(m)
+        return out
 
     # ---------------------------------------------------------------- summary
     def _publish_summary(self) -> None:

@@ -56,20 +56,8 @@
         "frame:gimbal_status_camera_link": {
           "visible": true
         },
-        "frame:gimbal_setpoint_camera_link": {
-          "visible": true
-        },
         "frame:gimbal_status_camera_optical_frame": {
           "visible": false
-        },
-        "frame:gimbal_setpoint_camera_optical_frame": {
-          "visible": false
-        },
-        "frame:gimbal_left_camera_link": {
-          "visible": true
-        },
-        "frame:gimbal_right_camera_link": {
-          "visible": true
         }
       },
       "topics": {
@@ -108,6 +96,9 @@
           "visible": true
         },
         "/scoring/summary": {
+          "visible": true
+        },
+        "/scoring/markers": {
           "visible": true
         }
       },
@@ -152,7 +143,8 @@
       "layer": "map",
       "topicColors": {
         "/mavros/global_position/global": "#ff7043",
-        "/ground_truth/geojson": "#2ecc71"
+        "/ground_truth/geojson": "#2ecc71",
+        "/map_overlays/geojson": "#4dd0e1"
       },
       "zoomLevel": 18,
       "maxNativeZoom": 19

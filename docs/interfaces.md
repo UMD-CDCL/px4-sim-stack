@@ -391,32 +391,60 @@ Covariance comes from parameters, not from a derivation. `covariance_diagonal`
 defaults to a two metre standard deviation in x and y, and
 `range_variance_scale` grows that with slant range.
 
-### Known: a constant position error
+### The gimbal frame, and how it was got wrong twice
 
-Hovering over a target at about 10 m, scoring reports recall 0.50, precision
-0.95 and a **mean position error near 4 m** that barely varies between frames.
-A constant offset is a modelling error, not noise.
+The camera frame is built from the gimbal attitude PX4 reports. Three things
+about that report are worth knowing, because each one caused a wrong answer
+that looked plausible.
 
-One likely cause is ruled out by measurement. The `map` frame and the Gazebo
-world frame agree: the drone reads (18.142, 1.269) in Gazebo and (18.106,
-1.326) in `map` at the same instant, which is 7 cm apart. So the EKF origin is
-not the problem, and `origin_offset_xyz` on the ground truth node is not the
-fix.
+**PX4 mislabels the frame.** `GZGimbal.cpp` builds the attitude from the gimbal
+IMU, which Gazebo reports against the world, then publishes it with
+`DEVICE_FLAGS_YAW_IN_VEHICLE_FRAME`. The value is absolute and the label says
+it is relative. `scene_tf` therefore ignores the flag, and
+`patches/px4-gzgimbal-frame.patch` corrects it at the source.
 
-What is still open:
+**MAVROS passes it through untouched.** `gimbal_control.cpp` calls
+`mavlink_to_quaternion` and nothing else, so the quaternion arrives in
+aerospace convention, NED reference with FRD body axes, and its `base_link_frd`
+frame_id is honest. Converting to ENU and FLU needs a rotation on each side,
+`NED_TO_ENU * q * FRD_TO_FLU`, because both ends change. Converting a rotation
+that is already relative to the body needs only the axis swap, which reduces to
+negating y and z. Using either conversion on the wrong quantity produces a
+frame that looks reasonable and tracks the aircraft incorrectly.
 
-- The Fuel person models may not be centred on their spawn pose, which would
-  put the rendered body somewhere other than the ground truth point.
-- The nadir camera's yaw about its optical axis. At 10 m altitude, a target
-  near the edge of the footprint sits about 11 m from the centre, so a 20
-  degree yaw error there is about 4 m on the ground.
-- The detector's box may not be centred on the subject when seen from directly
-  above.
+**The vehicle attitude comes off the left.** An absolute attitude is the vehicle
+attitude followed by the gimbal's own rotation, `q_abs = q_vehicle * q_rel`, so
 
-To separate them, put a target directly under the drone. If the error goes to
-nearly zero there and grows toward the edges of the frame, it is the camera
-orientation or the intrinsics. If it stays constant everywhere, it is the
-ground truth position or the box.
+```
+q_rel = conj(q_vehicle) * q_abs
+```
+
+Dividing on the right instead leaves `q_vehicle * q_rel * conj(q_vehicle)`, a
+conjugation: the same rotation through the same angle, about an axis turned by
+the vehicle heading. That has a distinctive signature. Conjugation maps identity
+to identity, so a **centred gimbal looks perfect at every heading** and the
+error appears only once the gimbal moves off centre, where it reads as swapped
+axes rather than as a rotation error:
+
+| aircraft at 90 deg yaw, gimbal pitched 30 deg down | roll | pitch | yaw |
+|---|---|---|---|
+| truth | 0.0 | -30.0 | 0.0 |
+| `conj(qv) * qabs` | 0.0 | -30.0 | 0.0 |
+| `qabs * conj(qv)` | +30.0 | 0.0 | 0.0 |
+
+**Correct at zero, wrong off zero** means conjugation. It does not mean a bad
+axis, and no constant offset can fix it.
+
+One more trap when judging any of this from the aircraft: a gimbal holding an
+ROI is earth locked, so its angle relative to the airframe genuinely changes as
+the aircraft yaws. That is correct behaviour and it reads exactly like the
+fault. Centre the gimbal, or command it in vehicle relative mode, before
+deciding.
+
+`scene_tf` publishes `gimbal_camera_link` and, beside it,
+`gimbal_status_camera_link` from the raw device report, so a future
+disagreement is visible rather than silent. Its diagnostic prints the vehicle
+heading, the gimbal heading and their difference once a second.
 
 ### Correcting a frame offset with a fiducial
 
