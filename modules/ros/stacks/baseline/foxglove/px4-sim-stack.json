@@ -5,8 +5,16 @@
         "distance": 90,
         "perspective": true,
         "phi": 52,
-        "target": [0, 0, 0],
-        "targetOffset": [12, 0, 0],
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          12,
+          0,
+          0
+        ],
         "thetaOffset": 45,
         "fovy": 45,
         "near": 0.5,
@@ -24,43 +32,99 @@
         }
       },
       "transforms": {
-        "frame:map": { "visible": true },
-        "frame:base_link": { "visible": true },
-        "frame:gimbal_mount": { "visible": false },
-        "frame:gimbal_camera_link": { "visible": true },
-        "frame:gimbal_camera_optical_frame": { "visible": true },
-        "frame:nadir_cam_link": { "visible": false },
-        "frame:nadir_camera_optical_frame": { "visible": true }
+        "frame:map": {
+          "visible": true
+        },
+        "frame:base_link": {
+          "visible": true
+        },
+        "frame:gimbal_mount": {
+          "visible": false
+        },
+        "frame:gimbal_camera_link": {
+          "visible": true
+        },
+        "frame:gimbal_camera_optical_frame": {
+          "visible": true
+        },
+        "frame:nadir_cam_link": {
+          "visible": false
+        },
+        "frame:nadir_camera_optical_frame": {
+          "visible": true
+        }
       },
       "topics": {
-        "/drone/markers": { "visible": true },
-        "/ground/plane": { "visible": true },
-        "/ground_truth/markers": { "visible": true },
-        "/perception/markers": { "visible": true },
-        "/perception/targets": { "visible": false },
-        "/camera/nadir/footprint": { "visible": true, "lineWidth": 0.4, "color": "#4dd0e1" },
-        "/camera/gimbal/footprint": { "visible": true, "lineWidth": 0.4, "color": "#ffb74d" },
-        "/camera/nadir/boresight": { "visible": true },
-        "/camera/gimbal/boresight": { "visible": false },
-        "/scoring/error_lines": { "visible": true },
-        "/scoring/summary": { "visible": true }
+        "/drone/markers": {
+          "visible": true
+        },
+        "/ground/plane": {
+          "visible": true
+        },
+        "/ground_truth/markers": {
+          "visible": true
+        },
+        "/perception/markers": {
+          "visible": true
+        },
+        "/perception/targets": {
+          "visible": false
+        },
+        "/camera/nadir/footprint": {
+          "visible": true,
+          "lineWidth": 0.4,
+          "color": "#4dd0e1"
+        },
+        "/camera/gimbal/footprint": {
+          "visible": true,
+          "lineWidth": 0.4,
+          "color": "#ffb74d"
+        },
+        "/camera/nadir/boresight": {
+          "visible": true
+        },
+        "/camera/gimbal/boresight": {
+          "visible": false
+        },
+        "/scoring/error_lines": {
+          "visible": true
+        },
+        "/scoring/summary": {
+          "visible": true
+        }
       },
       "layers": {},
-      "publish": { "type": "point", "poseTopic": "/move_base_simple/goal" },
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal"
+      },
       "imageMode": {}
     },
     "Image!nadir": {
-      "cameraState": { "distance": 20, "perspective": false },
+      "cameraState": {
+        "distance": 20,
+        "perspective": false
+      },
       "imageTopic": "/camera/nadir/image_raw",
       "calibrationTopic": "/camera/nadir/camera_info",
       "synchronize": false,
-      "transformMarkers": false
+      "transformMarkers": false,
+      "annotations": {
+        "/camera/nadir/annotations": {
+          "visible": true
+        }
+      }
     },
     "Image!gimbal": {
       "imageTopic": "/camera/gimbal/image_raw",
       "calibrationTopic": "/camera/gimbal/camera_info",
       "synchronize": false,
-      "transformMarkers": false
+      "transformMarkers": false,
+      "annotations": {
+        "/camera/gimbal/annotations": {
+          "visible": true
+        }
+      }
     },
     "map!world": {
       "center": null,
@@ -139,7 +203,9 @@
   },
   "globalVariables": {},
   "userNodes": {},
-  "playbackConfig": { "speed": 1 },
+  "playbackConfig": {
+    "speed": 1
+  },
   "layout": {
     "first": {
       "first": "3D!scene",

@@ -18,6 +18,9 @@ columns=1
 
 # ------------------------------------------------------------------ the input
 # type=4 is an RTSP URI source.
+# Both cameras go through one pipeline. deepstream-app batches them, so the
+# GPU cost is close to a single stream and the detections carry a sensorId that
+# says which camera they came from.
 [source0]
 enable=1
 type=4
@@ -31,10 +34,23 @@ latency=200
 rtsp-reconnect-interval-sec=10
 rtsp-reconnect-attempts=-1
 
+[source1]
+enable=1
+type=4
+uri=${RTSP_IN_2}
+num-sources=1
+gpu-id=0
+cudadec-memtype=0
+latency=200
+rtsp-reconnect-interval-sec=10
+rtsp-reconnect-attempts=-1
+
 [streammux]
 gpu-id=0
 live-source=1
-batch-size=1
+# One slot for each source. Leave it at 1 and the second camera never reaches
+# the detector.
+batch-size=2
 batched-push-timeout=40000
 width=1280
 height=720

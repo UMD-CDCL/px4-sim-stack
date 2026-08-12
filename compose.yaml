@@ -242,6 +242,7 @@ services:
       # looks straight down, which is what an overhead search wants, and
       # it needs no gimbal pointing to work.
       PERCEPTION_CAMERA: ${PERCEPTION_CAMERA:-nadir}
+      PERCEPTION_CAMERA_2: ${PERCEPTION_CAMERA_2:-gimbal}
       FIDUCIAL_ENABLED: ${FIDUCIAL_ENABLED:-0}
       FIDUCIAL_SURVEYED_LAT: ${FIDUCIAL_SURVEYED_LAT:-0.0}
       FIDUCIAL_SURVEYED_LON: ${FIDUCIAL_SURVEYED_LON:-0.0}
@@ -283,7 +284,14 @@ services:
     environment:
       <<: *gpu-env
       DS_CONFIG: ${DS_CONFIG:-gimbal_detector.txt}
+      # msgconv.txt turns these into the sensor ids that tag each payload,
+      # which is how the ROS side tells the two cameras apart.
+      PERCEPTION_CAMERA: ${PERCEPTION_CAMERA:-nadir}
       RTSP_IN: rtsp://video-router:8554/${PERCEPTION_CAMERA:-nadir}
+      # The second camera. Both run through one DeepStream pipeline, and the
+      # payload's sensorId says which one a detection came from.
+      RTSP_IN_2: rtsp://video-router:8554/${PERCEPTION_CAMERA_2:-gimbal}
+      PERCEPTION_CAMERA_2: ${PERCEPTION_CAMERA_2:-gimbal}
       MQTT_HOST: message-bus
       MQTT_PORT: "1883"
       MQTT_TOPIC: perception/detections

@@ -53,6 +53,11 @@ PERCEPTION_OPTICAL = NADIR_OPTICAL if PERCEPTION_CAMERA == "nadir" else GIMBAL_O
 # a box in one image direction, which shows up as a constant offset in metres.
 PERCEPTION_ANCHOR = "centre" if PERCEPTION_CAMERA == "nadir" else "bottom"
 
+# The second camera DeepStream runs. Both go through one pipeline, and the
+# payload's sensorId says which one a detection came from.
+PERCEPTION_CAMERA_2 = os.environ.get("PERCEPTION_CAMERA_2", "gimbal")
+CAMERA_OPTICAL = {"gimbal": GIMBAL_OPTICAL, "nadir": NADIR_OPTICAL}
+
 # Field of view of each camera, in radians, from the sensor definitions in
 # modules/sim/scenes/models/x500_recon/model.sdf. rtsp_camera builds its
 # CameraInfo from these, and every projection depends on them being right.
@@ -168,6 +173,11 @@ def generate_launch_description() -> LaunchDescription:
                 "topic": "perception/detections",
                 "bbox_format": "ltrb",
                 "frame_id": PERCEPTION_OPTICAL,
+                "sensor_ids": [PERCEPTION_CAMERA, PERCEPTION_CAMERA_2],
+                "sensor_frames": [
+                    CAMERA_OPTICAL.get(PERCEPTION_CAMERA, PERCEPTION_OPTICAL),
+                    CAMERA_OPTICAL.get(PERCEPTION_CAMERA_2, GIMBAL_OPTICAL),
+                ],
                 # DeepStream's frame time trails true capture by about 16 ms on
                 # this hardware. Measure yours with scripts/measure-latency.py
                 # and put the difference here if it matters to you.
@@ -175,6 +185,26 @@ def generate_launch_description() -> LaunchDescription:
                 "max_age": 2.0,
             }],
         ),
+
+        # ------------------------------------------- boxes on the video
+        # One annotator for each camera, so the Image panels show the same
+        # boxes the detector produced.
+        *[
+            Node(
+                package="sim_bridge",
+                executable="detection_annotator",
+                name=f"{cam}_annotator",
+                namespace=f"camera/{cam}",
+                output="screen",
+                parameters=[{
+                    "detections_topic": f"/perception/{cam}/detections",
+                    "annotations_topic": "annotations",
+                    "line_thickness": 2.0,
+                    "text_size": 14.0,
+                }],
+            )
+            for cam in (PERCEPTION_CAMERA, PERCEPTION_CAMERA_2)
+        ],
 
         # ------------------------------------------------------- ground
         Node(

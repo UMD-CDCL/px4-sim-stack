@@ -80,6 +80,16 @@ class DetectionsBridge(Node):
         self.declare_parameter("frame_id", "camera_optical_frame")
         self.declare_parameter("time_offset", 0.0)
         self.declare_parameter("max_age", 2.0)
+        # DeepStream runs both cameras through one pipeline and tags each
+        # payload with sensorId. These two lists map that id to the camera's
+        # optical frame, and detections are republished per camera so a
+        # consumer can pick one without filtering. The first entry is the
+        # primary camera, which also keeps the plain /perception/detections
+        # topic that the localizer and the older layout expect.
+        self.declare_parameter("sensor_ids", ["nadir", "gimbal"])
+        self.declare_parameter("sensor_frames",
+                               ["nadir_camera_optical_frame",
+                                "gimbal_camera_optical_frame"])
 
         self.bbox_format = self.get_parameter("bbox_format").value
         self.frame_id = self.get_parameter("frame_id").value
@@ -92,9 +102,19 @@ class DetectionsBridge(Node):
         self.lag_sum = 0.0
         self.lag_n = 0
 
+        ids = list(self.get_parameter("sensor_ids").value)
+        frames = list(self.get_parameter("sensor_frames").value)
+        self.frame_for = dict(zip(ids, frames))
+        self.primary = ids[0] if ids else None
+
         self.pub = self.create_publisher(
             Detection2DArray, "/perception/detections", DETECTION_QOS
         )
+        self.per_camera = {
+            name: self.create_publisher(
+                Detection2DArray, f"/perception/{name}/detections", DETECTION_QOS)
+            for name in ids
+        }
 
         host = self.get_parameter("host").value
         port = int(self.get_parameter("port").value)
@@ -148,11 +168,18 @@ class DetectionsBridge(Node):
             self.stale += 1
             return
 
+        sensor = str(payload.get("sensorId") or "") or self.primary
         array = Detection2DArray()
         array.header.stamp = stamp
-        array.header.frame_id = self.frame_id
+        array.header.frame_id = self.frame_for.get(sensor, self.frame_id)
         array.detections = detections
-        self.pub.publish(array)
+
+        if sensor in self.per_camera:
+            self.per_camera[sensor].publish(array)
+        # The primary camera also keeps the unqualified topic, so the localizer
+        # and anything older need no change.
+        if sensor == self.primary or sensor not in self.per_camera:
+            self.pub.publish(array)
         self.count += len(detections)
 
     # -------------------------------------------------------------- timestamp

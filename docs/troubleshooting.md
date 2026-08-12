@@ -176,6 +176,31 @@ The bind port must be free, and the target must be the hub, not PX4.
 
 ## Video
 
+### QGroundControl shows no video
+
+Use the address that works inside its container. Everything this stack prints
+uses host addresses, and inside QGroundControl `localhost` is QGroundControl.
+
+The container now forwards its own loopback to the video router, so both of
+these work:
+
+```
+rtsp://localhost:8554/gimbal
+rtsp://video-router:8554/gimbal
+```
+
+The settings are seeded with the second form on first start, so a fresh
+container needs no configuration at all.
+
+To see what QGroundControl thinks:
+
+```bash
+docker compose logs qgc | grep -iE "video|gst|rtsp"
+```
+
+`Decoding started` and `resized. New resolution: 1280 x 720` mean the video is
+running. `Streaming did not start` means it never reached the server.
+
 ### VLC cannot open an RTSP URL, but the browser can
 
 Use `--rtsp-tcp`:

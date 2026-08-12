@@ -26,6 +26,7 @@ setup(
             "ground_truth = sim_bridge.ground_truth:main",
             "detection_scorer = sim_bridge.detection_scorer:main",
             "fiducial_alignment = sim_bridge.fiducial_alignment:main",
+            "detection_annotator = sim_bridge.detection_annotator:main",
         ],
     },
 )

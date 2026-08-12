@@ -36,9 +36,10 @@ from __future__ import annotations
 import math
 
 import rclpy
-from geometry_msgs.msg import TransformStamped
+from geometry_msgs.msg import PoseStamped, TransformStamped
 from rclpy.node import Node
-from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile
+from rclpy.qos import (QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile,
+                       qos_profile_sensor_data)
 from std_msgs.msg import ColorRGBA
 from tf2_ros import TransformBroadcaster, StaticTransformBroadcaster
 from visualization_msgs.msg import Marker, MarkerArray
@@ -68,6 +69,40 @@ def quat_from_rpy(roll: float, pitch: float, yaw: float) -> tuple[float, float, 
     )
 
 
+def quat_mul(a, b):
+    """Hamilton product, both as (x, y, z, w)."""
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return (
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    )
+
+
+def quat_conj(q):
+    return (-q[0], -q[1], -q[2], q[3])
+
+
+# Aerospace to ROS. NED_TO_ENU is a half turn about the (1, 1, 0) diagonal and
+# swaps the reference frame; FRD_TO_FLU is a half turn about x and swaps the
+# body axes. Applied as NED_TO_ENU * q * FRD_TO_FLU, which is what MAVROS does
+# for every other attitude it converts.
+NED_TO_ENU = (math.sqrt(0.5), math.sqrt(0.5), 0.0, 0.0)
+FRD_TO_FLU = (1.0, 0.0, 0.0, 0.0)
+
+
+def aerospace_to_ros(q):
+    return quat_mul(quat_mul(NED_TO_ENU, q), FRD_TO_FLU)
+
+
+def quat_yaw_deg(q) -> float:
+    x, y, z, w = q
+    return math.degrees(math.atan2(2.0 * (w * z + x * y),
+                                   1.0 - 2.0 * (y * y + z * z)))
+
+
 # Body convention to REP 103 optical convention.
 LINK_TO_OPTICAL = quat_from_rpy(-math.pi / 2, 0.0, -math.pi / 2)
 
@@ -79,16 +114,41 @@ class SceneTf(Node):
         self.declare_parameter("base_frame", "base_link")
         self.declare_parameter("gimbal_mount_xyz", [0.0, 0.0, 0.10])
         self.declare_parameter("nadir_xyz", [0.10, 0.0, -0.06])
-        # "vehicle" means the gimbal quaternion is relative to the airframe,
-        # which is what PX4 reports unless the yaw lock flag is set. "earth"
-        # means it is relative to map. Reading it wrong tilts every projection.
-        self.declare_parameter("gimbal_reference", "vehicle")
-        # MAVROS publishes the gimbal attitude with frame_id base_link_frd, so
-        # the quaternion is in forward-right-down while every ROS frame here is
-        # forward-left-up. Converting is a 180 degree turn about x, which for a
-        # quaternion means negating y and z. Skip it and the camera appears to
-        # roll upside down and yaw the wrong way, which still produces a
-        # footprint, just the wrong one.
+        # Which frame the reported gimbal quaternion is actually in.
+        #
+        # PX4's simulated gimbal lies about this. In
+        # src/modules/simulation/gz_bridge/GZGimbal.cpp, gimbalIMUCallback()
+        # builds the quaternion from the gimbal's IMU, and a Gazebo IMU reports
+        # orientation relative to the world, not relative to the vehicle. The
+        # value is therefore absolute. publishDeviceAttitude() then hardcodes
+        #
+        #     device_flags = DEVICE_FLAGS_YAW_IN_VEHICLE_FRAME
+        #
+        # so the message claims to be vehicle-relative while carrying an
+        # earth-relative attitude.
+        #
+        # Obey the flag and the vehicle attitude gets applied twice: yaw the
+        # airframe by 90 degrees and the camera appears to swing 180. It looks
+        # like a gimbal that over-rotates, and it is why targets land in the
+        # wrong place at any heading other than zero. It affects roll and pitch
+        # as well, and only yaw is obvious because aircraft fly near level.
+        #
+        # "earth" is therefore the default and matches what PX4 sends. This
+        # node divides the vehicle attitude back out, so the transform it
+        # publishes under gimbal_mount is genuinely vehicle-relative.
+        # Set "vehicle" if you run a gimbal that reports honestly, or if you
+        # applied patches/px4-gzgimbal-frame.patch to PX4.
+        self.declare_parameter("gimbal_reference", "earth")
+        # MAVROS republishes the gimbal attitude untouched, with frame_id
+        # base_link_frd. That value is aerospace convention on both ends: the
+        # body axes are forward-right-down and the reference is NED. Every ROS
+        # frame here is forward-left-up against ENU.
+        #
+        # Both ends change, so this is not a single 180 degree turn. Negating y
+        # and z converts the body axes alone and leaves the reference wrong,
+        # which measures as the camera turning about twice as far as the
+        # aircraft and in the opposite direction. The conversion needs a
+        # rotation on each side, which is what NED_TO_ENU and FRD_TO_FLU do.
         self.declare_parameter("gimbal_is_frd", True)
         self.declare_parameter("gimbal_rate_hz", 30.0)
         self.declare_parameter("publish_markers", True)
@@ -106,12 +166,31 @@ class SceneTf(Node):
         # 3D view rather than silently wrong in the numbers.
         self.gimbal_q = (0.0, 0.0, 0.0, 1.0)
         self.gimbal_seen = False
+        self.gimbal_from_setpoint = False
+        self.last_status = None
+        # The vehicle attitude in map, needed to divide out of an earth
+        # referenced gimbal report.
+        self.vehicle_q = (0.0, 0.0, 0.0, 1.0)
+        self.create_subscription(PoseStamped, "/mavros/local_position/pose",
+                                 self._on_vehicle, qos_profile_sensor_data)
 
         if HAVE_GIMBAL_MSG:
             self.create_subscription(
                 GimbalDeviceAttitudeStatus,
                 "/mavros/gimbal_control/device/attitude_status",
                 self._on_gimbal, 10)
+            # The commanded attitude, used only when the device reports no
+            # status of its own. A setpoint is where the gimbal was told to go
+            # rather than where it is, so it lags and it never shows a stall,
+            # but it beats leaving the camera pointing along the airframe.
+            try:
+                from mavros_msgs.msg import GimbalDeviceSetAttitude
+                self.create_subscription(
+                    GimbalDeviceSetAttitude,
+                    "/mavros/gimbal_control/device/set_attitude",
+                    self._on_gimbal_setpoint, 10)
+            except ImportError:
+                pass
         else:
             self.get_logger().warn(
                 "mavros_msgs has no GimbalDeviceAttitudeStatus. The gimbal frame "
@@ -158,10 +237,38 @@ class SceneTf(Node):
         ])
 
     # ----------------------------------------------------------------- gimbal
+    def _on_vehicle(self, msg) -> None:
+        q = msg.pose.orientation
+        self.vehicle_q = (q.x, q.y, q.z, q.w)
+
+    def _on_gimbal_setpoint(self, msg) -> None:
+        # Only while the device itself is silent.
+        now = self.get_clock().now().nanoseconds / 1e9
+        if self.last_status is not None and now - self.last_status < 2.0:
+            return
+        if not self.gimbal_from_setpoint:
+            self.gimbal_from_setpoint = True
+            self.get_logger().warn(
+                "no gimbal device status, falling back to the commanded "
+                "attitude. That is where the gimbal was told to go, not where "
+                "it is.")
+        self._store(msg.q)
+
+    def _store(self, q) -> None:
+        raw = (q.x, q.y, q.z, q.w)
+        if self.gimbal_is_frd:
+            raw = aerospace_to_ros(raw)
+        if self.gimbal_reference == "earth":
+            # The report is absolute, so remove the vehicle attitude to get the
+            # rotation that belongs under gimbal_mount.
+            self.gimbal_q = quat_mul(quat_conj(self.vehicle_q), raw)
+        else:
+            self.gimbal_q = raw
+
     def _on_gimbal(self, msg) -> None:
-        q = msg.q
-        self.gimbal_q = (q.x, -q.y, -q.z, q.w) if self.gimbal_is_frd \
-            else (q.x, q.y, q.z, q.w)
+        self.last_status = self.get_clock().now().nanoseconds / 1e9
+        self.gimbal_from_setpoint = False
+        self._store(msg.q)
         if not self.gimbal_seen:
             self.gimbal_seen = True
             # flags bit 32 is YAW_IN_VEHICLE_FRAME, 64 is YAW_IN_EARTH_FRAME.
@@ -169,15 +276,20 @@ class SceneTf(Node):
                     ("earth" if (getattr(msg, "flags", 0) & 64) else "unstated")
             self.get_logger().info(
                 f"gimbal attitude received: flags={getattr(msg, 'flags', 0)} "
-                f"({frame} yaw), treating input as "
-                f"{'FRD' if self.gimbal_is_frd else 'FLU'}")
-            if frame != "unstated" and frame != self.gimbal_reference:
-                self.get_logger().warn(
-                    f"gimbal reports {frame} yaw but gimbal_reference is "
-                    f"'{self.gimbal_reference}'. Projections will be rotated.")
+                f"({frame} yaw claimed), treating input as "
+                f"{'FRD' if self.gimbal_is_frd else 'FLU'} and as "
+                f"{self.gimbal_reference} referenced")
+            if frame == "vehicle" and self.gimbal_reference == "earth":
+                self.get_logger().info(
+                    "The flag says vehicle frame and this node is ignoring it. "
+                    "PX4's simulated gimbal sets that flag while reporting an "
+                    "absolute attitude. See the note in scene_tf.py.")
 
     def _publish_gimbal(self) -> None:
-        parent = "gimbal_mount" if self.gimbal_reference == "vehicle" else "map"
+        # Always under gimbal_mount. An earth referenced report has already had
+        # the vehicle attitude divided out in _store, so by this point the
+        # rotation is vehicle relative either way.
+        parent = "gimbal_mount"
         t = TransformStamped()
         t.header.stamp = self.get_clock().now().to_msg()
         t.header.frame_id = parent

@@ -5,12 +5,22 @@
 # full schema (msg-conv-payload-type=0). They stay here so that switching to
 # the full schema needs no new file.
 
+# The id becomes "sensorId" in the payload, which is how the ROS side tells the
+# two cameras apart. sensor0 is source0, sensor1 is source1.
 [sensor0]
 enable=1
 type=Camera
-id=gimbal
+id=${PERCEPTION_CAMERA}
 location=0;0;0
 description=Gimbal camera on the recon airframe
+coordinate=0;0;0
+
+[sensor1]
+enable=1
+type=Camera
+id=${PERCEPTION_CAMERA_2}
+location=0;0;0
+description=Second camera on the recon airframe
 coordinate=0;0;0
 
 [place0]

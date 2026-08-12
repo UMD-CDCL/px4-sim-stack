@@ -17,7 +17,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl \
+      ca-certificates curl socat \
       libfontconfig1 libfreetype6 \
       libx11-6 libx11-xcb1 libxext6 libxfixes3 libxi6 libxrender1 \
       libxcb1 libxcb-glx0 libxcb-keysyms1 libxcb-image0 libxcb-shm0 \
