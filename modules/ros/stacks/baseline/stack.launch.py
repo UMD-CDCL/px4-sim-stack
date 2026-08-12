@@ -224,6 +224,22 @@ def generate_launch_description() -> LaunchDescription:
                 "port": 1883,
                 "topic": "perception/detections",
                 "bbox_format": "ltrb",
+                # The coordinate space DeepStream reports boxes in, which is
+                # [tiled-display] in its config, not [streammux]. Compose sets
+                # both from DS_WIDTH and DS_HEIGHT. The bridge scales into the
+                # live image size, so if these ever disagree the boxes still
+                # land in the right place and a warning says so.
+                "source_width": int(os.environ.get("DS_WIDTH", "1920")),
+                "source_height": int(os.environ.get("DS_HEIGHT", "1080")),
+                # Per camera corrections, as "camera=WxH", comma separated.
+                # The two sources in one DeepStream pipeline have been seen
+                # reporting in different spaces at the same time, so a single
+                # global size cannot always be right. Empty means every camera
+                # uses the pair above.
+                "source_size_overrides": [
+                    part.strip() for part in
+                    os.environ.get("DS_COORD_OVERRIDES", "").split(",")
+                ] or [""],
                 "frame_id": PERCEPTION_OPTICAL,
                 "sensor_ids": [PERCEPTION_CAMERA, PERCEPTION_CAMERA_2],
                 "sensor_frames": [
@@ -433,15 +449,18 @@ def generate_launch_description() -> LaunchDescription:
                     "optical_frame": optical_for(cam),
                     "reference_frame": REFERENCE_FRAME,
                     "use_rel_alt": True,
-                    # Take every Nth pixel in each direction. The cameras render
-                    # 1920x1080, so step 1 projects the full frame: 2.07 million
-                    # points, 33 MB in one message. Step 2 gives a 960x540 grid
-                    # at 8.3 MB, which is dense enough to read as a picture and
-                    # cheap enough to publish twice a second. Raise
-                    # send_buffer_limit on foxglove_bridge below before setting
-                    # this to 1.
-                    "step": int(os.environ.get("GROUND_IMAGE_STEP", "2")),
-                    "rate_hz": float(os.environ.get("GROUND_IMAGE_RATE", "2.0")),
+                    # Take every Nth pixel in each direction. Step 1 projects
+                    # the full 1920x1080 frame, which is the point: the ground
+                    # projection is the camera image laid flat, and it should
+                    # carry the resolution the camera actually rendered.
+                    #
+                    # It is not cheap. 2.07 million points at 16 bytes each is
+                    # 33 MB in a single message, for each camera, which is why
+                    # the rate is one a second and why foxglove_bridge below
+                    # gets a 200 MB send buffer. Raise GROUND_IMAGE_STEP to 2
+                    # for a quarter of the points if the link cannot hold it.
+                    "step": int(os.environ.get("GROUND_IMAGE_STEP", "1")),
+                    "rate_hz": float(os.environ.get("GROUND_IMAGE_RATE", "1.0")),
                 }],
             )
             for cam in CAMERAS

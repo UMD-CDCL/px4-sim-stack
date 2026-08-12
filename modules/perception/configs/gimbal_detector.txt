@@ -1,7 +1,8 @@
 # deepstream-app: both cameras in, boxes and detections out.
 #
 # The entrypoint expands ${RTSP_IN}, ${RTSP_IN_2}, ${MQTT_HOST}, ${MQTT_PORT},
-# ${MQTT_TOPIC} and ${ANNOTATED_ENABLE} from the environment and writes the
+# ${MQTT_TOPIC}, ${ANNOTATED_ENABLE}, ${DS_WIDTH} and ${DS_HEIGHT} from the
+# environment and writes the
 # result to /tmp/perception.
 # Edit this file on the host and restart the container:
 #     docker compose restart perception
@@ -12,6 +13,19 @@
 enable-perf-measurement=1
 perf-measurement-interval-sec=30
 
+# Tiled display is off, but these two keys still matter, and this is the
+# trap in this file.
+#
+# [tiled-display] width and height set the coordinate space deepstream-app
+# reports detection metadata in. [streammux] does not. Leave them out and
+# deepstream-app uses its built-in 1280x720 whatever the cameras send, so with
+# 1080p cameras every box arrives at two thirds of its true position and size:
+# a plausible looking box on the wrong part of the image, with no error
+# anywhere to explain it.
+#
+# Keep these equal to the streammux size below. Compose sets both from
+# DS_WIDTH and DS_HEIGHT, and feeds the same pair to detections_bridge, so the
+# three cannot drift apart.
 [tiled-display]
 enable=0
 rows=1
@@ -53,11 +67,11 @@ live-source=1
 # the detector.
 batch-size=2
 batched-push-timeout=40000
-# The cameras render 1920x1080. Scaling down here would throw away the
-# resolution before the detector sees it, and small distant targets are exactly
-# what this is looking for.
-width=1920
-height=1080
+# Match the cameras. Scaling down here would throw away resolution before the
+# detector sees it, and small distant targets are exactly what this is looking
+# for. Set DS_WIDTH and DS_HEIGHT in compose to the camera resolution.
+width=${DS_WIDTH}
+height=${DS_HEIGHT}
 enable-padding=0
 nvbuf-memory-type=0
 attach-sys-ts-as-ntp=0

@@ -245,13 +245,25 @@ services:
       GIMBAL_HFOV: ${GIMBAL_HFOV:-2.0}
       NADIR_HFOV: ${NADIR_HFOV:-1.74}
       # Take every Nth pixel when laying the camera image on the ground plane.
-      # The cameras render 1920x1080: step 1 projects the full frame at 33 MB a
-      # message, step 2 gives a 960x540 grid at 8.3 MB.
-      GROUND_IMAGE_STEP: ${GROUND_IMAGE_STEP:-2}
+      # Step 1 is the full 1920x1080 frame: 2.07 million points, 33 MB in one
+      # message, for each camera. Step 2 gives a 960x540 grid at 8.3 MB.
+      GROUND_IMAGE_STEP: ${GROUND_IMAGE_STEP:-1}
+      GROUND_IMAGE_RATE: ${GROUND_IMAGE_RATE:-1.0}
       # foxglove_bridge send buffer, bytes. The default 10 MB is smaller than
       # one ground projection cloud, and over the limit the bridge drops the
       # channel without logging anything.
       FOXGLOVE_SEND_BUFFER: ${FOXGLOVE_SEND_BUFFER:-209715200}
+      # The same pair the perception service uses. detections_bridge scales
+      # boxes from this space into the live image size, so a mismatch corrects
+      # itself instead of putting every box in the wrong place.
+      DS_WIDTH: ${DS_WIDTH:-1920}
+      DS_HEIGHT: ${DS_HEIGHT:-1080}
+      # Per camera corrections, as "camera=WxH", comma separated. Use this when
+      # one camera's boxes land correctly and the other's do not, which happens
+      # when the two DeepStream sources report in different spaces. Measure it
+      # with scripts/check-annotation-scale.py. Example:
+      #   DS_COORD_OVERRIDES=nadir=1280x720
+      DS_COORD_OVERRIDES: ${DS_COORD_OVERRIDES:-}
       # Nadir mounting against base_link, metres and degrees. Trim these if the
       # downward image is not square with the airframe.
       NADIR_X: ${NADIR_X:-0.10}
@@ -260,7 +272,6 @@ services:
       NADIR_ROLL: ${NADIR_ROLL:-0.0}
       NADIR_PITCH: ${NADIR_PITCH:-90.0}
       NADIR_YAW: ${NADIR_YAW:-0.0}
-      GROUND_IMAGE_RATE: ${GROUND_IMAGE_RATE:-2.0}
       GIMBAL_SOURCE: ${GIMBAL_SOURCE:-auto}
       # follow_vehicle takes yaw from the airframe and pitch from the
       # gimbal. report trusts the reported yaw too.
@@ -286,6 +297,9 @@ services:
     volumes:
       - ./modules/ros/stacks:/stacks
       - ./src/ros2_ws:/ws
+      # Diagnostics that need a ROS graph, so they run in here rather than on
+      # the host. check-annotation-scale.py lives here.
+      - ./scripts:/scripts:ro
       # Ground truth for scoring, read only. This is the one simulator file the
       # ROS side reads, and only the evaluation node touches it. Nothing in the
       # flight path depends on it, and on real hardware you do not run that node.
@@ -330,6 +344,12 @@ services:
       # on a busy GPU: the detections still reach ROS, and Foxglove still draws
       # the boxes over the plain streams.
       ANNOTATED_STREAMS: ${ANNOTATED_STREAMS:-1}
+      # The resolution the detector works in. Keep it equal to the camera
+      # resolution so inference sees every pixel the sensor rendered. It is
+      # also the coordinate space DeepStream reports boxes in, and the ros
+      # service reads the same pair to check that the boxes match the image.
+      DS_WIDTH: ${DS_WIDTH:-1920}
+      DS_HEIGHT: ${DS_HEIGHT:-1080}
       MQTT_HOST: message-bus
       MQTT_PORT: "1883"
       MQTT_TOPIC: perception/detections

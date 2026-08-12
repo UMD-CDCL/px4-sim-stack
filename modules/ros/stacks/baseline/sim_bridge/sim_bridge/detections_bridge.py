@@ -33,10 +33,43 @@ does not grow with GPU load.
 simulator publishes on `video/frames/<stream>`. Feed the result back through
 `time_offset` if you want the last few milliseconds.
 
+Which pixels the boxes are counted in
+-------------------------------------
+DeepStream reports boxes in its own coordinate space, and that space is set by
+`[tiled-display]` width and height in the deepstream-app config. Not by
+`[streammux]`, and it applies even when tiled display is disabled. Leave those
+keys out and deepstream-app uses its built-in 1280x720, whatever the camera
+sends.
+
+That is a quiet failure. With 1080p cameras and no tiled-display size, every
+box arrived at two thirds of its true position and size: still a plausible
+looking box, on the wrong part of the image, and no error anywhere.
+
+So the boxes are scaled here, into the size the live CameraInfo reports. When
+the two agree the scale is 1 and nothing happens, which is the normal case;
+when they disagree the boxes still land in the right place.
+
+The correction is per camera, and it has to be. Two sources in one DeepStream
+pipeline have been seen reporting in different spaces at the same time, which
+looks from the outside like an intermittent fault: identical configuration,
+boxes correct on one camera and two thirds of the way to the top left on the
+other. `source_size_overrides` names the camera, so one can be corrected
+without disturbing the other.
+
+The scale factor is logged for each camera the first time it is used. If it is
+not 1.0, something has changed and it is worth knowing why.
+`scripts/check-annotation-scale.py` draws the boxes on a live frame and reports
+the factor that would fit, which is the quickest way to find out.
+
 Parameters
     host, port     the MQTT broker
     topic          MQTT topic to subscribe to
     bbox_format    ltrb (default) or ltwh
+    source_width   the coordinate space DeepStream reports in
+    source_height
+    source_size_overrides
+                   per camera, as "camera=WxH". The two sources in one pipeline
+                   do not always agree, so this corrects one without the other.
     frame_id       frame_id on the published messages
     time_offset    seconds added to the payload timestamp, for calibration
     max_age        drop a payload older than this, in seconds
@@ -54,7 +87,8 @@ import paho.mqtt.client as mqtt
 import rclpy
 from rclpy.node import Node
 from builtin_interfaces.msg import Time
-from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
+from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy, qos_profile_sensor_data
+from sensor_msgs.msg import CameraInfo
 from vision_msgs.msg import (
     BoundingBox2D,
     Detection2D,
@@ -77,6 +111,15 @@ class DetectionsBridge(Node):
         self.declare_parameter("port", 1883)
         self.declare_parameter("topic", "perception/detections")
         self.declare_parameter("bbox_format", "ltrb")
+        # The coordinate space DeepStream reports boxes in. 0 means "assume it
+        # matches the image", which disables scaling.
+        self.declare_parameter("source_width", 0)
+        self.declare_parameter("source_height", 0)
+        # Per camera overrides, as "camera=WxH". The two sources in one
+        # DeepStream pipeline do not always report in the same space, so a
+        # single global size cannot always be right. Anything not named here
+        # falls back to source_width and source_height.
+        self.declare_parameter("source_size_overrides", [""])
         self.declare_parameter("frame_id", "camera_optical_frame")
         self.declare_parameter("time_offset", 0.0)
         self.declare_parameter("max_age", 2.0)
@@ -110,11 +153,41 @@ class DetectionsBridge(Node):
         self.pub = self.create_publisher(
             Detection2DArray, "/perception/detections", DETECTION_QOS
         )
+        self.source_size = (int(self.get_parameter("source_width").value),
+                            int(self.get_parameter("source_height").value))
+        self.source_override: dict[str, tuple[int, int]] = {}
+        for entry in self.get_parameter("source_size_overrides").value:
+            entry = str(entry).strip()
+            if not entry or "=" not in entry:
+                continue
+            name, _, size = entry.partition("=")
+            try:
+                w, h = (int(v) for v in size.lower().split("x", 1))
+            except ValueError:
+                self.get_logger().warn(f"cannot read source size override {entry!r}")
+                continue
+            self.source_override[name.strip()] = (w, h)
+            self.get_logger().info(f"{name.strip()}: DeepStream reports in {w}x{h}")
+        # Live image size for each camera, from CameraInfo, and the scale that
+        # follows from it. CameraInfo is the authority: it is what the image
+        # panels and the projection maths use.
+        self.image_size: dict[str, tuple[int, int]] = {}
+        self.scale_logged: set[str] = set()
+
         self.per_camera = {
             name: self.create_publisher(
                 Detection2DArray, f"/perception/{name}/detections", DETECTION_QOS)
             for name in ids
         }
+
+        # CameraInfo says how big the image really is. Reading it rather than
+        # trusting a configured number means a camera resolution change needs
+        # no edit here.
+        for name in ids:
+            self.create_subscription(
+                CameraInfo, f"/camera/{name}/camera_info",
+                lambda msg, n=name: self.image_size.__setitem__(n, (msg.width, msg.height)),
+                qos_profile_sensor_data)
 
         host = self.get_parameter("host").value
         port = int(self.get_parameter("port").value)
@@ -169,6 +242,7 @@ class DetectionsBridge(Node):
             return
 
         sensor = str(payload.get("sensorId") or "") or self.primary
+        self._rescale(sensor, detections)
         array = Detection2DArray()
         array.header.stamp = stamp
         array.header.frame_id = self.frame_for.get(sensor, self.frame_id)
@@ -255,6 +329,34 @@ class DetectionsBridge(Node):
                      "object")
         return self._detection(str(obj.get("id", "-1")), label,
                                left, top, right, bottom, corners=True)
+
+    def _rescale(self, sensor: str, detections: list) -> None:
+        """Move boxes from DeepStream's coordinate space into the image's."""
+        src_w, src_h = self.source_override.get(sensor, self.source_size)
+        if src_w <= 0 or src_h <= 0:
+            return
+        size = self.image_size.get(sensor)
+        if size is None:
+            return
+        sx, sy = size[0] / src_w, size[1] / src_h
+        if sensor not in self.scale_logged:
+            self.scale_logged.add(sensor)
+            if abs(sx - 1.0) < 1e-6 and abs(sy - 1.0) < 1e-6:
+                self.get_logger().info(
+                    f"{sensor}: detections and image are both {size[0]}x{size[1]}")
+            else:
+                self.get_logger().warn(
+                    f"{sensor}: DeepStream reports in {src_w}x{src_h} but the "
+                    f"image is {size[0]}x{size[1]}. Scaling boxes by "
+                    f"{sx:.3f}x{sy:.3f}. Check [tiled-display] in the "
+                    f"deepstream-app config if that is not deliberate.")
+        if abs(sx - 1.0) < 1e-6 and abs(sy - 1.0) < 1e-6:
+            return
+        for det in detections:
+            det.bbox.center.position.x *= sx
+            det.bbox.center.position.y *= sy
+            det.bbox.size_x *= sx
+            det.bbox.size_y *= sy
 
     def _detection(self, track_id: str, label: str,
                    a: float, b: float, c: float, d: float,

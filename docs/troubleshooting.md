@@ -324,6 +324,41 @@ does not change the code path.
 `payload_forwarder.py` does the publishing. If you turned that sink back on,
 turn it off again.
 
+### Detection boxes sit off the target, in pixel coordinates
+
+Measure it, then correct that camera:
+
+```bash
+docker compose exec ros python3 /scripts/check-annotation-scale.py
+```
+
+It grabs a frame and the detections that belong to it, draws the boxes, and
+reports the scale that would make them fit. A scale near 1.5 means DeepStream
+is reporting in 1280x720 while the image is 1920x1080. Put the answer in
+`.env` and restart the ros service:
+
+```
+DS_COORD_OVERRIDES=nadir=1280x720
+```
+
+`detections_bridge` then scales that camera's boxes into the image and logs
+what it is doing. Correct the cameras separately. The two sources in one
+DeepStream pipeline have been seen reporting in different spaces at the same
+time, which reads from the outside as an intermittent fault: identical
+configuration, one camera correct and the other two thirds of the way to the
+top left. Watching a single camera makes it look as if the fault comes and
+goes, because a global correction fixes one camera and breaks the other.
+
+The underlying cause is that DeepStream's coordinate space is not necessarily
+the image size and is not stated anywhere in the payload. `[streammux]` width
+and height do not settle it, and neither does `[tiled-display]`. Rather than
+guess, the bridge takes the image size from CameraInfo, which is what the image
+panels and the projection maths already use, and scales into it.
+
+This matters beyond the picture. `detection_localizer` casts a ray through the
+box, so a box in the wrong place is a target in the wrong place on the map, and
+`detection_scorer` then counts a correct detection as a miss.
+
 ### The image panel is empty, but the topic is listed
 
 Point the panel at `/camera/<name>/image_raw/compressed` rather than at

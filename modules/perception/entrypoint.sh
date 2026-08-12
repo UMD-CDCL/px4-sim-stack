@@ -10,6 +10,10 @@ MQTT_HOST=${MQTT_HOST:-message-bus}
 MQTT_PORT=${MQTT_PORT:-1883}
 MQTT_TOPIC=${MQTT_TOPIC:-perception/detections}
 RTSP_IN_2=${RTSP_IN_2:-rtsp://video-router:8554/gimbal}
+# The resolution the detector works in, and the coordinate space it reports
+# boxes in. Both [streammux] and [tiled-display] read these. See the config.
+DS_WIDTH=${DS_WIDTH:-1920}
+DS_HEIGHT=${DS_HEIGHT:-1080}
 # The annotated RTSP outputs, one for each camera, with the boxes burned into
 # the pixels. On by default. The config reads ANNOTATED_ENABLE, so translate
 # anything falsey to the 0 or 1 deepstream-app expects.
@@ -19,6 +23,7 @@ case "${ANNOTATED_STREAMS:-1}" in
 esac
 
 export RTSP_IN RTSP_IN_2 MQTT_HOST MQTT_PORT MQTT_TOPIC ANNOTATED_ENABLE
+export DS_WIDTH DS_HEIGHT
 
 log()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[33m    %s\033[0m\n' "$*"; }
@@ -77,6 +82,7 @@ log "Starting deepstream-app with $DS_CONFIG"
 cat <<EOF
     sources     $RTSP_IN
                 $RTSP_IN_2
+    detector    ${DS_WIDTH}x${DS_HEIGHT}, which is also the box coordinate space
     detections  mqtt://$MQTT_HOST:$MQTT_PORT topic $MQTT_TOPIC
     annotated   $([ "$ANNOTATED_ENABLE" = 1 ] && echo "on" || echo "off (ANNOTATED_STREAMS=0)")
                 rtsp://perception:8554/ds-test  source 0

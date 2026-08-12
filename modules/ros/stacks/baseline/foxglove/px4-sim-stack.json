@@ -92,7 +92,7 @@
         },
         "/camera/nadir/ground_projection": {
           "visible": true,
-          "pointSize": 4,
+          "pointSize": 2,
           "colorMode": "rgb",
           "colorField": "rgb",
           "decayTime": 0
@@ -119,7 +119,7 @@
         },
         "/camera/gimbal/ground_projection": {
           "visible": true,
-          "pointSize": 4,
+          "pointSize": 2,
           "colorMode": "rgb",
           "colorField": "rgb",
           "decayTime": 0
