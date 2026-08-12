@@ -237,6 +237,12 @@ services:
       FCU_URL: udp://:14555@mavlink-hub:14551
       RTSP_BASE: rtsp://video-router:8554
       MQTT_HOST: message-bus
+      # Gimbal frame handling. GIMBAL_SOURCE is auto, setpoint or status.
+      # The offsets are the constant the scene_tf diagnostic reports.
+      GIMBAL_SOURCE: ${GIMBAL_SOURCE:-auto}
+      GIMBAL_OFFSET_ROLL: ${GIMBAL_OFFSET_ROLL:-0.0}
+      GIMBAL_OFFSET_PITCH: ${GIMBAL_OFFSET_PITCH:-0.0}
+      GIMBAL_OFFSET_YAW: ${GIMBAL_OFFSET_YAW:-0.0}
       GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO:-urban_casualties}.yaml
       RESOLVED_TRUTH_FILE: /scenes/ground_truth_actual.yaml
       # Which camera feeds detection and localization. The nadir camera

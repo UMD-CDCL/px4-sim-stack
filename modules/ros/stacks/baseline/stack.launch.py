@@ -152,7 +152,16 @@ def generate_launch_description() -> LaunchDescription:
                 "base_frame": "base_link",
                 "gimbal_mount_xyz": [0.0, 0.0, 0.10],
                 "nadir_xyz": [0.10, 0.0, -0.06],
-                "gimbal_reference": "vehicle",
+                "gimbal_reference": "earth",
+                "gimbal_source": os.environ.get("GIMBAL_SOURCE", "auto"),
+                # Any constant left after the frame handling. The scene_tf
+                # diagnostic prints the number to put here: with the gimbal
+                # centred, "gimbal rel body" should read near zero.
+                "gimbal_offset_rpy_deg": [
+                    float(os.environ.get("GIMBAL_OFFSET_ROLL", "0.0")),
+                    float(os.environ.get("GIMBAL_OFFSET_PITCH", "0.0")),
+                    float(os.environ.get("GIMBAL_OFFSET_YAW", "0.0")),
+                ],
                 "gimbal_rate_hz": 30.0,
             }],
         ),
