@@ -47,6 +47,11 @@ services:
       SCENARIO: ${SCENARIO:-}
       GZ_GUI: ${GZ_GUI:-1}
       VIDEO_SINK_BASE: rtsp://video-router:8554
+      # Frame capture times go here. RTSP cannot carry them, and every
+      # localized detection depends on them. See modules/sim/frame_clock.py.
+      MQTT_HOST: message-bus
+      MQTT_PORT: "1883"
+      FRAME_CLOCK: "1"
       # PX4 pushes telemetry to this fixed address, so a hub restart does not
       # strand the link. See modules/sim/px4-rcS.
       MAVLINK_HUB_IP: 172.28.0.11
@@ -77,6 +82,8 @@ services:
         ipv4_address: 172.28.0.10
     depends_on:
       video-router:
+        condition: service_started
+      message-bus:
         condition: service_started
     stop_grace_period: 20s
 
@@ -123,6 +130,7 @@ services:
       - "8888:8888"        # HLS
       - "8889:8889"        # WebRTC
       - "8189:8189/udp"    # WebRTC ICE
+      - "9997:9997"        # HTTP API, used by `px4sim streams`
     networks:
       simnet:
         ipv4_address: 172.28.0.12
@@ -229,9 +237,18 @@ services:
       FCU_URL: udp://:14555@mavlink-hub:14551
       RTSP_BASE: rtsp://video-router:8554
       MQTT_HOST: message-bus
+      GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO:-urban_casualties}.yaml
+      # Which camera feeds detection and localization. The nadir camera
+      # looks straight down, which is what an overhead search wants, and
+      # it needs no gimbal pointing to work.
+      PERCEPTION_CAMERA: ${PERCEPTION_CAMERA:-nadir}
     volumes:
       - ./modules/ros/stacks:/stacks
       - ./src/ros2_ws:/ws
+      # Ground truth for scoring, read only. This is the one simulator file the
+      # ROS side reads, and only the evaluation node touches it. Nothing in the
+      # flight path depends on it, and on real hardware you do not run that node.
+      - ./modules/sim/scenes:/scenes:ro
       - ./logs/ros:/home/dev/.ros
       - /tmp/.X11-unix:/tmp/.X11-unix
       - ${XAUTH_FILE:-./.xauth}:/tmp/.docker.xauth
@@ -259,7 +276,7 @@ services:
     environment:
       <<: *gpu-env
       DS_CONFIG: ${DS_CONFIG:-gimbal_detector.txt}
-      RTSP_IN: rtsp://video-router:8554/gimbal
+      RTSP_IN: rtsp://video-router:8554/${PERCEPTION_CAMERA:-nadir}
       MQTT_HOST: message-bus
       MQTT_PORT: "1883"
       MQTT_TOPIC: perception/detections

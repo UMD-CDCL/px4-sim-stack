@@ -305,3 +305,115 @@ python3 -c 'import ipaddress, struct
 addr = "172.28.0.18"
 print(struct.unpack("<i", struct.pack("<I", int(ipaddress.IPv4Address(addr))))[0])'
 ```
+
+
+## 6. The perception frame tree and localization
+
+The ROS stack turns image-space detections into ground positions. Everything
+the 3D view needs is a stock ROS message.
+
+### Frames
+
+```
+map                         local ENU, origin where the EKF initialized
+ └── base_link              FLU body, published by MAVROS
+      ├── gimbal_mount      static
+      │    └── gimbal_camera_link          turns with the gimbal
+      │         └── gimbal_camera_optical_frame
+      └── nadir_cam_link    static, looks straight down
+           └── nadir_camera_optical_frame
+```
+
+A camera *link* uses the body convention, x forward along the view axis. A
+camera *optical* frame uses REP 103, x right, y down, z forward. The fixed
+rotation between them is rpy (-90, 0, -90). CameraInfo and every projection
+assume the optical frame.
+
+MAVROS reports the gimbal attitude in **FRD** with `frame_id: base_link_frd`,
+while every frame here is FLU. `scene_tf` converts by negating y and z. It also
+reads the `flags` field, where bit 32 means the yaw is relative to the vehicle
+and bit 64 means it is relative to north, and warns when that disagrees with
+its `gimbal_reference` parameter.
+
+### Which camera
+
+`PERCEPTION_CAMERA` in `.env` picks the camera that DeepStream reads and that
+detections are localized from. It sets `RTSP_IN` on the perception service and
+the optical frame in the ROS stack together, because a mismatch would project
+detections through the wrong lens from the wrong frame and produce plausible
+wrong answers.
+
+The default is `nadir`. It looks straight down, which suits an overhead search,
+and it needs no gimbal pointing.
+
+The anchor follows from that. Looking obliquely, the bottom edge of a box is
+where the subject meets the ground. Looking straight down, the box centre is.
+Using the wrong one shifts every estimate by a constant.
+
+### Timestamps
+
+`detections_bridge` stamps each `Detection2DArray` with DeepStream's frame
+time, taken as the frame enters the pipeline and before inference. The
+localizer looks up the transform **at that stamp**, so the pose is the one the
+camera actually had.
+
+Measured on this machine, that timestamp trails true capture by about 16 ms
+with 6 ms of jitter, and the whole pipeline is quick enough that the detection
+stamp is often a few tens of milliseconds *newer* than the newest transform.
+The localizer waits, and then clamps to the newest transform when the gap is
+under `future_tolerance`, counting how often it does. Past that bound it drops
+the detection rather than answer with the wrong pose.
+
+The simulator also publishes a true capture time for every frame on
+`video/frames/<stream>`, which is how `scripts/measure-latency.py` measures the
+offset. Nothing in the flight path depends on it.
+
+### Ground truth and scoring
+
+Simulation only. `ground_truth` reads the scenario file and publishes where the
+targets really are; `detection_scorer` matches estimates against them inside a
+gate and reports recall, precision and mean position error. Only targets inside
+the current camera footprint count, so flying away from the scene does not read
+as a collapse in recall.
+
+| Topic | Type |
+|---|---|
+| `/ground_truth/markers` | `visualization_msgs/MarkerArray` |
+| `/ground_truth/truth_3d` | `vision_msgs/Detection3DArray` |
+| `/ground_truth/geojson` | `foxglove_msgs/GeoJSON`, for the Map panel |
+| `/perception/detections_3d` | `vision_msgs/Detection3DArray` with covariance |
+| `/perception/markers` | `visualization_msgs/MarkerArray` |
+| `/camera/<name>/footprint` | `geometry_msgs/PolygonStamped` |
+| `/scoring/position_error` | `std_msgs/Float64`, metres |
+| `/scoring/recall`, `/scoring/precision` | `std_msgs/Float64` |
+
+Covariance comes from parameters, not from a derivation. `covariance_diagonal`
+defaults to a two metre standard deviation in x and y, and
+`range_variance_scale` grows that with slant range.
+
+### Known: a constant position error
+
+Hovering over a target at about 10 m, scoring reports recall 0.50, precision
+0.95 and a **mean position error near 4 m** that barely varies between frames.
+A constant offset is a modelling error, not noise.
+
+One likely cause is ruled out by measurement. The `map` frame and the Gazebo
+world frame agree: the drone reads (18.142, 1.269) in Gazebo and (18.106,
+1.326) in `map` at the same instant, which is 7 cm apart. So the EKF origin is
+not the problem, and `origin_offset_xyz` on the ground truth node is not the
+fix.
+
+What is still open:
+
+- The Fuel person models may not be centred on their spawn pose, which would
+  put the rendered body somewhere other than the ground truth point.
+- The nadir camera's yaw about its optical axis. At 10 m altitude, a target
+  near the edge of the footprint sits about 11 m from the centre, so a 20
+  degree yaw error there is about 4 m on the ground.
+- The detector's box may not be centred on the subject when seen from directly
+  above.
+
+To separate them, put a target directly under the drone. If the error goes to
+nearly zero there and grows toward the edges of the frame, it is the camera
+orientation or the intrinsics. If it stays constant everywhere, it is the
+ground truth position or the box.

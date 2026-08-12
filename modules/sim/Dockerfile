@@ -71,6 +71,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libxext6 libx11-6 libxrandr2 libxi6 libxcursor1 libxinerama1 \
       mesa-utils x11-utils \
       python3-yaml \
+      python3-paho-mqtt \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
@@ -103,7 +104,9 @@ RUN if getent passwd ${UID} >/dev/null; then \
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY px4-rcS /opt/sim/px4-rcS
-RUN chmod +x /usr/local/bin/entrypoint.sh && chmod 0644 /opt/sim/px4-rcS
+COPY frame_clock.py /opt/sim/frame_clock.py
+RUN chmod +x /usr/local/bin/entrypoint.sh /opt/sim/frame_clock.py \
+    && chmod 0644 /opt/sim/px4-rcS
 
 USER dev
 WORKDIR /px4

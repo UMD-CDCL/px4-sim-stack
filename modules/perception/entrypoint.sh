@@ -62,7 +62,7 @@ mkdir -p /tmp/ds-payloads
 if [ "${PAYLOAD_FORWARDER:-1}" = "1" ]; then
 	python3 /opt/perception/app/payload_forwarder.py \
 		--dir /tmp/ds-payloads --host "$MQTT_HOST" --port "$MQTT_PORT" \
-		--topic "$MQTT_TOPIC" &
+		--topic "$MQTT_TOPIC" --poll 0.02 &
 fi
 
 log "Starting deepstream-app with $DS_CONFIG"

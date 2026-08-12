@@ -176,6 +176,43 @@ The bind port must be free, and the target must be the hub, not PX4.
 
 ## Video
 
+### VLC cannot open an RTSP URL, but the browser can
+
+Use `--rtsp-tcp`:
+
+```bash
+vlc --rtsp-tcp rtsp://localhost:8554/gimbal
+```
+
+Without it, VLC hands `rtsp://` to its SAT>IP module, which speaks a dialect
+the server rejects. The server says so plainly in its own log:
+
+```
+invalid SETUP path. This typically happens when VLC fails a request,
+and then switches to an unsupported RTSP dialect
+```
+
+ffmpeg, ffplay, GStreamer and Foxglove all work with no flags. `./px4sim view`
+uses ffplay and already passes the right ones.
+
+### First, ask what is actually live
+
+```bash
+./px4sim streams
+```
+
+```
+  PATH                 STATE     READERS  SOURCE
+  gimbal               online    0        rtspSession
+  gimbal_annotated     offline   0        rtspSource
+  nadir                online    0        rtspSession
+```
+
+`offline` means nobody is publishing, and a player will get a 404 or a timeout.
+`gimbal` and `nadir` come from the simulator, so they stay offline until Gazebo
+is up and the vehicle has spawned. `gimbal_annotated` stays offline until the
+perception profile runs.
+
 ### No stream at rtsp://localhost:8554/gimbal
 
 1. **Is the streamer bound to a camera?**

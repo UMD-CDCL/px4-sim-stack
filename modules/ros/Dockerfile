@@ -27,6 +27,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-${ROS_DISTRO}-mavros-extras \
       ros-${ROS_DISTRO}-vision-msgs \
       ros-${ROS_DISTRO}-foxglove-bridge \
+      ros-${ROS_DISTRO}-foxglove-msgs \
+      ros-${ROS_DISTRO}-geographic-msgs \
       ros-${ROS_DISTRO}-rviz2 \
       ros-${ROS_DISTRO}-rqt-image-view \
       ros-${ROS_DISTRO}-image-transport \

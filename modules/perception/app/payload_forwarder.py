@@ -61,7 +61,7 @@ def main() -> int:
     ap.add_argument("--host", default=os.environ.get("MQTT_HOST", "message-bus"))
     ap.add_argument("--port", type=int, default=int(os.environ.get("MQTT_PORT", "1883")))
     ap.add_argument("--topic", default=os.environ.get("MQTT_TOPIC", "perception/detections"))
-    ap.add_argument("--poll", type=float, default=0.1, help="seconds between directory scans")
+    ap.add_argument("--poll", type=float, default=0.02, help="seconds between directory scans")
     ap.add_argument("--max-age", type=float, default=5.0,
                     help="drop a payload older than this, in seconds")
     args = ap.parse_args()

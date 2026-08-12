@@ -1,0 +1,174 @@
+{
+  "configById": {
+    "3D!scene": {
+      "cameraState": {
+        "distance": 90,
+        "perspective": true,
+        "phi": 52,
+        "target": [0, 0, 0],
+        "targetOffset": [12, 0, 0],
+        "thetaOffset": 45,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "followTf": "map",
+      "scene": {
+        "enableStats": false,
+        "backgroundColor": "#12161c",
+        "transforms": {
+          "axisScale": 1.2,
+          "showLabel": true,
+          "labelSize": 0.4
+        }
+      },
+      "transforms": {
+        "frame:map": { "visible": true },
+        "frame:base_link": { "visible": true },
+        "frame:gimbal_mount": { "visible": false },
+        "frame:gimbal_camera_link": { "visible": true },
+        "frame:gimbal_camera_optical_frame": { "visible": true },
+        "frame:nadir_cam_link": { "visible": false },
+        "frame:nadir_camera_optical_frame": { "visible": true }
+      },
+      "topics": {
+        "/drone/markers": { "visible": true },
+        "/ground/plane": { "visible": true },
+        "/ground_truth/markers": { "visible": true },
+        "/perception/markers": { "visible": true },
+        "/perception/targets": { "visible": false },
+        "/camera/nadir/footprint": { "visible": true, "lineWidth": 0.4, "color": "#4dd0e1" },
+        "/camera/gimbal/footprint": { "visible": true, "lineWidth": 0.4, "color": "#ffb74d" },
+        "/camera/nadir/boresight": { "visible": true },
+        "/camera/gimbal/boresight": { "visible": false },
+        "/scoring/error_lines": { "visible": true },
+        "/scoring/summary": { "visible": true }
+      },
+      "layers": {},
+      "publish": { "type": "point", "poseTopic": "/move_base_simple/goal" },
+      "imageMode": {}
+    },
+    "Image!nadir": {
+      "cameraState": { "distance": 20, "perspective": false },
+      "imageTopic": "/camera/nadir/image_raw",
+      "calibrationTopic": "/camera/nadir/camera_info",
+      "synchronize": false,
+      "transformMarkers": false
+    },
+    "Image!gimbal": {
+      "imageTopic": "/camera/gimbal/image_raw",
+      "calibrationTopic": "/camera/gimbal/camera_info",
+      "synchronize": false,
+      "transformMarkers": false
+    },
+    "map!world": {
+      "center": null,
+      "customTileProviders": [],
+      "disabledTopics": [],
+      "followTopic": "/mavros/global_position/global",
+      "layer": "map",
+      "topicColors": {
+        "/mavros/global_position/global": "#ff7043",
+        "/ground_truth/geojson": "#2ecc71"
+      },
+      "zoomLevel": 18,
+      "maxNativeZoom": 19
+    },
+    "Plot!scoring": {
+      "paths": [
+        {
+          "value": "/scoring/position_error.data",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "position error (m)",
+          "color": "#ffb74d"
+        },
+        {
+          "value": "/scoring/recall.data",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "recall",
+          "color": "#4dd0e1"
+        },
+        {
+          "value": "/scoring/precision.data",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "precision",
+          "color": "#81c784"
+        }
+      ],
+      "showLegend": true,
+      "isSynced": true,
+      "legendDisplay": "floating",
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "sidebarDimension": 240,
+      "xAxisVal": "timestamp"
+    },
+    "Plot!altitude": {
+      "paths": [
+        {
+          "value": "/mavros/global_position/rel_alt.data",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "relative altitude (m)",
+          "color": "#9575cd"
+        },
+        {
+          "value": "/mavros/rangefinder_pub.range",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "rangefinder (m)",
+          "color": "#f06292"
+        }
+      ],
+      "showLegend": true,
+      "isSynced": true,
+      "legendDisplay": "floating",
+      "xAxisVal": "timestamp"
+    },
+    "RawMessages!state": {
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "topicPath": "/scoring/summary.text"
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": { "speed": 1 },
+  "layout": {
+    "first": {
+      "first": "3D!scene",
+      "second": {
+        "first": "Image!nadir",
+        "second": "Image!gimbal",
+        "direction": "column",
+        "splitPercentage": 50
+      },
+      "direction": "row",
+      "splitPercentage": 68
+    },
+    "second": {
+      "first": "map!world",
+      "second": {
+        "first": "Plot!scoring",
+        "second": {
+          "first": "Plot!altitude",
+          "second": "RawMessages!state",
+          "direction": "row",
+          "splitPercentage": 55
+        },
+        "direction": "column",
+        "splitPercentage": 50
+      },
+      "direction": "row",
+      "splitPercentage": 40
+    },
+    "direction": "column",
+    "splitPercentage": 62
+  }
+}

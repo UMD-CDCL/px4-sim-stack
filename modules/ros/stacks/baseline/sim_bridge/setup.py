@@ -20,6 +20,11 @@ setup(
         "console_scripts": [
             "rtsp_camera = sim_bridge.rtsp_camera:main",
             "detections_bridge = sim_bridge.detections_bridge:main",
+            "scene_tf = sim_bridge.scene_tf:main",
+            "ground_projector = sim_bridge.ground_projector:main",
+            "detection_localizer = sim_bridge.detection_localizer:main",
+            "ground_truth = sim_bridge.ground_truth:main",
+            "detection_scorer = sim_bridge.detection_scorer:main",
         ],
     },
 )

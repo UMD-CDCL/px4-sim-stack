@@ -82,7 +82,7 @@ Everything downstream of the vehicle uses these and nothing else.
 | MAVLink, for scripts | `tcp://localhost:5760` |
 | Video | `rtsp://localhost:8554/gimbal`, `/nadir`, `/gimbal_annotated` |
 | Detections | `mqtt://localhost:1883`, topic `perception/detections` |
-| Foxglove | `ws://localhost:8765` |
+| Foxglove | `ws://localhost:8765`, layout in `modules/ros/stacks/baseline/foxglove/` |
 
 `make endpoints` prints this list.
 
@@ -97,6 +97,10 @@ Everything downstream of the vehicle uses these and nothing else.
 ./px4sim shell ros            # a ROS shell with the overlay sourced
 ./px4sim scene baylands       # change the world and restart the sim
 ./px4sim scenario             # place the targets again, no restart
+./px4sim streams              # which video streams are live
+./px4sim view nadir           # play one
+./px4sim detections           # follow the MQTT detection topic
+./px4sim sim                  # a shell inside a container: sim, ros, qgc, perception, hub, bus
 ./px4sim check                # validate the compose file and lint the docs
 ./px4sim clean                # remove containers, networks and volumes
 ```

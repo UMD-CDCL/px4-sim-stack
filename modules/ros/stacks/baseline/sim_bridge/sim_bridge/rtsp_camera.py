@@ -15,6 +15,15 @@ Parameters
                    and the nvcodec plugin.
     hfov           horizontal field of view in radians, for the CameraInfo
                    pinhole model. 2.0 matches the gimbal camera in this stack.
+    time_offset    extra seconds added to the image stamp, for calibration
+
+Stamping
+    A frame reaches this node well after it was taken: the jitter buffer alone
+    holds it for latency_ms. Stamping with the arrival time would put the image
+    later than the pose it belongs to, and the 3D view would lag the telemetry.
+    The stamp is therefore arrival minus the jitter buffer, plus time_offset.
+    It is an estimate. The detections do better, because DeepStream reports a
+    frame time and detections_bridge carries it through.
 
 Topics
     <ns>/image_raw    sensor_msgs/Image, rgb8
@@ -55,10 +64,15 @@ class RtspCamera(Node):
         self.declare_parameter("protocols", "tcp")
         self.declare_parameter("decoder", "avdec_h264")
         self.declare_parameter("hfov", 2.0)
+        self.declare_parameter("time_offset", 0.0)
 
         self.url = self.get_parameter("url").value
         self.frame_id = self.get_parameter("frame_id").value
         self.hfov = float(self.get_parameter("hfov").value)
+        # The jitter buffer is the largest known part of the delay, and it is
+        # the one part we can name exactly.
+        self.stamp_shift = -(int(self.get_parameter("latency_ms").value) / 1000.0) \
+            + float(self.get_parameter("time_offset").value)
 
         self.image_pub = self.create_publisher(Image, "image_raw", SENSOR_QOS)
         self.info_pub = self.create_publisher(CameraInfo, "camera_info", SENSOR_QOS)
@@ -146,7 +160,8 @@ class RtspCamera(Node):
         if not ok:
             return
         try:
-            stamp = self.get_clock().now().to_msg()
+            stamp = (self.get_clock().now()
+                     + rclpy.duration.Duration(seconds=self.stamp_shift)).to_msg()
 
             image = Image()
             image.header.stamp = stamp

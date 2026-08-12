@@ -131,6 +131,16 @@ if [ -f "$STREAMS_FILE" ]; then
 		case "${name:-}" in ''|\#*) continue ;; esac
 		args+=(--stream "name=$name,regex=$regex,bitrate=${bitrate:-4000},fps=${fps:-30}")
 	done < "$STREAMS_FILE"
+	# The capture-time side channel. RTSP carries no usable capture time, so
+	# the streamer reports one datagram for each frame and this forwards them
+	# to the message bus. See modules/sim/frame_clock.py.
+	if [ "${FRAME_CLOCK:-1}" = "1" ]; then
+		log "Starting the frame clock on udp/${FRAME_CLOCK_PORT:-5599}"
+		python3 /opt/sim/frame_clock.py --port "${FRAME_CLOCK_PORT:-5599}" &
+		children+=($!)
+		args+=(--frame-clock "127.0.0.1:${FRAME_CLOCK_PORT:-5599}")
+	fi
+
 	log "Starting the camera encoders from $(basename "$STREAMS_FILE")"
 	gz_video_streamer "${args[@]}" &
 	children+=($!)

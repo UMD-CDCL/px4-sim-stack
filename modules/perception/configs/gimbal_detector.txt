@@ -40,7 +40,7 @@ width=1280
 height=720
 enable-padding=0
 nvbuf-memory-type=0
-attach-sys-ts-as-ntp=1
+attach-sys-ts-as-ntp=0
 
 # -------------------------------------------------------------- the detector
 [primary-gie]

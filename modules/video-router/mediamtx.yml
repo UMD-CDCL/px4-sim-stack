@@ -17,6 +17,26 @@
 logLevel: info
 logDestinations: [stdout]
 
+# The HTTP API answers "which streams are live right now", which is the first
+# question when a player says it cannot connect. `px4sim streams` reads it.
+api: true
+apiAddress: :9997
+
+# MediaMTX grants anonymous users publish, read and playback, but not api. The
+# API therefore answers 401 until it is granted here. Publishing and reading
+# stay open to anyone on the compose network, and the API is limited to this
+# host and the docker subnet, because port 9997 is published.
+authInternalUsers:
+  - user: any
+    permissions:
+      - action: publish
+      - action: read
+      - action: playback
+  - user: any
+    ips: ['127.0.0.1/32', '::1/128', '172.16.0.0/12', '10.0.0.0/8', '192.168.0.0/16']
+    permissions:
+      - action: api
+
 readTimeout: 10s
 writeTimeout: 10s
 writeQueueSize: 512

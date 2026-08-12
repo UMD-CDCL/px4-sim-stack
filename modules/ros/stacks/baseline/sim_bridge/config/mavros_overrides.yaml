@@ -22,6 +22,14 @@
     plugin_allowlist:
       - distance_sensor
 
+# Without this there is no map -> base_link transform, and every projection and
+# localization fails with "no transform at the frame time". MAVROS ships it off.
+/mavros/local_position:
+  ros__parameters:
+    tf.send: true
+    tf.frame_id: "map"
+    tf.child_frame_id: "base_link"
+
 /mavros/distance_sensor:
   ros__parameters:
     base_frame_id: "base_link"

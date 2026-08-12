@@ -8,8 +8,16 @@
 // PX4 ships a similar plugin, but that one binds to the first camera it finds.
 // This program handles one stream for each camera.
 //
+// It also reports, for every frame it encodes, the wall-clock time at which
+// Gazebo produced that frame. H.264 over RTSP carries no usable capture time:
+// RTCP sender reports do not survive the relay, and DeepStream stamps its
+// output at inference time, tens of milliseconds later. Anything that localizes
+// a detection needs the capture time instead, so the streamer sends it out of
+// band as one small UDP datagram for each frame.
+//
 // Usage:
 //   gz_video_streamer --sink-base rtsp://video-router:8554 \
+//       --frame-clock 127.0.0.1:5599 \
 //       --stream name=gimbal,regex=.*/camera_link/sensor/camera/image$,bitrate=4000,fps=30
 //
 // Copyright (c) 2026. BSD 3-Clause, to match the PX4 plugin it takes its
@@ -20,6 +28,11 @@
 
 #include <gz/msgs/image.pb.h>
 #include <gz/transport/Node.hh>
+
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <chrono>
@@ -75,6 +88,56 @@ const char *GstFormatFor(gz::msgs::PixelFormatType t) {
   }
 }
 
+// Sends one datagram for each frame: which camera, which frame, and when it
+// was captured. frame_clock.py forwards these to the message bus.
+class FrameClock {
+ public:
+  bool Open(const std::string &hostport) {
+    const auto colon = hostport.rfind(':');
+    if (colon == std::string::npos) return false;
+    const std::string host = hostport.substr(0, colon);
+    const int port = std::atoi(hostport.substr(colon + 1).c_str());
+
+    fd_ = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd_ < 0) return false;
+    std::memset(&addr_, 0, sizeof(addr_));
+    addr_.sin_family = AF_INET;
+    addr_.sin_port = htons(static_cast<uint16_t>(port));
+    if (inet_aton(host.c_str(), &addr_.sin_addr) == 0) { Close(); return false; }
+    return true;
+  }
+
+  void Close() { if (fd_ >= 0) { ::close(fd_); fd_ = -1; } }
+  bool open() const { return fd_ >= 0; }
+
+  // capture_ns is the wall clock read the moment the image arrived from
+  // Gazebo. The gz header also carries a simulation-time stamp, which is not
+  // the same thing: it drifts from the wall clock whenever the simulation does
+  // not run at real time. TF and MAVROS both work in wall clock, so that is
+  // what travels with the frame. The simulation stamp rides along for anyone
+  // who wants to line frames up against a Gazebo log.
+  void Report(const std::string &stream, uint64_t seq, int64_t capture_ns,
+              int64_t sim_sec, int64_t sim_nsec) {
+    if (fd_ < 0) return;
+    char buf[256];
+    const int n = std::snprintf(
+        buf, sizeof(buf),
+        "{\"stream\":\"%s\",\"seq\":%llu,\"capture_unix_ns\":%lld,"
+        "\"sim_time_ns\":%lld}",
+        stream.c_str(), static_cast<unsigned long long>(seq),
+        static_cast<long long>(capture_ns),
+        static_cast<long long>(sim_sec) * 1000000000LL + sim_nsec);
+    if (n > 0) {
+      ::sendto(fd_, buf, static_cast<size_t>(n), MSG_DONTWAIT,
+               reinterpret_cast<struct sockaddr *>(&addr_), sizeof(addr_));
+    }
+  }
+
+ private:
+  int fd_ = -1;
+  struct sockaddr_in addr_ {};
+};
+
 struct Spec {
   std::string name;
   std::string regex;
@@ -86,8 +149,9 @@ struct Spec {
 // One camera. It owns a gz subscription and a GStreamer pipeline.
 class Stream {
  public:
-  Stream(Spec spec, std::string encoder)
-      : spec_(std::move(spec)), encoder_(std::move(encoder)), pattern_(spec_.regex) {}
+  Stream(Spec spec, std::string encoder, FrameClock *clock)
+      : spec_(std::move(spec)), encoder_(std::move(encoder)),
+        pattern_(spec_.regex), clock_(clock) {}
 
   ~Stream() { Teardown(); }
 
@@ -216,6 +280,19 @@ class Stream {
   }
 
   void OnImage(const gz::msgs::Image &msg) {
+    // Read the clock first. Everything below this line is encoder work, and
+    // the point of the report is the moment the frame existed, not the moment
+    // we finished with it.
+    const int64_t capture_ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count();
+    ++frames_;
+    if (clock_ != nullptr && clock_->open()) {
+      clock_->Report(spec_.name, SeqOf(msg), capture_ns,
+                     msg.header().stamp().sec(), msg.header().stamp().nsec());
+    }
+
     const char *format = GstFormatFor(msg.pixel_format_type());
     if (format == nullptr) {
       if (!warned_format_) {
@@ -244,9 +321,24 @@ class Stream {
     }
   }
 
+  // Gazebo puts the camera's own frame counter in the header key/value pairs.
+  // Prefer it over our own count: it survives a reconnect and it matches what
+  // a Gazebo log shows. Fall back to counting if the field is absent.
+  uint64_t SeqOf(const gz::msgs::Image &msg) const {
+    for (int i = 0; i < msg.header().data_size(); ++i) {
+      const auto &kv = msg.header().data(i);
+      if (kv.key() == "seq" && kv.value_size() > 0) {
+        return std::strtoull(kv.value(0).c_str(), nullptr, 10);
+      }
+    }
+    return frames_;
+  }
+
   Spec spec_;
   std::string encoder_;
   std::regex pattern_;
+  FrameClock *clock_ = nullptr;
+  uint64_t frames_ = 0;
   gz::transport::Node node_;
   std::string topic_;
   bool bound_ = false;
@@ -271,6 +363,9 @@ void Usage() {
       << "                      fps      default 30\n"
       << "  --encoder FRAG    GStreamer encoder fragment. Overrides the\n"
       << "                    automatic choice between nvh264enc and x264enc.\n"
+      << "  --frame-clock H:P Send one UDP datagram for each frame to H:P,\n"
+      << "                    carrying the capture time. Without it nothing\n"
+      << "                    downstream can know when a frame was taken.\n"
       << "  --no-cuda         Force the software encoder.\n";
 }
 
@@ -282,6 +377,7 @@ int main(int argc, char **argv) {
   std::signal(SIGTERM, OnSignal);
 
   std::string sink_base = "rtsp://video-router:8554";
+  std::string frame_clock_addr;
   std::string encoder_override;
   bool cuda = true;
   std::vector<Spec> specs;
@@ -293,6 +389,7 @@ int main(int argc, char **argv) {
     if (i + 1 >= argc) { std::cerr << "missing value for " << a << std::endl; return 2; }
     const std::string v = argv[++i];
     if (a == "--sink-base") { sink_base = v; continue; }
+    if (a == "--frame-clock") { frame_clock_addr = v; continue; }
     if (a == "--encoder") { encoder_override = v; continue; }
     if (a == "--stream") {
       Spec s;
@@ -325,6 +422,21 @@ int main(int argc, char **argv) {
                                    : encoder_override)
             << std::endl;
 
+  FrameClock clock;
+  if (!frame_clock_addr.empty()) {
+    if (clock.Open(frame_clock_addr)) {
+      std::cout << "frame clock: reporting capture times to " << frame_clock_addr
+                << std::endl;
+    } else {
+      std::cerr << "frame clock: cannot use " << frame_clock_addr
+                << ". Detections will fall back to estimated capture times."
+                << std::endl;
+    }
+  } else {
+    std::cerr << "frame clock: not configured. Detections will fall back to "
+              << "estimated capture times." << std::endl;
+  }
+
   std::vector<std::unique_ptr<Stream>> streams;
   for (auto &s : specs) {
     std::string enc = encoder_override;
@@ -334,7 +446,7 @@ int main(int argc, char **argv) {
                 : "x264enc tune=zerolatency speed-preset=ultrafast key-int-max=30 bitrate=" +
                       std::to_string(s.bitrate_kbps);
     }
-    streams.push_back(std::make_unique<Stream>(s, enc));
+    streams.push_back(std::make_unique<Stream>(s, enc, &clock));
   }
 
   gz::transport::Node discovery;
@@ -365,6 +477,7 @@ int main(int argc, char **argv) {
 
   std::cout << "stopping" << std::endl;
   streams.clear();
+  clock.Close();
   gst_deinit();
   return 0;
 }

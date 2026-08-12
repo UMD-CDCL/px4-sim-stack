@@ -19,11 +19,27 @@ message converter config:
 This node reads both. The field order inside an object string is not identical
 across DeepStream releases, so bbox_format selects it.
 
+The timestamp matters as much as the boxes
+-----------------------------------------
+Each payload carries `@timestamp`, which DeepStream sets when the frame enters
+its pipeline, before inference. That instant is what the header carries. Using
+the arrival time instead would fold in decode, inference and transport, and the
+localizer would then look up the drone pose for the wrong moment. Measured on
+this stack, DeepStream's timestamp trails true capture by about 16 ms with
+about 6 ms of jitter, so the remaining error is small and, more usefully,
+does not grow with GPU load.
+
+`scripts/measure-latency.py` measures that offset against the frame clock the
+simulator publishes on `video/frames/<stream>`. Feed the result back through
+`time_offset` if you want the last few milliseconds.
+
 Parameters
     host, port     the MQTT broker
     topic          MQTT topic to subscribe to
     bbox_format    ltrb (default) or ltwh
     frame_id       frame_id on the published messages
+    time_offset    seconds added to the payload timestamp, for calibration
+    max_age        drop a payload older than this, in seconds
 
 Topics
     /perception/detections   vision_msgs/Detection2DArray
@@ -31,11 +47,13 @@ Topics
 
 from __future__ import annotations
 
+import datetime
 import json
 
 import paho.mqtt.client as mqtt
 import rclpy
 from rclpy.node import Node
+from builtin_interfaces.msg import Time
 from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from vision_msgs.msg import (
     BoundingBox2D,
@@ -60,11 +78,19 @@ class DetectionsBridge(Node):
         self.declare_parameter("topic", "perception/detections")
         self.declare_parameter("bbox_format", "ltrb")
         self.declare_parameter("frame_id", "camera_optical_frame")
+        self.declare_parameter("time_offset", 0.0)
+        self.declare_parameter("max_age", 2.0)
 
         self.bbox_format = self.get_parameter("bbox_format").value
         self.frame_id = self.get_parameter("frame_id").value
+        self.time_offset = float(self.get_parameter("time_offset").value)
+        self.max_age = float(self.get_parameter("max_age").value)
         self.count = 0
         self.malformed = 0
+        self.no_stamp = 0
+        self.stale = 0
+        self.lag_sum = 0.0
+        self.lag_n = 0
 
         self.pub = self.create_publisher(
             Detection2DArray, "/perception/detections", DETECTION_QOS
@@ -112,12 +138,54 @@ class DetectionsBridge(Node):
             self.malformed += 1
             return
 
+        stamp, lag = self._frame_time(payload)
+        if stamp is None:
+            # Without a frame time the localizer cannot pick the right pose, and
+            # a wrong pose is worse than no answer. Drop it and say so.
+            self.no_stamp += 1
+            return
+        if lag is not None and lag > self.max_age:
+            self.stale += 1
+            return
+
         array = Detection2DArray()
-        array.header.stamp = self.get_clock().now().to_msg()
+        array.header.stamp = stamp
         array.header.frame_id = self.frame_id
         array.detections = detections
         self.pub.publish(array)
         self.count += len(detections)
+
+    # -------------------------------------------------------------- timestamp
+    def _frame_time(self, payload: dict):
+        """The instant the frame entered DeepStream, as a ROS stamp.
+
+        Returns (stamp, lag_seconds). lag is how far behind the clock the frame
+        is, which is the pipeline latency and is worth watching.
+        """
+        raw = payload.get("@timestamp")
+        if not raw:
+            return None, None
+        try:
+            # DeepStream writes RFC 3339 with a Z suffix and millisecond
+            # precision, which fromisoformat handles once Z becomes +00:00.
+            when = datetime.datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except ValueError:
+            return None, None
+
+        seconds = when.timestamp() + self.time_offset
+        now = self.get_clock().now()
+        lag = now.nanoseconds / 1e9 - seconds
+        self.lag_sum += lag
+        self.lag_n += 1
+
+        stamp = Time()
+        stamp.sec = int(seconds)
+        stamp.nanosec = int(round((seconds - int(seconds)) * 1e9))
+        # Rounding can carry into the next second.
+        if stamp.nanosec >= 1_000_000_000:
+            stamp.sec += 1
+            stamp.nanosec -= 1_000_000_000
+        return stamp, lag
 
     # ------------------------------------------------------------------ parse
     def _parse(self, payload: dict) -> list[Detection2D] | None:
@@ -187,11 +255,15 @@ class DetectionsBridge(Node):
         return det
 
     def _report(self) -> None:
+        lag = (self.lag_sum / self.lag_n * 1000.0) if self.lag_n else float("nan")
         self.get_logger().info(
-            f"{self.count} detections in the last minute, {self.malformed} unparsed"
+            f"{self.count} detections in the last minute, mean pipeline lag "
+            f"{lag:.0f} ms, {self.malformed} unparsed, {self.no_stamp} without a "
+            f"frame time, {self.stale} stale"
         )
-        self.count = 0
-        self.malformed = 0
+        self.count = self.malformed = self.no_stamp = self.stale = 0
+        self.lag_sum = 0.0
+        self.lag_n = 0
 
     def destroy_node(self) -> bool:
         self.client.loop_stop()

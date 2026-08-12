@@ -46,7 +46,22 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo, ROS 2 and DeepStream in containers
     status              What is running, and the addresses to use
     logs [service]      Follow the logs
     console             The PX4 pxh> prompt. Detach with Ctrl-P Ctrl-Q
-    shell <service>     A shell inside sim, ros, qgc, perception or hub
+
+  ${BOLD}Get inside a container${OFF}
+    sim                 PX4, Gazebo and the camera encoders
+    ros                 ROS 2 Jazzy, with the stack overlay sourced
+    qgc                 QGroundControl
+    perception          DeepStream
+    hub                 mavlink-router
+    bus                 the MQTT broker
+    video               the video router  ${DIM}(no shell in that image)${OFF}
+    shell <service>     any other service
+
+  ${BOLD}Look at the data${OFF}
+    streams             Which video streams are live right now
+    view [stream]       Play a stream. Default: gimbal
+    detections          Follow the MQTT detection topic
+    topics              List the ROS topics
 
   ${BOLD}Scenes and targets${OFF}
     scene <name>        Switch the world and restart the simulator
@@ -141,6 +156,56 @@ shell|sh)
 		hub) svc=mavlink-hub ;;
 	esac
 	$DC exec "$svc" bash 2>/dev/null || $DC exec "$svc" sh
+	;;
+
+sim|ros|qgc|perception|hub|bus|video)
+	svc=$cmd
+	case "$cmd" in hub) svc=mavlink-hub ;; bus) svc=message-bus ;; video) svc=video-router ;; esac
+	$DC ps --status running --services 2>/dev/null | grep -qx "$svc" \
+		|| die "$svc is not running. Run: ./px4sim start"
+	# Probe quietly first. Attaching to a missing shell prints a raw OCI error
+	# before anything of ours can explain what happened.
+	for candidate in bash sh; do
+		if $DC exec -T "$svc" "$candidate" -c 'exit 0' >/dev/null 2>&1; then
+			[ "$svc" = ros ] && exec $DC exec "$svc" "$candidate" -l
+			exec $DC exec "$svc" "$candidate"
+		fi
+	done
+	die "$svc has no shell. That image ships one binary and nothing else.
+    Look at it from outside instead:
+      ./px4sim logs $svc
+      docker inspect px4simstack-$svc-1"
+	;;
+
+streams)
+	say "Video paths"
+	./scripts/list-streams.py "${MEDIAMTX_API:-http://localhost:9997}"
+	echo
+	echo "  Play one with:  ./px4sim view gimbal"
+	;;
+
+view)
+	stream=${1:-gimbal}
+	url="rtsp://127.0.0.1:8554/$stream"
+	command -v ffplay >/dev/null || die "ffplay is not installed. Run: sudo apt install ffmpeg"
+	say "Playing $url   (close the window or press q)"
+	# Force TCP and drop every buffer we can. Without -rtsp_transport tcp a
+	# client can pick UDP, which does not survive docker's NAT.
+	exec ffplay -hide_banner -loglevel warning \
+		-rtsp_transport tcp -fflags nobuffer -flags low_delay \
+		-avioflags direct -probesize 32 -analyzeduration 0 \
+		-window_title "$stream" "$url"
+	;;
+
+detections)
+	say "Following mqtt://localhost:1883 topic perception/detections"
+	echo "${DIM}  Nothing appears until the perception profile runs and the camera sees a target.${OFF}"
+	$DC exec message-bus mosquitto_sub -h 127.0.0.1 -t 'perception/#' -v
+	;;
+
+topics)
+	$DC exec ros bash -lc 'ros2 topic list' 2>/dev/null \
+		|| die "The ros container is not running. Run: ./px4sim start ros"
 	;;
 
 scene)
