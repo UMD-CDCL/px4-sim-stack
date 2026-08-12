@@ -96,6 +96,7 @@ class GroundProjector(Node):
             self.create_timer(2.0, self._publish_grid)
 
         self.ok = self.miss = 0
+        self.bearing = None
         self.create_timer(30.0, self._report)
 
     def _on_info(self, msg: CameraInfo) -> None:
@@ -156,6 +157,15 @@ class GroundProjector(Node):
             p.header = poly.header
             p.point.x, p.point.y, p.point.z = float(hit[0]), float(hit[1]), float(hit[2])
             self.boresight_pub.publish(p)
+        # The compass bearing of the image's right edge, laid on the ground.
+        # This is the robust way to compare two cameras' orientation. Euler
+        # angles are not: a camera pointing straight down sits at a gimbal lock
+        # singularity, where roll and yaw trade off against each other and
+        # neither number means anything on its own. The footprint has no such
+        # problem, because it is measured rather than decomposed.
+        import math as _m
+        c0, c1 = corners[0], corners[1]
+        self.bearing = _m.degrees(_m.atan2(c1[1] - c0[1], c1[0] - c0[0]))
         self.ok += 1
 
     def _publish_grid(self) -> None:
@@ -173,6 +183,12 @@ class GroundProjector(Node):
         self.grid_pub.publish(m)
 
     def _report(self) -> None:
+        if self.bearing is not None:
+            self.get_logger().info(
+                f"footprint: image-right bearing {self.bearing:+7.2f} deg in "
+                f"{self.reference}. Subtract the vehicle heading to get the "
+                f"camera's rotation against the airframe; a camera square with "
+                f"the nose reads -90.")
         if self.ok == 0 and self.miss > 0:
             self.get_logger().warn(
                 f"no footprint in the last 30 s ({self.miss} attempts). Either "
