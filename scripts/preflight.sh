@@ -24,13 +24,15 @@ if command -v nvidia-smi >/dev/null 2>&1; then
 	gpu=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
 	vram=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader | head -1)
 	ok "GPU: $gpu ($vram), driver $drv"
+	# Which release the driver allows, and which one the stack will therefore
+	# build. Reported rather than left to the reader, because the two used to
+	# disagree silently whenever the repository moved to another machine.
 	major=${drv%%.*}
 	if [ "$major" -lt 570 ]; then
 		bad "driver $drv is below 570.133. DeepStream 8.0 will not start."
-	elif [ "$major" -lt 590 ]; then
-		ok "driver supports DeepStream 8.0 (DeepStream 9.0 needs 590.48)"
 	else
-		ok "driver supports DeepStream 9.0. You can raise DS_IMAGE in .env."
+		ok "$(./scripts/ds-select.sh --explain)"
+		ok "perception builds $(./scripts/ds-select.sh --image)"
 	fi
 else
 	bad "nvidia-smi not found. Install the NVIDIA driver."
@@ -99,8 +101,10 @@ fi
 
 sed -i "s|^HOST_UID=.*|HOST_UID=$(id -u)|" .env
 sed -i "s|^HOST_GID=.*|HOST_GID=$(id -g)|" .env
-sed -i "s|^DISPLAY=.*|DISPLAY=${DISPLAY:-:0}|" .env
-ok ".env host values set (HOST_UID=$(id -u) HOST_GID=$(id -g) DISPLAY=${DISPLAY:-:0})"
+# DISPLAY stays out of .env. The containers take it from the session that
+# starts them, because a value in the file goes stale on another machine.
+sed -i "/^DISPLAY=/d" .env
+ok ".env host values set (HOST_UID=$(id -u) HOST_GID=$(id -g))"
 
 # --------------------------------------------------------------- source trees
 for d in src/PX4-Autopilot src/ros2_ws; do

@@ -47,6 +47,11 @@ services:
       SCENARIO: ${SCENARIO:-}
       GZ_GUI: ${GZ_GUI:-1}
       VIDEO_SINK_BASE: rtsp://video-router:8554
+      # The streamer probes the H.264 encoders and takes the first that works,
+      # so a GPU whose driver has dropped the older NVENC presets falls through
+      # to the current element instead of publishing nothing. Set this to a
+      # GStreamer fragment to name the encoder yourself and skip the probe.
+      VIDEO_ENCODER: ${VIDEO_ENCODER:-}
       # Frame capture times go here. RTSP cannot carry them, and every
       # localized detection depends on them. See modules/sim/frame_clock.py.
       MQTT_HOST: message-bus
@@ -244,10 +249,11 @@ services:
       SCORING_GATE_M: ${SCORING_GATE_M:-2.0}
       GIMBAL_HFOV: ${GIMBAL_HFOV:-2.0}
       NADIR_HFOV: ${NADIR_HFOV:-1.74}
-      # Take every Nth pixel when laying the camera image on the ground plane.
-      # Step 1 is the full 1920x1080 frame: 2.07 million points, 33 MB in one
-      # message, for each camera. Step 2 gives a 960x540 grid at 8.3 MB.
-      GROUND_IMAGE_STEP: ${GROUND_IMAGE_STEP:-1}
+      # The grid each camera image is sampled to before it is laid on the
+      # ground plane. 640x360 is 230 thousand points and 3.7 MB for each
+      # camera. 1920x1080 is 2.07 million points and 33 MB, which held a core
+      # at full load and delivered nothing.
+      GROUND_IMAGE_SIZE: ${GROUND_IMAGE_SIZE:-640x360}
       GROUND_IMAGE_RATE: ${GROUND_IMAGE_RATE:-1.0}
       # foxglove_bridge send buffer, bytes. The default 10 MB is smaller than
       # one ground projection cloud, and over the limit the bridge drops the
@@ -325,7 +331,11 @@ services:
       context: ./modules/perception
       args:
         DS_IMAGE: ${DS_IMAGE:-nvcr.io/nvidia/deepstream:8.0-samples-multiarch}
-    image: px4simstack/perception:ds8
+    # DS_TAG follows DS_IMAGE, so DeepStream 8.0 and 9.0 build to two names.
+    # Sharing one name lets a release change overwrite the image already built,
+    # and the only symptom is a container that stops at the first CUDA call.
+    # Both front doors set the pair from scripts/ds-select.sh.
+    image: px4simstack/perception:${DS_TAG:-ds8}
     hostname: perception
     runtime: nvidia
     environment:

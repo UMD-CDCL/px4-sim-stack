@@ -133,7 +133,7 @@ Start a subset by naming the profiles:
 | ROS 2 | Jazzy | The long term release for Ubuntu 24.04, supported to May 2029. Kilted and Lyrical are newer, and Jazzy has binary packages for everything this stack uses. |
 | Gazebo | Harmonic | The Gazebo release that PX4 v1.17 installs and that pairs with Jazzy. |
 | QGroundControl | v5.0.8 | The mature v5.0 line. v5.1.0 arrived on 30 July 2026, twelve days before this stack was written. Set `QGC_REF=v5.1.0` in `.env` to move. |
-| DeepStream | 8.0 | **A hard limit, not a preference.** DeepStream 9.0 requires NVIDIA driver 590.48. This machine runs 580.173. See [docs/troubleshooting.md](docs/troubleshooting.md). |
+| DeepStream | 8.0 or 9.0 | Chosen from the driver, because the driver sets the ceiling: 9.0 needs 590.48 and 8.0 needs 570.133. `DS_VERSION=auto` reads it and takes the newest that runs. Pin it to reproduce a result elsewhere. See [docs/troubleshooting.md](docs/troubleshooting.md). |
 
 Every version is one line in `.env`.
 

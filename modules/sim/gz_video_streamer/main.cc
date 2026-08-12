@@ -75,6 +75,70 @@ bool HaveFactory(const char *name) {
   return true;
 }
 
+// Whether an encoder fragment can encode on this machine, which is a different
+// question from whether it is installed. nvh264enc loads and reports "H.264
+// encoding supported" on any NVIDIA GPU, then fails at set_format with
+// "Selected preset not supported" on a driver that has dropped the preset
+// GUIDs it asks for. The camera streams then stay down and the only clue is a
+// GStreamer error with no encoder named in it.
+//
+// So run the candidate rather than trusting the registry: push a few frames
+// through the real element and keep only what reaches end of stream. The shape
+// below matches BuildLocked, because negotiation is part of what is being
+// tested and a probe that converts differently answers a different question.
+bool EncoderWorks(const std::string &fragment) {
+  const std::string desc =
+      "videotestsrc num-buffers=5 ! video/x-raw,format=RGB,width=640,height=480"
+      " ! queue ! videoconvert ! videorate ! video/x-raw,format={ NV12, I420 },framerate=15/1 ! " +
+      fragment + " ! h264parse ! fakesink";
+
+  GError *err = nullptr;
+  GstElement *pipeline = gst_parse_launch(desc.c_str(), &err);
+  if (err != nullptr) g_error_free(err);
+  if (pipeline == nullptr) return false;
+
+  bool ok = false;
+  if (gst_element_set_state(pipeline, GST_STATE_PLAYING) != GST_STATE_CHANGE_FAILURE) {
+    GstBus *bus = gst_element_get_bus(pipeline);
+    GstMessage *msg = gst_bus_timed_pop_filtered(
+        bus, 15 * GST_SECOND,
+        static_cast<GstMessageType>(GST_MESSAGE_EOS | GST_MESSAGE_ERROR));
+    ok = msg != nullptr && GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS;
+    if (msg != nullptr) gst_message_unref(msg);
+    gst_object_unref(bus);
+  }
+  gst_element_set_state(pipeline, GST_STATE_NULL);
+  gst_object_unref(pipeline);
+  return ok;
+}
+
+// The encoders to try, best first. Each one takes bitrate in kbit/s, which is
+// added when the fragment is built.
+struct EncoderChoice {
+  const char *element;
+  const char *options;
+  bool needs_cuda;
+  const char *label;
+};
+
+const EncoderChoice kEncoders[] = {
+    // The current NVENC element. It takes the p1-p7 presets with a separate
+    // tune, which is the interface a recent driver still accepts.
+    {"nvcudah264enc",
+     "gop-size=30 rate-control=cbr tune=low-latency zero-reorder-delay=true b-frames=0", true,
+     "NVENC"},
+    // The older NVENC element, for a GStreamer that predates the one above.
+    // Its presets are the deprecated GUIDs, so newer hardware rejects it and
+    // the probe moves on.
+    {"nvh264enc", "gop-size=30", true, "NVENC, legacy element"},
+    // The software floor. Always available, and it costs a core per camera.
+    {"x264enc", "tune=zerolatency speed-preset=ultrafast key-int-max=30", false, "software"},
+};
+
+std::string EncoderFragment(const EncoderChoice &c, int bitrate_kbps) {
+  return std::string(c.element) + " bitrate=" + std::to_string(bitrate_kbps) + " " + c.options;
+}
+
 // GStreamer caps string for a gz pixel format. An unsupported format returns
 // an empty string, and the stream stays down with one log line.
 const char *GstFormatFor(gz::msgs::PixelFormatType t) {
@@ -242,11 +306,19 @@ class Stream {
 
   bool BuildLocked(int width, int height, const char *format) {
     std::ostringstream p;
+    // Two formats rather than one. Pinning I420 suits x264enc and rules out
+    // nvcudah264enc, which takes NV12 in system memory and nothing else;
+    // leaving the format free lets negotiation settle on Y444, and the stream
+    // then carries High 4:4:4 Predictive, which no NVDEC decodes. DeepStream
+    // reports that as "Feature not supported on this GPU" against the decoder,
+    // several containers away from the encoder that chose it.
+    //
+    // The pair below is what every consumer can read: 8 bit, 4:2:0.
     p << "appsrc name=src is-live=true do-timestamp=true format=time block=false"
       << " ! queue leaky=downstream max-size-buffers=4"
       << " ! videoconvert"
       << " ! videorate"
-      << " ! video/x-raw,format=I420,framerate=" << spec_.fps << "/1"
+      << " ! video/x-raw,format={ NV12, I420 },framerate=" << spec_.fps << "/1"
       << " ! " << encoder_
       << " ! h264parse config-interval=1"
       << " ! " << SinkFragment();
@@ -361,8 +433,8 @@ void Usage() {
       << "                      url      overrides the sink URL\n"
       << "                      bitrate  kbit/s, default 4000\n"
       << "                      fps      default 30\n"
-      << "  --encoder FRAG    GStreamer encoder fragment. Overrides the\n"
-      << "                    automatic choice between nvh264enc and x264enc.\n"
+      << "  --encoder FRAG    GStreamer encoder fragment. Skips the probe that\n"
+      << "                    picks between nvcudah264enc, nvh264enc and x264enc.\n"
       << "  --frame-clock H:P Send one UDP datagram for each frame to H:P,\n"
       << "                    carrying the capture time. Without it nothing\n"
       << "                    downstream can know when a frame was taken.\n"
@@ -416,11 +488,35 @@ int main(int argc, char **argv) {
 
   // One encoder choice for every stream. NVENC keeps the CPU free for the
   // physics loop, which matters more than the small quality difference.
-  const bool have_nvenc = cuda && HaveFactory("nvh264enc");
-  std::cout << "encoder: " << (encoder_override.empty()
-                                   ? (have_nvenc ? "nvh264enc (NVENC)" : "x264enc (software)")
-                                   : encoder_override)
-            << std::endl;
+  //
+  // Each candidate is run before it is chosen, because a GPU encoder can be
+  // installed and still refuse the job. The probe costs a second or two once,
+  // against camera streams that otherwise fail with no encoder named.
+  const EncoderChoice *chosen = nullptr;
+  if (encoder_override.empty()) {
+    const int probe_bitrate = specs.front().bitrate_kbps;
+    for (const auto &c : kEncoders) {
+      if (c.needs_cuda && !cuda) continue;
+      if (!HaveFactory(c.element)) continue;
+      if (!EncoderWorks(EncoderFragment(c, probe_bitrate))) {
+        std::cerr << "encoder: " << c.element
+                  << " is installed but cannot encode here, trying the next one" << std::endl;
+        continue;
+      }
+      chosen = &c;
+      break;
+    }
+    if (chosen == nullptr) {
+      // Nothing passed, software included. Take the software encoder anyway:
+      // its own error is more use than a stream that never starts.
+      chosen = &kEncoders[sizeof(kEncoders) / sizeof(kEncoders[0]) - 1];
+      std::cerr << "encoder: no candidate passed its probe, falling back to " << chosen->element
+                << std::endl;
+    }
+    std::cout << "encoder: " << chosen->element << " (" << chosen->label << ")" << std::endl;
+  } else {
+    std::cout << "encoder: " << encoder_override << " (from --encoder)" << std::endl;
+  }
 
   FrameClock clock;
   if (!frame_clock_addr.empty()) {
@@ -440,12 +536,7 @@ int main(int argc, char **argv) {
   std::vector<std::unique_ptr<Stream>> streams;
   for (auto &s : specs) {
     std::string enc = encoder_override;
-    if (enc.empty()) {
-      enc = have_nvenc
-                ? "nvh264enc bitrate=" + std::to_string(s.bitrate_kbps) + " gop-size=30"
-                : "x264enc tune=zerolatency speed-preset=ultrafast key-int-max=30 bitrate=" +
-                      std::to_string(s.bitrate_kbps);
-    }
+    if (enc.empty()) enc = EncoderFragment(*chosen, s.bitrate_kbps);
     streams.push_back(std::make_unique<Stream>(s, enc, &clock));
   }
 

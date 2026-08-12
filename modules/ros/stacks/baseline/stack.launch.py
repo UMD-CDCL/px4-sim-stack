@@ -449,17 +449,16 @@ def generate_launch_description() -> LaunchDescription:
                     "optical_frame": optical_for(cam),
                     "reference_frame": REFERENCE_FRAME,
                     "use_rel_alt": True,
-                    # Take every Nth pixel in each direction. Step 1 projects
-                    # the full 1920x1080 frame, which is the point: the ground
-                    # projection is the camera image laid flat, and it should
-                    # carry the resolution the camera actually rendered.
+                    # The resolution each frame is sampled down to before it is
+                    # projected. Both cameras use the same grid, so this one
+                    # number decides the cost for all of them.
                     #
-                    # It is not cheap. 2.07 million points at 16 bytes each is
-                    # 33 MB in a single message, for each camera, which is why
-                    # the rate is one a second and why foxglove_bridge below
-                    # gets a 200 MB send buffer. Raise GROUND_IMAGE_STEP to 2
-                    # for a quarter of the points if the link cannot hold it.
-                    "step": int(os.environ.get("GROUND_IMAGE_STEP", "1")),
+                    # 640x360 is 230 thousand points and 3.7 MB for each
+                    # camera. The full 1920x1080 grid is 2.07 million points
+                    # and 33 MB, which held a core at full load and published
+                    # nothing at all. Raise it if you want a sharper backdrop
+                    # and have measured that the link carries it.
+                    "size": os.environ.get("GROUND_IMAGE_SIZE", "640x360"),
                     "rate_hz": float(os.environ.get("GROUND_IMAGE_RATE", "1.0")),
                 }],
             )

@@ -26,6 +26,15 @@ die()  { printf '%s!!! %s%s\n' "$RED" "$*" "$OFF" >&2; exit 1; }
 # shellcheck disable=SC1091
 set -a; . ./.env; set +a
 
+# Which DeepStream this machine can run, from the driver. Resolved here so the
+# perception and ros services get the same answer, and so a repository that
+# moves to a machine with a different driver picks the release that starts
+# there. See scripts/ds-select.sh.
+if [ -x ./scripts/ds-select.sh ]; then
+	eval "$(./scripts/ds-select.sh)"
+	export DS_VERSION DS_IMAGE DS_TAG DS_REASON
+fi
+
 need_sources() {
 	[ -d src/PX4-Autopilot ] || die "No PX4 source. Run: ./px4sim setup"
 }

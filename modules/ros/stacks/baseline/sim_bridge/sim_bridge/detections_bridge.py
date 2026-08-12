@@ -35,15 +35,18 @@ simulator publishes on `video/frames/<stream>`. Feed the result back through
 
 Which pixels the boxes are counted in
 -------------------------------------
-DeepStream reports boxes in its own coordinate space, and that space is set by
-`[tiled-display]` width and height in the deepstream-app config. Not by
-`[streammux]`, and it applies even when tiled display is disabled. Leave those
-keys out and deepstream-app uses its built-in 1280x720, whatever the camera
-sends.
+DeepStream reports boxes in the coordinate space of `[streammux]` width and
+height, which is the resolution nvstreammux scales every source to. With tiled
+display disabled, deepstream-app builds the pipeline through nvstreamdemux, and
+nothing between nvinfer and the sink rescales the object metadata.
 
-That is a quiet failure. With 1080p cameras and no tiled-display size, every
-box arrived at two thirds of its true position and size: still a plausible
-looking box, on the wrong part of the image, and no error anywhere.
+Enabling `[tiled-display]` changes that. nvmultistreamtiler composites into its
+own width and height and moves the metadata with it, so the boxes then arrive
+in tiled-display coordinates instead. This stack keeps tiled display off and
+sets `[streammux]` to the camera resolution, so the two already agree.
+
+That makes a mismatch quiet when it does happen. Every box is still a plausible
+looking box, just on the wrong part of the image, and nothing logs an error.
 
 So the boxes are scaled here, into the size the live CameraInfo reports. When
 the two agree the scale is 1 and nothing happens, which is the normal case;

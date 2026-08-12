@@ -20,11 +20,17 @@ net-scale-factor=0.00392156862745098
 onnx-file=/opt/perception/models/Primary_Detector/resnet18_trafficcamnet_pruned.onnx
 # nvinfer generates this name itself and saves next to the ONNX. Naming the
 # same path here lets the next start reuse it instead of rebuilding.
-model-engine-file=/opt/perception/models/Primary_Detector/resnet18_trafficcamnet_pruned.onnx_b2_gpu0_fp16.engine
+#
+# The name carries the batch size. Change batch-size below and this has to
+# change with it, or nvinfer builds an engine, saves it under its own name, and
+# rebuilds it again on every start because the name here never matches.
+model-engine-file=/opt/perception/models/Primary_Detector/resnet18_trafficcamnet_pruned.onnx_b1_gpu0_fp16.engine
 labelfile-path=/opt/perception/models/Primary_Detector/labels.txt
 int8-calib-file=/opt/perception/models/Primary_Detector/cal_trt.bin
-# Must match the streammux batch size, which is one slot per camera.
-batch-size=2
+# Must match the streammux batch size. Each camera has its own pipeline with
+# one source, so that is one, not one per camera. It read 2 while the two
+# cameras still shared a batched pipeline.
+batch-size=1
 process-mode=1
 model-color-format=0
 # 0=FP32 1=INT8 2=FP16. The RTX 3070 has fast FP16 and the accuracy loss is

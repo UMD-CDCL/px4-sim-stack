@@ -131,6 +131,13 @@ if [ -f "$STREAMS_FILE" ]; then
 		case "${name:-}" in ''|\#*) continue ;; esac
 		args+=(--stream "name=$name,regex=$regex,bitrate=${bitrate:-4000},fps=${fps:-30}")
 	done < "$STREAMS_FILE"
+	# The streamer probes the encoders and takes the first that works. Set
+	# VIDEO_ENCODER to a GStreamer fragment to skip that and name your own:
+	#   VIDEO_ENCODER='x264enc tune=zerolatency speed-preset=ultrafast bitrate=4000'
+	if [ -n "${VIDEO_ENCODER:-}" ]; then
+		args+=(--encoder "$VIDEO_ENCODER")
+	fi
+
 	# The capture-time side channel. RTSP carries no usable capture time, so
 	# the streamer reports one datagram for each frame and this forwards them
 	# to the message bus. See modules/sim/frame_clock.py.
@@ -172,9 +179,14 @@ cd "$BUILD_DIR/rootfs"
 
 # -s runs our startup script instead of the stock one. Ours sources the stock
 # script first, then adds the link that pushes to the hub. See px4-rcS for why.
+#
+# PX4 needs the trailing rootfs path when you give it -s. PX4 links etc/ into
+# the working directory from that path. It falls back to its own build
+# directory only without -s. With -s and no path, px4-rcS cannot find the
+# stock rcS.
 PX4_RCS=${PX4_RCS:-/opt/sim/px4-rcS}
 if [ -f "$PX4_RCS" ] && [ -n "${MAVLINK_HUB_IP:-}" ]; then
-	exec "$BUILD_DIR/bin/px4" -s "$PX4_RCS"
+	exec "$BUILD_DIR/bin/px4" -s "$PX4_RCS" "$BUILD_DIR/etc"
 fi
 warn "No PX4_RCS or no MAVLINK_HUB_IP. Using the stock PX4 startup."
 warn "Telemetry then depends on the hub keepalive, and a hub restart needs a sim restart."

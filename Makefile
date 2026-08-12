@@ -11,6 +11,13 @@ include .env
 export
 endif
 
+# Which DeepStream this machine can run, from the driver. These override the
+# .env values above, which is the point: the release that starts here is a
+# property of this machine, not of the file. See scripts/ds-select.sh.
+DS_VERSION := $(shell ./scripts/ds-select.sh --version)
+DS_IMAGE   := $(shell ./scripts/ds-select.sh --image)
+DS_TAG     := $(shell ./scripts/ds-select.sh --tag)
+
 .DEFAULT_GOAL := help
 .PHONY: help preflight bootstrap x11 build build-% up up-core down restart ps logs \
         sim ros qgc perception hub px4-console scenario scene reset \

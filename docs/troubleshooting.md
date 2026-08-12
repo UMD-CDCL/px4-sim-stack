@@ -23,10 +23,17 @@ DeepStream refuses to start when the driver is older than the release needs.
 nvidia-smi --query-gpu=driver_version --format=csv,noheader
 ```
 
-If your driver is below the number for the image in `DS_IMAGE`, you have two
+`DS_VERSION=auto` reads that number and picks the newest release the driver
+supports, so this is normally chosen for you. `./px4sim doctor` prints the
+choice and the reason for it.
+
+If you pin `DS_VERSION` or `DS_IMAGE` below the driver's number, you have two
 choices: use the older DeepStream, or update the driver. There is no third
 option, and no container flag works around it. A DeepStream 9.0 image on disk
 does not mean the driver can run it.
+
+Each release builds to its own name, `px4simstack/perception:ds8` and
+`:ds9`, so moving between them rebuilds rather than overwrites.
 
 ### Gazebo renders on the CPU, and the frame rate is 5
 
@@ -516,7 +523,9 @@ make build-ros
 The DeepStream image is 33 GB, and that is upstream. The `-samples` tag carries
 sample models and videos. `nvcr.io/nvidia/deepstream:8.0-triton-multiarch` is
 smaller, and it does not ship the TrafficCamNet model this stack uses as its
-default detector. Change `DS_IMAGE` in `.env` after you supply your own model.
+default detector. Set `DS_IMAGE` in `.env` after you supply your own model.
+That overrides `DS_VERSION`, and `DS_FLAVOUR=triton-multiarch` keeps the
+release automatic while changing only the flavour.
 
 ## Starting over
 
