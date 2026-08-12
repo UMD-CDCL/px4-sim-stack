@@ -244,7 +244,15 @@ services:
       SCORING_GATE_M: ${SCORING_GATE_M:-2.0}
       GIMBAL_HFOV: ${GIMBAL_HFOV:-2.0}
       NADIR_HFOV: ${NADIR_HFOV:-1.74}
-      GROUND_IMAGE_STEP: ${GROUND_IMAGE_STEP:-8}
+      GROUND_IMAGE_STEP: ${GROUND_IMAGE_STEP:-4}
+      # Nadir mounting against base_link, metres and degrees. Trim these if the
+      # downward image is not square with the airframe.
+      NADIR_X: ${NADIR_X:-0.10}
+      NADIR_Y: ${NADIR_Y:-0.0}
+      NADIR_Z: ${NADIR_Z:--0.06}
+      NADIR_ROLL: ${NADIR_ROLL:-0.0}
+      NADIR_PITCH: ${NADIR_PITCH:-90.0}
+      NADIR_YAW: ${NADIR_YAW:-0.0}
       GROUND_IMAGE_RATE: ${GROUND_IMAGE_RATE:-2.0}
       GIMBAL_SOURCE: ${GIMBAL_SOURCE:-auto}
       # follow_vehicle takes yaw from the airframe and pitch from the

@@ -155,7 +155,16 @@ def generate_launch_description() -> LaunchDescription:
             parameters=[{
                 "base_frame": "base_link",
                 "gimbal_mount_xyz": [0.0, 0.0, 0.10],
-                "nadir_xyz": [0.10, 0.0, -0.06],
+                "nadir_xyz": [
+                    float(os.environ.get("NADIR_X", "0.10")),
+                    float(os.environ.get("NADIR_Y", "0.0")),
+                    float(os.environ.get("NADIR_Z", "-0.06")),
+                ],
+                "nadir_rpy_deg": [
+                    float(os.environ.get("NADIR_ROLL", "0.0")),
+                    float(os.environ.get("NADIR_PITCH", "90.0")),
+                    float(os.environ.get("NADIR_YAW", "0.0")),
+                ],
                 "gimbal_reference": "earth",
                 "gimbal_source": os.environ.get("GIMBAL_SOURCE", "auto"),
                 "gimbal_compose": os.environ.get("GIMBAL_COMPOSE", "left"),
@@ -380,7 +389,7 @@ def generate_launch_description() -> LaunchDescription:
                     "reference_frame": REFERENCE_FRAME,
                     "use_rel_alt": True,
                     # 8 turns 1280x720 into about 14 thousand points.
-                    "step": int(os.environ.get("GROUND_IMAGE_STEP", "8")),
+                    "step": int(os.environ.get("GROUND_IMAGE_STEP", "4")),
                     "rate_hz": float(os.environ.get("GROUND_IMAGE_RATE", "2.0")),
                 }],
             )

@@ -14,8 +14,17 @@ other by the same amount, which makes this a direct check on the projection:
 if the imagery lines up with the ground truth markers, the localization is
 correct, and if it does not, the picture shows which way it is out.
 
-Cost is controlled by `step`. At step 8 a 1280x720 frame becomes 160x90, about
-14 thousand points, which is cheap to publish at a couple of hertz.
+Cost is controlled by `step`. At step 4 a 1280x720 frame becomes 320x180, about
+57 thousand points, which reads as a picture rather than as dots once the point
+size in the panel is large enough to close the gaps. Step 2 quadruples that and
+still publishes, at a cost in bandwidth.
+
+This is an approximation of the thing actually wanted, which is the frame
+stretched across its footprint as a texture. Foxglove's 3D panel cannot texture
+a surface: it draws markers, meshes referenced by URL, and point clouds, and
+none of those take a live image. A dense coloured cloud is the closest thing it
+will render, so density and point size are the two knobs that decide how much
+it looks like an image.
 
 Subscribes
     <ns>/image_raw, <ns>/camera_info
@@ -48,7 +57,7 @@ class ImageGroundProjector(Node):
         self.declare_parameter("reference_frame", "map")
         self.declare_parameter("use_rel_alt", True)
         self.declare_parameter("ground_z", 0.0)
-        self.declare_parameter("step", 8)
+        self.declare_parameter("step", 4)
         self.declare_parameter("rate_hz", 2.0)
         self.declare_parameter("max_range", 2000.0)
 

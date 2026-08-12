@@ -151,6 +151,19 @@ class SceneTf(Node):
         self.declare_parameter("base_frame", "base_link")
         self.declare_parameter("gimbal_mount_xyz", [0.0, 0.0, 0.10])
         self.declare_parameter("nadir_xyz", [0.10, 0.0, -0.06])
+        # The nadir mounting, in degrees, roll pitch yaw against base_link.
+        #
+        # 0 90 0 comes straight from the sensor pose in x500_recon/model.sdf,
+        # where a quarter turn about y puts the camera's x axis, which is its
+        # view direction, pointing at the ground. With that, the image's up
+        # edge is the airframe's nose and its right edge is the airframe's
+        # right, so the picture is aligned with the direction of travel.
+        #
+        # It is a parameter because the alignment is worth being able to trim
+        # without a rebuild: a quarter turn wrong here rotates the whole image
+        # against the airframe, and a small error shifts where every detection
+        # from this camera lands.
+        self.declare_parameter("nadir_rpy_deg", [0.0, 90.0, 0.0])
         # Which frame the reported gimbal quaternion is actually in.
         #
         # PX4's simulated gimbal lies about this. In
@@ -350,7 +363,8 @@ class SceneTf(Node):
             # Pitched a quarter turn so the link's x axis looks straight down,
             # matching the sensor pose in x500_recon/model.sdf.
             self._static(self.base, "nadir_cam_link", nadir,
-                         quat_from_rpy(0.0, math.pi / 2, 0.0)),
+                         quat_from_rpy(*(math.radians(v) for v in
+                                         self.get_parameter("nadir_rpy_deg").value))),
             self._static("nadir_cam_link", "nadir_camera_optical_frame",
                          (0, 0, 0), LINK_TO_OPTICAL),
         ])

@@ -103,15 +103,17 @@
         },
         "/camera/nadir/ground_projection": {
           "visible": true,
-          "pointSize": 3,
+          "pointSize": 6,
           "colorMode": "rgb",
-          "colorField": "rgb"
+          "colorField": "rgb",
+          "decayTime": 0
         },
         "/camera/gimbal/ground_projection": {
           "visible": true,
-          "pointSize": 3,
+          "pointSize": 6,
           "colorMode": "rgb",
-          "colorField": "rgb"
+          "colorField": "rgb",
+          "decayTime": 0
         }
       },
       "layers": {},
@@ -122,30 +124,30 @@
       "imageMode": {}
     },
     "Image!nadir": {
-      "cameraState": {
-        "distance": 20,
-        "perspective": false
-      },
       "imageTopic": "/camera/nadir/image_raw",
       "calibrationTopic": "/camera/nadir/camera_info",
-      "synchronize": false,
-      "transformMarkers": false,
       "annotations": {
         "/camera/nadir/annotations": {
           "visible": true
         }
-      }
+      },
+      "synchronize": false,
+      "rotation": 0,
+      "flipHorizontal": false,
+      "flipVertical": false
     },
     "Image!gimbal": {
       "imageTopic": "/camera/gimbal/image_raw",
       "calibrationTopic": "/camera/gimbal/camera_info",
-      "synchronize": false,
-      "transformMarkers": false,
       "annotations": {
         "/camera/gimbal/annotations": {
           "visible": true
         }
-      }
+      },
+      "synchronize": false,
+      "rotation": 0,
+      "flipHorizontal": false,
+      "flipVertical": false
     },
     "map!world": {
       "center": null,
