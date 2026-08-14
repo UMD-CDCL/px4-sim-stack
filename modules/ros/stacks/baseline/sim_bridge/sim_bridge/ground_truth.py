@@ -1,39 +1,22 @@
 #!/usr/bin/env python3
 """Publish where the targets actually are, for scoring detections against.
 
-The simulator places targets from a scenario file, so their positions are known
-exactly. Publishing them alongside the estimated ones turns "the detector seems
-to work" into a number.
+The simulator places targets from a scenario file, so their positions are
+known exactly. This is the one node that reads a simulator file, and that is
+safe: ground truth is evaluation data, nothing in the flight path reads it,
+and on real hardware this node does not run.
 
-About the module boundary
--------------------------
-This is the one node that reads a simulator file. That is deliberate and it is
-safe, because ground truth is evaluation data, not vehicle data. Nothing in the
-flight path reads it, no other node depends on it, and on real hardware you
-simply do not run it. Keeping it here, rather than inventing a truth channel
-through the message bus, keeps the plumbing honest about what it is.
-
-Frames
-------
-Scenario poses are Gazebo world coordinates: x east, y north, in metres from
-the world origin. PX4's local frame starts at the point where the EKF
-initialized, which is where the vehicle spawned, so the two line up. When they
-do not, `origin_offset_xyz` shifts them.
-
-Latitude and longitude come from sim_bridge.geo.MapOrigin, which derives the
-position of local (0, 0) from the drone's own fix. map_overlays and
-detection_localizer use the same helper, so every layer of the Map panel is
-drawn about one origin. See geo.py for how it is derived and why.
+Scenario poses are Gazebo world coordinates, x east and y north in meters.
+PX4's local frame starts where the vehicle spawned, so the two line up.
+origin_offset_xyz shifts them when they do not.
 
 Publishes
-    /ground_truth/markers      visualization_msgs/MarkerArray  (3D panel)
-    /ground_truth/truth_3d     vision_msgs/Detection3DArray    (for the scorer)
-    /ground_truth/geojson      foxglove_msgs/GeoJSON           (Map panel)
+    /ground_truth/markers      visualization_msgs/MarkerArray, blue spheres
+    /ground_truth/truth_3d     vision_msgs/Detection3DArray, for the scorer
 """
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 
@@ -50,23 +33,17 @@ from vision_msgs.msg import (
 )
 from visualization_msgs.msg import Marker, MarkerArray
 
-from sim_bridge.geo import MapOrigin
+from sim_bridge.verdicts import GROUND_TRUTH_COLOR, PERSON_SPHERE_DIAMETER
 
-try:
-    from geographic_msgs.msg import GeoPointStamped
-    HAVE_GEO = True
-except ImportError:
-    HAVE_GEO = False
-
-try:
-    from foxglove_msgs.msg import GeoJSON
-    HAVE_GEOJSON = True
-except ImportError:
-    HAVE_GEOJSON = False
+# ------------------------------------------------------------------- tunables
+# Translucent, so a detection sphere at the same spot stays visible through it.
+MARKER_ALPHA = 0.45
+# Only entities whose name contains one of these count as findable targets.
+# A scenario can also hold props that no detector should find.
+TARGET_NAME_FILTERS = ["person", "casualty"]
 
 LATCHED = QoSProfile(durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
                      history=QoSHistoryPolicy.KEEP_LAST, depth=1)
-
 
 
 class GroundTruth(Node):
@@ -75,26 +52,18 @@ class GroundTruth(Node):
 
         self.declare_parameter("scenario_file", os.environ.get(
             "GROUND_TRUTH_FILE", "/scenes/scenarios/urban_casualties.yaml"))
-        # The scenario file says where entities were asked to go. After
-        # spawning, spawn_scenario.py reads back where Gazebo actually put them
-        # and writes this file. Prefer it: a mesh whose origin is not at its
-        # feet, a model that settled under gravity, or one that failed to spawn
-        # and left an older copy behind all make the request and the result
-        # differ, and scoring against the request measures the wrong thing.
+        # The scenario file records where entities were asked to go. After
+        # spawning, spawn_scenario.py reads back where Gazebo actually put
+        # them and writes this file. Prefer it, because a model that settled
+        # under gravity or failed to spawn makes the two differ.
         self.declare_parameter("resolved_file", os.environ.get(
             "RESOLVED_TRUTH_FILE", "/scenes/ground_truth_actual.yaml"))
         self.declare_parameter("reference_frame", "map")
         self.declare_parameter("origin_offset_xyz", [0.0, 0.0, 0.0])
-        self.declare_parameter("target_height", 1.7)
         self.declare_parameter("rate_hz", 1.0)
-        # Only entities whose name contains one of these count as findable
-        # targets. A scenario can also hold props that no detector should find.
-        self.declare_parameter("target_name_filters", ["person", "casualty"])
 
         self.reference = self.get_parameter("reference_frame").value
         self.offset = [float(x) for x in self.get_parameter("origin_offset_xyz").value]
-        self.height = float(self.get_parameter("target_height").value)
-        self.filters = [s.lower() for s in self.get_parameter("target_name_filters").value]
 
         self.targets = self._load()
         if not self.targets:
@@ -107,14 +76,6 @@ class GroundTruth(Node):
 
         self.marker_pub = self.create_publisher(MarkerArray, "/ground_truth/markers", LATCHED)
         self.truth_pub = self.create_publisher(Detection3DArray, "/ground_truth/truth_3d", LATCHED)
-        self.geojson_pub = (self.create_publisher(GeoJSON, "/ground_truth/geojson", LATCHED)
-                            if HAVE_GEOJSON else None)
-        if not HAVE_GEOJSON:
-            self.get_logger().warn(
-                "foxglove_msgs is missing, so the Map panel gets no ground truth. "
-                "Install ros-$ROS_DISTRO-foxglove-msgs.")
-
-        self.origin = MapOrigin(self, use_gp_origin=HAVE_GEO)
 
         rate = float(self.get_parameter("rate_hz").value)
         self.create_timer(1.0 / max(rate, 0.1), self._publish)
@@ -150,7 +111,7 @@ class GroundTruth(Node):
         out = []
         for entity in data.get("entities", []):
             name = str(entity.get("name", ""))
-            if self.filters and not any(f in name.lower() for f in self.filters):
+            if not any(f in name.lower() for f in TARGET_NAME_FILTERS):
                 continue
             pose = list(entity.get("pose", []))
             if len(pose) < 3:
@@ -160,13 +121,8 @@ class GroundTruth(Node):
                 "x": float(pose[0]) + self.offset[0],
                 "y": float(pose[1]) + self.offset[1],
                 "z": float(pose[2]) + self.offset[2],
-                "uri": entity.get("uri", ""),
             })
         return out
-
-    def _to_latlon(self, x: float, y: float) -> tuple[float, float] | None:
-        """Local ENU metres to WGS84. None until the vehicle has a fix."""
-        return self.origin.to_lla(x, y)
 
     # ---------------------------------------------------------------- output
     def _publish(self) -> None:
@@ -175,75 +131,42 @@ class GroundTruth(Node):
         truth = Detection3DArray()
         truth.header.stamp = now
         truth.header.frame_id = self.reference
-        features = []
 
-        for i, t in enumerate(self.targets):
-            # A translucent green pillar, so an estimate sitting inside it is
-            # obviously a hit and one beside it is obviously not.
-            pillar = Marker()
-            pillar.header.stamp = now
-            pillar.header.frame_id = self.reference
-            pillar.ns = "ground_truth"
-            pillar.id = i
-            pillar.type = Marker.CYLINDER
-            pillar.action = Marker.ADD
-            pillar.pose.position.x = t["x"]
-            pillar.pose.position.y = t["y"]
-            pillar.pose.position.z = t["z"] + self.height / 2.0
-            pillar.pose.orientation.w = 1.0
-            pillar.scale.x = pillar.scale.y = 0.6
-            pillar.scale.z = self.height
-            pillar.color = ColorRGBA(r=0.15, g=0.85, b=0.3, a=0.35)
-            markers.markers.append(pillar)
-
-            label = Marker()
-            label.header = pillar.header
-            label.ns = "ground_truth_labels"
-            label.id = i
-            label.type = Marker.TEXT_VIEW_FACING
-            label.action = Marker.ADD
-            label.pose.position.x = t["x"]
-            label.pose.position.y = t["y"]
-            label.pose.position.z = t["z"] + self.height + 1.2
-            label.pose.orientation.w = 1.0
-            label.scale.z = 0.7
-            label.color = ColorRGBA(r=0.5, g=1.0, b=0.6, a=0.9)
-            label.text = t["name"]
-            markers.markers.append(label)
+        for i, target in enumerate(self.targets):
+            sphere = Marker()
+            sphere.header.stamp = now
+            sphere.header.frame_id = self.reference
+            sphere.ns = "ground_truth"
+            sphere.id = i
+            sphere.type = Marker.SPHERE
+            sphere.action = Marker.ADD
+            sphere.pose.position.x = target["x"]
+            sphere.pose.position.y = target["y"]
+            sphere.pose.position.z = target["z"] + PERSON_SPHERE_DIAMETER / 2.0
+            sphere.pose.orientation.w = 1.0
+            sphere.scale.x = sphere.scale.y = sphere.scale.z = PERSON_SPHERE_DIAMETER
+            r, g, b = GROUND_TRUTH_COLOR
+            sphere.color = ColorRGBA(r=r, g=g, b=b, a=MARKER_ALPHA)
+            markers.markers.append(sphere)
 
             d = Detection3D()
             d.header = truth.header
-            d.id = t["name"]
-            hyp = ObjectHypothesisWithPose()
-            hyp.hypothesis.class_id = "person"
-            hyp.hypothesis.score = 1.0
-            hyp.pose.pose.position.x = t["x"]
-            hyp.pose.pose.position.y = t["y"]
-            hyp.pose.pose.position.z = t["z"]
-            hyp.pose.pose.orientation.w = 1.0
-            d.results.append(hyp)
+            d.id = target["name"]
+            hypothesis = ObjectHypothesisWithPose()
+            hypothesis.hypothesis.class_id = "person"
+            hypothesis.hypothesis.score = 1.0
+            hypothesis.pose.pose.position.x = target["x"]
+            hypothesis.pose.pose.position.y = target["y"]
+            hypothesis.pose.pose.position.z = target["z"]
+            hypothesis.pose.pose.orientation.w = 1.0
+            d.results.append(hypothesis)
             d.bbox = BoundingBox3D()
-            d.bbox.center = hyp.pose.pose
-            d.bbox.size.x = d.bbox.size.y = 0.6
-            d.bbox.size.z = self.height
+            d.bbox.center = hypothesis.pose.pose
+            d.bbox.size.x = d.bbox.size.y = d.bbox.size.z = PERSON_SPHERE_DIAMETER
             truth.detections.append(d)
-
-            ll = self._to_latlon(t["x"], t["y"])
-            if ll is not None:
-                features.append({
-                    "type": "Feature",
-                    "geometry": {"type": "Point", "coordinates": [ll[1], ll[0]]},
-                    "properties": {"name": t["name"], "kind": "ground_truth",
-                                   "marker-color": "#2ecc71"},
-                })
 
         self.marker_pub.publish(markers)
         self.truth_pub.publish(truth)
-
-        if self.geojson_pub is not None and features:
-            msg = GeoJSON()
-            msg.geojson = json.dumps({"type": "FeatureCollection", "features": features})
-            self.geojson_pub.publish(msg)
 
 
 def main() -> None:

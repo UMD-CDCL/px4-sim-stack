@@ -15,6 +15,15 @@ import math
 from typing import Iterable, Sequence
 
 
+def intrinsics_ready(info) -> bool:
+    """True when a CameraInfo carries a usable pinhole matrix.
+
+    CameraInfo.k arrives as a numpy array, so a plain truth test on it raises
+    rather than returning False. Test the length and fx instead.
+    """
+    return info is not None and len(info.k) == 9 and info.k[0] != 0.0
+
+
 def ray_in_optical(u: float, v: float, k: Sequence[float]) -> tuple[float, float, float]:
     """Unit direction, in the optical frame, of the ray through pixel (u, v).
 
@@ -54,7 +63,7 @@ def intersect_ground(
     Returns None when the ray points away from the plane, runs parallel to it,
     or would meet it beyond max_range. Each of those means "this pixel does not
     see the ground", and a caller must not invent a point for it. A camera at
-    the horizon produces rays that technically intersect thousands of metres
+    the horizon produces rays that technically intersect thousands of meters
     away, and those answers are worthless.
     """
     dz = direction[2]
@@ -70,12 +79,6 @@ def intersect_ground(
 
 def slant_range(a: Sequence[float], b: Sequence[float]) -> float:
     return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b)))
-
-
-def bbox_corners(cx: float, cy: float, w: float, h: float) -> list[tuple[float, float]]:
-    """The four corners of an axis-aligned box given as centre and size."""
-    hw, hh = w / 2.0, h / 2.0
-    return [(cx - hw, cy - hh), (cx + hw, cy - hh), (cx + hw, cy + hh), (cx - hw, cy + hh)]
 
 
 def image_corners(width: int, height: int, inset: float = 0.5) -> list[tuple[float, float]]:

@@ -47,48 +47,32 @@
         "frame:gimbal_camera_optical_frame": {
           "visible": true
         },
-        "frame:nadir_cam_link": {
+        "frame:nadir_camera_link": {
           "visible": false
         },
         "frame:nadir_camera_optical_frame": {
           "visible": true
-        },
-        "frame:gimbal_status_camera_link": {
-          "visible": true
-        },
-        "frame:gimbal_status_camera_optical_frame": {
-          "visible": false
         }
       },
       "topics": {
-        "/drone/markers": {
-          "visible": true
-        },
-        "/ground/plane": {
-          "visible": true
-        },
         "/ground_truth/markers": {
           "visible": true
         },
         "/scoring/nadir/markers": {
           "visible": true
         },
-        "/scoring/nadir/error_lines": {
+        "/scoring/gimbal/markers": {
           "visible": true
-        },
-        "/scoring/nadir/summary": {
-          "visible": true
-        },
-        "/perception/nadir/markers": {
-          "visible": false
         },
         "/camera/nadir/footprint": {
           "visible": true,
           "lineWidth": 0.4,
           "color": "#4dd0e1"
         },
-        "/camera/nadir/boresight": {
-          "visible": true
+        "/camera/gimbal/footprint": {
+          "visible": true,
+          "lineWidth": 0.4,
+          "color": "#ffb74d"
         },
         "/camera/nadir/ground_projection": {
           "visible": true,
@@ -96,26 +80,6 @@
           "colorMode": "rgb",
           "colorField": "rgb",
           "decayTime": 0
-        },
-        "/scoring/gimbal/markers": {
-          "visible": true
-        },
-        "/scoring/gimbal/error_lines": {
-          "visible": true
-        },
-        "/scoring/gimbal/summary": {
-          "visible": true
-        },
-        "/perception/gimbal/markers": {
-          "visible": false
-        },
-        "/camera/gimbal/footprint": {
-          "visible": true,
-          "lineWidth": 0.4,
-          "color": "#ffb74d"
-        },
-        "/camera/gimbal/boresight": {
-          "visible": false
         },
         "/camera/gimbal/ground_projection": {
           "visible": true,
@@ -171,11 +135,7 @@
       "followTopic": "/mavros/global_position/global",
       "layer": "satellite",
       "topicColors": {
-        "/mavros/global_position/global": "#ff7043",
-        "/ground_truth/geojson": "#2ecc71",
-        "/map_overlays/geojson": "#4dd0e1",
-        "/perception/nadir/detections_navsat": "#4dd0e1",
-        "/perception/gimbal/detections_navsat": "#ffb74d"
+        "/mavros/global_position/global": "#ff7043"
       },
       "zoomLevel": 18,
       "maxNativeZoom": 19
@@ -254,13 +214,6 @@
       "isSynced": true,
       "legendDisplay": "floating",
       "xAxisVal": "timestamp"
-    },
-    "RawMessages!state": {
-      "diffEnabled": false,
-      "diffMethod": "custom",
-      "diffTopicPath": "",
-      "showFullMessageForDiff": false,
-      "topicPath": "/scoring/nadir/summary.text"
     }
   },
   "globalVariables": {},
@@ -284,12 +237,7 @@
       "first": "map!world",
       "second": {
         "first": "Plot!scoring",
-        "second": {
-          "first": "Plot!altitude",
-          "second": "RawMessages!state",
-          "direction": "row",
-          "splitPercentage": 55
-        },
+        "second": "Plot!altitude",
         "direction": "column",
         "splitPercentage": 50
       },

@@ -27,7 +27,6 @@ setup(
             "detection_scorer = sim_bridge.detection_scorer:main",
             "fiducial_alignment = sim_bridge.fiducial_alignment:main",
             "detection_annotator = sim_bridge.detection_annotator:main",
-            "map_overlays = sim_bridge.map_overlays:main",
             "image_ground_projector = sim_bridge.image_ground_projector:main",
         ],
     },

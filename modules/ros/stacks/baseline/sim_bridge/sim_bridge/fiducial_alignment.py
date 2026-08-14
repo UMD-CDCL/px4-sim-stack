@@ -1,46 +1,23 @@
 #!/usr/bin/env python3
 """Correct localization bias against a surveyed point.
 
-The problem
------------
-Localized positions land in `map`, which is the vehicle's own EKF frame. That
-frame is built from the vehicle's GPS and drifts relative to any other frame
-built from a different receiver. Two aircraft, or an aircraft and a surveyed
-map, agree on the shape of the world and disagree on where it sits, typically
-by metres.
+Localized positions land in `map`, the vehicle's own EKF frame, which sits
+meters away from any frame built from a different GPS receiver. That offset
+is a frame difference, not noise, so it does not average away. Measure it
+once against a point whose position is known, then subtract it.
 
-That offset is not noise and it does not average away. It is a frame
-difference, and the fix is to measure it once against something whose position
-is known, then subtract it.
+A fiducial is a physical point known in both frames: `surveyed` is where it
+truly is, `measured` is where this pipeline put it. The difference is the
+bias, published as a static transform from `map` to `fiducial`, so tf2 does
+the arithmetic for every consumer. Both come as latitude, longitude and
+altitude, the form a survey exchanges.
 
-How it works
-------------
-A fiducial is a physical point that appears in both frames:
-
-  `surveyed`  where it truly is, from a survey, an RTK fix or a published
-              benchmark. This defines the frame you want answers in.
-  `measured`  where this pipeline says it is, read off a localization of that
-              same point.
-
-The difference is the bias. This node publishes it as a transform from `map` to
-`fiducial`, so anything can be re-expressed in the corrected frame with tf2 and
-nothing has to do the arithmetic itself.
-
-Both are latitude, longitude and altitude, because that is the form a survey
-comes in and the form two independent systems can actually exchange. They are
-converted to local metres against the same origin the rest of the stack uses.
-
-In simulation you do not have to fly a calibration: the true position is in the
-scenario file, so `surveyed` and `measured` can both be written down.
-
-A warning about measuring
--------------------------
-Do not use a target you also score against. Fitting the correction to a scored
-target and then reporting the error against that same target measures nothing
-but the arithmetic. Use a separate fiducial that no detector is graded on.
+Do not use a target you also score against. Fitting the correction to a
+scored target and then reporting the error against it measures nothing but
+the arithmetic.
 
 Parameters
-    enabled           off by default, so the frame appears only when configured
+    enabled           off by default
     surveyed_lla      [lat, lon, alt] where the fiducial truly is
     measured_lla      [lat, lon, alt] where this pipeline put it
     fiducial_frame    name of the corrected frame, default "fiducial"
@@ -52,7 +29,7 @@ from __future__ import annotations
 import math
 
 import rclpy
-from geometry_msgs.msg import PoseStamped, TransformStamped, Vector3Stamped
+from geometry_msgs.msg import PoseStamped, TransformStamped
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import NavSatFix
@@ -63,7 +40,7 @@ EARTH_R = 6378137.0
 
 def lla_to_enu(lat: float, lon: float, alt: float,
                ref_lat: float, ref_lon: float, ref_alt: float) -> tuple[float, float, float]:
-    """Flat-earth local ENU metres, about a reference. Good over a few km."""
+    """Flat-earth local ENU meters, about a reference. Good over a few km."""
     east = math.radians(lon - ref_lon) * EARTH_R * math.cos(math.radians(ref_lat))
     north = math.radians(lat - ref_lat) * EARTH_R
     return east, north, alt - ref_alt
@@ -106,8 +83,8 @@ class FiducialAlignment(Node):
         self.local = (p.x, p.y, p.z)
 
     def _on_fix(self, msg) -> None:
-        # The same derivation the ground truth node uses: walk the vehicle's own
-        # fix back to local zero, which is where the EKF frame starts.
+        # Walk the vehicle's own fix back to local zero, which is where the
+        # EKF frame starts.
         if self.local is None or msg.status.status < 0:
             return
         x, y, z = self.local

@@ -1,45 +1,34 @@
 #!/usr/bin/env python3
 """Publish an RTSP stream as a ROS 2 image topic.
 
-This node is the video half of the drone interface. It knows one URL. It does
-not know that Gazebo exists, and it would behave the same against a real camera
-that publishes the same URL.
+This node is the video half of the drone interface. It knows one URL, not
+that Gazebo exists, and it behaves the same against a real camera.
+
+The stamp is arrival time minus the jitter buffer, plus time_offset. A frame
+reaches this node well after capture, and stamping with the arrival time
+would put the image later than the pose it belongs to.
+
+Both a raw and a JPEG topic are published. The raw frames are too large for
+the foxglove_bridge websocket, so the image panels read the JPEG topic. The
+ground projector reads the raw topic inside the same container, where the
+cost is shared memory.
 
 Parameters
     url            RTSP address to read
     frame_id       frame_id on the published messages
     latency_ms     jitter buffer depth. Lower is fresher and less forgiving.
-    protocols      tcp or udp. TCP is the default and does not lose packets.
-    decoder        GStreamer decoder element. avdec_h264 is software and works
-                   everywhere. Use nvh264dec on a machine with an NVIDIA GPU
-                   and the nvcodec plugin.
+    protocols      tcp or udp. TCP does not lose packets.
+    decoder        GStreamer decoder element. avdec_h264 is software and
+                   works everywhere. nvh264dec needs an NVIDIA GPU and the
+                   nvcodec plugin.
     hfov           horizontal field of view in radians, for the CameraInfo
-                   pinhole model. 2.0 matches the gimbal camera in this stack.
+                   pinhole model
     time_offset    extra seconds added to the image stamp, for calibration
-
-Stamping
-    A frame reaches this node well after it was taken: the jitter buffer alone
-    holds it for latency_ms. Stamping with the arrival time would put the image
-    later than the pose it belongs to, and the 3D view would lag the telemetry.
-    The stamp is therefore arrival minus the jitter buffer, plus time_offset.
-    It is an estimate. The detections do better, because DeepStream reports a
-    frame time and detections_bridge carries it through.
 
 Topics
     <ns>/image_raw             sensor_msgs/Image, rgb8
     <ns>/image_raw/compressed  sensor_msgs/CompressedImage, jpeg
     <ns>/camera_info           sensor_msgs/CameraInfo
-
-Why both
-    A 1280x720 rgb8 frame is 2.76 MB. At the rate these cameras run that is
-    about 24 MB/s on one topic, and foxglove_bridge ships with a 10 MB send
-    buffer, so the raw stream cannot fit through the websocket and the image
-    panel stays empty. JPEG at quality 75 is roughly a hundredth of that and
-    goes through comfortably.
-
-    The raw topic stays, because the ground projector reads it inside the same
-    container where the cost is shared memory rather than a socket. Point
-    Foxglove at the compressed topic and everything else at the raw one.
 """
 
 from __future__ import annotations
@@ -57,6 +46,9 @@ from rclpy.node import Node  # noqa: E402
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy  # noqa: E402
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image  # noqa: E402
 
+
+# ------------------------------------------------------------------- tunables
+JPEG_QUALITY = 75
 
 SENSOR_QOS = QoSProfile(
     reliability=QoSReliabilityPolicy.BEST_EFFORT,
@@ -77,8 +69,6 @@ class RtspCamera(Node):
         self.declare_parameter("decoder", "avdec_h264")
         self.declare_parameter("hfov", 2.0)
         self.declare_parameter("time_offset", 0.0)
-        self.declare_parameter("publish_compressed", True)
-        self.declare_parameter("jpeg_quality", 75)
 
         self.url = self.get_parameter("url").value
         self.frame_id = self.get_parameter("frame_id").value
@@ -89,10 +79,8 @@ class RtspCamera(Node):
             + float(self.get_parameter("time_offset").value)
 
         self.image_pub = self.create_publisher(Image, "image_raw", SENSOR_QOS)
-        self.compressed = bool(self.get_parameter("publish_compressed").value)
-        self.jpeg_pub = (self.create_publisher(
+        self.jpeg_pub = self.create_publisher(
             CompressedImage, "image_raw/compressed", SENSOR_QOS)
-            if self.compressed else None)
         self.info_pub = self.create_publisher(CameraInfo, "camera_info", SENSOR_QOS)
 
         Gst.init(None)
@@ -116,7 +104,6 @@ class RtspCamera(Node):
         protocols = self.get_parameter("protocols").value
         decoder = self.get_parameter("decoder").value
 
-        quality = int(self.get_parameter("jpeg_quality").value)
         # One decode, two sinks. Encoding the JPEG here rather than in a
         # separate republish node keeps it off the Python side entirely.
         desc = (
@@ -125,14 +112,11 @@ class RtspCamera(Node):
             f"! rtph264depay ! h264parse ! {decoder} ! videoconvert ! tee name=t "
             f"t. ! queue max-size-buffers=2 leaky=downstream "
             f"! video/x-raw,format=RGB "
-            f"! appsink name=sink max-buffers=1 drop=true sync=false"
+            f"! appsink name=sink max-buffers=1 drop=true sync=false "
+            f"t. ! queue max-size-buffers=2 leaky=downstream ! videoconvert "
+            f"! jpegenc quality={JPEG_QUALITY} "
+            f"! appsink name=jpeg max-buffers=1 drop=true sync=false"
         )
-        if self.compressed:
-            desc += (
-                f" t. ! queue max-size-buffers=2 leaky=downstream ! videoconvert "
-                f"! jpegenc quality={quality} "
-                f"! appsink name=jpeg max-buffers=1 drop=true sync=false"
-            )
         try:
             self.pipeline = Gst.parse_launch(desc)
         except Exception as exc:  # noqa: BLE001 - Gst raises a bare GError
@@ -140,7 +124,7 @@ class RtspCamera(Node):
             return False
 
         self.appsink = self.pipeline.get_by_name("sink")
-        self.jpegsink = self.pipeline.get_by_name("jpeg") if self.compressed else None
+        self.jpegsink = self.pipeline.get_by_name("jpeg")
         if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
             self.get_logger().error("cannot start the pipeline")
             self._teardown()

@@ -1,48 +1,18 @@
 #!/usr/bin/env python3
 """Lay the live camera image flat on the ground plane, in 3D.
 
-Foxglove's 3D panel cannot texture a surface with an image, and it has no
-satellite basemap. What it does render is a coloured point cloud. So instead of
-drawing a textured quad, this projects a subsampled grid of pixels onto the same
-ground plane the localizer uses, and publishes them as PointCloud2 with colour.
-The result is the camera view lying on the ground, in the right place, at the
-right scale, next to the detections and the ground truth.
+Foxglove's 3D panel cannot texture a surface with an image, so this projects
+a subsampled grid of pixels onto the ground plane and publishes them as a
+colored PointCloud2. The result is the camera view lying on the ground, next
+to the detections and the ground truth.
 
-It is the same geometry the localizer performs, applied to a grid of pixels
-rather than to the centre of a box. Anything that misaligns one misaligns the
-other by the same amount, which makes this a direct check on the projection:
-if the imagery lines up with the ground truth markers, the localization is
-correct, and if it does not, the picture shows which way it is out.
+It is the same geometry the localizer performs, applied to a grid of pixels.
+When the imagery lines up with the ground truth spheres, the localization is
+correct. When it does not, the picture shows which way it is out.
 
-Cost is controlled by `size`, a standard resolution the frame is sampled down
-to before projection. Both cameras project the same grid, whatever they capture
-at, so one number decides the cost and neither camera can quietly become the
-expensive one.
-
-Size drives two costs at once, and both have a hard ceiling:
-
-    size        points     message    projection
-    1920x1080  2,073,600    33.2 MB      5.24 s
-    960x540      518,400     8.3 MB      1.32 s
-    640x360      230,400     3.7 MB      0.59 s
-    480x270      129,600     2.1 MB      0.33 s
-
-Those projection times are the measured cost of the scalar loop this node used
-to run, on this machine, for one camera. At 1920x1080 it never published at
-all: the loop ran longer than the interval between frames, so the node held one
-core at full load and produced nothing. Two cameras did that on two cores.
-
-The maths below is vectorized, which removes about two orders of magnitude from
-that column and is why a full resolution grid is now merely expensive rather
-than impossible. The default stays low anyway. A ground projection is a
-backdrop to look at, not a measurement, and 640x360 already reads as a picture.
-
-This is an approximation of the thing actually wanted, which is the frame
-stretched across its footprint as a texture. Foxglove's 3D panel cannot texture
-a surface: it draws markers, meshes referenced by URL, and point clouds, and
-none of those take a live image. A dense coloured cloud is the closest thing it
-will render, so density and point size are the two knobs that decide how much
-it looks like an image.
+`size` is the resolution the frame is sampled down to, and it decides the
+cost for both cameras. 640x360 is 230,400 points and 3.7 MB per message,
+which already reads as a picture. 1920x1080 is 2 million points and 33 MB.
 
 Subscribes
     <ns>/image_raw, <ns>/camera_info
@@ -61,14 +31,19 @@ from sensor_msgs.msg import CameraInfo, Image, PointCloud2, PointField
 from std_msgs.msg import Float64
 from tf2_ros import Buffer, TransformListener
 
+from sim_bridge.projection import intrinsics_ready
+
 # The point layout, as one 16 byte record. Naming it here means point_step,
 # row_step and the packing can never drift apart.
 POINT_DTYPE = np.dtype([("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("rgb", "<u4")])
 
-# What `size` accepts. Standard 16:9 resolutions, so the sampled grid keeps the
-# aspect ratio of both cameras and the numbers are ones you already recognize.
+# What `size` accepts. Standard 16:9 resolutions, so the sampled grid keeps
+# the aspect ratio of both cameras.
 STANDARD_SIZES = ("1920x1080", "1280x720", "960x540", "854x480", "640x360",
                   "480x270", "426x240")
+
+# Beyond this slant range a pixel ray is treated as missing the ground.
+MAX_RANGE = 2000.0
 
 
 def parse_size(text: str) -> tuple[int, int] | None:
@@ -92,11 +67,9 @@ class ImageGroundProjector(Node):
         self.declare_parameter("ground_z", 0.0)
         self.declare_parameter("size", "640x360")
         self.declare_parameter("rate_hz", 2.0)
-        self.declare_parameter("max_range", 2000.0)
 
         self.optical = self.get_parameter("optical_frame").value
         self.reference = self.get_parameter("reference_frame").value
-        self.max_range = float(self.get_parameter("max_range").value)
 
         requested = str(self.get_parameter("size").value)
         self.size = parse_size(requested)
@@ -106,8 +79,7 @@ class ImageGroundProjector(Node):
                 f"cannot read size {requested!r}. Using 640x360. "
                 f"The usual values are {', '.join(STANDARD_SIZES)}.")
         elif requested not in STANDARD_SIZES:
-            # Not an error. A non-standard grid projects correctly, it just
-            # stops matching the table in the module docstring.
+            # Not an error. A non-standard grid projects correctly.
             self.get_logger().info(
                 f"size {requested} is not one of {', '.join(STANDARD_SIZES)}")
 
@@ -147,7 +119,7 @@ class ImageGroundProjector(Node):
         now = self.get_clock().now().nanoseconds / 1e9
         if now - self.last_publish < self.min_period:
             return
-        if self.info is None or len(self.info.k) != 9 or self.info.k[0] == 0.0:
+        if not intrinsics_ready(self.info):
             return
         if msg.encoding != "rgb8":
             return
@@ -195,9 +167,9 @@ class ImageGroundProjector(Node):
         self.pub.publish(cloud)
         self.last_publish = now
 
-    # ------------------------------------------------------------- the maths
+    # -------------------------------------------------------------- the math
     def _sample_grid(self, width: int, height: int):
-        """Pixel centres of the sampled grid, as two 1D arrays.
+        """Pixel centers of the sampled grid, as two 1D arrays.
 
         The grid is the requested size, or the camera's own size when that is
         smaller: sampling a 1280x720 camera onto a 1920x1080 grid would invent
@@ -262,7 +234,7 @@ class ImageGroundProjector(Node):
         # intersect_ground, over the grid.
         with np.errstate(divide="ignore", invalid="ignore"):
             t = (ground_z - origin[2]) / wz
-        good = (np.abs(wz) >= 1e-9) & (t > 0.0) & (t <= self.max_range)
+        good = (np.abs(wz) >= 1e-9) & (t > 0.0) & (t <= MAX_RANGE)
         if not good.any():
             return None
 

@@ -1,82 +1,47 @@
 #!/usr/bin/env python3
 """Publish DeepStream detections as ROS 2 messages.
 
-DeepStream and ROS do not share a process, a language or a release schedule.
-They share one MQTT topic. This node is the only place that knows the DeepStream
-payload format, so a change there costs one file.
+DeepStream and ROS share one MQTT topic and nothing else. This node is the
+only place that knows the DeepStream payload format, so a change there costs
+one file.
 
-DeepStream's nvmsgbroker can emit two shapes, set by payload-type in the
-message converter config:
+nvmsgbroker emits two shapes, set by payload-type in the msgconv config: the
+minimal schema (payload-type=1), one message per frame with
+"objects": ["<id>|<left>|<top>|<right>|<bottom>|<class>", ...], and the full
+schema (payload-type=0), one message per object with a nested bbox. This
+node reads both. bbox_format selects the field order, which differs across
+DeepStream releases.
 
-  payload-type=1, the minimal schema, one message for each frame:
-      {"version":"4.0", "id":"<frame>", "@timestamp":"...",
-       "sensorId":"gimbal",
-       "objects":["<id>|<left>|<top>|<right>|<bottom>|<class>", ...]}
+Each payload carries "@timestamp", set when the frame enters the DeepStream
+pipeline, before inference. That instant becomes the header stamp, so the
+localizer can look up the drone pose for the right moment. The arrival time
+would fold in decode, inference and transport. Measure the remaining offset
+with scripts/measure-latency.py and feed it back through time_offset.
 
-  payload-type=0, the full schema, one message for each object, with a nested
-      "object" element that holds a bbox.
+DeepStream reports boxes in its own coordinate space, which can differ from
+the image resolution without any error message. The boxes are scaled here
+into the size the live CameraInfo reports. When the two agree the scale is 1
+and nothing happens. scripts/check-annotation-scale.py finds the factor when
+they do not.
 
-This node reads both. The field order inside an object string is not identical
-across DeepStream releases, so bbox_format selects it.
-
-The timestamp matters as much as the boxes
------------------------------------------
-Each payload carries `@timestamp`, which DeepStream sets when the frame enters
-its pipeline, before inference. That instant is what the header carries. Using
-the arrival time instead would fold in decode, inference and transport, and the
-localizer would then look up the drone pose for the wrong moment. Measured on
-this stack, DeepStream's timestamp trails true capture by about 16 ms with
-about 6 ms of jitter, so the remaining error is small and, more usefully,
-does not grow with GPU load.
-
-`scripts/measure-latency.py` measures that offset against the frame clock the
-simulator publishes on `video/frames/<stream>`. Feed the result back through
-`time_offset` if you want the last few milliseconds.
-
-Which pixels the boxes are counted in
--------------------------------------
-DeepStream reports boxes in the coordinate space of `[streammux]` width and
-height, which is the resolution nvstreammux scales every source to. With tiled
-display disabled, deepstream-app builds the pipeline through nvstreamdemux, and
-nothing between nvinfer and the sink rescales the object metadata.
-
-Enabling `[tiled-display]` changes that. nvmultistreamtiler composites into its
-own width and height and moves the metadata with it, so the boxes then arrive
-in tiled-display coordinates instead. This stack keeps tiled display off and
-sets `[streammux]` to the camera resolution, so the two already agree.
-
-That makes a mismatch quiet when it does happen. Every box is still a plausible
-looking box, just on the wrong part of the image, and nothing logs an error.
-
-So the boxes are scaled here, into the size the live CameraInfo reports. When
-the two agree the scale is 1 and nothing happens, which is the normal case;
-when they disagree the boxes still land in the right place.
-
-The correction is per camera. Each camera has its own DeepStream pipeline at
-its own resolution, so the two should already agree and the scale should be 1;
-`source_size_overrides` exists because the failure it corrects is silent, and
-naming the camera means one can be fixed without disturbing the other.
-
-The scale factor is logged for each camera the first time it is used. If it is
-not 1.0, something has changed and it is worth knowing why.
-`scripts/check-annotation-scale.py` draws the boxes on a live frame and reports
-the factor that would fit, which is the quickest way to find out.
+Each payload's sensorId routes it to that camera's topic, so a consumer can
+pick one camera without filtering.
 
 Parameters
     host, port     the MQTT broker
     topic          MQTT topic to subscribe to
     bbox_format    ltrb (default) or ltwh
-    source_width   the coordinate space DeepStream reports in
-    source_height
+    source_width   the coordinate space DeepStream reports in. 0 disables
+    source_height  scaling.
     source_size_overrides
                    per camera, as "camera=WxH". Corrects one camera without
                    disturbing the other.
-    frame_id       frame_id on the published messages
+    sensor_ids     DeepStream sensorId values, one per camera
+    sensor_frames  the optical frame for each sensor id, same order
     time_offset    seconds added to the payload timestamp, for calibration
-    max_age        drop a payload older than this, in seconds
 
 Topics
-    /perception/detections   vision_msgs/Detection2DArray
+    /perception/<camera>/detections   vision_msgs/Detection2DArray
 """
 
 from __future__ import annotations
@@ -97,6 +62,10 @@ from vision_msgs.msg import (
     ObjectHypothesisWithPose,
 )
 
+# ------------------------------------------------------------------- tunables
+# Drop a payload older than this, in seconds.
+MAX_AGE_S = 2.0
+
 DETECTION_QOS = QoSProfile(
     reliability=QoSReliabilityPolicy.BEST_EFFORT,
     history=QoSHistoryPolicy.KEEP_LAST,
@@ -112,39 +81,17 @@ class DetectionsBridge(Node):
         self.declare_parameter("port", 1883)
         self.declare_parameter("topic", "perception/detections")
         self.declare_parameter("bbox_format", "ltrb")
-        # The coordinate space DeepStream reports boxes in. 0 means "assume it
-        # matches the image", which disables scaling.
         self.declare_parameter("source_width", 0)
         self.declare_parameter("source_height", 0)
-        # Per camera overrides, as "camera=WxH". The two sources in one
-        # DeepStream pipeline do not always report in the same space, so a
-        # single global size cannot always be right. Anything not named here
-        # falls back to source_width and source_height.
         self.declare_parameter("source_size_overrides", [""])
-        self.declare_parameter("frame_id", "camera_optical_frame")
         self.declare_parameter("time_offset", 0.0)
-        self.declare_parameter("max_age", 2.0)
-        # DeepStream runs a pipeline for each camera and tags each
-        # payload with sensorId. These two lists map that id to the camera's
-        # optical frame, and detections are republished per camera so a
-        # consumer can pick one without filtering. The first entry is the
-        # primary camera, which also keeps the plain /perception/detections
-        # topic that the localizer and the older layout expect.
-        # The unqualified /perception/detections topic, which carried the
-        # primary camera's detections before every stage became per camera.
-        # Off by default: with it on, the primary camera's detections appear on
-        # two topics, and anything left on the old default subscribes to a feed
-        # that silently holds one camera out of two.
-        self.declare_parameter("publish_unqualified", False)
         self.declare_parameter("sensor_ids", ["nadir", "gimbal"])
         self.declare_parameter("sensor_frames",
                                ["nadir_camera_optical_frame",
                                 "gimbal_camera_optical_frame"])
 
         self.bbox_format = self.get_parameter("bbox_format").value
-        self.frame_id = self.get_parameter("frame_id").value
         self.time_offset = float(self.get_parameter("time_offset").value)
-        self.max_age = float(self.get_parameter("max_age").value)
         self.count = 0
         self.malformed = 0
         self.unrouted = 0
@@ -153,15 +100,12 @@ class DetectionsBridge(Node):
         self.lag_sum = 0.0
         self.lag_n = 0
 
-        ids = list(self.get_parameter("sensor_ids").value)
+        sensor_ids = list(self.get_parameter("sensor_ids").value)
         frames = list(self.get_parameter("sensor_frames").value)
-        self.frame_for = dict(zip(ids, frames))
-        self.primary = ids[0] if ids else None
+        self.frame_for = dict(zip(sensor_ids, frames))
+        # Payloads without a sensorId belong to the primary camera.
+        self.primary = sensor_ids[0] if sensor_ids else None
 
-        self.publish_unqualified = bool(self.get_parameter("publish_unqualified").value)
-        self.pub = (self.create_publisher(
-            Detection2DArray, "/perception/detections", DETECTION_QOS)
-            if self.publish_unqualified else None)
         self.source_size = (int(self.get_parameter("source_width").value),
                             int(self.get_parameter("source_height").value))
         self.source_override: dict[str, tuple[int, int]] = {}
@@ -177,26 +121,23 @@ class DetectionsBridge(Node):
                 continue
             self.source_override[name.strip()] = (w, h)
             self.get_logger().info(f"{name.strip()}: DeepStream reports in {w}x{h}")
-        # Live image size for each camera, from CameraInfo, and the scale that
-        # follows from it. CameraInfo is the authority: it is what the image
-        # panels and the projection maths use.
+
+        # Live image size for each camera. CameraInfo is the authority: it is
+        # what the image panels and the projection math use, and reading it
+        # means a camera resolution change needs no edit here.
         self.image_size: dict[str, tuple[int, int]] = {}
         self.scale_logged: set[str] = set()
-
-        self.per_camera = {
-            name: self.create_publisher(
-                Detection2DArray, f"/perception/{name}/detections", DETECTION_QOS)
-            for name in ids
-        }
-
-        # CameraInfo says how big the image really is. Reading it rather than
-        # trusting a configured number means a camera resolution change needs
-        # no edit here.
-        for name in ids:
+        for name in sensor_ids:
             self.create_subscription(
                 CameraInfo, f"/camera/{name}/camera_info",
                 lambda msg, n=name: self.image_size.__setitem__(n, (msg.width, msg.height)),
                 qos_profile_sensor_data)
+
+        self.publisher_for = {
+            name: self.create_publisher(
+                Detection2DArray, f"/perception/{name}/detections", DETECTION_QOS)
+            for name in sensor_ids
+        }
 
         host = self.get_parameter("host").value
         port = int(self.get_parameter("port").value)
@@ -212,7 +153,8 @@ class DetectionsBridge(Node):
         self.client.on_connect = self._on_connect
         self.client.on_message = self._on_message
         self.client.user_data_set(topic)
-        # A broker that is not up yet is normal at start. Retry rather than exit.
+        # A broker that is not up yet is normal at start. Retry rather than
+        # exit.
         self.client.connect_async(host, port, keepalive=30)
         self.client.loop_start()
 
@@ -242,50 +184,45 @@ class DetectionsBridge(Node):
 
         stamp, lag = self._frame_time(payload)
         if stamp is None:
-            # Without a frame time the localizer cannot pick the right pose, and
-            # a wrong pose is worse than no answer. Drop it and say so.
+            # Without a frame time the localizer cannot pick the right pose,
+            # and a wrong pose is worse than no answer.
             self.no_stamp += 1
             return
-        if lag is not None and lag > self.max_age:
+        if lag is not None and lag > MAX_AGE_S:
             self.stale += 1
             return
 
         sensor = str(payload.get("sensorId") or "") or self.primary
-        self._rescale(sensor, detections)
-        array = Detection2DArray()
-        array.header.stamp = stamp
-        array.header.frame_id = self.frame_for.get(sensor, self.frame_id)
-        array.detections = detections
-
-        if sensor in self.per_camera:
-            self.per_camera[sensor].publish(array)
-        # A camera with no publisher of its own has nowhere else to go, so it
-        # falls back to the unqualified topic when that is enabled at all.
-        if self.pub is not None and (sensor == self.primary
-                                     or sensor not in self.per_camera):
-            self.pub.publish(array)
-        elif sensor not in self.per_camera:
+        if sensor not in self.publisher_for:
             self.unrouted += 1
             if self.unrouted in (1, 500):
                 self.get_logger().warn(
                     f"detections tagged sensorId={sensor!r}, which is not in "
-                    f"sensor_ids {list(self.per_camera)}. They are dropped. "
+                    f"sensor_ids {list(self.publisher_for)}. They are dropped. "
                     f"Check the id in the deepstream msgconv config.")
+            return
+
+        self._rescale(sensor, detections)
+        array = Detection2DArray()
+        array.header.stamp = stamp
+        array.header.frame_id = self.frame_for[sensor]
+        array.detections = detections
+        self.publisher_for[sensor].publish(array)
         self.count += len(detections)
 
     # -------------------------------------------------------------- timestamp
     def _frame_time(self, payload: dict):
         """The instant the frame entered DeepStream, as a ROS stamp.
 
-        Returns (stamp, lag_seconds). lag is how far behind the clock the frame
-        is, which is the pipeline latency and is worth watching.
+        Returns (stamp, lag_seconds). lag is how far behind the clock the
+        frame is, which is the pipeline latency.
         """
         raw = payload.get("@timestamp")
         if not raw:
             return None, None
         try:
-            # DeepStream writes RFC 3339 with a Z suffix and millisecond
-            # precision, which fromisoformat handles once Z becomes +00:00.
+            # DeepStream writes RFC 3339 with a Z suffix, which fromisoformat
+            # handles once Z becomes +00:00.
             when = datetime.datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
         except ValueError:
             return None, None
@@ -394,8 +331,8 @@ class DetectionsBridge(Node):
 
         hypothesis = ObjectHypothesisWithPose()
         hypothesis.hypothesis.class_id = label
-        # The minimal schema carries no confidence. Report 1.0 and say so here
-        # rather than invent a number that a planner might threshold on.
+        # The minimal schema carries no confidence. Report 1.0 rather than
+        # invent a number that a planner might threshold on.
         hypothesis.hypothesis.score = 1.0
         det.results.append(hypothesis)
         return det

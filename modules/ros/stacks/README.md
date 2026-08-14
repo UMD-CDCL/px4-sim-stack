@@ -64,7 +64,7 @@ make ros                                  # a shell, with the overlay sourced
 ros2 topic list
 ros2 topic hz /camera/gimbal/image_raw
 ros2 topic echo /mavros/state
-ros2 topic echo /perception/detections
+ros2 topic echo /perception/nadir/detections
 ```
 
 Set `ROS_AUTOLAUNCH=0` to bring the container up without starting the stack.

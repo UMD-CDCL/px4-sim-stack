@@ -233,11 +233,12 @@ mosquitto_sub -h localhost -t 'perception/#' -v
 ### In ROS
 
 `detections_bridge` republishes the payload as
-`vision_msgs/Detection2DArray` on `/perception/detections`.
+`vision_msgs/Detection2DArray` on `/perception/<camera>/detections`, routed
+by the payload's `sensorId`.
 
 ```bash
 make ros
-ros2 topic echo /perception/detections
+ros2 topic echo /perception/nadir/detections
 ```
 
 ## 4. What the ROS stack sees
@@ -266,13 +267,13 @@ The baseline stack publishes:
 | `/camera/nadir/image_raw` | `sensor_msgs/Image`, rgb8 |
 | `/camera/nadir/image_raw/compressed` | `sensor_msgs/CompressedImage`, jpeg |
 | `/camera/nadir/camera_info` | `sensor_msgs/CameraInfo` |
+| `/perception/<camera>/detections` | `vision_msgs/Detection2DArray` |
 
 Each camera publishes the same frame twice. Use the raw topic inside the ROS
 container, where a large message costs shared memory. Use the compressed topic
 in Foxglove, because the raw one is too large to cross the websocket. The two
 carry the same header stamp, so they refer to one capture, and the Foxglove
 layout points its image panels at the compressed topics.
-| `/perception/detections` | `vision_msgs/Detection2DArray` |
 
 The rangefinder topic is `/mavros/rangefinder_pub`, not
 `/mavros/distance_sensor/rangefinder_pub`. MAVROS names the topic after the
@@ -328,7 +329,7 @@ map                         local ENU, origin where the EKF initialized
       ├── gimbal_mount      static
       │    └── gimbal_camera_link          turns with the gimbal
       │         └── gimbal_camera_optical_frame
-      └── nadir_cam_link    static, looks straight down
+      └── nadir_camera_link static, looks straight down
            └── nadir_camera_optical_frame
 ```
 
@@ -337,11 +338,10 @@ camera *optical* frame uses REP 103, x right, y down, z forward. The fixed
 rotation between them is rpy (-90, 0, -90). CameraInfo and every projection
 assume the optical frame.
 
-MAVROS reports the gimbal attitude in **FRD** with `frame_id: base_link_frd`,
-while every frame here is FLU. `scene_tf` converts by negating y and z. It also
-reads the `flags` field, where bit 32 means the yaw is relative to the vehicle
-and bit 64 means it is relative to north, and warns when that disagrees with
-its `gimbal_reference` parameter.
+MAVROS reports the gimbal attitude in aerospace convention, NED reference
+with FRD body axes, while every frame here is ENU and FLU. `scene_tf`
+converts it. The conversion is the subject of the gimbal section below,
+because getting it wrong produces plausible wrong answers.
 
 ### Which camera
 
@@ -391,33 +391,24 @@ recall figure would describe neither.
 
 | Topic | Type |
 |---|---|
-| `/ground_truth/markers` | `visualization_msgs/MarkerArray` |
+| `/ground_truth/markers` | `visualization_msgs/MarkerArray`, blue spheres |
 | `/ground_truth/truth_3d` | `vision_msgs/Detection3DArray` |
-| `/ground_truth/geojson` | `foxglove_msgs/GeoJSON`, for the Map panel |
 | `/perception/<camera>/detections_3d` | `vision_msgs/Detection3DArray` with covariance |
-| `/perception/<camera>/targets` | `geometry_msgs/PoseArray` |
-| `/perception/<camera>/markers` | `visualization_msgs/MarkerArray` |
-| `/perception/<camera>/detections_navsat` | `sensor_msgs/NavSatFix`, one per estimate |
 | `/camera/<camera>/footprint` | `geometry_msgs/PolygonStamped` |
 | `/scoring/<camera>/verdicts` | `vision_msgs/Detection3DArray`, each labelled TP, FP or FN |
-| `/scoring/<camera>/markers` | `visualization_msgs/MarkerArray`, verdicts as pillars |
+| `/scoring/<camera>/markers` | `visualization_msgs/MarkerArray`, verdicts as spheres |
 | `/scoring/<camera>/position_error` | `std_msgs/Float64`, metres |
 | `/scoring/<camera>/recall`, `/scoring/<camera>/precision` | `std_msgs/Float64` |
-| `/map_overlays/geojson` | `foxglove_msgs/GeoJSON`, footprints and estimates |
 
-The Map panel gets the estimates twice, and both are useful. `detections_navsat`
-is a plain NavSatFix that the panel plots with no conversion. The GeoJSON in
-`/map_overlays/geojson` carries the verdict colour and the label. Turn either
-off in the layout without losing the other.
+In the 3D view every person is a 1 m sphere, and the image overlay uses the
+same colors. Blue is ground truth. Green means the estimate landed within
+`SCORING_GATE_M` of a real target, red means it did not, and yellow is a
+target inside the footprint that nothing found. The color table lives in
+`sim_bridge/verdicts.py`, so the two views cannot drift apart.
 
-In the 3D view a localization is drawn the way a target is drawn: a pillar the
-height of a person, with a label above it. Only the colour differs. Green means
-the estimate landed within `SCORING_GATE_M` of a real target, red means it did
-not, and yellow is a target inside the footprint that nothing found.
-
-Covariance comes from parameters, not from a derivation. `covariance_diagonal`
-defaults to a two metre standard deviation in x and y, and
-`range_variance_scale` grows that with slant range.
+Covariance comes from constants in `detection_localizer.py`, not from a
+derivation. `COVARIANCE_DIAGONAL` is a two metre standard deviation in x and
+y, and `RANGE_VARIANCE_SCALE` grows that with slant range.
 
 ### The gimbal frame, and how it was got wrong twice
 
@@ -469,10 +460,11 @@ the aircraft yaws. That is correct behaviour and it reads exactly like the
 fault. Centre the gimbal, or command it in vehicle relative mode, before
 deciding.
 
-`scene_tf` publishes `gimbal_camera_link` and, beside it,
-`gimbal_status_camera_link` from the raw device report, so a future
-disagreement is visible rather than silent. Its diagnostic prints the vehicle
-heading, the gimbal heading and their difference once a second.
+With `GIMBAL_DIAGNOSTICS=1`, `scene_tf` prints the vehicle heading, the
+gimbal heading and their difference once a second. With the gimbal centred,
+"gimbal rel body" reads near zero at every aircraft heading. A constant there
+is the `GIMBAL_OFFSET_*` mounting value; a value that moves with the aircraft
+means a frame handling bug.
 
 ### Correcting a frame offset with a fiducial
 

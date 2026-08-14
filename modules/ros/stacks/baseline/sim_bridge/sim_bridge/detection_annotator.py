@@ -1,19 +1,14 @@
 #!/usr/bin/env python3
 """Draw detection boxes over the camera image in Foxglove.
 
-The Image panel overlays `foxglove_msgs/ImageAnnotations` on any image whose
-frame matches. This converts the detections into that message, so the boxes
-appear on the live video the way they do on the annotated RTSP stream, without
-DeepStream having to burn them into the pixels.
-
-Drawing them here rather than reading the burned-in stream has two advantages:
-the boxes stay selectable data rather than pixels, and the overlay carries the
-same timestamp as the detection, so scrubbing a recording keeps them aligned.
-
-One node runs for each camera that produces detections.
+Converts each Detection2DArray into foxglove_msgs/ImageAnnotations, which the
+Image panel overlays on the live video. The box color comes from the scoring
+verdict, so a box on the image matches the sphere for the same detection in
+the 3D view. One node runs for each camera.
 
 Subscribes
     <detections_topic>   vision_msgs/Detection2DArray
+    <verdicts_topic>     vision_msgs/Detection3DArray, this camera's verdicts
 Publishes
     <annotations_topic>  foxglove_msgs/ImageAnnotations
 """
@@ -24,6 +19,8 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from vision_msgs.msg import Detection2DArray, Detection3DArray
+
+from sim_bridge.verdicts import UNJUDGED_COLOR, VERDICT_COLOR
 
 try:
     from foxglove_msgs.msg import (
@@ -37,22 +34,14 @@ try:
 except ImportError:
     HAVE_FOXGLOVE = False
 
+# ----------------------------------------------------------------- appearance
+BOX_LINE_THICKNESS = 2.0
+LABEL_FONT_SIZE = 14.0
+LABEL_TEXT_COLOR = (1.0, 1.0, 1.0, 1.0)
+LABEL_BACKGROUND = (0.0, 0.0, 0.0, 0.6)
+
 BEST_EFFORT = QoSProfile(reliability=QoSReliabilityPolicy.BEST_EFFORT,
                          history=QoSHistoryPolicy.KEEP_LAST, depth=10)
-
-# Green for a true positive, red for a false positive. A false negative has no
-# box to draw, because nothing detected it; it appears in the 3D and map views
-# instead. Grey means the scorer has not judged this track yet.
-VERDICT_COLOUR = {"TP": (0.18, 0.80, 0.44), "FP": (0.91, 0.30, 0.24)}
-UNJUDGED = (0.75, 0.75, 0.78)
-
-PALETTE = [
-    (0.99, 0.45, 0.10),
-    (0.20, 0.80, 0.95),
-    (0.55, 0.90, 0.35),
-    (0.95, 0.85, 0.20),
-    (0.85, 0.40, 0.90),
-]
 
 
 class DetectionAnnotator(Node):
@@ -61,18 +50,9 @@ class DetectionAnnotator(Node):
 
         self.declare_parameter("detections_topic", "/perception/detections")
         self.declare_parameter("annotations_topic", "annotations")
-        self.declare_parameter("line_thickness", 2.0)
-        self.declare_parameter("text_size", 14.0)
-        self.declare_parameter("show_score", False)
-        self.declare_parameter("colour_by_verdict", True)
-        # Each camera is scored on its own, so read the verdicts for this one.
-        # Reading another camera's would colour these boxes by whether a
-        # different lens found something.
+        # This camera's own verdicts. Another camera's verdicts would color
+        # these boxes by what a different lens found.
         self.declare_parameter("verdicts_topic", "/scoring/verdicts")
-
-        self.thickness = float(self.get_parameter("line_thickness").value)
-        self.text_size = float(self.get_parameter("text_size").value)
-        self.show_score = bool(self.get_parameter("show_score").value)
 
         if not HAVE_FOXGLOVE:
             self.get_logger().error(
@@ -80,89 +60,70 @@ class DetectionAnnotator(Node):
                 "Install ros-$ROS_DISTRO-foxglove-msgs.")
             return
 
+        self.verdict_for: dict[str, str] = {}
         self.pub = self.create_publisher(
             ImageAnnotations, self.get_parameter("annotations_topic").value, BEST_EFFORT)
         self.create_subscription(
             Detection2DArray, self.get_parameter("detections_topic").value,
             self._on_detections, BEST_EFFORT)
-
-        self.verdicts: dict[str, str] = {}
-        if bool(self.get_parameter("colour_by_verdict").value):
-            self.create_subscription(Detection3DArray,
-                                     self.get_parameter("verdicts_topic").value,
-                                     self._on_verdicts, 10)
-        self.count = 0
-        self.create_timer(60.0, self._report)
+        self.create_subscription(
+            Detection3DArray, self.get_parameter("verdicts_topic").value,
+            self._on_verdicts, 10)
         self.get_logger().info(
             f"annotating {self.get_parameter('detections_topic').value} -> "
             f"{self.get_parameter('annotations_topic').value}")
 
     def _on_verdicts(self, msg: Detection3DArray) -> None:
-        self.verdicts = {
+        self.verdict_for = {
             d.id: (d.results[0].hypothesis.class_id if d.results else "FP")
             for d in msg.detections
         }
 
-    def _colour(self, track_id: str):
-        if self.verdicts:
-            v = self.verdicts.get(track_id)
-            r, g, b = VERDICT_COLOUR.get(v, UNJUDGED) if v else UNJUDGED
-            return Color(r=r, g=g, b=b, a=1.0)
-        try:
-            idx = int(track_id) % len(PALETTE)
-        except (TypeError, ValueError):
-            idx = 0
-        r, g, b = PALETTE[idx]
+    def _box_color(self, track_id: str) -> Color:
+        verdict = self.verdict_for.get(track_id)
+        r, g, b = VERDICT_COLOR.get(verdict, UNJUDGED_COLOR)
         return Color(r=r, g=g, b=b, a=1.0)
 
     def _on_detections(self, msg: Detection2DArray) -> None:
         out = ImageAnnotations()
 
         for det in msg.detections:
-            cx = det.bbox.center.position.x
-            cy = det.bbox.center.position.y
-            hw = det.bbox.size_x / 2.0
-            hh = det.bbox.size_y / 2.0
-            colour = self._colour(det.id)
+            center_x = det.bbox.center.position.x
+            center_y = det.bbox.center.position.y
+            half_w = det.bbox.size_x / 2.0
+            half_h = det.bbox.size_y / 2.0
 
             box = PointsAnnotation()
-            # The stamp comes from the detection, which carries the frame time
-            # DeepStream reported. Using the clock here instead would slide the
-            # boxes off the frame they belong to when a recording is scrubbed.
+            # The detection stamp is the frame time DeepStream reported. The
+            # clock here would slide the boxes off their frame when a
+            # recording is scrubbed.
             box.timestamp = msg.header.stamp
             box.type = PointsAnnotation.LINE_LOOP
-            box.thickness = self.thickness
-            box.outline_color = colour
+            box.thickness = BOX_LINE_THICKNESS
+            box.outline_color = self._box_color(det.id)
             box.points = [
-                Point2(x=cx - hw, y=cy - hh),
-                Point2(x=cx + hw, y=cy - hh),
-                Point2(x=cx + hw, y=cy + hh),
-                Point2(x=cx - hw, y=cy + hh),
+                Point2(x=center_x - half_w, y=center_y - half_h),
+                Point2(x=center_x + half_w, y=center_y - half_h),
+                Point2(x=center_x + half_w, y=center_y + half_h),
+                Point2(x=center_x - half_w, y=center_y + half_h),
             ]
             out.points.append(box)
 
-            label = det.results[0].hypothesis.class_id if det.results else "object"
-            if det.id:
-                label = f"{label} {det.id}"
-            if self.show_score and det.results:
-                label = f"{label} {det.results[0].hypothesis.score:.2f}"
-
-            text = TextAnnotation()
-            text.timestamp = msg.header.stamp
-            # Sit the label just above the box, and keep it inside the frame.
-            text.position = Point2(x=cx - hw, y=max(cy - hh - 4.0, self.text_size))
-            text.text = label
-            text.font_size = self.text_size
-            text.text_color = Color(r=1.0, g=1.0, b=1.0, a=1.0)
-            text.background_color = Color(r=0.0, g=0.0, b=0.0, a=0.6)
-            out.texts.append(text)
+            class_name = det.results[0].hypothesis.class_id if det.results else "object"
+            label = TextAnnotation()
+            label.timestamp = msg.header.stamp
+            # Just above the box, kept inside the frame.
+            label.position = Point2(x=center_x - half_w,
+                                    y=max(center_y - half_h - 4.0, LABEL_FONT_SIZE))
+            label.text = f"{class_name} {det.id}".strip()
+            label.font_size = LABEL_FONT_SIZE
+            label.text_color = Color(r=LABEL_TEXT_COLOR[0], g=LABEL_TEXT_COLOR[1],
+                                     b=LABEL_TEXT_COLOR[2], a=LABEL_TEXT_COLOR[3])
+            label.background_color = Color(r=LABEL_BACKGROUND[0], g=LABEL_BACKGROUND[1],
+                                           b=LABEL_BACKGROUND[2], a=LABEL_BACKGROUND[3])
+            out.texts.append(label)
 
         self.pub.publish(out)
-        self.count += len(msg.detections)
-
-    def _report(self) -> None:
-        self.get_logger().info(f"{self.count} boxes drawn in the last minute")
-        self.count = 0
 
 
 def main() -> None:

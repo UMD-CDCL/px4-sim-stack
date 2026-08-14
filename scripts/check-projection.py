@@ -63,9 +63,9 @@ from sim_bridge.projection import intersect_ground, quat_rotate, ray_in_optical
 
 DETECTION_QOS = QoSProfile(reliability=QoSReliabilityPolicy.BEST_EFFORT,
                            history=QoSHistoryPolicy.KEEP_LAST, depth=10)
-# Matches stack.launch.py: straight down projects from the box centre, oblique
+# Matches stack.launch.py: straight down projects from the box center, oblique
 # from the bottom edge where the feet meet the ground.
-ANCHOR = {"nadir": "centre", "gimbal": "bottom"}
+ANCHOR = {"nadir": "center", "gimbal": "bottom"}
 TOLERANCE_PX = 0.5
 TOLERANCE_M = 0.5
 
@@ -147,7 +147,7 @@ def check(node: Probe, camera: str, host: str, port: int, topic: str,
     ground_z = 0.0 if node.rel_alt is None else t.z - node.rel_alt
 
     anchor = ANCHOR.get(camera, "bottom")
-    anchor_v = cy_px if anchor == "centre" else bottom
+    anchor_v = cy_px if anchor == "center" else bottom
     expected = intersect_ground(
         origin, quat_rotate(rot, ray_in_optical(cx_px, anchor_v, node.info.k)),
         ground_z, 5000.0)
@@ -176,7 +176,7 @@ def check(node: Probe, camera: str, host: str, port: int, topic: str,
     dy = got.center.position.y - cy_px
     dw = got.size_x - box_px
     ok_px = max(abs(dx), abs(dy), abs(dw)) <= TOLERANCE_PX
-    print(f"    pixel round trip  sent centre ({cx_px:.1f}, {cy_px:.1f}) size {box_px:.0f}, "
+    print(f"    pixel round trip  sent center ({cx_px:.1f}, {cy_px:.1f}) size {box_px:.0f}, "
           f"got ({got.center.position.x:.1f}, {got.center.position.y:.1f}) "
           f"size {got.size_x:.0f}  {'OK' if ok_px else 'OFF by '}"
           f"{'' if ok_px else f'({dx:+.1f}, {dy:+.1f}) px, size {dw:+.1f}'}")
