@@ -395,8 +395,11 @@ def generate_launch_description() -> LaunchDescription:
                     "camera_info_topic": "/camera/gimbal/camera_info",
                     "optical_frame": CAMERA["gimbal"]["optical_frame"],
                     "reference_frame": REFERENCE_FRAME,
-                    # "gz_sim" matches the simulated gimbal. Set "mavlink"
-                    # for a gimbal that obeys the MAVLink frame flags.
+                    # "gz_sim" matches the simulated gimbal, whose joints
+                    # ride on the airframe: the node commands vehicle
+                    # relative. Set "mavlink" for a gimbal that obeys the
+                    # MAVLink frame flags: the node commands earth
+                    # referenced with the lock flags set.
                     "gimbal_convention": "gz_sim",
                 }],
             ),

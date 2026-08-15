@@ -272,9 +272,10 @@ The baseline stack publishes:
 One topic goes the other way. `click_to_gimbal` subscribes to
 `/foxglove/cursor/click` (`geometry_msgs/PointStamped`, x and y in gimbal
 image pixels) and turns each click into a MAVLink gimbal attitude command,
-so a click in Foxglove points the camera there. The frame handling behind
-that command is calibrated against the simulated gimbal and documented in
-`sim_bridge/click_to_gimbal.py`.
+so a click in Foxglove points the camera there. The simulated gimbal takes
+its commands vehicle relative and a MAVLink-honest gimbal takes them earth
+referenced. The `gimbal_convention` parameter picks between them, and
+`sim_bridge/click_to_gimbal.py` documents both.
 
 Each camera publishes the same frame twice. Use the raw topic inside the ROS
 container, where a large message costs shared memory. Use the compressed topic

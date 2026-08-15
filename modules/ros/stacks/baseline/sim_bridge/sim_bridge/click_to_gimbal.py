@@ -3,33 +3,53 @@
 
 Foxglove publishes the clicked pixel as a PointStamped, x and y in image
 coordinates. This node casts a ray through that pixel with the gimbal
-camera intrinsics, rotates the ray into the reference frame with the live
-TF, and commands the gimbal to put its optical axis on the ray. The command
-is a full three axis attitude: roll is zero so the image stays level, and
-pitch and yaw point the axis, computed earth referenced in that frame.
+camera intrinsics, rotates the ray into the pointing frame, and commands
+the gimbal to put its optical axis on the ray. The command is a full three
+axis attitude: roll is zero so the image stays level, and pitch and yaw
+point the axis.
 
 The command leaves as the MAVLink GIMBAL_MANAGER_SET_ATTITUDE message. The
 node publishes a mavros_msgs/GimbalManagerSetAttitude, and the mavros
 gimbal_control plugin sends it to the autopilot.
 
-The flags and the yaw offset below are calibrated against PX4's
-simulated gimbal, which does not obey the MAVLink frame conventions.
-GZGimbal.cpp (pollSetpoint) maps the setpoint's Euler angles straight
-onto the CGO3 joints and ignores the frame flags, and that joint chain
-runs through a yaw joint on -z and two 180 degree mounts
-(gimbal/model.sdf, x500_recon/model.sdf). Measured against the frame
-tree scene_tf builds from the device report, with the vehicle at rest
-and the lock flags clear: the achieved pitch equals the commanded pitch,
-and the achieved compass yaw is the commanded yaw plus 90 degrees, on
-six probe attitudes to within 0.1 degrees. So the node sends the lock
-flags clear, which stops PX4's gimbal module from adding its own earth
-to body conversion on top, and subtracts the 90 degrees from the
-commanded yaw. One heading was tried, so a heading term inside that
-offset cannot be ruled out. The desired attitude comes from the live TF,
-so repeated clicks converge on the target either way. For a gimbal that
-obeys the MAVLink convention, set the gimbal_convention parameter to
-"mavlink": the three lock flags, no offset. docs/interfaces.md section 6
-records the sibling bug in the reported attitude.
+The pointing frame depends on which convention the gimbal obeys. A gimbal
+that obeys MAVLink reads the lock flags: with the three lock flags set,
+the attitude is earth referenced and the device holds it against the
+horizon and North. That is the "mavlink" convention: pitch and yaw earth
+referenced in the reference frame, the three lock flags set.
+
+PX4's simulated gimbal does not read the flags. PX4's gimbal module
+passes the setpoint quaternion through unchanged (output_mavlink.cpp,
+OutputMavlinkV2). GZGimbal.cpp (pollSetpoint) converts it to Euler
+angles and writes them onto the CGO3 joint position controllers, and
+the joints ride on the airframe. The joint chain is the 180 degree
+mount in x500_recon/model.sdf, the yaw joint on -z and the pitch joint
+on +y in gimbal/model.sdf, and the camera sensor yawed 180 degrees
+inside its link. That chain realizes the commanded Euler angles
+exactly, vehicle relative, in the aerospace sign convention, verified
+against Gazebo link poses to 0.1 degrees. The device is a follow mode
+gimbal on every axis, whatever the flags say. So the "gz_sim"
+convention sends a vehicle-relative attitude with the lock flags
+clear, which also labels the setpoint honestly for scene_tf.
+
+The vehicle-relative ray does not come from the TF tree. The gimbal
+segment of that tree divides the device report, which Gazebo builds
+from ground truth, by the EKF attitude, so that segment carries the
+EKF heading error, measured at 16 degrees in flight. The full map to
+optical chain cancels the error, which keeps the projections correct,
+but the vehicle-relative half does not. The joints hold exactly the
+last commanded angles, so the node composes the clicked ray with its
+own last command instead, and the loop stays in one true frame. A
+gimbal moved by another controller desynchronizes that state for one
+click: that click re-synchronizes it, and the next click lands.
+
+Two earlier wrong answers are worth recording. A calibration at rest
+measured a constant 90 degree yaw error and subtracted it as a mount
+offset, but the vehicle spawns facing east, compass 90 degrees, so the
+constant was the vehicle heading. A later version read the ray from
+the TF vehicle segment and inherited the EKF heading error above.
+docs/interfaces.md section 6 records the sibling bug in the reported
+attitude.
 
 PX4 ignores the setpoint unless its sender holds primary gimbal control
 (input_mavlink.cpp, _process_set_attitude), and it drops it silently. The
@@ -69,8 +89,10 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo
 from tf2_ros import Buffer, TransformListener
 
-from sim_bridge.projection import (intrinsics_ready, pointing_rpy_ned,
-                                   quat_from_rpy, quat_rotate, ray_in_optical)
+from sim_bridge.projection import (LINK_TO_OPTICAL, body_frd_to_flu,
+                                   intrinsics_ready, pointing_rpy_body,
+                                   pointing_rpy_ned, quat_from_rpy,
+                                   quat_mul, quat_rotate, ray_in_optical)
 
 # ------------------------------------------------------------------- tunables
 # How often the startup claim retries until the autopilot accepts one.
@@ -96,9 +118,6 @@ MAVROS_COMPID = 191
 TARGET_SYSTEM = 1
 TARGET_COMPONENT = 1
 
-# The gimbal_convention "gz_sim" calibration. See the module docstring.
-GZ_SIM_YAW_OFFSET_DEG = -90.0
-
 EARTH_LOCK_FLAGS = (
     GimbalManagerSetAttitude.GIMBAL_MANAGER_FLAGS_ROLL_LOCK
     | GimbalManagerSetAttitude.GIMBAL_MANAGER_FLAGS_PITCH_LOCK
@@ -114,20 +133,25 @@ class ClickToGimbal(Node):
         self.declare_parameter("optical_frame", "gimbal_camera_optical_frame")
         self.declare_parameter("reference_frame", "map")
         # Which command convention the gimbal obeys.
-        #   gz_sim    PX4's simulated gimbal: lock flags clear, yaw offset
-        #             -90 degrees. The calibration in the module docstring.
-        #   mavlink   a gimbal that reads the flags honestly: the three lock
-        #             flags, no offset.
+        #   gz_sim    PX4's simulated gimbal. Its joints ride on the airframe
+        #             and ignore the frame flags, so the node sends a
+        #             vehicle-relative attitude with the lock flags clear.
+        #   mavlink   a gimbal that reads the flags honestly: an earth
+        #             referenced attitude with the three lock flags set.
         # The sibling knob for the reported attitude is scene_tf's
         # gimbal_reference.
         self.declare_parameter("gimbal_convention", "gz_sim")
 
         self.optical = self.get_parameter("optical_frame").value
         self.reference = self.get_parameter("reference_frame").value
-        honest = self.get_parameter("gimbal_convention").value == "mavlink"
-        self.cmd_yaw_offset = (0.0 if honest
-                               else math.radians(GZ_SIM_YAW_OFFSET_DEG))
-        self.setpoint_flags = EARTH_LOCK_FLAGS if honest else 0
+        self.earth_referenced = (
+            self.get_parameter("gimbal_convention").value == "mavlink")
+        self.setpoint_flags = EARTH_LOCK_FLAGS if self.earth_referenced else 0
+        # The camera link orientation the joints hold, from the last command
+        # this node sent. Identity matches a device that was never commanded:
+        # GZGimbal steers the joints to zero without a setpoint, and _center
+        # commands the same zero.
+        self.cmd_q_body_link = (0.0, 0.0, 0.0, 1.0)
 
         self.tf_buffer = Buffer()
         # spin_thread=True is required. On this node's executor, a lookup that
@@ -215,6 +239,7 @@ class ClickToGimbal(Node):
         # Pitch zero, yaw zero, straight ahead. Rates NaN, no rate setpoint.
         # Flags zero, vehicle relative. The autopilot hands primary control
         # to the sender of this command.
+        self.cmd_q_body_link = (0.0, 0.0, 0.0, 1.0)
         request = CommandLong.Request()
         request.command = MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW
         request.param1 = 0.0
@@ -264,22 +289,26 @@ class ClickToGimbal(Node):
                 f"click ignored: pixel ({u:.0f}, {v:.0f}) is outside the "
                 f"{self.info.width}x{self.info.height} image")
             return
-        try:
-            # Latest available rather than the click stamp: the command
-            # steers from where the camera looks now.
-            tf = self.tf_buffer.lookup_transform(
-                self.reference, self.optical, rclpy.time.Time(),
-                timeout=Duration(seconds=TF_TIMEOUT_S))
-        except Exception as err:  # noqa: BLE001 - lookup raises several types
-            self.get_logger().warn(
-                f"click dropped: no transform {self.reference} -> "
-                f"{self.optical} ({err})")
-            return
-
-        r = tf.transform.rotation
-        direction = quat_rotate((r.x, r.y, r.z, r.w),
-                                ray_in_optical(u, v, self.info.k))
-        roll, pitch, yaw = pointing_rpy_ned(direction)
+        ray = ray_in_optical(u, v, self.info.k)
+        if self.earth_referenced:
+            try:
+                # Latest available rather than the click stamp: the command
+                # steers from where the camera looks now.
+                tf = self.tf_buffer.lookup_transform(
+                    self.reference, self.optical, rclpy.time.Time(),
+                    timeout=Duration(seconds=TF_TIMEOUT_S))
+            except Exception as err:  # noqa: BLE001 - lookup raises several types
+                self.get_logger().warn(
+                    f"click dropped: no transform {self.reference} -> "
+                    f"{self.optical} ({err})")
+                return
+            r = tf.transform.rotation
+            direction = quat_rotate((r.x, r.y, r.z, r.w), ray)
+            roll, pitch, yaw = pointing_rpy_ned(direction)
+        else:
+            direction = quat_rotate(
+                quat_mul(self.cmd_q_body_link, LINK_TO_OPTICAL), ray)
+            roll, pitch, yaw = pointing_rpy_body(direction)
 
         if self.in_control is False:
             # The setpoint races the claim to the autopilot, and a setpoint
@@ -289,12 +318,14 @@ class ClickToGimbal(Node):
             self.get_logger().warn(
                 "another party held gimbal control at click time. If the "
                 "gimbal does not move, click again.")
-        self._publish_setpoint(quat_from_rpy(
-            roll, pitch, yaw + self.cmd_yaw_offset))
+        setpoint = quat_from_rpy(roll, pitch, yaw)
+        if not self.earth_referenced:
+            self.cmd_q_body_link = body_frd_to_flu(setpoint)
+        self._publish_setpoint(setpoint)
         self.get_logger().info(
             f"click ({u:.0f}, {v:.0f}) -> gimbal pitch "
             f"{math.degrees(pitch):+.1f} deg, yaw {math.degrees(yaw):+.1f} deg, "
-            f"earth referenced")
+            f"{'earth' if self.earth_referenced else 'vehicle'} referenced")
 
     def _publish_setpoint(self, q) -> None:
         cmd = GimbalManagerSetAttitude()

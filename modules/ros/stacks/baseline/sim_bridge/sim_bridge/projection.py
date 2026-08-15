@@ -57,6 +57,29 @@ def quat_from_rpy(roll: float, pitch: float, yaw: float) -> tuple[float, float, 
     )
 
 
+def quat_mul(a: Sequence[float], b: Sequence[float]) -> tuple[float, float, float, float]:
+    """Hamilton product, both as (x, y, z, w)."""
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return (
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    )
+
+
+def body_frd_to_flu(q: Sequence[float]) -> tuple[float, float, float, float]:
+    """A rotation relative to the body, from FRD axes to FLU axes.
+
+    A relative rotation has no reference frame to change, so only the axis
+    convention converts. This is not the absolute NED to ENU conversion:
+    using either on the wrong quantity produces a frame that tracks the
+    aircraft incorrectly.
+    """
+    return (q[0], -q[1], -q[2], q[3])
+
+
 def quat_rotate(q: Sequence[float], v: Sequence[float]) -> tuple[float, float, float]:
     """Rotate vector v by quaternion q, given as (x, y, z, w)."""
     qx, qy, qz, qw = q
@@ -113,6 +136,22 @@ def pointing_rpy_ned(direction_enu: Sequence[float]) -> tuple[float, float, floa
     pitch = math.asin(max(-1.0, min(1.0, up)))
     yaw = math.atan2(east, north)
     return 0.0, pitch, yaw
+
+
+def pointing_rpy_body(direction_flu: Sequence[float]) -> tuple[float, float, float]:
+    """The vehicle-relative attitude that puts the view axis on a direction.
+
+    direction_flu is a unit vector in the FLU body frame. The result is
+    roll, pitch, yaw in radians in the FRD convention vehicle-relative
+    MAVLink attitude commands use. Roll is zero, so the image stays level.
+    """
+    forward, left, up = direction_flu
+    # Right, forward, up against the body play east, north, up in the world.
+    return pointing_rpy_ned((-left, forward, up))
+
+
+# Body convention to REP 103 optical convention.
+LINK_TO_OPTICAL = quat_from_rpy(-math.pi / 2, 0.0, -math.pi / 2)
 
 
 def image_boundary(width: int, height: int, per_edge: int,

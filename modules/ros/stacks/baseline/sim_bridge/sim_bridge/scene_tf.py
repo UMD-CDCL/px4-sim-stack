@@ -37,7 +37,8 @@ try:
 except ImportError:  # pragma: no cover - only when mavros_extras is absent
     HAVE_GIMBAL_MSG = False
 
-from sim_bridge.projection import quat_from_rpy
+from sim_bridge.projection import (LINK_TO_OPTICAL, body_frd_to_flu,
+                                   quat_from_rpy, quat_mul)
 
 # ------------------------------------------------------------------- tunables
 GIMBAL_PUBLISH_RATE_HZ = 30.0
@@ -47,18 +48,6 @@ SETPOINT_TIMEOUT_S = 3.0
 
 # GIMBAL_DEVICE_FLAGS_YAW_LOCK
 YAW_LOCK = 16
-
-
-def quat_mul(a, b):
-    """Hamilton product, both as (x, y, z, w)."""
-    ax, ay, az, aw = a
-    bx, by, bz, bw = b
-    return (
-        aw * bx + ax * bw + ay * bz - az * by,
-        aw * by - ax * bz + ay * bw + az * bx,
-        aw * bz + ax * by - ay * bx + az * bw,
-        aw * bw - ax * bx - ay * by - az * bz,
-    )
 
 
 def quat_conj(q):
@@ -86,20 +75,6 @@ FRD_TO_FLU = (1.0, 0.0, 0.0, 0.0)
 def aerospace_to_ros(q):
     """An absolute attitude, NED reference and FRD body, into ENU and FLU."""
     return quat_mul(quat_mul(NED_TO_ENU, q), FRD_TO_FLU)
-
-
-def body_frd_to_flu(q):
-    """A rotation relative to the body, from FRD axes to FLU axes.
-
-    A relative rotation has no reference frame to change, so only the axis
-    convention converts. This is not aerospace_to_ros: using either on the
-    wrong quantity produces a frame that tracks the aircraft incorrectly.
-    """
-    return (q[0], -q[1], -q[2], q[3])
-
-
-# Body convention to REP 103 optical convention.
-LINK_TO_OPTICAL = quat_from_rpy(-math.pi / 2, 0.0, -math.pi / 2)
 
 
 class SceneTf(Node):
