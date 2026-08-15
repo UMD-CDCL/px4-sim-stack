@@ -235,7 +235,6 @@ class ClickToGimbal(Node):
         self.declare_parameter("camera_info_topic", "/camera/gimbal/camera_info")
         self.declare_parameter("optical_frame", "gimbal_camera_optical_frame")
         self.declare_parameter("reference_frame", "map")
-        # What one click does: roi, point or off. Runtime switchable.
         self.declare_parameter("click_mode", "roi")
         # The ground plane, as in ground_projector: rel_alt below the
         # camera, or pinned to ground_z with use_rel_alt false.
@@ -282,8 +281,6 @@ class ClickToGimbal(Node):
         self.in_control: bool | None = None
         self.claim_acked = False
         self.claim_inflight = False
-        # Trailing-edge flood guard state: the newest held-back click and
-        # the one-shot timer that lands it.
         self.pending_click: PointStamped | None = None
         self.pending_click_timer = None
         self.last_click_at = -CLICK_MIN_INTERVAL_S
@@ -324,7 +321,6 @@ class ClickToGimbal(Node):
         self.mode = "roi"
         self._apply_mode(self.get_parameter("click_mode").value, announce=True)
         self.add_on_set_parameters_callback(self._on_parameters)
-        # One empty-request service per mode, for one-press buttons.
         for mode in CLICK_MODES:
             self.create_service(
                 Trigger, f"/gimbal/click_mode/{mode}",
@@ -547,9 +543,6 @@ class ClickToGimbal(Node):
             self.last_click_at = now
             self._process_click(msg)
             return
-        # Inside the interval: hold the click, newest wins, and let the
-        # timer land it. A genuine rapid re-click arrives at most one
-        # interval late, never dropped.
         self.pending_click = msg
         if self.pending_click_timer is not None:
             if not self.pending_click_timer.is_canceled():

@@ -107,7 +107,6 @@ class RoiTracker:
         self.correction = IDENTITY
         self.desired_link = None
         self.still_since = time.monotonic()
-        # When the last pose-driven recompute ran, for the 20 Hz gate.
         self.last_pose_tick = 0.0
 
     def track(self, point_map: tuple[float, float, float]) -> None:

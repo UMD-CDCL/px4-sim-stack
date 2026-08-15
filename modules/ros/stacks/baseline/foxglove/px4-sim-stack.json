@@ -134,19 +134,18 @@
     "Parameters!3t5mz9g": {},
     "3D!scene": {
       "cameraState": {
-        "perspective": true,
         "distance": 69.64028437490886,
+        "perspective": true,
         "phi": 62.83470296765191,
-        "thetaOffset": 115.27559055118232,
-        "targetOffset": [
-          10.390359578475747,
-          -0.8474391881162652,
-          -1.945111681235947e-16
-        ],
         "target": [
           0,
           0,
           0
+        ],
+        "targetOffset": [
+          10.390359578475747,
+          -0.8474391881162652,
+          -1.945111681235947e-16
         ],
         "targetOrientation": [
           0,
@@ -154,6 +153,7 @@
           0,
           1
         ],
+        "thetaOffset": 115.27559055118232,
         "fovy": 45,
         "near": 0.5,
         "far": 5000
@@ -387,9 +387,9 @@
         }
       ],
       "disabledTopics": [
-        "/mavros/global_position/global",
         "/mavros/sim_state/global_position",
-        "/mavros/global_position/raw/fix"
+        "/mavros/global_position/raw/fix",
+        "/mavros/global_position/global"
       ],
       "followTopic": "",
       "layer": "satellite",
@@ -409,7 +409,11 @@
       "customTileUrl": "",
       "followFrame": "",
       "topicConfig": {
-        "/mavros/global_position/global": {
+        "/camera/nadir/footprint_geojson": {
+          "historyMode": "none",
+          "pointSize": 6
+        },
+        "/camera/gimbal/footprint_geojson": {
           "historyMode": "none",
           "pointSize": 6
         },
@@ -439,12 +443,16 @@
           "historyMode": "none",
           "pointSize": 6
         },
-        "/ground_truth/geojson": {
+        "/gimbal/roi_geojson": {
           "historyMode": "none",
           "pointSize": 6,
           "pointDisplayMode": "pin"
         },
-        "/gimbal/roi_geojson": {
+        "/mavros/global_position/global": {
+          "historyMode": "none",
+          "pointSize": 6
+        },
+        "/ground_truth/geojson": {
           "historyMode": "none",
           "pointSize": 6,
           "pointDisplayMode": "pin"
