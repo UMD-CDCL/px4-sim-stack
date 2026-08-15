@@ -38,23 +38,39 @@ GROUND_TRUTH_COLOR = {
 # bubble is a hit by construction. Change the two together.
 GROUND_TRUTH_BUBBLE_RADIUS = 2.0
 
+# The name label over each bubble. Height is the text size in meters.
+GROUND_TRUTH_LABEL_HEIGHT = 0.7
+GROUND_TRUTH_LABEL_COLOR = (0.92, 0.94, 0.96, 0.9)
 
-def sphere(ns: str, marker_id: int, frame_id: str, stamp,
-           position, diameter: float, rgba, lifetime=None) -> Marker:
-    """One sphere marker. position is (x, y, z) of the center."""
+
+def marker(ns: str, marker_id: int, frame_id: str, stamp,
+           position, size_m: float, rgba, text: str = "",
+           lifetime=None) -> Marker:
+    """One marker for the 3D panels. position is (x, y, z) of the center.
+    The default is a sphere with size_m as its diameter. Give text to get
+    billboard text with size_m as its height."""
     m = Marker()
     m.header.stamp = stamp
     m.header.frame_id = frame_id
     m.ns = ns
     m.id = marker_id
-    m.type = Marker.SPHERE
+    m.type = Marker.TEXT_VIEW_FACING if text else Marker.SPHERE
     m.action = Marker.ADD
     m.pose.position.x = float(position[0])
     m.pose.position.y = float(position[1])
     m.pose.position.z = float(position[2])
     m.pose.orientation.w = 1.0
-    m.scale.x = m.scale.y = m.scale.z = float(diameter)
+    if text:
+        m.text = text
+        m.scale.z = float(size_m)
+    else:
+        m.scale.x = m.scale.y = m.scale.z = float(size_m)
     m.color = ColorRGBA(r=rgba[0], g=rgba[1], b=rgba[2], a=rgba[3])
     if lifetime is not None:
         m.lifetime = lifetime
     return m
+
+
+def hex_rgb(rgba) -> str:
+    """The rgba tuple as a #rrggbb string, for the Map panel's GeoJSON styles."""
+    return "#%02x%02x%02x" % tuple(round(255 * c) for c in rgba[:3])

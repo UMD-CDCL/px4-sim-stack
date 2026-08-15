@@ -1,8 +1,8 @@
 """Where local (0, 0) is on the Earth, for the Map panel publishers.
 
-Ground truth and the scorers publish NavSatFix for the Map panel, and they
-must agree on the origin: truth from one origin and estimates from another
-would show a bias that is not there.
+The scorers publish NavSatFix and ground truth publishes GeoJSON for the
+Map panel, and they must agree on the origin: truth from one origin and
+estimates from another would show a bias that is not there.
 
 PX4 does not send GPS_GLOBAL_ORIGIN unless something asks for it, so the
 fallback pairs the drone's own fix with its local position: if the aircraft
@@ -93,13 +93,12 @@ class MapOrigin:
                 self.lon + math.degrees(
                     x / (EARTH_R * math.cos(math.radians(self.lat)))))
 
-    def navsat_fix(self, x: float, y: float, frame_id: str, stamp,
-                   xy_std: float = 0.0) -> NavSatFix | None:
+    def navsat_fix(self, x: float, y: float, frame_id: str,
+                   stamp) -> NavSatFix | None:
         """A NavSatFix at local (x, y), or None before the origin is known.
 
-        xy_std becomes the position covariance, which the Map panel draws as
-        an accuracy ring of that radius. Altitude is NaN: a point on the
-        ground plane has no height worth plotting.
+        Altitude is NaN: a point on the ground plane has no height worth
+        plotting.
         """
         ll = self.to_lla(x, y)
         if ll is None:
@@ -111,10 +110,4 @@ class MapOrigin:
         fix.status.service = NavSatStatus.SERVICE_GPS
         fix.latitude, fix.longitude = ll
         fix.altitude = float("nan")
-        if xy_std > 0.0:
-            variance = xy_std * xy_std
-            fix.position_covariance = [variance, 0.0, 0.0,
-                                       0.0, variance, 0.0,
-                                       0.0, 0.0, 0.0]
-            fix.position_covariance_type = NavSatFix.COVARIANCE_TYPE_DIAGONAL_KNOWN
         return fix

@@ -48,7 +48,7 @@ from vision_msgs.msg import Detection3D, Detection3DArray, ObjectHypothesisWithP
 from visualization_msgs.msg import MarkerArray
 
 from sim_bridge.geo import MapOrigin
-from sim_bridge.verdicts import DETECTION_DOT_DIAMETER, VERDICT_COLOR, sphere
+from sim_bridge.verdicts import DETECTION_DOT_DIAMETER, VERDICT_COLOR, marker
 
 # ------------------------------------------------------------------- tunables
 SCORING_RATE_HZ = 2.0
@@ -225,7 +225,7 @@ class DetectionScorer(Node):
                 continue    # an FN has no dot, only a yellow truth bubble
             # Namespaced by camera and verdict, so the 3D panel can switch
             # off one camera's false positives without touching the other.
-            out.markers.append(sphere(
+            out.markers.append(marker(
                 ns=f"{self.camera}_{kind}",
                 marker_id=i,
                 frame_id=verdicts.header.frame_id,
@@ -233,7 +233,7 @@ class DetectionScorer(Node):
                 position=(det.bbox.center.position.x,
                           det.bbox.center.position.y,
                           det.bbox.center.position.z + DETECTION_DOT_DIAMETER / 2.0),
-                diameter=DETECTION_DOT_DIAMETER,
+                size_m=DETECTION_DOT_DIAMETER,
                 rgba=VERDICT_COLOR[kind],
                 lifetime=lifetime))
         return out

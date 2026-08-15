@@ -261,7 +261,6 @@
       "layer": "satellite",
       "topicColors": {
         "/mavros/global_position/global": "#ff7043",
-        "/ground_truth/navsat": "#f1c40f",
         "/scoring/nadir/true_positives": "#2ecc71",
         "/scoring/nadir/false_positives": "#e74c3c",
         "/scoring/gimbal/true_positives": "#81c784",

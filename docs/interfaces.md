@@ -398,9 +398,9 @@ recall figure would describe neither.
 
 | Topic | Type |
 |---|---|
-| `/ground_truth/markers` | `visualization_msgs/MarkerArray`, the truth bubbles |
+| `/ground_truth/markers` | `visualization_msgs/MarkerArray`, the truth bubbles and their name labels |
 | `/ground_truth/truth_3d` | `vision_msgs/Detection3DArray` |
-| `/ground_truth/navsat` | `sensor_msgs/NavSatFix`, one per target, for the Map panel. The covariance draws the gate radius as an accuracy ring |
+| `/ground_truth/geojson` | `foxglove_msgs/GeoJSON`, every target in one message, for the Map panel. Each target is a gate-radius circle in its status color, plus a pin whose tooltip shows the name and altitude |
 | `/perception/<camera>/detections_3d` | `vision_msgs/Detection3DArray` with covariance |
 | `/camera/<camera>/footprint` | `geometry_msgs/PolygonStamped`, truncated at 100 m |
 | `/scoring/<camera>/verdicts` | `vision_msgs/Detection3DArray`, each labelled TP, FP or FN |

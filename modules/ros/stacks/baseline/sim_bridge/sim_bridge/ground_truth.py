@@ -13,20 +13,28 @@ when no camera sees it. The status comes from the scorers' verdicts: an FN
 names a visible undetected target, and a TP carries the name of the target
 it matched.
 
+A billboard label names each target. The Map panel gets the same gate
+circle and colors from one GeoJSON message that carries every target.
+The tooltip on a target shows its name and altitude.
+
 Scenario poses are Gazebo world coordinates, x east and y north in meters.
 PX4's local frame starts where the vehicle spawned, so the two line up.
 origin_offset_xyz shifts them when they do not.
 
 Publishes
     /ground_truth/markers      visualization_msgs/MarkerArray, the bubbles
+                               and the name labels
     /ground_truth/truth_3d     vision_msgs/Detection3DArray, for the scorers
-    /ground_truth/navsat       sensor_msgs/NavSatFix, one per target, for the
-                               Map panel. The position covariance draws an
-                               accuracy ring with the scoring gate's radius.
+    /ground_truth/geojson      foxglove_msgs/GeoJSON, every target in one
+                               message, for the Map panel. Each target is a
+                               gate circle plus a pin. The tooltip shows the
+                               name and the altitude.
 """
 
 from __future__ import annotations
 
+import json
+import math
 import os
 from pathlib import Path
 
@@ -34,7 +42,6 @@ import rclpy
 import yaml
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile
-from sensor_msgs.msg import NavSatFix
 from vision_msgs.msg import (
     BoundingBox3D,
     Detection3D,
@@ -45,7 +52,15 @@ from visualization_msgs.msg import MarkerArray
 
 from sim_bridge.geo import MapOrigin
 from sim_bridge.verdicts import (GROUND_TRUTH_BUBBLE_RADIUS,
-                                 GROUND_TRUTH_COLOR, sphere)
+                                 GROUND_TRUTH_COLOR,
+                                 GROUND_TRUTH_LABEL_COLOR,
+                                 GROUND_TRUTH_LABEL_HEIGHT, hex_rgb, marker)
+
+try:
+    from foxglove_msgs.msg import GeoJSON
+    HAVE_FOXGLOVE = True
+except ImportError:
+    HAVE_FOXGLOVE = False
 
 # ------------------------------------------------------------------- tunables
 # Only entities whose name contains one of these count as findable targets.
@@ -54,6 +69,9 @@ TARGET_NAME_FILTERS = ["person", "casualty"]
 # Verdicts older than this no longer color the bubbles. The scorers publish
 # at 2 Hz, so a camera gone quiet turns its targets grey within a few ticks.
 VERDICT_TIMEOUT_S = 3.0
+# Vertices of the gate circle on the Map panel. GeoJSON has no circle
+# primitive, so the circle is a polygon.
+GATE_CIRCLE_SEGMENTS = 24
 
 LATCHED = QoSProfile(durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
                      history=QoSHistoryPolicy.KEEP_LAST, depth=1)
@@ -100,7 +118,14 @@ class GroundTruth(Node):
 
         self.marker_pub = self.create_publisher(MarkerArray, "/ground_truth/markers", LATCHED)
         self.truth_pub = self.create_publisher(Detection3DArray, "/ground_truth/truth_3d", LATCHED)
-        self.navsat_pub = self.create_publisher(NavSatFix, "/ground_truth/navsat", 10)
+        self.geojson_pub = None
+        if HAVE_FOXGLOVE:
+            self.geojson_pub = self.create_publisher(
+                GeoJSON, "/ground_truth/geojson", LATCHED)
+        else:
+            self.get_logger().error(
+                "foxglove_msgs is missing, so the Map panel gets no ground "
+                "truth. Install ros-$ROS_DISTRO-foxglove-msgs.")
         self.origin = MapOrigin(self)
 
         rate = float(self.get_parameter("rate_hz").value)
@@ -184,14 +209,27 @@ class GroundTruth(Node):
         for i, target in enumerate(self.targets):
             # The bubble's equator sits at ground level, so a detection dot
             # inside the visible half is within the gate by construction.
-            markers.markers.append(sphere(
+            markers.markers.append(marker(
                 ns="ground_truth",
                 marker_id=i,
                 frame_id=self.reference,
                 stamp=now,
                 position=(target["x"], target["y"], target["z"]),
-                diameter=2.0 * GROUND_TRUTH_BUBBLE_RADIUS,
+                size_m=2.0 * GROUND_TRUTH_BUBBLE_RADIUS,
                 rgba=GROUND_TRUTH_COLOR[self._status(target["name"])]))
+            # A marker cannot follow the camera, so the label sits on top
+            # of the bubble. From the usual overhead view, that is centered
+            # on the target and one gate radius toward the camera.
+            markers.markers.append(marker(
+                ns="ground_truth_labels",
+                marker_id=i,
+                frame_id=self.reference,
+                stamp=now,
+                position=(target["x"], target["y"],
+                          target["z"] + GROUND_TRUTH_BUBBLE_RADIUS),
+                size_m=GROUND_TRUTH_LABEL_HEIGHT,
+                rgba=GROUND_TRUTH_LABEL_COLOR,
+                text=target["name"]))
 
             d = Detection3D()
             d.header = truth.header
@@ -209,14 +247,52 @@ class GroundTruth(Node):
             d.bbox.size.x = d.bbox.size.y = d.bbox.size.z = 2.0 * GROUND_TRUTH_BUBBLE_RADIUS
             truth.detections.append(d)
 
-            fix = self.origin.navsat_fix(target["x"], target["y"],
-                                         self.reference, now,
-                                         xy_std=GROUND_TRUTH_BUBBLE_RADIUS)
-            if fix is not None:
-                self.navsat_pub.publish(fix)
-
         self.marker_pub.publish(markers)
         self.truth_pub.publish(truth)
+        self._publish_geojson()
+
+    def _publish_geojson(self) -> None:
+        """Publish every target in one GeoJSON message for the Map panel.
+        Each target becomes a gate circle in its status color, plus a pin.
+        The tooltip on both shows the name and the altitude."""
+        if self.geojson_pub is None or not self.origin.ready:
+            return
+        features = []
+        for target in self.targets:
+            status = self._status(target["name"])
+            rgba = GROUND_TRUTH_COLOR[status]
+            ring = []
+            for k in range(GATE_CIRCLE_SEGMENTS + 1):
+                angle = 2.0 * math.pi * k / GATE_CIRCLE_SEGMENTS
+                lat, lon = self.origin.to_lla(
+                    target["x"] + GROUND_TRUTH_BUBBLE_RADIUS * math.cos(angle),
+                    target["y"] + GROUND_TRUTH_BUBBLE_RADIUS * math.sin(angle))
+                ring.append([lon, lat])
+            lat, lon = self.origin.to_lla(target["x"], target["y"])
+            # The Map panel shows `name` and `metadata` in the hover tooltip,
+            # and reads Leaflet path options from `style`. The fill alpha
+            # matches the 3D bubble.
+            tooltip = {
+                "name": target["name"],
+                "metadata": {"altitude_m": round(target["z"], 1),
+                             "status": status},
+            }
+            features.append({
+                "type": "Feature",
+                "geometry": {"type": "Polygon", "coordinates": [ring]},
+                "properties": dict(tooltip, style={
+                    "color": hex_rgb(rgba), "weight": 2,
+                    "fillColor": hex_rgb(rgba), "fillOpacity": rgba[3]}),
+            })
+            features.append({
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                "properties": tooltip,
+            })
+        msg = GeoJSON()
+        msg.geojson = json.dumps(
+            {"type": "FeatureCollection", "features": features})
+        self.geojson_pub.publish(msg)
 
 
 def main() -> None:
