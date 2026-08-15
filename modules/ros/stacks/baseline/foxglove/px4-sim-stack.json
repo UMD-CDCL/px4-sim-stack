@@ -2,20 +2,26 @@
   "configById": {
     "3D!scene": {
       "cameraState": {
-        "distance": 90,
         "perspective": true,
-        "phi": 52,
+        "distance": 94.73684210525879,
+        "phi": 53.88976377952849,
+        "thetaOffset": 38.38582677165521,
+        "targetOffset": [
+          5.331527851907092,
+          -1.4003383033131915,
+          -2.08383675906979e-16
+        ],
         "target": [
           0,
           0,
           0
         ],
-        "targetOffset": [
-          12,
+        "targetOrientation": [
           0,
-          0
+          0,
+          0,
+          1
         ],
-        "thetaOffset": 45,
         "fovy": 45,
         "near": 0.5,
         "far": 5000
@@ -26,9 +32,9 @@
         "enableStats": false,
         "backgroundColor": "#12161c",
         "transforms": {
-          "axisScale": 1.2,
           "showLabel": true,
-          "labelSize": 0.4
+          "labelSize": 0.4,
+          "axisSize": 0.24
         }
       },
       "transforms": {
@@ -92,9 +98,15 @@
       "layers": {},
       "publish": {
         "type": "point",
-        "poseTopic": "/move_base_simple/goal"
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
       },
-      "imageMode": {}
+      "imageMode": {},
+      "synchronize": false
     },
     "Image!nadir": {
       "imageTopic": "/camera/nadir/image_raw/compressed",
@@ -107,7 +119,65 @@
       "synchronize": false,
       "rotation": 0,
       "flipHorizontal": false,
-      "flipVertical": false
+      "flipVertical": false,
+      "cameraState": {
+        "distance": 20,
+        "perspective": true,
+        "phi": 60,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 60,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "scene": {},
+      "transforms": {},
+      "topics": {
+        "/scoring/gimbal/markers": {
+          "visible": true
+        },
+        "/scoring/nadir/markers": {
+          "visible": false
+        },
+        "/ground_truth/markers": {
+          "visible": true
+        }
+      },
+      "layers": {},
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "imageMode": {
+        "imageTopic": "/camera/gimbal/image_raw/compressed",
+        "calibrationTopic": "/camera/gimbal/camera_info",
+        "annotations": {
+          "/camera/gimbal/annotations": {
+            "visible": true
+          }
+        }
+      }
     },
     "Image!gimbal": {
       "imageTopic": "/camera/gimbal/image_raw/compressed",
@@ -120,7 +190,62 @@
       "synchronize": false,
       "rotation": 0,
       "flipHorizontal": false,
-      "flipVertical": false
+      "flipVertical": false,
+      "cameraState": {
+        "distance": 20,
+        "perspective": true,
+        "phi": 60,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 60,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "scene": {},
+      "transforms": {},
+      "topics": {
+        "/scoring/nadir/markers": {
+          "visible": true
+        },
+        "/ground_truth/markers": {
+          "visible": true
+        }
+      },
+      "layers": {},
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "imageMode": {
+        "imageTopic": "/camera/nadir/image_raw/compressed",
+        "calibrationTopic": "/camera/nadir/camera_info",
+        "annotations": {
+          "/camera/nadir/annotations": {
+            "visible": true
+          }
+        }
+      }
     },
     "map!world": {
       "center": null,
