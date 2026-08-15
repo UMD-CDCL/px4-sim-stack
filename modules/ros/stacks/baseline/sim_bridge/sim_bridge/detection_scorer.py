@@ -25,6 +25,8 @@ Publishes, under /scoring/<camera>/
     markers         visualization_msgs/MarkerArray, TP and FP as dots. An FN
                     has no estimate to draw and gets no dot: it appears as
                     the ground truth bubble turning yellow.
+    true_positives  sensor_msgs/NavSatFix, one per TP, for the Map panel
+    false_positives sensor_msgs/NavSatFix, one per FP, for the Map panel
     position_error  std_msgs/Float64, meters, one per matched estimate
     recall          std_msgs/Float64, over the running window
     precision       std_msgs/Float64, over the running window
@@ -40,10 +42,12 @@ from geometry_msgs.msg import PolygonStamped
 from rclpy.node import Node
 from rclpy.qos import (QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile,
                        QoSReliabilityPolicy)
+from sensor_msgs.msg import NavSatFix
 from std_msgs.msg import Float64
 from vision_msgs.msg import Detection3D, Detection3DArray, ObjectHypothesisWithPose
 from visualization_msgs.msg import MarkerArray
 
+from sim_bridge.geo import MapOrigin
 from sim_bridge.verdicts import DETECTION_DOT_DIAMETER, VERDICT_COLOR, sphere
 
 # ------------------------------------------------------------------- tunables
@@ -113,9 +117,12 @@ class DetectionScorer(Node):
 
         self.verdict_pub = self.create_publisher(Detection3DArray, "verdicts", 10)
         self.marker_pub = self.create_publisher(MarkerArray, "markers", 10)
+        self.tp_pub = self.create_publisher(NavSatFix, "true_positives", 10)
+        self.fp_pub = self.create_publisher(NavSatFix, "false_positives", 10)
         self.error_pub = self.create_publisher(Float64, "position_error", 10)
         self.recall_pub = self.create_publisher(Float64, "recall", 10)
         self.precision_pub = self.create_publisher(Float64, "precision", 10)
+        self.origin = MapOrigin(self)
 
         self.create_timer(1.0 / SCORING_RATE_HZ, self._score)
 
@@ -166,6 +173,7 @@ class DetectionScorer(Node):
             if best_index is None:
                 self.false_positives.append(1)
                 verdicts.detections.append(self._verdict("FP", track_id, x, y, z))
+                self._publish_fix(self.fp_pub, x, y, verdicts.header.stamp)
             else:
                 unclaimed.remove(best_index)
                 self.true_positives.append(1)
@@ -174,6 +182,7 @@ class DetectionScorer(Node):
                     self._verdict("TP", track_id, x, y, z,
                                   score=best_distance,
                                   matched=visible[best_index][0]))
+                self._publish_fix(self.tp_pub, x, y, verdicts.header.stamp)
 
         for i in unclaimed:
             name, x, y, z = visible[i]
@@ -183,6 +192,11 @@ class DetectionScorer(Node):
         self.verdict_pub.publish(verdicts)
         self.marker_pub.publish(self._verdict_markers(verdicts))
         self._publish_metrics()
+
+    def _publish_fix(self, publisher, x: float, y: float, stamp) -> None:
+        fix = self.origin.navsat_fix(x, y, self.reference, stamp)
+        if fix is not None:
+            publisher.publish(fix)
 
     def _verdict(self, kind: str, track_id: str, x: float, y: float, z: float,
                  score: float = 0.0, matched: str = "") -> Detection3D:

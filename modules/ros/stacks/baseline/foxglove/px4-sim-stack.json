@@ -260,85 +260,15 @@
       "followTopic": "/mavros/global_position/global",
       "layer": "satellite",
       "topicColors": {
-        "/mavros/global_position/global": "#ff7043"
+        "/mavros/global_position/global": "#ff7043",
+        "/ground_truth/navsat": "#f1c40f",
+        "/scoring/nadir/true_positives": "#2ecc71",
+        "/scoring/nadir/false_positives": "#e74c3c",
+        "/scoring/gimbal/true_positives": "#81c784",
+        "/scoring/gimbal/false_positives": "#f06292"
       },
       "zoomLevel": 18,
       "maxNativeZoom": 19
-    },
-    "Plot!scoring": {
-      "paths": [
-        {
-          "value": "/scoring/nadir/recall.data",
-          "enabled": true,
-          "timestampMethod": "receiveTime",
-          "label": "nadir recall",
-          "color": "#4dd0e1"
-        },
-        {
-          "value": "/scoring/nadir/precision.data",
-          "enabled": true,
-          "timestampMethod": "receiveTime",
-          "label": "nadir precision",
-          "color": "#81c784"
-        },
-        {
-          "value": "/scoring/nadir/position_error.data",
-          "enabled": true,
-          "timestampMethod": "receiveTime",
-          "label": "nadir error (m)",
-          "color": "#9575cd"
-        },
-        {
-          "value": "/scoring/gimbal/recall.data",
-          "enabled": true,
-          "timestampMethod": "receiveTime",
-          "label": "gimbal recall",
-          "color": "#ffb74d"
-        },
-        {
-          "value": "/scoring/gimbal/precision.data",
-          "enabled": true,
-          "timestampMethod": "receiveTime",
-          "label": "gimbal precision",
-          "color": "#c5e1a5"
-        },
-        {
-          "value": "/scoring/gimbal/position_error.data",
-          "enabled": true,
-          "timestampMethod": "receiveTime",
-          "label": "gimbal error (m)",
-          "color": "#f06292"
-        }
-      ],
-      "showLegend": true,
-      "isSynced": true,
-      "legendDisplay": "floating",
-      "showXAxisLabels": true,
-      "showYAxisLabels": true,
-      "sidebarDimension": 240,
-      "xAxisVal": "timestamp"
-    },
-    "Plot!altitude": {
-      "paths": [
-        {
-          "value": "/mavros/global_position/rel_alt.data",
-          "enabled": true,
-          "timestampMethod": "receiveTime",
-          "label": "relative altitude (m)",
-          "color": "#9575cd"
-        },
-        {
-          "value": "/mavros/rangefinder_pub.range",
-          "enabled": true,
-          "timestampMethod": "receiveTime",
-          "label": "rangefinder (m)",
-          "color": "#f06292"
-        }
-      ],
-      "showLegend": true,
-      "isSynced": true,
-      "legendDisplay": "floating",
-      "xAxisVal": "timestamp"
     }
   },
   "globalVariables": {},
@@ -358,17 +288,7 @@
       "direction": "row",
       "splitPercentage": 68
     },
-    "second": {
-      "first": "map!world",
-      "second": {
-        "first": "Plot!scoring",
-        "second": "Plot!altitude",
-        "direction": "column",
-        "splitPercentage": 50
-      },
-      "direction": "row",
-      "splitPercentage": 40
-    },
+    "second": "map!world",
     "direction": "column",
     "splitPercentage": 62
   }

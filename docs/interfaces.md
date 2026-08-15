@@ -393,10 +393,12 @@ recall figure would describe neither.
 |---|---|
 | `/ground_truth/markers` | `visualization_msgs/MarkerArray`, the truth bubbles |
 | `/ground_truth/truth_3d` | `vision_msgs/Detection3DArray` |
+| `/ground_truth/navsat` | `sensor_msgs/NavSatFix`, one per target, for the Map panel. The covariance draws the gate radius as an accuracy ring |
 | `/perception/<camera>/detections_3d` | `vision_msgs/Detection3DArray` with covariance |
 | `/camera/<camera>/footprint` | `geometry_msgs/PolygonStamped`, truncated at 100 m |
 | `/scoring/<camera>/verdicts` | `vision_msgs/Detection3DArray`, each labelled TP, FP or FN |
 | `/scoring/<camera>/markers` | `visualization_msgs/MarkerArray`, TP and FP as dots |
+| `/scoring/<camera>/true_positives`, `false_positives` | `sensor_msgs/NavSatFix`, one per verdict, for the Map panel and recordings |
 | `/scoring/<camera>/position_error` | `std_msgs/Float64`, meters |
 | `/scoring/<camera>/recall`, `/scoring/<camera>/precision` | `std_msgs/Float64` |
 
