@@ -2,19 +2,18 @@
   "configById": {
     "3D!scene": {
       "cameraState": {
+        "distance": 150.31643131022855,
         "perspective": true,
-        "distance": 94.73684210525879,
-        "phi": 53.88976377952849,
-        "thetaOffset": 38.38582677165521,
-        "targetOffset": [
-          5.331527851907092,
-          -1.4003383033131915,
-          -2.08383675906979e-16
-        ],
+        "phi": 40.15753761331069,
         "target": [
           0,
           0,
           0
+        ],
+        "targetOffset": [
+          -0.0078073719505056625,
+          -0.0004115838179326495,
+          -2.363346523724825e-16
         ],
         "targetOrientation": [
           0,
@@ -22,12 +21,13 @@
           0,
           1
         ],
+        "thetaOffset": 87.87401574803359,
         "fovy": 45,
         "near": 0.5,
         "far": 5000
       },
-      "followMode": "follow-pose",
-      "followTf": "map",
+      "followMode": "follow-heading",
+      "followTf": "base_link",
       "scene": {
         "enableStats": false,
         "backgroundColor": "#12161c",
@@ -39,7 +39,7 @@
       },
       "transforms": {
         "frame:map": {
-          "visible": true
+          "visible": false
         },
         "frame:base_link": {
           "visible": true
@@ -48,16 +48,28 @@
           "visible": false
         },
         "frame:gimbal_camera_link": {
-          "visible": true
+          "visible": false
         },
         "frame:gimbal_camera_optical_frame": {
-          "visible": true
+          "visible": false
         },
         "frame:nadir_camera_link": {
           "visible": false
         },
         "frame:nadir_camera_optical_frame": {
-          "visible": true
+          "visible": false
+        },
+        "frame:odom": {
+          "visible": false
+        },
+        "frame:odom_ned": {
+          "visible": false
+        },
+        "frame:base_link_frd": {
+          "visible": false
+        },
+        "frame:map_ned": {
+          "visible": false
         }
       },
       "topics": {
@@ -89,10 +101,53 @@
         },
         "/camera/gimbal/ground_projection": {
           "visible": true,
-          "pointSize": 2,
+          "pointSize": 4,
           "colorMode": "rgb",
           "colorField": "rgb",
           "decayTime": 0
+        },
+        "/camera/gimbal/image_raw": {
+          "visible": false
+        },
+        "/camera/gimbal/image_raw/compressed": {
+          "visible": true,
+          "cameraInfoTopic": "/camera/gimbal/camera_info",
+          "projectionFrameId": "map",
+          "distance": 1,
+          "planarProjectionFactor": 0
+        },
+        "/camera/nadir/image_raw/compressed": {
+          "visible": true,
+          "cameraInfoTopic": "/camera/nadir/camera_info",
+          "projectionFrameId": "map"
+        },
+        "/mavros/global_position/gp_lp_offset": {
+          "visible": false
+        },
+        "/initialpose": {
+          "visible": false
+        },
+        "/mavros/landing_target/pose": {
+          "visible": false
+        },
+        "/mavros/landing_target/pose_in": {
+          "visible": false
+        },
+        "/mavros/local_position/pose": {
+          "visible": false
+        },
+        "/mavros/obstacle/send": {
+          "visible": false
+        },
+        "/mavros/setpoint_position/local": {
+          "visible": false
+        },
+        "/mavros/trajectory/path": {
+          "visible": false,
+          "lineWidth": 10
+        },
+        "/mavros/setpoint_trajectory/desired": {
+          "visible": false
         }
       },
       "layers": {},
@@ -176,6 +231,9 @@
           "/camera/gimbal/annotations": {
             "visible": true
           }
+        },
+        "publish": {
+          "clickEnabled": true
         }
       }
     },
@@ -256,18 +314,73 @@
           "attribution": "Esri World Imagery"
         }
       ],
-      "disabledTopics": [],
-      "followTopic": "/mavros/global_position/global",
+      "disabledTopics": [
+        "/mavros/sim_state/global_position",
+        "/mavros/global_position/raw/fix"
+      ],
+      "followTopic": "",
       "layer": "satellite",
       "topicColors": {
-        "/mavros/global_position/global": "#ff7043",
-        "/scoring/nadir/true_positives": "#2ecc71",
-        "/scoring/nadir/false_positives": "#e74c3c",
-        "/scoring/gimbal/true_positives": "#81c784",
-        "/scoring/gimbal/false_positives": "#f06292"
+        "/mavros/global_position/global": "#4e98e2",
+        "/camera/nadir/footprint_geojson": "#4dd0e1",
+        "/camera/gimbal/footprint_geojson": "#ffb74d",
+        "/scoring/nadir/true_positives": "#00ff00",
+        "/scoring/nadir/false_positives": "#ff0000",
+        "/scoring/gimbal/true_positives": "#00ff00",
+        "/scoring/gimbal/false_positives": "#ff0000",
+        "/mavros/global_position/raw/fix": "#f5774d",
+        "/mavros/sim_state/global_position": "#f7df71"
       },
       "zoomLevel": 18,
-      "maxNativeZoom": 19
+      "maxNativeZoom": 19,
+      "customTileUrl": "",
+      "followFrame": "",
+      "topicConfig": {
+        "/mavros/global_position/global": {
+          "historyMode": "none",
+          "pointSize": 6,
+          "pointDisplayMode": "diamond",
+          "order": 1
+        },
+        "/scoring/nadir/true_positives": {
+          "historyMode": "previous",
+          "pointSize": 6,
+          "order": 5
+        },
+        "/scoring/nadir/false_positives": {
+          "historyMode": "previous",
+          "pointSize": 6,
+          "pointDisplayMode": "cross",
+          "order": 3
+        },
+        "/scoring/gimbal/true_positives": {
+          "historyMode": "previous",
+          "pointSize": 6,
+          "order": 4
+        },
+        "/scoring/gimbal/false_positives": {
+          "historyMode": "previous",
+          "pointSize": 6,
+          "pointDisplayMode": "cross",
+          "order": 2
+        },
+        "/mavros/global_position/raw/fix": {
+          "historyMode": "none",
+          "pointSize": 6,
+          "order": 6
+        },
+        "/mavros/sim_state/global_position": {
+          "historyMode": "none",
+          "pointSize": 6,
+          "order": 7
+        },
+        "/ground_truth/geojson": {
+          "historyMode": "none",
+          "pointSize": 6,
+          "pointDisplayMode": "pin"
+        }
+      },
+      "layers": []
     }
   },
   "globalVariables": {},

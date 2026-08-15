@@ -255,6 +255,7 @@ def generate_launch_description() -> LaunchDescription:
                 namespace=f"camera/{cam}",
                 output="screen",
                 parameters=[{
+                    "camera": cam,
                     "camera_info_topic": f"/camera/{cam}/camera_info",
                     "optical_frame": CAMERA[cam]["optical_frame"],
                     "reference_frame": REFERENCE_FRAME,

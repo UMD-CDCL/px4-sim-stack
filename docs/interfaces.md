@@ -403,6 +403,7 @@ recall figure would describe neither.
 | `/ground_truth/geojson` | `foxglove_msgs/GeoJSON`, every target in one message, for the Map panel. Each target is a gate-radius circle in its status color, plus a pin whose tooltip shows the name and altitude |
 | `/perception/<camera>/detections_3d` | `vision_msgs/Detection3DArray` with covariance |
 | `/camera/<camera>/footprint` | `geometry_msgs/PolygonStamped`, truncated at 100 m |
+| `/camera/<camera>/footprint_geojson` | `foxglove_msgs/GeoJSON`, the same outline for the Map panel. The Foxglove layout colors it to match the 3D panel line |
 | `/scoring/<camera>/verdicts` | `vision_msgs/Detection3DArray`, each labelled TP, FP or FN |
 | `/scoring/<camera>/markers` | `visualization_msgs/MarkerArray`, TP and FP as dots |
 | `/scoring/<camera>/true_positives`, `false_positives` | `sensor_msgs/NavSatFix`, one per verdict, for the Map panel and recordings |

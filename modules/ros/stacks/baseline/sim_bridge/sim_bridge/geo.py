@@ -93,6 +93,16 @@ class MapOrigin:
                 self.lon + math.degrees(
                     x / (EARTH_R * math.cos(math.radians(self.lat)))))
 
+    def geojson_ring(self, points_xy) -> list | None:
+        """The local (x, y) points as a closed GeoJSON ring of
+        [longitude, latitude] pairs. None before the origin is known."""
+        if self.lat is None:
+            return None
+        ring = [[lon, lat]
+                for lat, lon in (self.to_lla(x, y) for x, y in points_xy)]
+        ring.append(ring[0])
+        return ring
+
     def navsat_fix(self, x: float, y: float, frame_id: str,
                    stamp) -> NavSatFix | None:
         """A NavSatFix at local (x, y), or None before the origin is known.

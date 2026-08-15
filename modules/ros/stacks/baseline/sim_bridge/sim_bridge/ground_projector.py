@@ -17,11 +17,19 @@ above the launch point, so the ground is at pose.z minus rel_alt. Set
 use_rel_alt false to pin the plane to ground_z instead. This is a flat-earth
 assumption, and over a slope the footprint is wrong in the way you expect.
 
+The Map panel gets the same outline as one GeoJSON polygon. The Foxglove
+layout colors it, with the same color it gives the 3D panel line. A camera
+that sees no ground publishes an empty collection, which clears its outline
+from the map.
+
 Publishes
-    <camera_ns>/footprint   geometry_msgs/PolygonStamped
+    <camera_ns>/footprint           geometry_msgs/PolygonStamped
+    <camera_ns>/footprint_geojson   foxglove_msgs/GeoJSON, for the Map panel
 """
 
 from __future__ import annotations
+
+import json
 
 import rclpy
 from geometry_msgs.msg import Point32, PolygonStamped
@@ -32,9 +40,16 @@ from sensor_msgs.msg import CameraInfo
 from std_msgs.msg import Float64
 from tf2_ros import Buffer, TransformListener
 
+from sim_bridge.geo import MapOrigin
 from sim_bridge.projection import (GROUND_VIEW_MAX_DISTANCE_M,
                                    footprint_on_ground, image_boundary,
                                    intrinsics_ready)
+
+try:
+    from foxglove_msgs.msg import GeoJSON
+    HAVE_FOXGLOVE = True
+except ImportError:
+    HAVE_FOXGLOVE = False
 
 # ------------------------------------------------------------------- tunables
 PUBLISH_RATE_HZ = 5.0
@@ -46,12 +61,14 @@ class GroundProjector(Node):
     def __init__(self) -> None:
         super().__init__("ground_projector")
 
+        self.declare_parameter("camera", "gimbal")
         self.declare_parameter("camera_info_topic", "/camera/gimbal/camera_info")
         self.declare_parameter("optical_frame", "gimbal_camera_optical_frame")
         self.declare_parameter("reference_frame", "map")
         self.declare_parameter("use_rel_alt", True)
         self.declare_parameter("ground_z", 0.0)
 
+        self.camera = self.get_parameter("camera").value
         self.optical = self.get_parameter("optical_frame").value
         self.reference = self.get_parameter("reference_frame").value
         self.ground_z = float(self.get_parameter("ground_z").value)
@@ -75,6 +92,15 @@ class GroundProjector(Node):
                                      self._on_rel_alt, qos_profile_sensor_data)
 
         self.footprint_pub = self.create_publisher(PolygonStamped, "footprint", 1)
+        self.geojson_pub = None
+        if HAVE_FOXGLOVE:
+            self.geojson_pub = self.create_publisher(
+                GeoJSON, "footprint_geojson", 1)
+        else:
+            self.get_logger().error(
+                "foxglove_msgs is missing, so the Map panel gets no "
+                "footprint. Install ros-$ROS_DISTRO-foxglove-msgs.")
+        self.origin = MapOrigin(self)
         self.create_timer(1.0 / PUBLISH_RATE_HZ, self._publish_footprint)
 
         self.published = self.missed = 0
@@ -110,8 +136,9 @@ class GroundProjector(Node):
             ground_z, GROUND_VIEW_MAX_DISTANCE_M)
         if outline is None:
             # No ground within the limit is in view. Publishing nothing is
-            # the honest answer.
+            # the honest answer, and the map outline is cleared.
             self.missed += 1
+            self._publish_geojson([])
             return
 
         footprint = PolygonStamped()
@@ -121,7 +148,27 @@ class GroundProjector(Node):
             Point32(x=float(p[0]), y=float(p[1]), z=float(p[2])) for p in outline
         ]
         self.footprint_pub.publish(footprint)
+        self._publish_geojson(outline)
         self.published += 1
+
+    def _publish_geojson(self, outline) -> None:
+        """Publish the outline as one GeoJSON polygon for the Map panel.
+        The Foxglove layout gives it this camera's color. An empty outline
+        publishes an empty collection, which clears the map."""
+        if self.geojson_pub is None or not self.origin.ready:
+            return
+        features = []
+        if outline:
+            ring = self.origin.geojson_ring([(p[0], p[1]) for p in outline])
+            features.append({
+                "type": "Feature",
+                "geometry": {"type": "Polygon", "coordinates": [ring]},
+                "properties": {"name": f"{self.camera} footprint"},
+            })
+        msg = GeoJSON()
+        msg.geojson = json.dumps(
+            {"type": "FeatureCollection", "features": features})
+        self.geojson_pub.publish(msg)
 
     def _report(self) -> None:
         if self.published == 0 and self.missed > 0:

@@ -261,13 +261,12 @@ class GroundTruth(Node):
         for target in self.targets:
             status = self._status(target["name"])
             rgba = GROUND_TRUTH_COLOR[status]
-            ring = []
-            for k in range(GATE_CIRCLE_SEGMENTS + 1):
-                angle = 2.0 * math.pi * k / GATE_CIRCLE_SEGMENTS
-                lat, lon = self.origin.to_lla(
-                    target["x"] + GROUND_TRUTH_BUBBLE_RADIUS * math.cos(angle),
-                    target["y"] + GROUND_TRUTH_BUBBLE_RADIUS * math.sin(angle))
-                ring.append([lon, lat])
+            angles = [2.0 * math.pi * k / GATE_CIRCLE_SEGMENTS
+                      for k in range(GATE_CIRCLE_SEGMENTS)]
+            ring = self.origin.geojson_ring(
+                [(target["x"] + GROUND_TRUTH_BUBBLE_RADIUS * math.cos(a),
+                  target["y"] + GROUND_TRUTH_BUBBLE_RADIUS * math.sin(a))
+                 for a in angles])
             lat, lon = self.origin.to_lla(target["x"], target["y"])
             # The Map panel shows `name` and `metadata` in the hover tooltip,
             # and reads Leaflet path options from `style`. The fill alpha
