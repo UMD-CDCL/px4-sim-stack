@@ -17,6 +17,7 @@ What runs here
   detection_scorer    estimates against truth, one per camera
   image_ground_projector  the live image laid flat on the ground, one per camera
   fiducial_alignment  frame correction against a surveyed point, off by default
+  click_to_gimbal     a click on the gimbal image becomes a gimbal command
   foxglove_bridge     a websocket for the browser, on port 8765
 
 Every per-camera stage runs once for each camera and nothing merges the two.
@@ -375,6 +376,30 @@ def generate_launch_description() -> LaunchDescription:
             )
             for cam in CAMERAS
         ],
+
+        # ------------------------------------------------ click to point
+        # A click on the gimbal image in Foxglove becomes a MAVLink gimbal
+        # attitude command. Gimbal only: the nadir camera is bolted down.
+        # Skipped when the gimbal camera is not in the camera set, so the
+        # node never claims gimbal control for a camera that is not
+        # streaming.
+        *([
+            Node(
+                package="sim_bridge",
+                executable="click_to_gimbal",
+                name="click_to_gimbal",
+                output="screen",
+                parameters=[{
+                    "click_topic": "/foxglove/cursor/click",
+                    "camera_info_topic": "/camera/gimbal/camera_info",
+                    "optical_frame": CAMERA["gimbal"]["optical_frame"],
+                    "reference_frame": REFERENCE_FRAME,
+                    # "gz_sim" matches the simulated gimbal. Set "mavlink"
+                    # for a gimbal that obeys the MAVLink frame flags.
+                    "gimbal_convention": "gz_sim",
+                }],
+            ),
+        ] if "gimbal" in CAMERAS else []),
 
         # ------------------------------------------------- observability
         Node(

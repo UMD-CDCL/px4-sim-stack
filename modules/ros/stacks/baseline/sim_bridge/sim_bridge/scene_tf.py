@@ -37,6 +37,8 @@ try:
 except ImportError:  # pragma: no cover - only when mavros_extras is absent
     HAVE_GIMBAL_MSG = False
 
+from sim_bridge.projection import quat_from_rpy
+
 # ------------------------------------------------------------------- tunables
 GIMBAL_PUBLISH_RATE_HZ = 30.0
 # How long a commanded setpoint stays authoritative before the device report
@@ -45,18 +47,6 @@ SETPOINT_TIMEOUT_S = 3.0
 
 # GIMBAL_DEVICE_FLAGS_YAW_LOCK
 YAW_LOCK = 16
-
-
-def quat_from_rpy(roll: float, pitch: float, yaw: float) -> tuple[float, float, float, float]:
-    cr, sr = math.cos(roll / 2), math.sin(roll / 2)
-    cp, sp = math.cos(pitch / 2), math.sin(pitch / 2)
-    cy, sy = math.cos(yaw / 2), math.sin(yaw / 2)
-    return (
-        sr * cp * cy - cr * sp * sy,
-        cr * sp * cy + sr * cp * sy,
-        cr * cp * sy - sr * sp * cy,
-        cr * cp * cy + sr * sp * sy,
-    )
 
 
 def quat_mul(a, b):

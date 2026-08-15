@@ -43,6 +43,20 @@ def ray_in_optical(u: float, v: float, k: Sequence[float]) -> tuple[float, float
     return (x / norm, y / norm, 1.0 / norm)
 
 
+def quat_from_rpy(roll: float, pitch: float, yaw: float) -> tuple[float, float, float, float]:
+    """Quaternion (x, y, z, w) from roll, pitch, yaw in radians, applied
+    intrinsically in z-y-x order, the aerospace convention."""
+    cr, sr = math.cos(roll / 2), math.sin(roll / 2)
+    cp, sp = math.cos(pitch / 2), math.sin(pitch / 2)
+    cy, sy = math.cos(yaw / 2), math.sin(yaw / 2)
+    return (
+        sr * cp * cy - cr * sp * sy,
+        cr * sp * cy + sr * cp * sy,
+        cr * cp * sy - sr * sp * cy,
+        cr * cp * cy + sr * sp * sy,
+    )
+
+
 def quat_rotate(q: Sequence[float], v: Sequence[float]) -> tuple[float, float, float]:
     """Rotate vector v by quaternion q, given as (x, y, z, w)."""
     qx, qy, qz, qw = q
@@ -84,6 +98,21 @@ def intersect_ground(
 
 def slant_range(a: Sequence[float], b: Sequence[float]) -> float:
     return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b)))
+
+
+def pointing_rpy_ned(direction_enu: Sequence[float]) -> tuple[float, float, float]:
+    """The earth-referenced attitude that puts the view axis on a direction.
+
+    direction_enu is a unit vector in the ENU reference frame. The result is
+    roll, pitch, yaw in radians in the NED convention MAVLink attitude
+    commands use. Roll is zero, so the image stays level. Straight up or
+    down leaves yaw underdetermined, and atan2 then returns an arbitrary
+    stable angle, which is harmless with the view axis vertical.
+    """
+    east, north, up = direction_enu
+    pitch = math.asin(max(-1.0, min(1.0, up)))
+    yaw = math.atan2(east, north)
+    return 0.0, pitch, yaw
 
 
 def image_boundary(width: int, height: int, per_edge: int,

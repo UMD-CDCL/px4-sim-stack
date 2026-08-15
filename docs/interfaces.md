@@ -269,6 +269,13 @@ The baseline stack publishes:
 | `/camera/nadir/camera_info` | `sensor_msgs/CameraInfo` |
 | `/perception/<camera>/detections` | `vision_msgs/Detection2DArray` |
 
+One topic goes the other way. `click_to_gimbal` subscribes to
+`/foxglove/cursor/click` (`geometry_msgs/PointStamped`, x and y in gimbal
+image pixels) and turns each click into a MAVLink gimbal attitude command,
+so a click in Foxglove points the camera there. The frame handling behind
+that command is calibrated against the simulated gimbal and documented in
+`sim_bridge/click_to_gimbal.py`.
+
 Each camera publishes the same frame twice. Use the raw topic inside the ROS
 container, where a large message costs shared memory. Use the compressed topic
 in Foxglove, because the raw one is too large to cross the websocket. The two
