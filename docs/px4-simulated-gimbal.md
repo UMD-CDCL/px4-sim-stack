@@ -39,10 +39,11 @@ set, and the section above says what the simulated gimbal then does
 with it. So an ROI does not track the point as the vehicle moves, and
 it does not point correctly even at the start.
 
-To hold the simulated gimbal on a world point, recompute the
-vehicle-relative attitude yourself as the vehicle moves. This stack
-does that in `sim_bridge/roi_tracker.py`, one small file built to be
-easy to drop when PX4 learns to do it.
+To hold the simulated gimbal on a world point, or to stabilize pitch
+and roll while yaw follows the heading, recompute the vehicle-relative
+attitude yourself as the vehicle moves. This stack does that in
+`sim_bridge/roi_tracker.py`, one small file built to be easy to drop
+when PX4 learns to do it.
 
 ## It reports an absolute attitude labeled vehicle relative
 

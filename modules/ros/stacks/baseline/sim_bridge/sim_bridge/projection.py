@@ -74,6 +74,38 @@ def quat_conj(q: Sequence[float]) -> tuple[float, float, float, float]:
     return (-q[0], -q[1], -q[2], q[3])
 
 
+def rpy_from_quat(q: Sequence[float]) -> tuple[float, float, float]:
+    """Roll, pitch, yaw in radians from a quaternion (x, y, z, w). The
+    inverse of quat_from_rpy, in the same intrinsic z-y-x convention."""
+    x, y, z, w = q
+    roll = math.atan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y))
+    pitch = math.asin(max(-1.0, min(1.0, 2.0 * (w * y - z * x))))
+    yaw = math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+    return roll, pitch, yaw
+
+
+def wrap_pi(angle: float) -> float:
+    """The same angle in (-pi, pi]."""
+    return math.atan2(math.sin(angle), math.cos(angle))
+
+
+# Aerospace to ROS. NED_TO_ENU swaps the reference frame; FRD_TO_FLU swaps
+# the body axes. Applied on both sides because both ends change, the same
+# conversion MAVROS applies to every attitude.
+NED_TO_ENU = (math.sqrt(0.5), math.sqrt(0.5), 0.0, 0.0)
+FRD_TO_FLU = (1.0, 0.0, 0.0, 0.0)
+
+
+def aerospace_to_ros(q: Sequence[float]) -> tuple[float, float, float, float]:
+    """An absolute attitude, NED reference and FRD body, into ENU and FLU."""
+    return quat_mul(quat_mul(NED_TO_ENU, q), FRD_TO_FLU)
+
+
+def ros_to_aerospace(q: Sequence[float]) -> tuple[float, float, float, float]:
+    """An absolute attitude, ENU reference and FLU body, into NED and FRD."""
+    return quat_mul(quat_mul(quat_conj(NED_TO_ENU), q), quat_conj(FRD_TO_FLU))
+
+
 def body_frd_to_flu(q: Sequence[float]) -> tuple[float, float, float, float]:
     """A rotation relative to the body, from FRD axes to FLU axes.
 

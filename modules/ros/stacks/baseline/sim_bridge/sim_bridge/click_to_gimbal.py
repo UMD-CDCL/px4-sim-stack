@@ -6,8 +6,17 @@ coordinates. The click_mode parameter decides what one click does, and
 because it is one parameter the modes cannot overlap:
 
     roi     hold the camera on the ground point under the pixel. Default.
-    point   turn the camera optical axis onto the pixel, once.
+    point   put the camera axis on the pixel: pitch and roll hold against
+            the horizon, and yaw follows the vehicle heading.
     off     ignore clicks.
+
+Both click behaviors are the gimbal protocol's stabilized ones. An ROI
+holds every axis on the point. A point click uses the protocol's
+default lock flags: roll and pitch locked to the horizon, yaw
+unlocked, so the view turns with the aircraft. A hold persists across
+mode changes and through off mode: the modes only decide what a new
+click does. A new click replaces the hold, and /gimbal/center releases
+it.
 
 The mode changes at runtime with `ros2 param set` or the Foxglove
 Parameters panel, and the current mode is published latched on
@@ -16,7 +25,7 @@ Parameters panel, and the current mode is published latched on
 /gimbal/click_mode/off, set the mode with an empty request, so a
 Foxglove service-call button needs no payload. Each goes through the
 parameter, which stays the single source of truth. A fourth service,
-/gimbal/center, releases any ROI hold and points the gimbal straight
+/gimbal/center, releases any hold and points the gimbal straight
 ahead, pitch and yaw zero, the same center command the recovery path
 uses. The mode does not change.
 
@@ -32,19 +41,22 @@ warning. What happens next depends on the gimbal convention. With
 cannot: its v2 gimbal output computes the ROI attitude once per command,
 and the simulated gimbal ignores the frame flags. With "mavlink" the
 node sends DO_SET_ROI_LOCATION and the autopilot does the holding, the
-same path QGC uses, and leaving roi mode sends DO_SET_ROI_NONE.
+same path QGC uses, and a point click on top of an ROI sends
+DO_SET_ROI_NONE first.
 
-In point mode the command is a full three axis attitude: roll is zero so
-the image stays level, and pitch and yaw put the axis on the ray. It
-leaves as the MAVLink GIMBAL_MANAGER_SET_ATTITUDE message through the
-mavros gimbal_control plugin.
+In point mode the command leaves as the MAVLink
+GIMBAL_MANAGER_SET_ATTITUDE message through the mavros gimbal_control
+plugin: the clicked pitch against the horizon, the clicked yaw as an
+offset from the vehicle heading, roll zero. An honest gimbal
+stabilizes it because the flags say so, and roi_tracker.py does the
+same for the simulated gimbal.
 
-The pointing frame depends on which convention the gimbal obeys. A
-gimbal that obeys MAVLink reads the lock flags: with the three lock
-flags set, the attitude is earth referenced and the device holds it
-against the horizon and North. That is the "mavlink" convention: pitch
-and yaw earth referenced in the reference frame, the three lock flags
-set.
+How a command is expressed depends on which convention the gimbal
+obeys. A gimbal that obeys MAVLink reads the lock flags: the node
+sends the roll and pitch lock flags with yaw unlocked, so the
+quaternion carries a horizon-referenced pitch and a heading-relative
+yaw, and the device does the stabilizing. That is the "mavlink"
+convention.
 
 PX4's simulated gimbal does not read the flags. PX4's gimbal module
 passes the setpoint quaternion through unchanged (output_mavlink.cpp,
@@ -60,16 +72,18 @@ gimbal on every axis, whatever the flags say. So the "gz_sim"
 convention sends a vehicle-relative attitude with the lock flags
 clear, which also labels the setpoint honestly for scene_tf.
 
-The vehicle-relative ray does not come from the TF tree. The gimbal
-segment of that tree divides the device report, which Gazebo builds
-from ground truth, by the EKF attitude, so that segment carries the
-EKF heading error, measured at 16 degrees in flight. The full map to
-optical chain cancels the error, which keeps the projections correct,
-but the vehicle-relative half does not. The joints hold exactly the
-last commanded angles, so the node composes the clicked ray with its
-own last command instead, and the loop stays in one true frame. A
-gimbal moved by another controller desynchronizes that state for one
-click: that click re-synchronizes it, and the next click lands.
+The world direction of a click comes from the full map to optical TF
+chain, which is world true. The gimbal segment of that tree alone
+carries the EKF heading error, measured at 16 degrees in flight,
+because it divides the device report, which Gazebo builds from ground
+truth, by the EKF attitude. Composing the vehicle attitude back on
+cancels the error exactly, so the full chain is safe and the
+vehicle-relative half is not. roi_tracker.py therefore converts world
+targets back to vehicle-relative joints with a corrected vehicle
+attitude, built from that chain and the joint state this node last
+commanded in cmd_q_body_link. A gimbal moved by another controller
+desynchronizes that state for one click: that click re-synchronizes
+it, and the next click lands.
 
 Two earlier wrong answers are worth recording. A calibration at rest
 measured a constant 90 degree yaw error and subtracted it as a mount
@@ -99,6 +113,7 @@ Subscribes
     <click_topic>        geometry_msgs/PointStamped, pixels on the image
     <camera_info_topic>  sensor_msgs/CameraInfo
     /mavros/gimbal_control/manager/status   who holds control
+    /mavros/local_position/pose             the vehicle attitude
     /mavros/global_position/rel_alt         the ground plane height
     /mavros/global_position/global          the ROI altitude datum
     /mavros/altitude                        AMSL for DO_SET_ROI_LOCATION
@@ -119,7 +134,7 @@ from __future__ import annotations
 import math
 
 import rclpy
-from geometry_msgs.msg import PointStamped
+from geometry_msgs.msg import PointStamped, PoseStamped
 from mavros_msgs.msg import Altitude, GimbalManagerSetAttitude, GimbalManagerStatus
 from mavros_msgs.srv import CommandInt, CommandLong
 from rcl_interfaces.msg import SetParametersResult
@@ -135,11 +150,10 @@ from tf2_ros import Buffer, TransformListener
 
 from sim_bridge.geo import MapOrigin
 from sim_bridge.projection import (GROUND_VIEW_MAX_DISTANCE_M,
-                                   LINK_TO_OPTICAL, body_frd_to_flu,
-                                   intersect_ground, intrinsics_ready,
-                                   pointing_rpy_body, pointing_rpy_ned,
-                                   quat_from_rpy, quat_mul, quat_rotate,
-                                   ray_in_optical)
+                                   body_frd_to_flu, intersect_ground,
+                                   intrinsics_ready, pointing_rpy_ned,
+                                   quat_from_rpy, quat_rotate, ray_in_optical,
+                                   ros_to_aerospace, rpy_from_quat, wrap_pi)
 from sim_bridge.roi_tracker import RoiTracker
 
 # ------------------------------------------------------------------- tunables
@@ -171,10 +185,11 @@ MAVROS_COMPID = 191
 TARGET_SYSTEM = 1
 TARGET_COMPONENT = 1
 
-EARTH_LOCK_FLAGS = (
+# The protocol's default lock flags: roll and pitch to the horizon, yaw
+# unlocked so the view follows the vehicle heading.
+FOLLOW_LOCK_FLAGS = (
     GimbalManagerSetAttitude.GIMBAL_MANAGER_FLAGS_ROLL_LOCK
-    | GimbalManagerSetAttitude.GIMBAL_MANAGER_FLAGS_PITCH_LOCK
-    | GimbalManagerSetAttitude.GIMBAL_MANAGER_FLAGS_YAW_LOCK)
+    | GimbalManagerSetAttitude.GIMBAL_MANAGER_FLAGS_PITCH_LOCK)
 
 LATCHED = QoSProfile(durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
                      history=QoSHistoryPolicy.KEEP_LAST, depth=1)
@@ -208,7 +223,9 @@ class ClickToGimbal(Node):
         self.reference = self.get_parameter("reference_frame").value
         self.earth_referenced = (
             self.get_parameter("gimbal_convention").value == "mavlink")
-        self.setpoint_flags = EARTH_LOCK_FLAGS if self.earth_referenced else 0
+        # The simulated gimbal ignores flags and runs vehicle relative, so
+        # zero labels its setpoints honestly.
+        self.setpoint_flags = FOLLOW_LOCK_FLAGS if self.earth_referenced else 0
         self.ground_z_default = float(self.get_parameter("ground_z").value)
         # The camera link orientation the joints hold, from the last command
         # this node sent. Identity matches a device that was never commanded:
@@ -224,6 +241,7 @@ class ClickToGimbal(Node):
                                              spin_thread=True)
 
         self.info: CameraInfo | None = None
+        self.vehicle_q: tuple[float, float, float, float] | None = None
         self.rel_alt: float | None = None
         self.fix_altitude: float | None = None
         self.amsl: float | None = None
@@ -241,6 +259,8 @@ class ClickToGimbal(Node):
         self.create_subscription(GimbalManagerStatus,
                                  "/mavros/gimbal_control/manager/status",
                                  self._on_status, qos_profile_sensor_data)
+        self.create_subscription(PoseStamped, "/mavros/local_position/pose",
+                                 self._on_pose, qos_profile_sensor_data)
         if self.get_parameter("use_rel_alt").value:
             self.create_subscription(Float64, "/mavros/global_position/rel_alt",
                                      self._on_rel_alt, qos_profile_sensor_data)
@@ -269,9 +289,9 @@ class ClickToGimbal(Node):
         self.claim_future = None
 
         self.origin = MapOrigin(self)
-        # The whole hold-on-a-point emulation for the simulated gimbal lives
-        # in roi_tracker.py. An honest gimbal gets DO_SET_ROI_LOCATION and
-        # needs no tracker.
+        # The whole stabilization emulation for the simulated gimbal lives
+        # in roi_tracker.py. An honest gimbal stabilizes flagged commands
+        # itself and needs none of it.
         self.roi_tracker = None if self.earth_referenced else RoiTracker(self)
         self.roi_active = False
 
@@ -297,6 +317,10 @@ class ClickToGimbal(Node):
     # ------------------------------------------------------------------ inputs
     def _on_info(self, msg: CameraInfo) -> None:
         self.info = msg
+
+    def _on_pose(self, msg: PoseStamped) -> None:
+        q = msg.pose.orientation
+        self.vehicle_q = (q.x, q.y, q.z, q.w)
 
     def _on_rel_alt(self, msg: Float64) -> None:
         self.rel_alt = float(msg.data)
@@ -342,18 +366,17 @@ class ClickToGimbal(Node):
                             else result.reason)
         return response
 
-    def _release_roi(self) -> None:
-        """Drop an active ROI hold, leaving the gimbal where it points."""
-        if not self.roi_active:
-            return
-        self.roi_active = False
+    def _release_hold(self) -> None:
+        """Drop any standing hold, leaving the gimbal where it points."""
         if self.roi_tracker is not None:
             self.roi_tracker.clear()
-        if self.earth_referenced:
-            self._send_roi_none()
+        if self.roi_active:
+            self.roi_active = False
+            if self.earth_referenced:
+                self._send_roi_none()
 
     def _on_center_service(self, response):
-        self._release_roi()
+        self._release_hold()
         if self._center():
             response.success = True
             response.message = "gimbal centered, pitch and yaw zero"
@@ -367,9 +390,9 @@ class ClickToGimbal(Node):
             self.get_logger().warn(
                 f"click_mode '{mode}' is not one of {CLICK_MODES}, using roi")
             mode = "roi"
-        if mode != "roi":
-            # Leaving roi releases the hold, so the gimbal stays put.
-            self._release_roi()
+        # A standing hold continues across mode changes, as a real gimbal
+        # keeps its last earth referenced command. The modes only decide
+        # what a new click does, and /gimbal/center releases the hold.
         changed = mode != self.mode
         self.mode = mode
         self.mode_pub.publish(String(data=mode))
@@ -466,35 +489,35 @@ class ClickToGimbal(Node):
             self.get_logger().info("click ignored: click_mode is off")
             return
 
-        ray = ray_in_optical(u, v, self.info.k)
-        if self.mode == "roi":
-            self._roi_click(u, v, ray)
-        else:
-            self._point_click(u, v, ray)
-
-    def _point_click(self, u: float, v: float, ray) -> None:
-        if self.earth_referenced:
-            camera = self._camera_pose()
-            if camera is None:
-                return
-            _, rotation = camera
-            roll, pitch, yaw = pointing_rpy_ned(quat_rotate(rotation, ray))
-            self._command_pointing(roll, pitch, yaw)
-        else:
-            direction = quat_rotate(
-                quat_mul(self.cmd_q_body_link, LINK_TO_OPTICAL), ray)
-            _, pitch, yaw = self.command_body_direction(direction)
-        self.get_logger().info(
-            f"click ({u:.0f}, {v:.0f}) -> gimbal pitch "
-            f"{math.degrees(pitch):+.1f} deg, yaw {math.degrees(yaw):+.1f} deg, "
-            f"{'earth' if self.earth_referenced else 'vehicle'} referenced")
-
-    def _roi_click(self, u: float, v: float, ray) -> None:
         camera = self._camera_pose()
         if camera is None:
             return
         position, rotation = camera
-        direction = quat_rotate(rotation, ray)
+        direction = quat_rotate(rotation, ray_in_optical(u, v, self.info.k))
+        if self.mode == "roi":
+            self._roi_click(u, v, position, direction)
+        else:
+            self._point_click(u, v, direction)
+
+    def _point_click(self, u: float, v: float, direction) -> None:
+        """Hold pitch and roll on the horizon, yaw follows the heading."""
+        if self.vehicle_q is None:
+            self.get_logger().warn("click dropped: no vehicle attitude yet")
+            return
+        self._release_hold()
+        _, pitch, yaw = pointing_rpy_ned(direction)
+        if self.earth_referenced:
+            heading = rpy_from_quat(ros_to_aerospace(self.vehicle_q))[2]
+            self.command_body_attitude(0.0, pitch, wrap_pi(yaw - heading))
+        else:
+            self.roi_tracker.follow(pitch, yaw)
+        self.get_logger().info(
+            f"click ({u:.0f}, {v:.0f}) -> hold pitch "
+            f"{math.degrees(pitch):+.1f} deg on the horizon, yaw "
+            f"{math.degrees(yaw):+.1f} deg now, following the heading")
+
+    def _roi_click(self, u: float, v: float, position, direction) -> None:
+        """Hold the camera on the ground point under the clicked pixel."""
         ground_z = (self.ground_z_default if self.rel_alt is None
                     else position[2] - self.rel_alt)
         hit = intersect_ground(position, direction, ground_z,
@@ -598,14 +621,10 @@ class ClickToGimbal(Node):
                 f"ROI command {command} rejected, result={response.result}")
 
     # ----------------------------------------------------------------- command
-    def command_body_direction(self, direction) -> tuple[float, float, float]:
-        """Put the camera axis on a vehicle-frame FLU direction. Returns
-        the commanded roll, pitch, yaw in radians. roi_tracker calls this."""
-        roll, pitch, yaw = pointing_rpy_body(direction)
-        self._command_pointing(roll, pitch, yaw)
-        return roll, pitch, yaw
-
-    def _command_pointing(self, roll: float, pitch: float, yaw: float) -> None:
+    def command_body_attitude(self, roll: float, pitch: float,
+                              yaw: float) -> None:
+        """Command a vehicle-relative attitude, radians in the aerospace
+        convention. roi_tracker calls this too."""
         if self.in_control is False:
             # The setpoint races the claim to the autopilot, and a setpoint
             # that arrives first is dropped. The command still goes out: at

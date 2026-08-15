@@ -37,8 +37,9 @@ try:
 except ImportError:  # pragma: no cover - only when mavros_extras is absent
     HAVE_GIMBAL_MSG = False
 
-from sim_bridge.projection import (LINK_TO_OPTICAL, body_frd_to_flu,
-                                   quat_conj, quat_from_rpy, quat_mul)
+from sim_bridge.projection import (LINK_TO_OPTICAL, aerospace_to_ros,
+                                   body_frd_to_flu, quat_conj, quat_from_rpy,
+                                   quat_mul)
 
 # ------------------------------------------------------------------- tunables
 GIMBAL_PUBLISH_RATE_HZ = 30.0
@@ -59,18 +60,6 @@ def quat_yaw_deg(q) -> float:
 def yaw_only(q):
     """The yaw part of a quaternion, as a rotation about z."""
     return quat_from_rpy(0.0, 0.0, math.radians(quat_yaw_deg(q)))
-
-
-# Aerospace to ROS. NED_TO_ENU swaps the reference frame; FRD_TO_FLU swaps
-# the body axes. Applied as NED_TO_ENU * q * FRD_TO_FLU, the same conversion
-# MAVROS applies to every other attitude.
-NED_TO_ENU = (math.sqrt(0.5), math.sqrt(0.5), 0.0, 0.0)
-FRD_TO_FLU = (1.0, 0.0, 0.0, 0.0)
-
-
-def aerospace_to_ros(q):
-    """An absolute attitude, NED reference and FRD body, into ENU and FLU."""
-    return quat_mul(quat_mul(NED_TO_ENU, q), FRD_TO_FLU)
 
 
 class SceneTf(Node):

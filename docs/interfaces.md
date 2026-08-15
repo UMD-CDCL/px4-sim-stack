@@ -279,13 +279,16 @@ one parameter means the modes cannot overlap. `roi`, the default, projects
 the pixel onto the ground plane and holds the camera on that world point:
 the point is published latched on `/gimbal/roi` and `/gimbal/roi_local`,
 and the hold survives vehicle motion. `point` turns the camera onto the
-pixel once. `off` ignores clicks. The mode switches at runtime from the
-Foxglove Parameters panel, and the layout's indicator shows the current
-mode from `/gimbal/click_mode`. The simulated gimbal takes its commands
-vehicle relative and a MAVLink-honest gimbal takes them earth referenced,
-with the ROI hold done by `sim_bridge/roi_tracker.py` in simulation and by
-DO_SET_ROI_LOCATION on honest hardware. The `gimbal_convention` parameter
-picks between them, and `sim_bridge/click_to_gimbal.py` documents both.
+pixel, holds pitch and roll against the horizon, and lets yaw follow the
+vehicle heading, the gimbal protocol's default lock flags. `off` ignores
+clicks, and a standing hold continues until a new click or the
+`/gimbal/center` service. The mode switches at runtime from the Foxglove
+Parameters panel or the `/gimbal/click_mode/*` services, and the layout's
+indicator shows the current mode from `/gimbal/click_mode`. An honest
+MAVLink gimbal stabilizes both behaviors because the flags say so, and
+`sim_bridge/roi_tracker.py` emulates them for the simulated gimbal, which
+ignores the flags. The `gimbal_convention` parameter picks between them,
+and `sim_bridge/click_to_gimbal.py` documents both.
 
 Each camera publishes the same frame twice. Use the raw topic inside the ROS
 container, where a large message costs shared memory. Use the compressed topic
