@@ -11,7 +11,14 @@ because it is one parameter the modes cannot overlap:
 
 The mode changes at runtime with `ros2 param set` or the Foxglove
 Parameters panel, and the current mode is published latched on
-/gimbal/click_mode for the layout's indicator.
+/gimbal/click_mode for the layout's indicator. Three Trigger services,
+/gimbal/click_mode/roi, /gimbal/click_mode/point and
+/gimbal/click_mode/off, set the mode with an empty request, so a
+Foxglove service-call button needs no payload. Each goes through the
+parameter, which stays the single source of truth. A fourth service,
+/gimbal/center, releases any ROI hold and points the gimbal straight
+ahead, pitch and yaw zero, the same center command the recovery path
+uses. The mode does not change.
 
 In roi mode the node casts the pixel ray with the camera intrinsics,
 meets the ground plane, and records the region of interest: latched
@@ -101,6 +108,10 @@ Publishes
     /gimbal/click_mode   std_msgs/String, latched
     /gimbal/roi          sensor_msgs/NavSatFix, latched
     /gimbal/roi_local    geometry_msgs/PointStamped, latched
+
+Serves
+    /gimbal/click_mode/{roi,point,off}   std_srvs/Trigger
+    /gimbal/center                       std_srvs/Trigger
 """
 
 from __future__ import annotations
@@ -114,10 +125,12 @@ from mavros_msgs.srv import CommandInt, CommandLong
 from rcl_interfaces.msg import SetParametersResult
 from rclpy.duration import Duration
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.qos import (QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile,
                        qos_profile_sensor_data)
 from sensor_msgs.msg import CameraInfo, NavSatFix, NavSatStatus
 from std_msgs.msg import Float64, String
+from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformListener
 
 from sim_bridge.geo import MapOrigin
@@ -265,6 +278,15 @@ class ClickToGimbal(Node):
         self.mode = "roi"
         self._apply_mode(self.get_parameter("click_mode").value, announce=True)
         self.add_on_set_parameters_callback(self._on_parameters)
+        # One empty-request service per mode, for one-press buttons.
+        for mode in CLICK_MODES:
+            self.create_service(
+                Trigger, f"/gimbal/click_mode/{mode}",
+                lambda request, response, m=mode:
+                    self._on_mode_service(m, response))
+        self.create_service(
+            Trigger, "/gimbal/center",
+            lambda request, response: self._on_center_service(response))
 
         self.create_timer(CLAIM_RETRY_S, self._claim_tick)
         # The timer first fires a full period from now. Against an already
@@ -311,18 +333,43 @@ class ClickToGimbal(Node):
             self._apply_mode(param.value)
         return SetParametersResult(successful=True)
 
+    def _on_mode_service(self, mode: str, response):
+        """Set click_mode through the parameter, so every path agrees."""
+        result = self.set_parameters([Parameter(
+            "click_mode", Parameter.Type.STRING, mode)])[0]
+        response.success = result.successful
+        response.message = (f"click_mode: {mode}" if result.successful
+                            else result.reason)
+        return response
+
+    def _release_roi(self) -> None:
+        """Drop an active ROI hold, leaving the gimbal where it points."""
+        if not self.roi_active:
+            return
+        self.roi_active = False
+        if self.roi_tracker is not None:
+            self.roi_tracker.clear()
+        if self.earth_referenced:
+            self._send_roi_none()
+
+    def _on_center_service(self, response):
+        self._release_roi()
+        if self._center():
+            response.success = True
+            response.message = "gimbal centered, pitch and yaw zero"
+        else:
+            response.success = False
+            response.message = "center not sent: the command service is busy"
+        return response
+
     def _apply_mode(self, mode: str, announce: bool = False) -> None:
         if mode not in CLICK_MODES:
             self.get_logger().warn(
                 f"click_mode '{mode}' is not one of {CLICK_MODES}, using roi")
             mode = "roi"
-        if mode != "roi" and self.roi_active:
+        if mode != "roi":
             # Leaving roi releases the hold, so the gimbal stays put.
-            self.roi_active = False
-            if self.roi_tracker is not None:
-                self.roi_tracker.clear()
-            if self.earth_referenced:
-                self._send_roi_none()
+            self._release_roi()
         changed = mode != self.mode
         self.mode = mode
         self.mode_pub.publish(String(data=mode))
@@ -355,12 +402,10 @@ class ClickToGimbal(Node):
         request.param7 = 0.0
         self._send_command(request)
 
-    def _center(self) -> None:
+    def _center(self) -> bool:
         # Pitch zero, yaw zero, straight ahead. Rates NaN, no rate setpoint.
         # Flags zero, vehicle relative. The autopilot hands primary control
         # to the sender of this command.
-        self.cmd_q_body_link = (0.0, 0.0, 0.0, 1.0)
-        self.last_command_time = self.get_clock().now().nanoseconds / 1e9
         request = CommandLong.Request()
         request.command = MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW
         request.param1 = 0.0
@@ -369,15 +414,22 @@ class ClickToGimbal(Node):
         request.param4 = math.nan
         request.param5 = 0.0
         request.param7 = 0.0
-        self._send_command(request)
+        if not self._send_command(request):
+            return False
+        # Only a dispatched center resets the joint state, so the state
+        # keeps matching the joints when the command cannot go out.
+        self.cmd_q_body_link = (0.0, 0.0, 0.0, 1.0)
+        self.last_command_time = self.get_clock().now().nanoseconds / 1e9
+        return True
 
-    def _send_command(self, request) -> None:
+    def _send_command(self, request) -> bool:
         if self.claim_inflight or not self.claim_client.service_is_ready():
-            return
+            return False
         self.claim_inflight = True
         self.claim_sent_at = self.get_clock().now().nanoseconds / 1e9
         self.claim_future = self.claim_client.call_async(request)
         self.claim_future.add_done_callback(self._on_claim_done)
+        return True
 
     def _on_claim_done(self, future) -> None:
         if future is not self.claim_future:
