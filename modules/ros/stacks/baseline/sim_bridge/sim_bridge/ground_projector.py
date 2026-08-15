@@ -5,11 +5,12 @@ Casts rays through points along the image boundary, intersects the ground
 plane, and publishes the covered ground as a stock PolygonStamped that the
 Foxglove 3D panel draws without custom code. One node runs for each camera.
 
-The footprint is truncated at FOOTPRINT_MAX_DISTANCE_M from the camera. A
+The footprint is truncated at GROUND_VIEW_MAX_DISTANCE_M from the camera. A
 camera near the horizon still covers ground close to the drone, so its
 footprint is the near region it sees, closed by an arc at the limit,
 instead of nothing. Only a camera that sees no ground at all publishes
-nothing.
+nothing. The projected imagery stops at the same limit, so the picture
+fills the outline that frames it.
 
 The plane height comes from the drone by default: MAVROS reports altitude
 above the launch point, so the ground is at pose.z minus rel_alt. Set
@@ -31,12 +32,12 @@ from sensor_msgs.msg import CameraInfo
 from std_msgs.msg import Float64
 from tf2_ros import Buffer, TransformListener
 
-from sim_bridge.projection import footprint_on_ground, image_boundary, intrinsics_ready
+from sim_bridge.projection import (GROUND_VIEW_MAX_DISTANCE_M,
+                                   footprint_on_ground, image_boundary,
+                                   intrinsics_ready)
 
 # ------------------------------------------------------------------- tunables
 PUBLISH_RATE_HZ = 5.0
-# The footprint stops at this horizontal distance from the camera.
-FOOTPRINT_MAX_DISTANCE_M = 100.0
 # Boundary rays per image edge. More makes the truncation arc smoother.
 BOUNDARY_SAMPLES_PER_EDGE = 8
 
@@ -106,7 +107,7 @@ class GroundProjector(Node):
             image_boundary(self.info.width, self.info.height,
                            BOUNDARY_SAMPLES_PER_EDGE),
             self.info.k, (t.x, t.y, t.z), (r.x, r.y, r.z, r.w),
-            ground_z, FOOTPRINT_MAX_DISTANCE_M)
+            ground_z, GROUND_VIEW_MAX_DISTANCE_M)
         if outline is None:
             # No ground within the limit is in view. Publishing nothing is
             # the honest answer.

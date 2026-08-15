@@ -7,12 +7,19 @@ colored PointCloud2. The result is the camera view lying on the ground, next
 to the detections and the ground truth.
 
 It is the same geometry the localizer performs, applied to a grid of pixels.
-When the imagery lines up with the ground truth spheres, the localization is
+When the imagery lines up with the ground truth bubbles, the localization is
 correct. When it does not, the picture shows which way it is out.
 
-`size` is the resolution the frame is sampled down to, and it decides the
-cost for both cameras. 640x360 is 230,400 points and 3.7 MB per message,
-which already reads as a picture. 1920x1080 is 2 million points and 33 MB.
+The cloud stops at GROUND_VIEW_MAX_DISTANCE_M, the same limit that
+truncates the footprint, so the imagery fills the outline that frames it.
+Rays are cast for the whole grid, but colors are gathered and points packed
+only for pixels that land inside the limit, so the cost tracks what is
+displayed: a camera near the horizon pays for the near ground it shows,
+not for the sky.
+
+`size` is the resolution the frame is sampled down to, and it bounds the
+cost for both cameras. 640x360 is at most 230,400 points and 3.7 MB per
+message, which already reads as a picture.
 
 Subscribes
     <ns>/image_raw, <ns>/camera_info
@@ -31,7 +38,7 @@ from sensor_msgs.msg import CameraInfo, Image, PointCloud2, PointField
 from std_msgs.msg import Float64
 from tf2_ros import Buffer, TransformListener
 
-from sim_bridge.projection import intrinsics_ready
+from sim_bridge.projection import GROUND_VIEW_MAX_DISTANCE_M, intrinsics_ready
 
 # The point layout, as one 16 byte record. Naming it here means point_step,
 # row_step and the packing can never drift apart.
@@ -41,9 +48,6 @@ POINT_DTYPE = np.dtype([("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("rgb", "<u4")
 # the aspect ratio of both cameras.
 STANDARD_SIZES = ("1920x1080", "1280x720", "960x540", "854x480", "640x360",
                   "480x270", "426x240")
-
-# Beyond this slant range a pixel ray is treated as missing the ground.
-MAX_RANGE = 2000.0
 
 
 def parse_size(text: str) -> tuple[int, int] | None:
@@ -186,64 +190,68 @@ class ImageGroundProjector(Node):
         self.vs = ((np.arange(out_h) + 0.5) * (height / out_h)).astype(np.int32)
         self.grid_for = (width, height)
         self.get_logger().info(
-            f"projecting {width}x{height} as {out_w}x{out_h}, "
+            f"projecting {width}x{height} as {out_w}x{out_h}, up to "
             f"{out_w * out_h} points, {out_w * out_h * POINT_DTYPE.itemsize / 1e6:.1f} MB")
         return self.us, self.vs
 
     def _project(self, msg: Image, origin, rot, ground_z):
-        """Every sampled pixel, projected onto the ground plane.
+        """Sampled pixels that land on the ground within the view limit.
 
-        The same geometry as sim_bridge.projection, written over whole arrays.
-        A pixel whose ray misses the plane is dropped, so the result holds only
-        points that a camera ray actually reaches.
+        The same geometry as sim_bridge.projection, written over whole
+        arrays. The mask comes first, so colors are gathered and points
+        packed only for the pixels that will be displayed.
         """
         us, vs = self._sample_grid(msg.width, msg.height)
-
-        frame = np.frombuffer(msg.data, dtype=np.uint8)
-        if frame.size < msg.height * msg.step:
-            return None
-        # Index through msg.step rather than width*3: a row can carry padding.
-        frame = frame[:msg.height * msg.step].reshape(msg.height, msg.step)
-        red = frame[np.ix_(vs, us * 3)].astype(np.uint32)
-        green = frame[np.ix_(vs, us * 3 + 1)].astype(np.uint32)
-        blue = frame[np.ix_(vs, us * 3 + 2)].astype(np.uint32)
 
         k = self.info.k
         fx, cx, fy, cy = k[0], k[2], k[4], k[5]
         if fx == 0.0 or fy == 0.0:
             return None
 
-        # ray_in_optical, over the grid. The unit normalization is kept because
-        # max_range below is a distance along the ray.
+        # Rays through the grid, in the optical frame. Unnormalized: neither
+        # the plane intersection nor the horizontal cut needs unit length.
         x = (us[None, :].astype(np.float64) - cx) / fx
         y = (vs[:, None].astype(np.float64) - cy) / fy
         x = np.broadcast_to(x, (len(vs), len(us)))
         y = np.broadcast_to(y, (len(vs), len(us)))
-        norm = np.sqrt(x * x + y * y + 1.0)
-        dx, dy, dz = x / norm, y / norm, 1.0 / norm
 
-        # quat_rotate, over the grid: t = 2*(qv x d); d' = d + qw*t + qv x t
+        # quat_rotate over the grid, with d = (x, y, 1):
+        # t = 2*(qv x d); d' = d + qw*t + qv x t
         qx, qy, qz, qw = rot
-        tx = 2.0 * (qy * dz - qz * dy)
-        ty = 2.0 * (qz * dx - qx * dz)
-        tz = 2.0 * (qx * dy - qy * dx)
-        wx = dx + qw * tx + (qy * tz - qz * ty)
-        wy = dy + qw * ty + (qz * tx - qx * tz)
-        wz = dz + qw * tz + (qx * ty - qy * tx)
+        tx = 2.0 * (qy - qz * y)
+        ty = 2.0 * (qz * x - qx)
+        tz = 2.0 * (qx * y - qy * x)
+        wx = x + qw * tx + (qy * tz - qz * ty)
+        wy = y + qw * ty + (qz * tx - qx * tz)
+        wz = 1.0 + qw * tz + (qx * ty - qy * tx)
 
-        # intersect_ground, over the grid.
+        # Ground intersection and the footprint limit, over the grid.
         with np.errstate(divide="ignore", invalid="ignore"):
             t = (ground_z - origin[2]) / wz
-        good = (np.abs(wz) >= 1e-9) & (t > 0.0) & (t <= MAX_RANGE)
+            horizontal = t * np.hypot(wx, wy)
+        good = ((np.abs(wz) >= 1e-9) & (t > 0.0)
+                & (horizontal <= GROUND_VIEW_MAX_DISTANCE_M))
         if not good.any():
             return None
+
+        frame = np.frombuffer(msg.data, dtype=np.uint8)
+        if frame.size < msg.height * msg.step:
+            return None
+        # Index through msg.step rather than width*3: a row can carry padding.
+        frame = frame[:msg.height * msg.step].reshape(msg.height, msg.step)
+        row_index, col_index = np.nonzero(good)
+        rows = vs[row_index]
+        cols = us[col_index] * 3
+        red = frame[rows, cols].astype(np.uint32)
+        green = frame[rows, cols + 1].astype(np.uint32)
+        blue = frame[rows, cols + 2].astype(np.uint32)
 
         t = t[good]
         out = np.empty(t.size, dtype=POINT_DTYPE)
         out["x"] = origin[0] + t * wx[good]
         out["y"] = origin[1] + t * wy[good]
         out["z"] = origin[2] + t * wz[good]
-        out["rgb"] = (red[good] << 16) | (green[good] << 8) | blue[good]
+        out["rgb"] = (red << 16) | (green << 8) | blue
         return out
 
 

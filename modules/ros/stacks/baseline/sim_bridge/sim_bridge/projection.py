@@ -14,6 +14,11 @@ from __future__ import annotations
 import math
 from typing import Iterable, Sequence
 
+# Both the footprint polygon and the projected imagery stop at this
+# horizontal distance from the camera, so the picture always fills the
+# outline that frames it.
+GROUND_VIEW_MAX_DISTANCE_M = 100.0
+
 
 def intrinsics_ready(info) -> bool:
     """True when a CameraInfo carries a usable pinhole matrix.

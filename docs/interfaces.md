@@ -417,7 +417,9 @@ The footprint is truncated at 100 m from the camera. A camera near the
 horizon reports the near ground it sees, closed by an arc at the limit, and
 only a camera that sees no ground publishes nothing. The scorers treat a
 stale footprint as no coverage, so a camera pointed at the sky stops
-counting its targets as visible.
+counting its targets as visible. The projected imagery stops at the same
+limit, and its cost tracks what is displayed: pixels outside the limit are
+masked before their colors are read.
 
 Covariance comes from constants in `detection_localizer.py`, not from a
 derivation. `COVARIANCE_DIAGONAL` is a two metre standard deviation in x and
