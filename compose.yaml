@@ -175,7 +175,19 @@ services:
     ipc: host
     environment:
       <<: [*gpu-env, *x11-env]
+    # Joystick passthrough. QGroundControl reads game controllers through SDL,
+    # which opens /dev/input/event*. The bind mount brings the nodes in, the
+    # cgroup rule lets the container open input devices (char major 13), and
+    # the group entry gives the non-root user read access, because the host
+    # marks those nodes root:input. preflight writes INPUT_GID into .env.
+    # PX4 SITL already accepts the result: its rcS defaults COM_RC_IN_MODE
+    # to 1, joystick input.
+    device_cgroup_rules:
+      - "c 13:* rmw"
+    group_add:
+      - "${INPUT_GID:-107}"
     volumes:
+      - /dev/input:/dev/input
       - qgc-config:/home/dev/.config
       - ./logs/qgc:/home/dev/Documents/QGroundControl
       - /tmp/.X11-unix:/tmp/.X11-unix

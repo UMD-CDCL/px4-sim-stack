@@ -103,6 +103,17 @@ fi
 
 sed -i "s|^HOST_UID=.*|HOST_UID=$(id -u)|" .env
 sed -i "s|^HOST_GID=.*|HOST_GID=$(id -g)|" .env
+# The group that owns /dev/input/event*. The qgc container joins it so
+# QGroundControl can read a joystick. Append rather than edit, because an .env
+# copied from an older example does not have the line yet.
+input_gid=$(getent group input | cut -d: -f3 || true)
+if [ -n "${input_gid:-}" ]; then
+	if grep -q '^INPUT_GID=' .env; then
+		sed -i "s|^INPUT_GID=.*|INPUT_GID=$input_gid|" .env
+	else
+		echo "INPUT_GID=$input_gid" >> .env
+	fi
+fi
 # DISPLAY stays out of .env. The containers take it from the session that
 # starts them, because a value in the file goes stale on another machine.
 sed -i "/^DISPLAY=/d" .env

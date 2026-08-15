@@ -72,6 +72,13 @@ same jobs if you prefer it.
 When Gazebo shows the drone and QGroundControl shows a connected vehicle, the
 stack is up. Take off from QGroundControl and the video appears in its window.
 
+A joystick or game controller plugged into the host works in QGroundControl.
+The container mounts `/dev/input` and joins the host `input` group, whose id
+`./px4sim doctor` writes into `.env` as `INPUT_GID`. Calibrate it once under
+Vehicle Setup, Joystick. PX4 SITL accepts joystick input out of the box
+(`COM_RC_IN_MODE` defaults to 1). If the Joystick page does not appear,
+restart the `qgc` service with the controller already plugged in.
+
 ## The three addresses
 
 Everything downstream of the vehicle uses these and nothing else.
