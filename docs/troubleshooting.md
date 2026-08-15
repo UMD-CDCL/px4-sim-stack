@@ -288,6 +288,13 @@ That path proxies the DeepStream RTSP server. It appears only when
 names the camera. The default is `gimbal`, so `nadir_annotated` needs
 `ANNOTATED_STREAMS=nadir,gimbal` (or `1` for every camera).
 
+The entrypoint holds each pipeline until the video router reports its camera
+stream ready. The log shows `Waiting for the <camera> stream` during the hold.
+Thus each pipeline connects on the first attempt, and the annotated stream
+comes up seconds after the camera stream. A hold that does not end means the
+camera stream never came up. See "No stream at rtsp://localhost:8554/gimbal"
+above.
+
 ```bash
 docker compose ps perception
 docker compose logs perception | grep -i rtsp

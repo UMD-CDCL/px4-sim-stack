@@ -60,21 +60,34 @@ warn() { printf '\033[33m    %s\033[0m\n' "$*"; }
 	exit 1
 }
 
-# Wait for the video router to accept connections. Do not try to pull a frame
-# here: deepstream-app has rtsp-reconnect-attempts=-1 and retries the stream
-# itself, and a probe that gets the pipeline slightly wrong blocks startup
-# forever for no gain.
-host=$(echo "$RTSP_IN" | sed -E 's|^rtsp://([^:/]+).*|\1|')
-port=$(echo "$RTSP_IN" | sed -nE 's|^rtsp://[^:/]+:([0-9]+).*|\1|p'); port=${port:-8554}
-log "Waiting for the video router at $host:$port"
-deadline=$(( $(date +%s) + ${RTSP_WAIT_SECONDS:-900} ))
-until timeout 3 bash -c "exec 3<>/dev/tcp/$host/$port" 2>/dev/null; do
-	if [ "$(date +%s)" -ge "$deadline" ]; then
-		warn "No video router after ${RTSP_WAIT_SECONDS:-900} s. Starting anyway."
-		break
-	fi
-	sleep 5
-done
+# Hold each pipeline until the video router reports its camera stream ready.
+# The camera streams come from Gazebo, which is the last module to come up. A
+# deepstream-app that starts first gets a 404, and its retry runs on the
+# no-data watchdog, about 60 seconds later. That one wait was most of the
+# annotated stream's startup time. A pipeline that starts against a live
+# stream connects on the first attempt.
+router_host=$(echo "$RTSP_IN" | sed -E 's|^rtsp://([^:/]+).*|\1|')
+ROUTER_API=${ROUTER_API:-http://$router_host:9997}
+
+stream_ready() {
+	curl -sf --max-time 3 "$ROUTER_API/v3/paths/get/${1##*/}" 2>/dev/null |
+		grep -Eq '"ready" *: *true'
+}
+
+# wait_for_stream <rtsp-uri>. On timeout it returns and lets deepstream-app
+# retry on its own, so a missing camera does not block the other one forever.
+wait_for_stream() {
+	local uri=$1 name=${1##*/}
+	local deadline=$(( $(date +%s) + ${RTSP_WAIT_SECONDS:-900} ))
+	log "Waiting for the $name stream at $uri"
+	until stream_ready "$uri"; do
+		if [ "$(date +%s)" -ge "$deadline" ]; then
+			warn "No $name stream after ${RTSP_WAIT_SECONDS:-900} s. Starting anyway."
+			return 1
+		fi
+		sleep 2
+	done
+}
 
 # nvinfer writes the TensorRT engine next to the ONNX file and ignores
 # model-engine-file when it saves. That path is inside the image, so the engine
@@ -235,11 +248,13 @@ cat <<EOF
 
 EOF
 
+wait_for_stream "$RTSP_IN"
 start_camera "$PERCEPTION_CAMERA" "$RTSP_IN" 8554 5400
 if [ "$ENGINE_READY" = 0 ] && [ -n "$ENGINE" ]; then
 	log "Building the TensorRT engine in the first camera, so it is written once"
 	wait_for_engine "$ENGINE"
 fi
+wait_for_stream "$RTSP_IN_2"
 start_camera "$PERCEPTION_CAMERA_2" "$RTSP_IN_2" 8555 5401
 
 # Exit when the first pipeline exits, so a crash is visible to compose rather
