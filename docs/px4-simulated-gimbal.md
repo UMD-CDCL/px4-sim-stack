@@ -29,6 +29,21 @@ miss equals the vehicle heading, so the offset only works at the heading
 where it was measured. Keep the honest earth referenced command path
 behind a switch for real hardware.
 
+## It computes a region of interest once
+
+DO_SET_ROI_LOCATION reaches PX4's gimbal module, but the v2 output
+computes the attitude toward the point one time, when the command
+arrives (`output_mavlink.cpp`, OutputMavlinkV2 recomputes only on new
+setpoints). That attitude is earth referenced with the yaw lock flag
+set, and the section above says what the simulated gimbal then does
+with it. So an ROI does not track the point as the vehicle moves, and
+it does not point correctly even at the start.
+
+To hold the simulated gimbal on a world point, recompute the
+vehicle-relative attitude yourself as the vehicle moves. This stack
+does that in `sim_bridge/roi_tracker.py`, one small file built to be
+easy to drop when PX4 learns to do it.
+
 ## It reports an absolute attitude labeled vehicle relative
 
 GZGimbal builds GIMBAL_DEVICE_ATTITUDE_STATUS from the gimbal IMU, and a
@@ -65,6 +80,7 @@ the report divided by the EKF.
 | The simulation does | You do |
 |---|---|
 | Executes commands vehicle relative, flags ignored | Send a vehicle-relative attitude, lock flags clear |
+| Computes an ROI attitude once, earth referenced | Re-command the point yourself as the vehicle moves |
 | Reports an absolute attitude flagged vehicle relative | Divide the vehicle attitude off the left, or apply the patch |
 | Reports truth while the EKF estimates | Build earth-frame poses from the report, build command state from your own setpoints |
 

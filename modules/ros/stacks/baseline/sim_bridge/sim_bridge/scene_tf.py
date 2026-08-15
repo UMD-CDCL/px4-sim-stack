@@ -38,7 +38,7 @@ except ImportError:  # pragma: no cover - only when mavros_extras is absent
     HAVE_GIMBAL_MSG = False
 
 from sim_bridge.projection import (LINK_TO_OPTICAL, body_frd_to_flu,
-                                   quat_from_rpy, quat_mul)
+                                   quat_conj, quat_from_rpy, quat_mul)
 
 # ------------------------------------------------------------------- tunables
 GIMBAL_PUBLISH_RATE_HZ = 30.0
@@ -48,10 +48,6 @@ SETPOINT_TIMEOUT_S = 3.0
 
 # GIMBAL_DEVICE_FLAGS_YAW_LOCK
 YAW_LOCK = 16
-
-
-def quat_conj(q):
-    return (-q[0], -q[1], -q[2], q[3])
 
 
 def quat_yaw_deg(q) -> float:

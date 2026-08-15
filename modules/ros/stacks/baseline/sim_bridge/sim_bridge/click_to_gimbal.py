@@ -1,22 +1,43 @@
 #!/usr/bin/env python3
-"""Point the gimbal at a pixel clicked in Foxglove.
+"""Turn clicks on the gimbal image into gimbal action.
 
 Foxglove publishes the clicked pixel as a PointStamped, x and y in image
-coordinates. This node casts a ray through that pixel with the gimbal
-camera intrinsics, rotates the ray into the pointing frame, and commands
-the gimbal to put its optical axis on the ray. The command is a full three
-axis attitude: roll is zero so the image stays level, and pitch and yaw
-point the axis.
+coordinates. The click_mode parameter decides what one click does, and
+because it is one parameter the modes cannot overlap:
 
-The command leaves as the MAVLink GIMBAL_MANAGER_SET_ATTITUDE message. The
-node publishes a mavros_msgs/GimbalManagerSetAttitude, and the mavros
-gimbal_control plugin sends it to the autopilot.
+    roi     hold the camera on the ground point under the pixel. Default.
+    point   turn the camera optical axis onto the pixel, once.
+    off     ignore clicks.
 
-The pointing frame depends on which convention the gimbal obeys. A gimbal
-that obeys MAVLink reads the lock flags: with the three lock flags set,
-the attitude is earth referenced and the device holds it against the
-horizon and North. That is the "mavlink" convention: pitch and yaw earth
-referenced in the reference frame, the three lock flags set.
+The mode changes at runtime with `ros2 param set` or the Foxglove
+Parameters panel, and the current mode is published latched on
+/gimbal/click_mode for the layout's indicator.
+
+In roi mode the node casts the pixel ray with the camera intrinsics,
+meets the ground plane, and records the region of interest: latched
+NavSatFix on /gimbal/roi, altitude in the datum of the vehicle's own
+fix, and a latched reference-frame PointStamped on /gimbal/roi_local.
+The ground plane sits rel_alt below the camera, or at ground_z with
+use_rel_alt false, the same convention the ground projector uses. A ray
+that meets no ground within the footprint limit drops the click with a
+warning. What happens next depends on the gimbal convention. With
+"gz_sim", roi_tracker.py holds the camera on the point, because PX4
+cannot: its v2 gimbal output computes the ROI attitude once per command,
+and the simulated gimbal ignores the frame flags. With "mavlink" the
+node sends DO_SET_ROI_LOCATION and the autopilot does the holding, the
+same path QGC uses, and leaving roi mode sends DO_SET_ROI_NONE.
+
+In point mode the command is a full three axis attitude: roll is zero so
+the image stays level, and pitch and yaw put the axis on the ray. It
+leaves as the MAVLink GIMBAL_MANAGER_SET_ATTITUDE message through the
+mavros gimbal_control plugin.
+
+The pointing frame depends on which convention the gimbal obeys. A
+gimbal that obeys MAVLink reads the lock flags: with the three lock
+flags set, the attitude is earth referenced and the device holds it
+against the horizon and North. That is the "mavlink" convention: pitch
+and yaw earth referenced in the reference frame, the three lock flags
+set.
 
 PX4's simulated gimbal does not read the flags. PX4's gimbal module
 passes the setpoint quaternion through unchanged (output_mavlink.cpp,
@@ -54,7 +75,7 @@ attitude.
 PX4 ignores the setpoint unless its sender holds primary gimbal control
 (input_mavlink.cpp, _process_set_attitude), and it drops it silently. The
 node therefore claims control with DO_GIMBAL_MANAGER_CONFIGURE at startup,
-and claims again when a click arrives while someone else, usually QGC,
+and claims again when a command goes out while someone else, usually QGC,
 holds control. It never wrestles control back on a timer: outside a click
 there is no user intent to act on. The claim goes through the generic
 /mavros/cmd/command service, not the gimbal_control configure service.
@@ -64,15 +85,22 @@ any gimbal message at all. The command plugin times out and recovers.
 A claim whose response never arrives is treated as a stuck gimbal, and
 the recovery is the center action QGC offers: command pitch and yaw
 zero, straight ahead. That command also hands primary control to its
-sender, so it doubles as the claim.
+sender, so it doubles as the claim. ROI location commands go to the
+navigator instead and need no gimbal control at all.
 
 Subscribes
     <click_topic>        geometry_msgs/PointStamped, pixels on the image
     <camera_info_topic>  sensor_msgs/CameraInfo
     /mavros/gimbal_control/manager/status   who holds control
+    /mavros/global_position/rel_alt         the ground plane height
+    /mavros/global_position/global          the ROI altitude datum
+    /mavros/altitude                        AMSL for DO_SET_ROI_LOCATION
 
 Publishes
     /mavros/gimbal_control/manager/set_attitude
+    /gimbal/click_mode   std_msgs/String, latched
+    /gimbal/roi          sensor_msgs/NavSatFix, latched
+    /gimbal/roi_local    geometry_msgs/PointStamped, latched
 """
 
 from __future__ import annotations
@@ -81,18 +109,25 @@ import math
 
 import rclpy
 from geometry_msgs.msg import PointStamped
-from mavros_msgs.msg import GimbalManagerSetAttitude, GimbalManagerStatus
-from mavros_msgs.srv import CommandLong
+from mavros_msgs.msg import Altitude, GimbalManagerSetAttitude, GimbalManagerStatus
+from mavros_msgs.srv import CommandInt, CommandLong
+from rcl_interfaces.msg import SetParametersResult
 from rclpy.duration import Duration
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import CameraInfo
+from rclpy.qos import (QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile,
+                       qos_profile_sensor_data)
+from sensor_msgs.msg import CameraInfo, NavSatFix, NavSatStatus
+from std_msgs.msg import Float64, String
 from tf2_ros import Buffer, TransformListener
 
-from sim_bridge.projection import (LINK_TO_OPTICAL, body_frd_to_flu,
-                                   intrinsics_ready, pointing_rpy_body,
-                                   pointing_rpy_ned, quat_from_rpy,
-                                   quat_mul, quat_rotate, ray_in_optical)
+from sim_bridge.geo import MapOrigin
+from sim_bridge.projection import (GROUND_VIEW_MAX_DISTANCE_M,
+                                   LINK_TO_OPTICAL, body_frd_to_flu,
+                                   intersect_ground, intrinsics_ready,
+                                   pointing_rpy_body, pointing_rpy_ned,
+                                   quat_from_rpy, quat_mul, quat_rotate,
+                                   ray_in_optical)
+from sim_bridge.roi_tracker import RoiTracker
 
 # ------------------------------------------------------------------- tunables
 # How often the startup claim retries until the autopilot accepts one.
@@ -105,8 +140,13 @@ CLAIM_RECOVER_S = 10.0
 # How long a click waits for the transform before it is dropped.
 TF_TIMEOUT_S = 0.2
 
+CLICK_MODES = ("roi", "point", "off")
+
+MAV_CMD_DO_SET_ROI_LOCATION = 195
+MAV_CMD_DO_SET_ROI_NONE = 197
 MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW = 1000
 MAV_CMD_DO_GIMBAL_MANAGER_CONFIGURE = 1001
+MAV_FRAME_GLOBAL_INT = 5
 
 # The ids mavros stamps on outgoing MAVLink, so the ids that must hold
 # primary control for PX4 to accept the setpoint. mavros defaults, not set
@@ -123,6 +163,9 @@ EARTH_LOCK_FLAGS = (
     | GimbalManagerSetAttitude.GIMBAL_MANAGER_FLAGS_PITCH_LOCK
     | GimbalManagerSetAttitude.GIMBAL_MANAGER_FLAGS_YAW_LOCK)
 
+LATCHED = QoSProfile(durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+                     history=QoSHistoryPolicy.KEEP_LAST, depth=1)
+
 
 class ClickToGimbal(Node):
     def __init__(self) -> None:
@@ -132,6 +175,12 @@ class ClickToGimbal(Node):
         self.declare_parameter("camera_info_topic", "/camera/gimbal/camera_info")
         self.declare_parameter("optical_frame", "gimbal_camera_optical_frame")
         self.declare_parameter("reference_frame", "map")
+        # What one click does: roi, point or off. Runtime switchable.
+        self.declare_parameter("click_mode", "roi")
+        # The ground plane, as in ground_projector: rel_alt below the
+        # camera, or pinned to ground_z with use_rel_alt false.
+        self.declare_parameter("use_rel_alt", True)
+        self.declare_parameter("ground_z", 0.0)
         # Which command convention the gimbal obeys.
         #   gz_sim    PX4's simulated gimbal. Its joints ride on the airframe
         #             and ignore the frame flags, so the node sends a
@@ -147,11 +196,13 @@ class ClickToGimbal(Node):
         self.earth_referenced = (
             self.get_parameter("gimbal_convention").value == "mavlink")
         self.setpoint_flags = EARTH_LOCK_FLAGS if self.earth_referenced else 0
+        self.ground_z_default = float(self.get_parameter("ground_z").value)
         # The camera link orientation the joints hold, from the last command
         # this node sent. Identity matches a device that was never commanded:
         # GZGimbal steers the joints to zero without a setpoint, and _center
         # commands the same zero.
         self.cmd_q_body_link = (0.0, 0.0, 0.0, 1.0)
+        self.last_command_time = 0.0
 
         self.tf_buffer = Buffer()
         # spin_thread=True is required. On this node's executor, a lookup that
@@ -160,6 +211,9 @@ class ClickToGimbal(Node):
                                              spin_thread=True)
 
         self.info: CameraInfo | None = None
+        self.rel_alt: float | None = None
+        self.fix_altitude: float | None = None
+        self.amsl: float | None = None
         # None until the first manager status arrives. True while these
         # MAVROS_SYSID and MAVROS_COMPID ids hold primary control.
         self.in_control: bool | None = None
@@ -174,6 +228,13 @@ class ClickToGimbal(Node):
         self.create_subscription(GimbalManagerStatus,
                                  "/mavros/gimbal_control/manager/status",
                                  self._on_status, qos_profile_sensor_data)
+        if self.get_parameter("use_rel_alt").value:
+            self.create_subscription(Float64, "/mavros/global_position/rel_alt",
+                                     self._on_rel_alt, qos_profile_sensor_data)
+        self.create_subscription(NavSatFix, "/mavros/global_position/global",
+                                 self._on_fix, qos_profile_sensor_data)
+        self.create_subscription(Altitude, "/mavros/altitude",
+                                 self._on_altitude, qos_profile_sensor_data)
         # Foxglove publishes clicks reliable, the default.
         self.create_subscription(PointStamped,
                                  self.get_parameter("click_topic").value,
@@ -182,9 +243,28 @@ class ClickToGimbal(Node):
         self.setpoint_pub = self.create_publisher(
             GimbalManagerSetAttitude,
             "/mavros/gimbal_control/manager/set_attitude", 10)
+        self.mode_pub = self.create_publisher(String, "/gimbal/click_mode",
+                                              LATCHED)
+        self.roi_fix_pub = self.create_publisher(NavSatFix, "/gimbal/roi",
+                                                 LATCHED)
+        self.roi_point_pub = self.create_publisher(PointStamped,
+                                                   "/gimbal/roi_local", LATCHED)
         self.claim_client = self.create_client(CommandLong, "/mavros/cmd/command")
+        self.roi_client = self.create_client(CommandInt,
+                                             "/mavros/cmd/command_int")
         self.claim_sent_at = 0.0
         self.claim_future = None
+
+        self.origin = MapOrigin(self)
+        # The whole hold-on-a-point emulation for the simulated gimbal lives
+        # in roi_tracker.py. An honest gimbal gets DO_SET_ROI_LOCATION and
+        # needs no tracker.
+        self.roi_tracker = None if self.earth_referenced else RoiTracker(self)
+        self.roi_active = False
+
+        self.mode = "roi"
+        self._apply_mode(self.get_parameter("click_mode").value, announce=True)
+        self.add_on_set_parameters_callback(self._on_parameters)
 
         self.create_timer(CLAIM_RETRY_S, self._claim_tick)
         # The timer first fires a full period from now. Against an already
@@ -195,6 +275,16 @@ class ClickToGimbal(Node):
     # ------------------------------------------------------------------ inputs
     def _on_info(self, msg: CameraInfo) -> None:
         self.info = msg
+
+    def _on_rel_alt(self, msg: Float64) -> None:
+        self.rel_alt = float(msg.data)
+
+    def _on_fix(self, msg: NavSatFix) -> None:
+        if msg.status.status >= 0:
+            self.fix_altitude = msg.altitude
+
+    def _on_altitude(self, msg: Altitude) -> None:
+        self.amsl = msg.amsl
 
     def _on_status(self, msg: GimbalManagerStatus) -> None:
         ours = (msg.sysid_primary == MAVROS_SYSID
@@ -208,6 +298,36 @@ class ClickToGimbal(Node):
                     f"{msg.sysid_primary}/{msg.compid_primary}, not "
                     f"{MAVROS_SYSID}/{MAVROS_COMPID}. A click claims it back.")
         self.in_control = ours
+
+    # -------------------------------------------------------------------- mode
+    def _on_parameters(self, params) -> SetParametersResult:
+        for param in params:
+            if param.name != "click_mode":
+                continue
+            if param.value not in CLICK_MODES:
+                return SetParametersResult(
+                    successful=False,
+                    reason=f"click_mode must be one of {CLICK_MODES}")
+            self._apply_mode(param.value)
+        return SetParametersResult(successful=True)
+
+    def _apply_mode(self, mode: str, announce: bool = False) -> None:
+        if mode not in CLICK_MODES:
+            self.get_logger().warn(
+                f"click_mode '{mode}' is not one of {CLICK_MODES}, using roi")
+            mode = "roi"
+        if mode != "roi" and self.roi_active:
+            # Leaving roi releases the hold, so the gimbal stays put.
+            self.roi_active = False
+            if self.roi_tracker is not None:
+                self.roi_tracker.clear()
+            if self.earth_referenced:
+                self._send_roi_none()
+        changed = mode != self.mode
+        self.mode = mode
+        self.mode_pub.publish(String(data=mode))
+        if changed or announce:
+            self.get_logger().info(f"click_mode: {mode}")
 
     # ------------------------------------------------------------------- claim
     def _claim_tick(self) -> None:
@@ -240,6 +360,7 @@ class ClickToGimbal(Node):
         # Flags zero, vehicle relative. The autopilot hands primary control
         # to the sender of this command.
         self.cmd_q_body_link = (0.0, 0.0, 0.0, 1.0)
+        self.last_command_time = self.get_clock().now().nanoseconds / 1e9
         request = CommandLong.Request()
         request.command = MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW
         request.param1 = 0.0
@@ -289,43 +410,163 @@ class ClickToGimbal(Node):
                 f"click ignored: pixel ({u:.0f}, {v:.0f}) is outside the "
                 f"{self.info.width}x{self.info.height} image")
             return
+        if self.mode == "off":
+            self.get_logger().info("click ignored: click_mode is off")
+            return
+
         ray = ray_in_optical(u, v, self.info.k)
+        if self.mode == "roi":
+            self._roi_click(u, v, ray)
+        else:
+            self._point_click(u, v, ray)
+
+    def _point_click(self, u: float, v: float, ray) -> None:
         if self.earth_referenced:
-            try:
-                # Latest available rather than the click stamp: the command
-                # steers from where the camera looks now.
-                tf = self.tf_buffer.lookup_transform(
-                    self.reference, self.optical, rclpy.time.Time(),
-                    timeout=Duration(seconds=TF_TIMEOUT_S))
-            except Exception as err:  # noqa: BLE001 - lookup raises several types
-                self.get_logger().warn(
-                    f"click dropped: no transform {self.reference} -> "
-                    f"{self.optical} ({err})")
+            camera = self._camera_pose()
+            if camera is None:
                 return
-            r = tf.transform.rotation
-            direction = quat_rotate((r.x, r.y, r.z, r.w), ray)
-            roll, pitch, yaw = pointing_rpy_ned(direction)
+            _, rotation = camera
+            roll, pitch, yaw = pointing_rpy_ned(quat_rotate(rotation, ray))
+            self._command_pointing(roll, pitch, yaw)
         else:
             direction = quat_rotate(
                 quat_mul(self.cmd_q_body_link, LINK_TO_OPTICAL), ray)
-            roll, pitch, yaw = pointing_rpy_body(direction)
-
-        if self.in_control is False:
-            # The setpoint races the claim to the autopilot, and a setpoint
-            # that arrives first is dropped. The click still goes out: at
-            # worst this click restores control and the next one lands.
-            self._claim()
-            self.get_logger().warn(
-                "another party held gimbal control at click time. If the "
-                "gimbal does not move, click again.")
-        setpoint = quat_from_rpy(roll, pitch, yaw)
-        if not self.earth_referenced:
-            self.cmd_q_body_link = body_frd_to_flu(setpoint)
-        self._publish_setpoint(setpoint)
+            _, pitch, yaw = self.command_body_direction(direction)
         self.get_logger().info(
             f"click ({u:.0f}, {v:.0f}) -> gimbal pitch "
             f"{math.degrees(pitch):+.1f} deg, yaw {math.degrees(yaw):+.1f} deg, "
             f"{'earth' if self.earth_referenced else 'vehicle'} referenced")
+
+    def _roi_click(self, u: float, v: float, ray) -> None:
+        camera = self._camera_pose()
+        if camera is None:
+            return
+        position, rotation = camera
+        direction = quat_rotate(rotation, ray)
+        ground_z = (self.ground_z_default if self.rel_alt is None
+                    else position[2] - self.rel_alt)
+        hit = intersect_ground(position, direction, ground_z,
+                               GROUND_VIEW_MAX_DISTANCE_M)
+        if hit is None:
+            self.get_logger().warn(
+                f"click dropped: pixel ({u:.0f}, {v:.0f}) meets no ground "
+                f"within {GROUND_VIEW_MAX_DISTANCE_M:.0f} m")
+            return
+
+        self.roi_active = True
+        self._publish_roi(hit)
+        if self.earth_referenced:
+            self._send_roi_location(hit)
+        else:
+            self.roi_tracker.track(hit)
+        self.get_logger().info(
+            f"click ({u:.0f}, {v:.0f}) -> ROI at map "
+            f"({hit[0]:.1f}, {hit[1]:.1f}, {hit[2]:.1f})")
+
+    def _camera_pose(self):
+        """Reference frame position and rotation of the optical frame, or
+        None with a warning when the transform is not available."""
+        try:
+            # Latest available rather than the click stamp: the command
+            # steers from where the camera looks now.
+            tf = self.tf_buffer.lookup_transform(
+                self.reference, self.optical, rclpy.time.Time(),
+                timeout=Duration(seconds=TF_TIMEOUT_S))
+        except Exception as err:  # noqa: BLE001 - lookup raises several types
+            self.get_logger().warn(
+                f"click dropped: no transform {self.reference} -> "
+                f"{self.optical} ({err})")
+            return None
+        t, r = tf.transform.translation, tf.transform.rotation
+        return (t.x, t.y, t.z), (r.x, r.y, r.z, r.w)
+
+    # --------------------------------------------------------------------- roi
+    def _publish_roi(self, hit) -> None:
+        stamp = self.get_clock().now().to_msg()
+        point = PointStamped()
+        point.header.stamp = stamp
+        point.header.frame_id = self.reference
+        point.point.x, point.point.y, point.point.z = hit
+        self.roi_point_pub.publish(point)
+
+        latlon = self.origin.to_lla(hit[0], hit[1])
+        if latlon is None:
+            self.get_logger().warn(
+                "ROI has no lat/lon yet: the map origin is not known")
+            return
+        fix = NavSatFix()
+        fix.header.stamp = stamp
+        fix.header.frame_id = self.reference
+        fix.status.status = NavSatStatus.STATUS_FIX
+        fix.status.service = NavSatStatus.SERVICE_GPS
+        fix.latitude, fix.longitude = latlon
+        # The ground in the datum of the vehicle's own fix.
+        fix.altitude = (float("nan")
+                        if self.fix_altitude is None or self.rel_alt is None
+                        else self.fix_altitude - self.rel_alt)
+        self.roi_fix_pub.publish(fix)
+
+    def _send_roi_location(self, hit) -> None:
+        latlon = self.origin.to_lla(hit[0], hit[1])
+        if latlon is None or self.amsl is None or self.rel_alt is None:
+            self.get_logger().warn(
+                "DO_SET_ROI_LOCATION not sent: no origin or altitude yet")
+            return
+        request = CommandInt.Request()
+        request.frame = MAV_FRAME_GLOBAL_INT
+        request.command = MAV_CMD_DO_SET_ROI_LOCATION
+        request.x = int(latlon[0] * 1e7)
+        request.y = int(latlon[1] * 1e7)
+        request.z = self.amsl - self.rel_alt
+        self._send_roi_command(request)
+
+    def _send_roi_none(self) -> None:
+        request = CommandInt.Request()
+        request.command = MAV_CMD_DO_SET_ROI_NONE
+        self._send_roi_command(request)
+
+    def _send_roi_command(self, request) -> None:
+        if not self.roi_client.service_is_ready():
+            self.get_logger().warn("ROI command not sent: no command_int "
+                                   "service yet")
+            return
+        command = request.command
+        future = self.roi_client.call_async(request)
+        future.add_done_callback(
+            lambda f: self._on_roi_command_done(command, f))
+
+    def _on_roi_command_done(self, command: int, future) -> None:
+        try:
+            response = future.result()
+        except Exception as err:  # noqa: BLE001 - a dead service can drop it
+            self.get_logger().warn(f"ROI command {command} failed: {err}")
+            return
+        if not response.success:
+            self.get_logger().warn(
+                f"ROI command {command} rejected, result={response.result}")
+
+    # ----------------------------------------------------------------- command
+    def command_body_direction(self, direction) -> tuple[float, float, float]:
+        """Put the camera axis on a vehicle-frame FLU direction. Returns
+        the commanded roll, pitch, yaw in radians. roi_tracker calls this."""
+        roll, pitch, yaw = pointing_rpy_body(direction)
+        self._command_pointing(roll, pitch, yaw)
+        return roll, pitch, yaw
+
+    def _command_pointing(self, roll: float, pitch: float, yaw: float) -> None:
+        if self.in_control is False:
+            # The setpoint races the claim to the autopilot, and a setpoint
+            # that arrives first is dropped. The command still goes out: at
+            # worst it restores control and the next one lands.
+            self._claim()
+            self.get_logger().warn(
+                "another party held gimbal control at command time. If the "
+                "gimbal does not move, click again.",
+                throttle_duration_sec=5.0)
+        setpoint = quat_from_rpy(roll, pitch, yaw)
+        if not self.earth_referenced:
+            self.cmd_q_body_link = body_frd_to_flu(setpoint)
+        self._publish_setpoint(setpoint)
 
     def _publish_setpoint(self, q) -> None:
         cmd = GimbalManagerSetAttitude()
@@ -339,6 +580,7 @@ class ClickToGimbal(Node):
         cmd.angular_velocity_y = math.nan
         cmd.angular_velocity_z = math.nan
         self.setpoint_pub.publish(cmd)
+        self.last_command_time = self.get_clock().now().nanoseconds / 1e9
 
 
 def main() -> None:

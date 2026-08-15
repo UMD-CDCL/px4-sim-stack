@@ -268,14 +268,24 @@ The baseline stack publishes:
 | `/camera/nadir/image_raw/compressed` | `sensor_msgs/CompressedImage`, jpeg |
 | `/camera/nadir/camera_info` | `sensor_msgs/CameraInfo` |
 | `/perception/<camera>/detections` | `vision_msgs/Detection2DArray` |
+| `/gimbal/click_mode` | `std_msgs/String`, latched, the current click mode |
+| `/gimbal/roi` | `sensor_msgs/NavSatFix`, latched, the held region of interest |
+| `/gimbal/roi_local` | `geometry_msgs/PointStamped`, latched, the same point in the reference frame |
 
 One topic goes the other way. `click_to_gimbal` subscribes to
 `/foxglove/cursor/click` (`geometry_msgs/PointStamped`, x and y in gimbal
-image pixels) and turns each click into a MAVLink gimbal attitude command,
-so a click in Foxglove points the camera there. The simulated gimbal takes
-its commands vehicle relative and a MAVLink-honest gimbal takes them earth
-referenced. The `gimbal_convention` parameter picks between them, and
-`sim_bridge/click_to_gimbal.py` documents both.
+image pixels). Its `click_mode` parameter decides what one click does, and
+one parameter means the modes cannot overlap. `roi`, the default, projects
+the pixel onto the ground plane and holds the camera on that world point:
+the point is published latched on `/gimbal/roi` and `/gimbal/roi_local`,
+and the hold survives vehicle motion. `point` turns the camera onto the
+pixel once. `off` ignores clicks. The mode switches at runtime from the
+Foxglove Parameters panel, and the layout's indicator shows the current
+mode from `/gimbal/click_mode`. The simulated gimbal takes its commands
+vehicle relative and a MAVLink-honest gimbal takes them earth referenced,
+with the ROI hold done by `sim_bridge/roi_tracker.py` in simulation and by
+DO_SET_ROI_LOCATION on honest hardware. The `gimbal_convention` parameter
+picks between them, and `sim_bridge/click_to_gimbal.py` documents both.
 
 Each camera publishes the same frame twice. Use the raw topic inside the ROS
 container, where a large message costs shared memory. Use the compressed topic

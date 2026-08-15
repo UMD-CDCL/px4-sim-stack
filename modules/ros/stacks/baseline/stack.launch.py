@@ -395,6 +395,12 @@ def generate_launch_description() -> LaunchDescription:
                     "camera_info_topic": "/camera/gimbal/camera_info",
                     "optical_frame": CAMERA["gimbal"]["optical_frame"],
                     "reference_frame": REFERENCE_FRAME,
+                    # What a click does: roi holds the camera on the ground
+                    # point, point turns the camera once, off ignores clicks.
+                    # Runtime switchable with ros2 param set or the Foxglove
+                    # Parameters panel.
+                    "click_mode": os.environ.get("CLICK_MODE", "roi"),
+                    "use_rel_alt": True,
                     # "gz_sim" matches the simulated gimbal, whose joints
                     # ride on the airframe: the node commands vehicle
                     # relative. Set "mavlink" for a gimbal that obeys the

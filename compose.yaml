@@ -280,6 +280,8 @@ services:
       NADIR_YAW: ${NADIR_YAW:-0.0}
       # Where the gimbal orientation comes from: auto, setpoint or status.
       GIMBAL_SOURCE: ${GIMBAL_SOURCE:-auto}
+      # What a click on the gimbal image does: roi, point or off.
+      CLICK_MODE: ${CLICK_MODE:-roi}
       GIMBAL_OFFSET_ROLL: ${GIMBAL_OFFSET_ROLL:-0.0}
       GIMBAL_OFFSET_PITCH: ${GIMBAL_OFFSET_PITCH:-0.0}
       GIMBAL_OFFSET_YAW: ${GIMBAL_OFFSET_YAW:-0.0}

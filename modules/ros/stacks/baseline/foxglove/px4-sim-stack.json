@@ -381,7 +381,34 @@
         }
       },
       "layers": []
-    }
+    },
+    "Indicator!clickmode": {
+      "path": "/gimbal/click_mode.data",
+      "style": "background",
+      "fallbackColor": "#68686e",
+      "fallbackLabel": "click mode unknown",
+      "rules": [
+        {
+          "operator": "=",
+          "rawValue": "roi",
+          "color": "#2d7d46",
+          "label": "click sets ROI"
+        },
+        {
+          "operator": "=",
+          "rawValue": "point",
+          "color": "#1d6fc4",
+          "label": "click points gimbal"
+        },
+        {
+          "operator": "=",
+          "rawValue": "off",
+          "color": "#68686e",
+          "label": "clicks disabled"
+        }
+      ]
+    },
+    "Parameters!stack": {}
   },
   "globalVariables": {},
   "userNodes": {},
@@ -400,7 +427,17 @@
       "direction": "row",
       "splitPercentage": 68
     },
-    "second": "map!world",
+    "second": {
+      "first": "map!world",
+      "second": {
+        "first": "Indicator!clickmode",
+        "second": "Parameters!stack",
+        "direction": "column",
+        "splitPercentage": 25
+      },
+      "direction": "row",
+      "splitPercentage": 78
+    },
     "direction": "column",
     "splitPercentage": 62
   }

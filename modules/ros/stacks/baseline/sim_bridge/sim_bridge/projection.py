@@ -69,6 +69,11 @@ def quat_mul(a: Sequence[float], b: Sequence[float]) -> tuple[float, float, floa
     )
 
 
+def quat_conj(q: Sequence[float]) -> tuple[float, float, float, float]:
+    """The inverse of a unit quaternion (x, y, z, w)."""
+    return (-q[0], -q[1], -q[2], q[3])
+
+
 def body_frd_to_flu(q: Sequence[float]) -> tuple[float, float, float, float]:
     """A rotation relative to the body, from FRD axes to FLU axes.
 
