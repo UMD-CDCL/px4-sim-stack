@@ -1,0 +1,33 @@
+name: umd_campus_casualties
+description: 3 casualties placed by scenegen for scene umd_campus.
+entities:
+- name: casualty_01
+  uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Casual female
+  pose:
+  - -60.651
+  - -72.16
+  - -1.852
+  - 0
+  - 0
+  - 2.352
+  static: true
+- name: casualty_02
+  uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Casual female
+  pose:
+  - 69.315
+  - -99.914
+  - -6.247
+  - 0
+  - 0
+  - 3.931
+  static: true
+- name: casualty_mall_east
+  uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Casual female
+  pose:
+  - 4.332
+  - -33.305
+  - -1.119
+  - 0
+  - 0
+  - 4.545
+  static: true

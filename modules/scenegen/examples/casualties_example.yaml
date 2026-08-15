@@ -1,0 +1,22 @@
+# Casualty ground truth for scenegen build --casualties.
+#
+# Each entry:
+#   lat, lon   required, WGS84 degrees
+#   alt        optional AMSL meters. Absent or null puts the casualty on
+#              the terrain.
+#   model      optional model URI. Absent draws from the pool in
+#              build_world.py, seeded, so a rebuild repeats the draw.
+#   name       optional. Keep "casualty" or "person" in it; the ROS
+#              ground-truth scorer only counts names that carry one.
+#
+# These three sit on McKeldin Mall for the umd_campus example scene.
+
+casualties:
+  - lat: 38.98625
+    lon: -76.94330
+  - lat: 38.98600
+    lon: -76.94180
+    model: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Casual female
+  - lat: 38.98660
+    lon: -76.94255
+    name: casualty_mall_east

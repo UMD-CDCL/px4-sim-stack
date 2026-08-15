@@ -1,0 +1,13 @@
+name: allsmoke_casualties
+description: 1 casualties placed by scenegen for scene allsmoke.
+entities:
+- name: casualty_01
+  uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Casual female
+  pose:
+  - 0.0
+  - 0.0
+  - 0.001
+  - 0
+  - 0
+  - 0.952
+  static: true

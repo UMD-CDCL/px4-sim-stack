@@ -1,0 +1,1055 @@
+<!DOCTYPE html>
+<!--
+  The scene editor. Served by editor_server.py, which also answers
+  /scene.json, /satellite.jpg and POST /save. Everything is plain JS on a
+  canvas: no build step, no dependency, works offline.
+
+  What it edits, all in scene ENU meters on top of the satellite image:
+    vehicles       move, rotate, resize, add, delete, flip, class, model
+    buildings      select, change height, disable, name a model override,
+                   move/rotate/resize the box
+    flatten zones  draw polygons that level the terrain (overhang fix)
+    fiducial       drag the orange survey marker
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>scenegen editor</title>
+<style>
+  :root { --panel: #20242b; --ink: #e8eaee; --dim: #9aa1ac; --line: #363c46; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.45 system-ui, sans-serif; background: #14171c;
+         color: var(--ink); height: 100vh; display: flex; flex-direction: column; }
+  #toolbar { display: flex; gap: 6px; align-items: center; padding: 7px 10px;
+             background: var(--panel); border-bottom: 1px solid var(--line); }
+  #toolbar button { background: #2c313a; color: var(--ink); border: 1px solid var(--line);
+                    border-radius: 5px; padding: 5px 11px; cursor: pointer; }
+  #toolbar button.active { background: #0d5f8a; border-color: #1583bd; }
+  #toolbar button.save { background: #1d6b38; margin-left: auto; }
+  #toolbar button.save.dirty { background: #8a5a0d; }
+  #toolbar button:disabled { opacity: .35; cursor: default; }
+  #status { color: var(--dim); margin-left: 10px; }
+  #main { flex: 1; display: flex; min-height: 0; }
+  #canvas-wrap { flex: 1; position: relative; min-width: 0; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; }
+  #panel { width: 260px; background: var(--panel); border-left: 1px solid var(--line);
+           padding: 12px; overflow-y: auto; }
+  #panel h3 { margin: 0 0 8px; font-size: 13px; }
+  #panel label { display: block; color: var(--dim); margin: 8px 0 2px; }
+  #panel input, #panel select { width: 100%; background: #171a1f; color: var(--ink);
+           border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; }
+  #panel .row { display: flex; gap: 6px; }
+  #panel button { margin-top: 10px; width: 100%; background: #2c313a; color: var(--ink);
+           border: 1px solid var(--line); border-radius: 5px; padding: 6px; cursor: pointer; }
+  #panel button.danger { background: #6b1d1d; }
+  #help { padding: 5px 10px; color: var(--dim); background: var(--panel);
+          border-top: 1px solid var(--line); }
+  kbd { background: #2c313a; border-radius: 3px; padding: 0 5px; }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <button data-mode="select" class="active">Select</button>
+  <button data-mode="add_car">+ Car</button>
+  <button data-mode="add_bus">+ Bus</button>
+  <button data-mode="add_building">+ Building</button>
+  <button data-mode="zone">+ Flatten zone</button>
+  <button data-mode="fiducial">Fiducial</button>
+  <button id="undo" title="undo (Ctrl+Z)" disabled>↶</button>
+  <button id="redo" title="redo (Ctrl+Y)" disabled>↷</button>
+  <span id="status">loading…</span>
+  <button id="save" class="save">Save</button>
+  <button id="finish" class="save" style="display:none"
+          title="Save, stop the editor, and let the pipeline build the world">
+    Save &amp; build</button>
+</div>
+<div id="main">
+  <div id="canvas-wrap"><canvas id="canvas"></canvas></div>
+  <div id="panel"><h3>Nothing selected</h3>
+    <div id="panel-body">Click a vehicle, a building outline, a zone or the
+    orange fiducial. Drag empty ground to pan, wheel to zoom.</div></div>
+</div>
+<div id="help">
+  drag empty = pan · wheel = zoom · handles: round = rotate, square = resize ·
+  shift-click = stamp a copy of the last vehicle · shift-drag = select many ·
+  shift-click an object = add or drop it from the selection ·
+  <kbd>Ctrl+Z</kbd> undo · <kbd>Ctrl+Y</kbd> redo ·
+  <kbd>F</kbd> flip · <kbd>Del</kbd> delete · <kbd>Esc</kbd> deselect ·
+  zones: double-click closes a draft, removes a corner, or adds one on an edge
+</div>
+
+<script>
+"use strict";
+
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const statusEl = document.getElementById("status");
+const panelBody = document.getElementById("panel-body");
+const panelTitle = document.querySelector("#panel h3");
+const saveButton = document.getElementById("save");
+
+let scene = null;
+let image = new Image();
+let view = { s: 0.3, panX: 0, panY: 0 };
+let mode = "select";
+let selection = null;          // {kind: vehicle|building|zone|fiducial, index}
+let drag = null;               // {kind: pan|move|rotate|resize|vertex, ...}
+let zoneDraft = [];
+let dirty = false;
+let vehicleCounter = 1;
+let buildingCounter = 1;
+let multi = [];                // [{kind, index}] when several objects are selected
+let stampRef = null;           // {kind, id} of the object behind shift-click copies
+let undoStack = [];
+let redoStack = [];
+const MAX_UNDO_STATES = 50;
+
+// ---------------------------------------------------------------- transforms
+function mpp() {
+  return [scene.side_m / scene.imagery.width_px,
+          scene.side_m / scene.imagery.height_px];
+}
+function enuFromImage(px, py) {
+  const [mx, my] = mpp();
+  return [(px - scene.imagery.width_px / 2) * mx,
+          (scene.imagery.height_px / 2 - py) * my];
+}
+function imageFromEnu(e, n) {
+  const [mx, my] = mpp();
+  return [scene.imagery.width_px / 2 + e / mx,
+          scene.imagery.height_px / 2 - n / my];
+}
+function enuFromMouse(event) {
+  const rect = canvas.getBoundingClientRect();
+  const px = (event.clientX - rect.left) / view.s + view.panX;
+  const py = (event.clientY - rect.top) / view.s + view.panY;
+  return enuFromImage(px, py);
+}
+
+// ------------------------------------------------------------------- drawing
+function metersToImagePx(meters) { return meters / mpp()[0]; }
+
+function corners(x, y, length, width, headingDeg) {
+  const a = headingDeg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+  return [[length/2, width/2], [length/2, -width/2],
+          [-length/2, -width/2], [-length/2, width/2]]
+    .map(([dx, dy]) => [x + dx*c - dy*s, y + dx*s + dy*c]);
+}
+
+function polyPath(pointsEnu) {
+  ctx.beginPath();
+  pointsEnu.forEach(([e, n], index) => {
+    const [px, py] = imageFromEnu(e, n);
+    index ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+  });
+  ctx.closePath();
+}
+
+function draw() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (canvas.width !== w) canvas.width = w;
+  if (canvas.height !== h) canvas.height = h;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "#14171c";
+  ctx.fillRect(0, 0, w, h);
+  if (!scene || !image.complete) return;
+  ctx.setTransform(view.s, 0, 0, view.s, -view.panX * view.s, -view.panY * view.s);
+  ctx.drawImage(image, 0, 0);
+  const lw = k => k / view.s;
+
+  scene.buildings.forEach((b, index) => {
+    const single = selection && selection.kind === "building" && selection.index === index;
+    const selected = single || isMultiMember("building", index);
+    ctx.strokeStyle = b.enabled ? "#62d98c" : "#777";
+    ctx.setLineDash(b.enabled ? [] : [lw(6), lw(5)]);
+    ctx.lineWidth = lw(selected ? 2.4 : 1.2);
+    if (b.outline_m.length > 2) { polyPath(b.outline_m); ctx.stroke(); }
+    if (selected || b.outline_m.length <= 2 || b.source !== "osm") {
+      ctx.setLineDash([lw(5), lw(4)]);
+      polyPath(corners(b.east_m, b.north_m, b.length_m, b.width_m, b.yaw_deg));
+      ctx.stroke();
+      if (single) drawHandles(b.east_m, b.north_m, b.length_m, b.width_m, b.yaw_deg, "#62d98c");
+    }
+    ctx.setLineDash([]);
+  });
+
+  scene.flatten_zones.forEach((z, index) => {
+    const selected = selection && selection.kind === "zone" && selection.index === index;
+    ctx.fillStyle = "rgba(255,92,225,0.14)";
+    ctx.strokeStyle = "#ff5ce1";
+    ctx.lineWidth = lw(selected ? 2.4 : 1.3);
+    polyPath(z.polygon_m); ctx.fill(); ctx.stroke();
+    if (selected) z.polygon_m.forEach(([e, n]) => squareHandle(e, n, "#ff5ce1"));
+  });
+
+  if (zoneDraft.length) {
+    ctx.strokeStyle = "#ff5ce1"; ctx.lineWidth = lw(1.6);
+    ctx.setLineDash([lw(4), lw(4)]);
+    polyPath(zoneDraft); ctx.stroke(); ctx.setLineDash([]);
+    zoneDraft.forEach(([e, n]) => squareHandle(e, n, "#ff5ce1"));
+  }
+
+  scene.vehicles.forEach((v, index) => {
+    if (!v.enabled) return;
+    const single = selection && selection.kind === "vehicle" && selection.index === index;
+    const selected = single || isMultiMember("vehicle", index);
+    ctx.strokeStyle = v.cls === "bus" ? "#ffd21e" : "#3bd9ff";
+    ctx.lineWidth = lw(selected ? 2.6 : 1.6);
+    polyPath(corners(v.east_m, v.north_m, v.length_m, v.width_m, v.heading_deg));
+    ctx.stroke();
+    const a = v.heading_deg * Math.PI / 180;
+    const [nx, ny] = imageFromEnu(v.east_m + Math.cos(a) * v.length_m / 2,
+                                  v.north_m + Math.sin(a) * v.length_m / 2);
+    const [cx, cy] = imageFromEnu(v.east_m, v.north_m);
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(nx, ny); ctx.stroke();
+    if (v.source === "manual") {
+      ctx.fillStyle = "#fff";
+      ctx.beginPath(); ctx.arc(cx, cy, lw(2.2), 0, 7); ctx.fill();
+    }
+    if (single) drawHandles(v.east_m, v.north_m, v.length_m, v.width_m, v.heading_deg,
+                            ctx.strokeStyle);
+  });
+
+  const f = scene.fiducial;
+  const [fx, fy] = imageFromEnu(f.east_m, f.north_m);
+  const radius = Math.max(metersToImagePx(f.diameter_m / 2), lw(5));
+  ctx.strokeStyle = "#ff8a00"; ctx.lineWidth = lw(2);
+  ctx.beginPath(); ctx.arc(fx, fy, radius, 0, 7); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(fx - radius * 1.6, fy); ctx.lineTo(fx + radius * 1.6, fy);
+  ctx.moveTo(fx, fy - radius * 1.6); ctx.lineTo(fx, fy + radius * 1.6); ctx.stroke();
+
+  if (drag && drag.kind === "marquee") {
+    ctx.strokeStyle = "#7ab8ff";
+    ctx.fillStyle = "rgba(122,184,255,0.12)";
+    ctx.lineWidth = lw(1.2);
+    ctx.setLineDash([lw(5), lw(4)]);
+    polyPath([[drag.startE, drag.startN], [drag.e, drag.startN],
+              [drag.e, drag.n], [drag.startE, drag.n]]);
+    ctx.fill(); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  if (multi.length > 1) {
+    const [centerE, centerN] = multiCentroid();
+    const [handleE, handleN] = groupHandlePoint(centerE, centerN);
+    const [cx, cy] = imageFromEnu(centerE, centerN);
+    const [hx, hy] = imageFromEnu(handleE, handleN);
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = lw(1.4);
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(hx, hy); ctx.stroke();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(hx, hy, 5 / view.s, 0, 7); ctx.fill();
+  }
+}
+
+function squareHandle(e, n, color) {
+  const [px, py] = imageFromEnu(e, n);
+  const r = 4 / view.s;
+  ctx.fillStyle = color;
+  ctx.fillRect(px - r, py - r, 2 * r, 2 * r);
+}
+
+function drawHandles(x, y, length, width, headingDeg, color) {
+  const a = headingDeg * Math.PI / 180;
+  const rot = [x + Math.cos(a) * (length / 2 + rotateGap()),
+               y + Math.sin(a) * (length / 2 + rotateGap())];
+  const [rx, ry] = imageFromEnu(rot[0], rot[1]);
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(rx, ry, 5 / view.s, 0, 7); ctx.fill();
+  const corner = corners(x, y, length, width, headingDeg)[0];
+  squareHandle(corner[0], corner[1], color);
+}
+function rotateGap() { return Math.max(2, 8 / view.s * mpp()[0]); }
+
+// ------------------------------------------------------------------ hit test
+function inBox(e, n, box) {
+  const a = -box.heading * Math.PI / 180;
+  const dx = e - box.x, dy = n - box.y;
+  const lx = dx * Math.cos(a) - dy * Math.sin(a);
+  const ly = dx * Math.sin(a) + dy * Math.cos(a);
+  return Math.abs(lx) < box.length / 2 + 0.4 && Math.abs(ly) < box.width / 2 + 0.4;
+}
+function nearPoint(e, n, pe, pn, tolMeters) {
+  return Math.hypot(e - pe, n - pn) < tolMeters;
+}
+function inPolygon(e, n, points) {
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const [xi, yi] = points[i], [xj, yj] = points[j];
+    if ((yi > n) !== (yj > n) && e < (xj - xi) * (n - yi) / (yj - yi) + xi)
+      inside = !inside;
+  }
+  return inside;
+}
+
+function clickTolerance() {
+  return Math.max(1.0, 8 / view.s * mpp()[0]);
+}
+
+function nearestZoneVertex(zone, e, n) {
+  const tol = clickTolerance();
+  for (let i = 0; i < zone.polygon_m.length; i++)
+    if (nearPoint(e, n, zone.polygon_m[i][0], zone.polygon_m[i][1], tol))
+      return i;
+  return -1;
+}
+
+function nearestZoneEdge(zone, e, n) {
+  const tol = clickTolerance();
+  const points = zone.polygon_m;
+  for (let i = 0; i < points.length; i++) {
+    const [ax, ay] = points[i];
+    const [bx, by] = points[(i + 1) % points.length];
+    const lengthSq = (bx - ax) ** 2 + (by - ay) ** 2;
+    if (lengthSq === 0) continue;
+    let t = ((e - ax) * (bx - ax) + (n - ay) * (by - ay)) / lengthSq;
+    t = Math.min(Math.max(t, 0), 1);
+    const px = ax + t * (bx - ax), py = ay + t * (by - ay);
+    if (Math.hypot(e - px, n - py) < tol)
+      return { insertAt: i + 1, e: +px.toFixed(2), n: +py.toFixed(2) };
+  }
+  return null;
+}
+
+function boxOf(selectionRef) {
+  if (selectionRef.kind === "vehicle") {
+    const v = scene.vehicles[selectionRef.index];
+    return { x: v.east_m, y: v.north_m, length: v.length_m, width: v.width_m,
+             heading: v.heading_deg, set(p) {
+               v.east_m = p.x; v.north_m = p.y; v.length_m = p.length;
+               v.width_m = p.width; v.heading_deg = p.heading; } };
+  }
+  const b = scene.buildings[selectionRef.index];
+  return { x: b.east_m, y: b.north_m, length: b.length_m, width: b.width_m,
+           heading: b.yaw_deg, set(p) {
+             b.east_m = p.x; b.north_m = p.y; b.length_m = p.length;
+             b.width_m = p.width; b.yaw_deg = p.heading; } };
+}
+
+function hitAt(e, n) {
+  const f = scene.fiducial;
+  const tol = 6 * mpp()[0] / view.s;
+  if (nearPoint(e, n, f.east_m, f.north_m, Math.max(f.diameter_m, tol)))
+    return { kind: "fiducial" };
+  for (let i = scene.vehicles.length - 1; i >= 0; i--) {
+    const v = scene.vehicles[i];
+    if (v.enabled && inBox(e, n, { x: v.east_m, y: v.north_m, length: v.length_m,
+                                   width: v.width_m, heading: v.heading_deg }))
+      return { kind: "vehicle", index: i };
+  }
+  for (let i = 0; i < scene.flatten_zones.length; i++)
+    if (inPolygon(e, n, scene.flatten_zones[i].polygon_m))
+      return { kind: "zone", index: i };
+  for (let i = 0; i < scene.buildings.length; i++) {
+    const b = scene.buildings[i];
+    const outline = b.outline_m.length > 2 ? b.outline_m
+      : corners(b.east_m, b.north_m, b.length_m, b.width_m, b.yaw_deg);
+    if (inPolygon(e, n, outline)) return { kind: "building", index: i };
+  }
+  return null;
+}
+
+function handleAt(e, n) {
+  if (!selection || (selection.kind !== "vehicle" && selection.kind !== "building"))
+    return null;
+  const box = boxOf(selection);
+  const tol = Math.max(0.8, 8 / view.s * mpp()[0]);
+  const a = box.heading * Math.PI / 180;
+  const rot = [box.x + Math.cos(a) * (box.length / 2 + rotateGap()),
+               box.y + Math.sin(a) * (box.length / 2 + rotateGap())];
+  if (nearPoint(e, n, rot[0], rot[1], tol)) return { kind: "rotate" };
+  const corner = corners(box.x, box.y, box.length, box.width, box.heading)[0];
+  if (nearPoint(e, n, corner[0], corner[1], tol)) return { kind: "resize" };
+  return null;
+}
+
+// ------------------------------------------------------------ multi-selection
+function isMultiMember(kind, index) {
+  return multi.some(m => m.kind === kind && m.index === index);
+}
+function memberObject(member) {
+  return member.kind === "vehicle" ? scene.vehicles[member.index]
+                                   : scene.buildings[member.index];
+}
+function multiCentroid() {
+  let e = 0, n = 0;
+  multi.forEach(m => { const o = memberObject(m); e += o.east_m; n += o.north_m; });
+  return [e / multi.length, n / multi.length];
+}
+function groupHandlePoint(centerE, centerN) {
+  return [centerE + 40 / view.s * mpp()[0], centerN];
+}
+function headingOf(member) {
+  const o = memberObject(member);
+  return member.kind === "vehicle" ? o.heading_deg : o.yaw_deg;
+}
+function setHeading(member, degrees) {
+  const normalized = +((((degrees + 180) % 360) + 360) % 360 - 180).toFixed(1);
+  const o = memberObject(member);
+  if (member.kind === "vehicle") o.heading_deg = normalized;
+  else o.yaw_deg = normalized;
+}
+function deleteMembers(members) {
+  pushUndo();
+  members.filter(m => m.kind === "vehicle").map(m => m.index)
+    .sort((a, b) => b - a).forEach(index => scene.vehicles.splice(index, 1));
+  members.filter(m => m.kind === "building").map(m => m.index)
+    .sort((a, b) => b - a).forEach(index => {
+      const building = scene.buildings[index];
+      if (building.source === "manual") scene.buildings.splice(index, 1);
+      else building.enabled = false;
+    });
+  select(null);
+  markDirty();
+}
+function flipMembers() {
+  pushUndo();
+  multi.filter(m => m.kind === "vehicle")
+       .forEach(m => setHeading(m, headingOf(m) + 180));
+  markDirty();
+  draw();
+}
+
+// ------------------------------------------------------------- stamped copies
+function addVehicle(e, n, props) {
+  scene.vehicles.push({ id: "v_manual_" + vehicleCounter++, cls: props.cls,
+    east_m: +e.toFixed(2), north_m: +n.toFixed(2),
+    length_m: props.length_m, width_m: props.width_m,
+    heading_deg: props.heading_deg, confidence: 1.0, source: "manual",
+    model_uri: props.model_uri, enabled: true });
+  return { kind: "vehicle", index: scene.vehicles.length - 1 };
+}
+function addBuilding(e, n, props) {
+  scene.buildings.push({ id: "b_manual_" + buildingCounter++,
+    east_m: +e.toFixed(2), north_m: +n.toFixed(2),
+    length_m: props.length_m, width_m: props.width_m, yaw_deg: props.yaw_deg,
+    height_m: props.height_m, height_source: "manual", name: "",
+    outline_m: [], source: "manual", model_uri: props.model_uri, enabled: true });
+  return { kind: "building", index: scene.buildings.length - 1 };
+}
+function rememberStamp(ref) {
+  // Vehicles only: buildings are one-off shapes, so stamping them earns
+  // misplaced boxes faster than it saves clicks. The stamp tracks the
+  // source by id and reads its properties at stamp time, so a rotate or
+  // a panel edit after selection carries into every later copy, and the
+  // link survives undo, which rebuilds the arrays.
+  if (!ref || ref.kind !== "vehicle") return;
+  stampRef = { kind: "vehicle", id: memberObject(ref).id };
+}
+function stampSourceObject() {
+  if (!stampRef) return null;
+  return scene.vehicles.find(o => o.id === stampRef.id) || null;
+}
+function stampAt(e, n) {
+  const source = stampSourceObject();
+  if (!source) {
+    statusEl.textContent =
+      "nothing to copy yet: place or select a vehicle first";
+    return;
+  }
+  pushUndo();
+  const ref = addVehicle(e, n, { cls: source.cls, length_m: source.length_m,
+    width_m: source.width_m, heading_deg: source.heading_deg,
+    model_uri: source.model_uri });
+  select(ref);   // the newest copy leads the next stamp
+  markDirty();
+}
+
+// ---------------------------------------------------------------------- panel
+function field(labelText, inputHtml) {
+  return `<label>${labelText}</label>${inputHtml}`;
+}
+
+function showMultiPanel() {
+  const vehicleMembers = multi.filter(m => m.kind === "vehicle");
+  const buildingCount = multi.length - vehicleMembers.length;
+  panelTitle.textContent = `${multi.length} selected`;
+  panelBody.innerHTML =
+    `<p style="color:var(--dim)">${vehicleMembers.length} vehicles, ` +
+    `${buildingCount} buildings. Drag a selected object to move the group. ` +
+    `The white handle turns every object in place; positions hold. Sizes ` +
+    `stay as they are.</p>` +
+    (vehicleMembers.length ? field("class (vehicles)", `<select id="m-cls">
+        <option value="">leave as is</option>
+        <option value="car">car</option>
+        <option value="bus">bus</option></select>`) : "") +
+    field("model uri for everything selected",
+          `<input id="m-uri" placeholder="URI, or the word none for the pool">`) +
+    (vehicleMembers.length ? `<button id="m-flip">Flip vehicles 180°</button>` : "") +
+    `<button id="m-del" class="danger">Delete selection</button>`;
+  if (vehicleMembers.length) {
+    document.getElementById("m-cls").onchange = ev => {
+      if (!ev.target.value) return;
+      pushUndo();
+      vehicleMembers.forEach(m => { memberObject(m).cls = ev.target.value; });
+      markDirty(); draw();
+    };
+    document.getElementById("m-flip").onclick = flipMembers;
+  }
+  document.getElementById("m-uri").onchange = ev => {
+    const raw = ev.target.value.trim();
+    if (!raw) return;
+    pushUndo();
+    const value = raw === "none" ? null : raw;
+    multi.forEach(m => { memberObject(m).model_uri = value; });
+    markDirty();
+  };
+  document.getElementById("m-del").onclick = () => deleteMembers(multi);
+}
+
+function showPanel() {
+  if (multi.length > 1) { showMultiPanel(); return; }
+  if (!selection) {
+    panelTitle.textContent = "Nothing selected";
+    panelBody.innerHTML = "Click a vehicle, a building outline, a zone or the " +
+      "orange fiducial. Drag empty ground to pan, wheel to zoom.";
+    return;
+  }
+  if (selection.kind === "fiducial") {
+    const f = scene.fiducial;
+    panelTitle.textContent = "Fiducial";
+    panelBody.innerHTML =
+      field("east m", `<input id="p-e" type="number" step="0.1" value="${f.east_m.toFixed(2)}">`) +
+      field("north m", `<input id="p-n" type="number" step="0.1" value="${f.north_m.toFixed(2)}">`) +
+      `<p style="color:var(--dim)">The orange 0.5 m survey circle. Its
+       coordinates land in .env as FIDUCIAL_SURVEYED_*.</p>`;
+    bind("p-e", v => f.east_m = v); bind("p-n", v => f.north_m = v);
+    return;
+  }
+  if (selection.kind === "zone") {
+    const z = scene.flatten_zones[selection.index];
+    panelTitle.textContent = z.id;
+    panelBody.innerHTML =
+      field("mode", `<select id="p-mode">
+        <option value="min"${z.mode === "min" ? " selected" : ""}>min of zone</option>
+        <option value="mean"${z.mode === "mean" ? " selected" : ""}>mean of zone</option>
+        <option value="manual"${z.mode === "manual" ? " selected" : ""}>manual height</option>
+      </select>`) +
+      field("height m (manual, 0 = origin ground)",
+            `<input id="p-h" type="number" step="0.1" value="${z.height_m ?? 0}">`) +
+      `<p style="color:var(--dim)">Drag the zone to move it whole, a corner
+       to reshape it. Double-click a corner to remove it, double-click an
+       edge to add one.</p>` +
+      `<button id="p-del" class="danger">Delete zone</button>`;
+    document.getElementById("p-mode").onchange = ev => {
+      pushUndo(); z.mode = ev.target.value; markDirty(); };
+    bind("p-h", v => z.height_m = v);
+    document.getElementById("p-del").onclick = () => {
+      pushUndo();
+      scene.flatten_zones.splice(selection.index, 1); select(null); markDirty(); };
+    return;
+  }
+  if (selection.kind === "vehicle") {
+    const v = scene.vehicles[selection.index];
+    panelTitle.textContent = `${v.id} (${v.source}` +
+      (v.source === "auto" ? `, conf ${v.confidence})` : ")");
+    panelBody.innerHTML =
+      field("class", `<select id="p-cls">
+        <option value="car"${v.cls === "car" ? " selected" : ""}>car</option>
+        <option value="bus"${v.cls === "bus" ? " selected" : ""}>bus</option></select>`) +
+      `<div class="row"><div>` +
+      field("length m", `<input id="p-l" type="number" step="0.1" value="${v.length_m}">`) +
+      `</div><div>` +
+      field("width m", `<input id="p-w" type="number" step="0.1" value="${v.width_m}">`) +
+      `</div></div>` +
+      field("heading deg (ccw from east)",
+            `<input id="p-hd" type="number" step="1" value="${v.heading_deg}">`) +
+      field("model uri (empty = pool)",
+            `<input id="p-uri" value="${v.model_uri ?? ""}" placeholder="https://fuel… or model://…">`) +
+      `<button id="p-flip">Flip 180°</button>` +
+      `<button id="p-del" class="danger">Delete vehicle</button>`;
+    document.getElementById("p-cls").onchange = ev => {
+      pushUndo(); v.cls = ev.target.value; markDirty(); };
+    bind("p-l", val => v.length_m = val); bind("p-w", val => v.width_m = val);
+    bind("p-hd", val => v.heading_deg = val);
+    document.getElementById("p-uri").onchange = ev => {
+      pushUndo(); v.model_uri = ev.target.value.trim() || null; markDirty(); };
+    document.getElementById("p-flip").onclick = () => {
+      pushUndo();
+      v.heading_deg = ((v.heading_deg + 180 + 180) % 360) - 180; markDirty(); };
+    document.getElementById("p-del").onclick = () => {
+      pushUndo();
+      scene.vehicles.splice(selection.index, 1); select(null); markDirty(); };
+    return;
+  }
+  const b = scene.buildings[selection.index];
+  panelTitle.textContent = b.name || b.id;
+  panelBody.innerHTML =
+    field("height m (source: " + b.height_source + ")",
+          `<input id="p-h" type="number" step="0.5" value="${b.height_m}">`) +
+    `<div class="row"><div>` +
+    field("length m", `<input id="p-l" type="number" step="0.5" value="${b.length_m}">`) +
+    `</div><div>` +
+    field("width m", `<input id="p-w" type="number" step="0.5" value="${b.width_m}">`) +
+    `</div></div>` +
+    field("yaw deg", `<input id="p-y" type="number" step="1" value="${b.yaw_deg}">`) +
+    field("model uri (empty = box)",
+          `<input id="p-uri" value="${b.model_uri ?? ""}" placeholder="model://… replaces the box">`) +
+    field("", `<label style="display:flex;gap:6px;align-items:center;margin-top:8px">
+      <input id="p-en" type="checkbox" style="width:auto"${b.enabled ? " checked" : ""}>
+      include in the world</label>`);
+  bind("p-h", v => { b.height_m = v; b.height_source = "manual"; });
+  bind("p-l", v => b.length_m = v); bind("p-w", v => b.width_m = v);
+  bind("p-y", v => b.yaw_deg = v);
+  document.getElementById("p-uri").onchange = ev => {
+    pushUndo(); b.model_uri = ev.target.value.trim() || null; markDirty(); };
+  document.getElementById("p-en").onchange = ev => {
+    pushUndo(); b.enabled = ev.target.checked; markDirty(); };
+}
+
+function bind(id, setter) {
+  document.getElementById(id).onchange = ev => {
+    const value = parseFloat(ev.target.value);
+    if (!Number.isNaN(value)) { pushUndo(); setter(value); markDirty(); }
+  };
+}
+
+function select(hit) {
+  selection = hit;
+  multi = [];
+  rememberStamp(hit);
+  showPanel();
+  draw();
+}
+
+function selectMulti(members) {
+  if (members.length === 0) { select(null); return; }
+  if (members.length === 1) { select(members[0]); return; }
+  selection = null;
+  multi = members;
+  showPanel();
+  draw();
+}
+
+function toggleMember(hit) {
+  let members = multi.slice();
+  if (members.length === 0 && selection
+      && (selection.kind === "vehicle" || selection.kind === "building"))
+    members = [selection];
+  const at = members.findIndex(m => m.kind === hit.kind && m.index === hit.index);
+  if (at >= 0) members.splice(at, 1);
+  else members.push(hit);
+  selectMulti(members);
+}
+
+// -------------------------------------------------------------------- events
+canvas.addEventListener("wheel", event => {
+  event.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const mx = event.clientX - rect.left, my = event.clientY - rect.top;
+  const factor = event.deltaY < 0 ? 1.15 : 1 / 1.15;
+  const imgX = mx / view.s + view.panX, imgY = my / view.s + view.panY;
+  view.s = Math.min(Math.max(view.s * factor, 0.03), 20);
+  view.panX = imgX - mx / view.s;
+  view.panY = imgY - my / view.s;
+  draw();
+}, { passive: false });
+
+canvas.addEventListener("mousedown", event => {
+  if (!scene || event.button !== 0) return;
+  const [e, n] = enuFromMouse(event);
+  if (mode === "add_car" || mode === "add_bus") {
+    pushUndo();
+    const bus = mode === "add_bus";
+    const ref = addVehicle(e, n, { cls: bus ? "bus" : "car",
+      length_m: bus ? 12.0 : 4.6, width_m: bus ? 2.5 : 1.9,
+      heading_deg: 0, model_uri: null });
+    if (!event.shiftKey) setMode("select");   // shift keeps placing
+    select(ref);
+    markDirty();
+    return;
+  }
+  if (mode === "add_building") {
+    pushUndo();
+    const ref = addBuilding(e, n, { length_m: 14, width_m: 10, yaw_deg: 0,
+      height_m: 6, model_uri: null });
+    if (!event.shiftKey) setMode("select");   // shift keeps placing
+    select(ref);
+    markDirty();
+    return;
+  }
+  if (mode === "zone") { zoneDraft.push([+e.toFixed(2), +n.toFixed(2)]); draw(); return; }
+  if (mode === "fiducial") {
+    pushUndo();
+    drag = { kind: "fiducial" };
+    scene.fiducial.east_m = +e.toFixed(2); scene.fiducial.north_m = +n.toFixed(2);
+    markDirty(); draw(); return;
+  }
+  if (event.shiftKey) {
+    const hit = hitAt(e, n);
+    if (hit && (hit.kind === "vehicle" || hit.kind === "building")) {
+      toggleMember(hit);
+      return;
+    }
+    // A still shift-click stamps a copy of the last object; a shift-drag
+    // opens a selection rectangle. Mouseup decides which one it was.
+    drag = { kind: "shiftpending", startE: e, startN: n,
+             startX: event.clientX, startY: event.clientY };
+    return;
+  }
+
+  if (multi.length > 1) {
+    const [centerE, centerN] = multiCentroid();
+    const [handleE, handleN] = groupHandlePoint(centerE, centerN);
+    const tol = Math.max(0.8, 8 / view.s * mpp()[0]);
+    if (nearPoint(e, n, handleE, handleN, tol)) {
+      pushUndo();
+      drag = { kind: "grouprotate", centerE, centerN,
+               startAngle: Math.atan2(n - centerN, e - centerE),
+               initialHeadings: multi.map(m => headingOf(m)) };
+      return;
+    }
+    const hit = hitAt(e, n);
+    if (hit && isMultiMember(hit.kind, hit.index)) {
+      pushUndo();
+      drag = { kind: "groupmove",
+               offsets: multi.map(m => { const o = memberObject(m);
+                 return { de: o.east_m - e, dn: o.north_m - n }; }) };
+      return;
+    }
+    // Clicking outside the group falls through and clears it.
+  }
+
+  const handle = handleAt(e, n);
+  if (handle) { pushUndo(); drag = { kind: handle.kind }; return; }
+  if (selection && selection.kind === "zone") {
+    const zone = scene.flatten_zones[selection.index];
+    const vertexIndex = nearestZoneVertex(zone, e, n);
+    if (vertexIndex >= 0) {
+      pushUndo();
+      drag = { kind: "vertex", index: vertexIndex };
+      return;
+    }
+    // A click on the selected zone's edge keeps the selection, so the
+    // double-click that adds a corner there still finds the zone selected.
+    if (nearestZoneEdge(zone, e, n)) return;
+  }
+  const hit = hitAt(e, n);
+  select(hit);
+  if (hit && hit.kind === "fiducial") { pushUndo(); drag = { kind: "fiducial" }; }
+  else if (hit && (hit.kind === "vehicle" || hit.kind === "building")) {
+    pushUndo();
+    const box = boxOf(hit);
+    drag = { kind: "move", offsetE: box.x - e, offsetN: box.y - n };
+  } else if (hit && hit.kind === "zone") {
+    pushUndo();
+    // The whole polygon rides the drag, offset from a frozen copy so
+    // rounding never accumulates across the corners.
+    drag = { kind: "zonemove", startE: e, startN: n,
+             initial: scene.flatten_zones[hit.index].polygon_m.map(p => p.slice()) };
+  } else if (!hit) {
+    drag = { kind: "pan", startX: event.clientX, startY: event.clientY,
+             panX: view.panX, panY: view.panY };
+  }
+});
+
+window.addEventListener("mousemove", event => {
+  if (!drag || !scene) { if (scene) updateStatus(event); return; }
+  const [e, n] = enuFromMouse(event);
+  if (drag.kind === "pan") {
+    view.panX = drag.panX - (event.clientX - drag.startX) / view.s;
+    view.panY = drag.panY - (event.clientY - drag.startY) / view.s;
+  } else if (drag.kind === "shiftpending") {
+    if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 4)
+      drag = { kind: "marquee", startE: drag.startE, startN: drag.startN, e, n };
+  } else if (drag.kind === "marquee") {
+    drag.e = e; drag.n = n;
+  } else if (drag.kind === "groupmove") {
+    multi.forEach((m, i) => {
+      const o = memberObject(m);
+      o.east_m = +(e + drag.offsets[i].de).toFixed(2);
+      o.north_m = +(n + drag.offsets[i].dn).toFixed(2);
+    });
+    markDirty();
+  } else if (drag.kind === "grouprotate") {
+    // Headings only. Every object turns in place; nothing orbits.
+    const delta = Math.atan2(n - drag.centerN, e - drag.centerE) - drag.startAngle;
+    multi.forEach((m, i) =>
+      setHeading(m, drag.initialHeadings[i] + delta * 180 / Math.PI));
+    markDirty();
+  } else if (drag.kind === "fiducial") {
+    scene.fiducial.east_m = +e.toFixed(2); scene.fiducial.north_m = +n.toFixed(2);
+    markDirty();
+  } else if (drag.kind === "vertex" && selection && selection.kind === "zone") {
+    scene.flatten_zones[selection.index].polygon_m[drag.index] = [+e.toFixed(2), +n.toFixed(2)];
+    markDirty();
+  } else if (drag.kind === "zonemove" && selection && selection.kind === "zone") {
+    const de = e - drag.startE, dn = n - drag.startN;
+    scene.flatten_zones[selection.index].polygon_m = drag.initial.map(
+      ([pe, pn]) => [+(pe + de).toFixed(2), +(pn + dn).toFixed(2)]);
+    markDirty();
+  } else if (selection && (selection.kind === "vehicle" || selection.kind === "building")) {
+    const box = boxOf(selection);
+    if (drag.kind === "move") {
+      box.set({ ...box, x: +(e + drag.offsetE).toFixed(2), y: +(n + drag.offsetN).toFixed(2) });
+    } else if (drag.kind === "rotate") {
+      box.set({ ...box, heading: +(Math.atan2(n - box.y, e - box.x) * 180 / Math.PI).toFixed(1) });
+    } else if (drag.kind === "resize") {
+      const a = -box.heading * Math.PI / 180;
+      const dx = e - box.x, dy = n - box.y;
+      const lx = dx * Math.cos(a) - dy * Math.sin(a);
+      const ly = dx * Math.sin(a) + dy * Math.cos(a);
+      box.set({ ...box, length: Math.max(0.8, +(2 * Math.abs(lx)).toFixed(2)),
+                width: Math.max(0.8, +(2 * Math.abs(ly)).toFixed(2)) });
+    }
+    markDirty();
+  }
+  if (selection) showPanel();
+  draw();
+  updateStatus(event);
+});
+
+window.addEventListener("mouseup", () => {
+  if (drag && drag.kind === "shiftpending") {
+    stampAt(drag.startE, drag.startN);
+  } else if (drag && drag.kind === "marquee") {
+    const minE = Math.min(drag.startE, drag.e), maxE = Math.max(drag.startE, drag.e);
+    const minN = Math.min(drag.startN, drag.n), maxN = Math.max(drag.startN, drag.n);
+    const inside = (o) => o.east_m >= minE && o.east_m <= maxE
+                       && o.north_m >= minN && o.north_m <= maxN;
+    const members = [];
+    scene.vehicles.forEach((v, index) => {
+      if (v.enabled && inside(v)) members.push({ kind: "vehicle", index });
+    });
+    scene.buildings.forEach((b, index) => {
+      if (b.enabled && inside(b)) members.push({ kind: "building", index });
+    });
+    selectMulti(members);
+  }
+  drag = null;
+  draw();
+});
+
+canvas.addEventListener("dblclick", event => {
+  if (mode === "zone" && zoneDraft.length >= 3) {
+    pushUndo();
+    scene.flatten_zones.push({ id: "fz_" + (scene.flatten_zones.length + 1),
+      polygon_m: zoneDraft.slice(0, -1), mode: "min", height_m: null });
+    zoneDraft = [];
+    setMode("select");
+    select({ kind: "zone", index: scene.flatten_zones.length - 1 });
+    markDirty();
+    return;
+  }
+  // On a selected zone: double-click a corner to remove it, an edge to
+  // add one. The zone never needs a delete-and-redraw.
+  if (mode === "select" && selection && selection.kind === "zone") {
+    const [e, n] = enuFromMouse(event);
+    const zone = scene.flatten_zones[selection.index];
+    const vertexIndex = nearestZoneVertex(zone, e, n);
+    if (vertexIndex >= 0) {
+      if (zone.polygon_m.length <= 3) {
+        statusEl.textContent = "a zone keeps at least 3 corners - delete the zone instead";
+        return;
+      }
+      pushUndo();
+      zone.polygon_m.splice(vertexIndex, 1);
+      markDirty(); draw();
+      return;
+    }
+    const edge = nearestZoneEdge(zone, e, n);
+    if (edge) {
+      pushUndo();
+      zone.polygon_m.splice(edge.insertAt, 0, [edge.e, edge.n]);
+      markDirty(); draw();
+    }
+  }
+});
+
+window.addEventListener("keydown", event => {
+  if (event.target.tagName === "INPUT" || event.target.tagName === "SELECT") return;
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+    event.preventDefault();
+    if (event.shiftKey) redo(); else undo();
+    return;
+  }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
+    event.preventDefault();
+    redo();
+    return;
+  }
+  if (event.key === "Escape") { zoneDraft = []; select(null); setMode("select"); }
+  if (event.key === "Delete" || event.key === "Backspace") {
+    if (multi.length > 1) { deleteMembers(multi); return; }
+    if (!selection) return;
+    pushUndo();
+    if (selection.kind === "vehicle") scene.vehicles.splice(selection.index, 1);
+    else if (selection.kind === "zone") scene.flatten_zones.splice(selection.index, 1);
+    else if (selection.kind === "building") {
+      const building = scene.buildings[selection.index];
+      if (building.source !== "manual") {
+        // An OSM building keeps its data and toggles out of the world; a
+        // hand-placed box just goes.
+        building.enabled = !building.enabled;
+        markDirty(); showPanel(); draw(); return;
+      }
+      scene.buildings.splice(selection.index, 1);
+    }
+    select(null); markDirty();
+  }
+  if (event.key === "f" || event.key === "F") {
+    if (multi.length > 1) { flipMembers(); return; }
+    if (selection && selection.kind === "vehicle") {
+      pushUndo();
+      const v = scene.vehicles[selection.index];
+      v.heading_deg = ((v.heading_deg + 180 + 180) % 360) - 180;
+      markDirty(); showPanel(); draw();
+    }
+  }
+});
+
+document.querySelectorAll("#toolbar button[data-mode]").forEach(button => {
+  button.onclick = () => setMode(button.dataset.mode);
+});
+function setMode(next) {
+  mode = next;
+  if (next !== "zone") zoneDraft = [];
+  document.querySelectorAll("#toolbar button[data-mode]").forEach(button =>
+    button.classList.toggle("active", button.dataset.mode === next));
+  draw();
+}
+
+function markDirty() {
+  dirty = true;
+  saveButton.classList.add("dirty");
+  saveButton.textContent = "Save *";
+}
+
+// ----------------------------------------------------------------- undo/redo
+// One snapshot per user action: pushUndo() runs at the start of every
+// mutation, so a whole drag is one undo step. Selection is not part of a
+// snapshot; it clears on undo because indices may not survive the jump.
+function editableState() {
+  return JSON.stringify({ vehicles: scene.vehicles, buildings: scene.buildings,
+                          flatten_zones: scene.flatten_zones,
+                          fiducial: scene.fiducial });
+}
+function pushUndo() {
+  const state = editableState();
+  if (undoStack[undoStack.length - 1] === state) return;
+  undoStack.push(state);
+  if (undoStack.length > MAX_UNDO_STATES) undoStack.shift();
+  redoStack = [];
+  refreshUndoButtons();
+}
+function applyState(state) {
+  const parsed = JSON.parse(state);
+  scene.vehicles = parsed.vehicles;
+  scene.buildings = parsed.buildings;
+  scene.flatten_zones = parsed.flatten_zones;
+  scene.fiducial = parsed.fiducial;
+  selection = null;
+  multi = [];
+  zoneDraft = [];
+  drag = null;
+  markDirty();
+  refreshUndoButtons();
+  showPanel();
+  draw();
+}
+function undo() {
+  const current = editableState();
+  let previous = undoStack.pop();
+  // A mousedown pushes before it knows whether anything will move, so the
+  // top can equal the present state; skip past it.
+  while (previous === current && undoStack.length) previous = undoStack.pop();
+  if (previous === undefined || previous === current) { refreshUndoButtons(); return; }
+  redoStack.push(current);
+  applyState(previous);
+}
+function redo() {
+  if (!redoStack.length) return;
+  undoStack.push(editableState());
+  applyState(redoStack.pop());
+}
+function refreshUndoButtons() {
+  document.getElementById("undo").disabled = undoStack.length === 0;
+  document.getElementById("redo").disabled = redoStack.length === 0;
+}
+document.getElementById("undo").onclick = () => undo();
+document.getElementById("redo").onclick = () => redo();
+
+async function saveScene() {
+  const reply = await fetch("/save", { method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(scene, null, 1) });
+  if (!reply.ok) throw new Error(await reply.text());
+  dirty = false;
+  saveButton.classList.remove("dirty");
+  saveButton.textContent = "Save";
+  statusEl.textContent = "saved " + new Date().toLocaleTimeString();
+}
+
+saveButton.onclick = async () => {
+  try { await saveScene(); }
+  catch (error) { alert("Save failed: " + error.message); }
+};
+
+document.getElementById("finish").onclick = async () => {
+  try {
+    await saveScene();
+    await fetch("/finish", { method: "POST" });
+  } catch (error) {
+    alert("Could not finish: " + error.message);
+    return;
+  }
+  // The server is gone now; freeze the page so nothing looks editable.
+  const overlay = document.createElement("div");
+  overlay.style.cssText = "position:fixed;inset:0;background:rgba(14,16,20,.92);" +
+    "display:flex;align-items:center;justify-content:center;z-index:10;" +
+    "color:#e8eaee;font-size:16px;text-align:center;padding:30px";
+  overlay.textContent = "Scene saved. The build is running in the terminal - " +
+    "you can close this tab.";
+  document.body.appendChild(overlay);
+};
+
+window.addEventListener("beforeunload", event => {
+  if (dirty) { event.preventDefault(); event.returnValue = ""; }
+});
+
+function updateStatus(event) {
+  const [e, n] = enuFromMouse(event);
+  const vehicles = scene.vehicles.filter(v => v.enabled).length;
+  const buildings = scene.buildings.filter(b => b.enabled).length;
+  const selectedNote = multi.length > 1 ? ` · ${multi.length} selected` : "";
+  statusEl.textContent =
+    `${scene.name} · ${buildings} buildings · ${vehicles} vehicles · ` +
+    `${scene.flatten_zones.length} zones${selectedNote} · ` +
+    `cursor ${e.toFixed(1)}, ${n.toFixed(1)} m`;
+}
+
+// ---------------------------------------------------------------------- init
+function nextIdNumber(items) {
+  let highest = 0;
+  items.forEach(item => {
+    const match = /_(\d+)$/.exec(item.id);
+    if (match) highest = Math.max(highest, parseInt(match[1], 10));
+  });
+  return highest + 1;
+}
+
+async function init() {
+  scene = await (await fetch("/scene.json")).json();
+  try {
+    const config = await (await fetch("/config.json")).json();
+    if (config.finish_enabled)
+      document.getElementById("finish").style.display = "";
+  } catch (error) { /* an older server; the button stays hidden */ }
+  vehicleCounter = nextIdNumber(scene.vehicles);
+  buildingCounter = nextIdNumber(scene.buildings);
+  image.onload = () => {
+    const fit = Math.min(canvas.clientWidth / image.width,
+                         canvas.clientHeight / image.height);
+    view.s = fit;
+    view.panX = (image.width - canvas.clientWidth / fit) / 2;
+    view.panY = (image.height - canvas.clientHeight / fit) / 2;
+    statusEl.textContent = scene.name;
+    draw();
+  };
+  image.src = "/satellite.jpg";
+}
+new ResizeObserver(draw).observe(canvas);
+init();
+</script>
+</body>
+</html>
