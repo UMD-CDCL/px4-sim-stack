@@ -1,5 +1,104 @@
 {
   "configById": {
+    "Image!nadir": {
+      "imageTopic": "/camera/nadir/image_raw/compressed",
+      "calibrationTopic": "/camera/nadir/camera_info",
+      "annotations": {
+        "/camera/nadir/annotations": {
+          "visible": true
+        }
+      },
+      "synchronize": false,
+      "rotation": 0,
+      "flipHorizontal": false,
+      "flipVertical": false,
+      "cameraState": {
+        "distance": 20,
+        "perspective": true,
+        "phi": 60,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 60,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "scene": {},
+      "transforms": {},
+      "topics": {
+        "/scoring/gimbal/markers": {
+          "visible": true
+        },
+        "/scoring/nadir/markers": {
+          "visible": false
+        },
+        "/ground_truth/markers": {
+          "visible": true
+        }
+      },
+      "layers": {},
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "imageMode": {
+        "imageTopic": "/camera/gimbal/image_raw/compressed",
+        "calibrationTopic": "/camera/gimbal/camera_info",
+        "annotations": {
+          "/camera/gimbal/annotations": {
+            "visible": true
+          }
+        },
+        "publish": {
+          "clickEnabled": true
+        }
+      }
+    },
+    "Stack!2rrsv1h": {
+      "panels": [
+        {
+          "panelId": "CallService!1zqf9al",
+          "size": 0.25
+        },
+        {
+          "panelId": "CallService!3gws9j9",
+          "size": 0.25
+        },
+        {
+          "panelId": "CallService!3r27hzg",
+          "size": 0.25
+        },
+        {
+          "panelId": "CallService!2gftbwi",
+          "size": 0.25
+        },
+        {
+          "panelId": "Parameters!3t5mz9g",
+          "size": 0.25
+        }
+      ],
+      "foxglovePanelTitle": "Gimbal Control Mode"
+    },
     "CallService!1zqf9al": {
       "requestPayload": "{}",
       "layout": "vertical",
@@ -35,18 +134,19 @@
     "Parameters!3t5mz9g": {},
     "3D!scene": {
       "cameraState": {
-        "distance": 150.31643131022855,
         "perspective": true,
-        "phi": 40.15753761331069,
+        "distance": 69.64028437490886,
+        "phi": 62.83470296765191,
+        "thetaOffset": 115.27559055118232,
+        "targetOffset": [
+          10.390359578475747,
+          -0.8474391881162652,
+          -1.945111681235947e-16
+        ],
         "target": [
           0,
           0,
           0
-        ],
-        "targetOffset": [
-          -0.0078073719505056625,
-          -0.0004115838179326495,
-          -2.363346523724825e-16
         ],
         "targetOrientation": [
           0,
@@ -54,7 +154,6 @@
           0,
           1
         ],
-        "thetaOffset": 87.87401574803359,
         "fovy": 45,
         "near": 0.5,
         "far": 5000
@@ -196,104 +295,19 @@
       "imageMode": {},
       "synchronize": false
     },
-    "Image!nadir": {
-      "imageTopic": "/camera/nadir/image_raw/compressed",
-      "calibrationTopic": "/camera/nadir/camera_info",
-      "annotations": {
-        "/camera/nadir/annotations": {
-          "visible": true
-        }
-      },
-      "synchronize": false,
-      "rotation": 0,
-      "flipHorizontal": false,
-      "flipVertical": false,
-      "cameraState": {
-        "distance": 20,
-        "perspective": true,
-        "phi": 60,
-        "target": [
-          0,
-          0,
-          0
-        ],
-        "targetOffset": [
-          0,
-          0,
-          0
-        ],
-        "targetOrientation": [
-          0,
-          0,
-          0,
-          1
-        ],
-        "thetaOffset": 60,
-        "fovy": 45,
-        "near": 0.5,
-        "far": 5000
-      },
-      "followMode": "follow-pose",
-      "scene": {},
-      "transforms": {},
-      "topics": {
-        "/scoring/gimbal/markers": {
-          "visible": true
-        },
-        "/scoring/nadir/markers": {
-          "visible": false
-        },
-        "/ground_truth/markers": {
-          "visible": true
-        }
-      },
-      "layers": {},
-      "publish": {
-        "type": "point",
-        "poseTopic": "/move_base_simple/goal",
-        "pointTopic": "/clicked_point",
-        "poseEstimateTopic": "/initialpose",
-        "poseEstimateXDeviation": 0.5,
-        "poseEstimateYDeviation": 0.5,
-        "poseEstimateThetaDeviation": 0.26179939
-      },
-      "imageMode": {
-        "imageTopic": "/camera/gimbal/image_raw/compressed",
-        "calibrationTopic": "/camera/gimbal/camera_info",
-        "annotations": {
-          "/camera/gimbal/annotations": {
-            "visible": true
+    "Tab!9e6uir": {
+      "activeTabIdx": 0,
+      "tabs": [
+        {
+          "title": "Fullscreen Me",
+          "layout": {
+            "first": "Image!nadir",
+            "second": "Stack!2rrsv1h",
+            "direction": "row",
+            "splitPercentage": 82.9817158931083
           }
-        },
-        "publish": {
-          "clickEnabled": true
         }
-      }
-    },
-    "Stack!2rrsv1h": {
-      "panels": [
-        {
-          "panelId": "CallService!1zqf9al",
-          "size": 0.25
-        },
-        {
-          "panelId": "CallService!3gws9j9",
-          "size": 0.25
-        },
-        {
-          "panelId": "CallService!3r27hzg",
-          "size": 0.25
-        },
-        {
-          "panelId": "CallService!2gftbwi",
-          "size": 0.25
-        },
-        {
-          "panelId": "Parameters!3t5mz9g",
-          "size": 0.25
-        }
-      ],
-      "foxglovePanelTitle": "Gimbal Control Mode"
+      ]
     },
     "Image!gimbal": {
       "imageTopic": "/camera/gimbal/image_raw/compressed",
@@ -389,7 +403,7 @@
         "/mavros/global_position/raw/fix": "#f5774d",
         "/mavros/sim_state/global_position": "#f7df71"
       },
-      "zoomLevel": 18,
+      "zoomLevel": 20,
       "maxNativeZoom": 19,
       "customTileUrl": "",
       "followFrame": "",
@@ -450,12 +464,7 @@
     "first": {
       "first": "3D!scene",
       "second": {
-        "first": {
-          "first": "Image!nadir",
-          "second": "Stack!2rrsv1h",
-          "direction": "row",
-          "splitPercentage": 82.9817158931083
-        },
+        "first": "Tab!9e6uir",
         "second": "Image!gimbal",
         "direction": "column",
         "splitPercentage": 57.069113625644576
