@@ -6,13 +6,20 @@ known exactly. This is the one node that reads a simulator file, and that is
 safe: ground truth is evaluation data, nothing in the flight path reads it,
 and on real hardware this node does not run.
 
+Each target is drawn as a bubble with the scoring gate's radius, colored by
+its scene status across every camera: green when some camera detected it,
+yellow when some camera's footprint covers it but nothing detected it, grey
+when no camera sees it. The status comes from the scorers' verdicts: an FN
+names a visible undetected target, and a TP carries the name of the target
+it matched.
+
 Scenario poses are Gazebo world coordinates, x east and y north in meters.
 PX4's local frame starts where the vehicle spawned, so the two line up.
 origin_offset_xyz shifts them when they do not.
 
 Publishes
-    /ground_truth/markers      visualization_msgs/MarkerArray, blue spheres
-    /ground_truth/truth_3d     vision_msgs/Detection3DArray, for the scorer
+    /ground_truth/markers      visualization_msgs/MarkerArray, the bubbles
+    /ground_truth/truth_3d     vision_msgs/Detection3DArray, for the scorers
 """
 
 from __future__ import annotations
@@ -24,23 +31,24 @@ import rclpy
 import yaml
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile
-from std_msgs.msg import ColorRGBA
 from vision_msgs.msg import (
     BoundingBox3D,
     Detection3D,
     Detection3DArray,
     ObjectHypothesisWithPose,
 )
-from visualization_msgs.msg import Marker, MarkerArray
+from visualization_msgs.msg import MarkerArray
 
-from sim_bridge.verdicts import GROUND_TRUTH_COLOR, PERSON_SPHERE_DIAMETER
+from sim_bridge.verdicts import (GROUND_TRUTH_BUBBLE_RADIUS,
+                                 GROUND_TRUTH_COLOR, sphere)
 
 # ------------------------------------------------------------------- tunables
-# Translucent, so a detection sphere at the same spot stays visible through it.
-MARKER_ALPHA = 0.45
 # Only entities whose name contains one of these count as findable targets.
 # A scenario can also hold props that no detector should find.
 TARGET_NAME_FILTERS = ["person", "casualty"]
+# Verdicts older than this no longer color the bubbles. The scorers publish
+# at 2 Hz, so a camera gone quiet turns its targets grey within a few ticks.
+VERDICT_TIMEOUT_S = 3.0
 
 LATCHED = QoSProfile(durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
                      history=QoSHistoryPolicy.KEEP_LAST, depth=1)
@@ -60,7 +68,8 @@ class GroundTruth(Node):
             "RESOLVED_TRUTH_FILE", "/scenes/ground_truth_actual.yaml"))
         self.declare_parameter("reference_frame", "map")
         self.declare_parameter("origin_offset_xyz", [0.0, 0.0, 0.0])
-        self.declare_parameter("rate_hz", 1.0)
+        self.declare_parameter("rate_hz", 2.0)
+        self.declare_parameter("cameras", ["nadir", "gimbal"])
 
         self.reference = self.get_parameter("reference_frame").value
         self.offset = [float(x) for x in self.get_parameter("origin_offset_xyz").value]
@@ -73,6 +82,16 @@ class GroundTruth(Node):
         else:
             names = ", ".join(t["name"] for t in self.targets)
             self.get_logger().info(f"{len(self.targets)} ground truth targets: {names}")
+
+        # Per camera: which targets its verdicts marked detected or visible,
+        # and when. Stale entries stop counting.
+        self.detected_by: dict[str, set[str]] = {}
+        self.visible_by: dict[str, set[str]] = {}
+        self.verdict_stamp: dict[str, float] = {}
+        for cam in [str(c) for c in self.get_parameter("cameras").value]:
+            self.create_subscription(
+                Detection3DArray, f"/scoring/{cam}/verdicts",
+                lambda msg, c=cam: self._on_verdicts(c, msg), 10)
 
         self.marker_pub = self.create_publisher(MarkerArray, "/ground_truth/markers", LATCHED)
         self.truth_pub = self.create_publisher(Detection3DArray, "/ground_truth/truth_3d", LATCHED)
@@ -124,6 +143,29 @@ class GroundTruth(Node):
             })
         return out
 
+    def _on_verdicts(self, cam: str, msg: Detection3DArray) -> None:
+        detected, visible = set(), set()
+        for det in msg.detections:
+            kind = det.results[0].hypothesis.class_id if det.results else ""
+            if kind == "FN":
+                visible.add(det.id)
+            elif kind == "TP" and len(det.results) > 1:
+                # The second result names the matched target.
+                detected.add(det.results[1].hypothesis.class_id)
+        self.detected_by[cam] = detected
+        self.visible_by[cam] = visible
+        self.verdict_stamp[cam] = self.get_clock().now().nanoseconds / 1e9
+
+    def _status(self, name: str) -> str:
+        now = self.get_clock().now().nanoseconds / 1e9
+        fresh = [cam for cam, stamp in self.verdict_stamp.items()
+                 if (now - stamp) <= VERDICT_TIMEOUT_S]
+        if any(name in self.detected_by[cam] for cam in fresh):
+            return "detected"
+        if any(name in self.visible_by[cam] for cam in fresh):
+            return "visible"
+        return "out_of_view"
+
     # ---------------------------------------------------------------- output
     def _publish(self) -> None:
         now = self.get_clock().now().to_msg()
@@ -133,21 +175,16 @@ class GroundTruth(Node):
         truth.header.frame_id = self.reference
 
         for i, target in enumerate(self.targets):
-            sphere = Marker()
-            sphere.header.stamp = now
-            sphere.header.frame_id = self.reference
-            sphere.ns = "ground_truth"
-            sphere.id = i
-            sphere.type = Marker.SPHERE
-            sphere.action = Marker.ADD
-            sphere.pose.position.x = target["x"]
-            sphere.pose.position.y = target["y"]
-            sphere.pose.position.z = target["z"] + PERSON_SPHERE_DIAMETER / 2.0
-            sphere.pose.orientation.w = 1.0
-            sphere.scale.x = sphere.scale.y = sphere.scale.z = PERSON_SPHERE_DIAMETER
-            r, g, b = GROUND_TRUTH_COLOR
-            sphere.color = ColorRGBA(r=r, g=g, b=b, a=MARKER_ALPHA)
-            markers.markers.append(sphere)
+            # The bubble's equator sits at ground level, so a detection dot
+            # inside the visible half is within the gate by construction.
+            markers.markers.append(sphere(
+                ns="ground_truth",
+                marker_id=i,
+                frame_id=self.reference,
+                stamp=now,
+                position=(target["x"], target["y"], target["z"]),
+                diameter=2.0 * GROUND_TRUTH_BUBBLE_RADIUS,
+                rgba=GROUND_TRUTH_COLOR[self._status(target["name"])]))
 
             d = Detection3D()
             d.header = truth.header
@@ -162,7 +199,7 @@ class GroundTruth(Node):
             d.results.append(hypothesis)
             d.bbox = BoundingBox3D()
             d.bbox.center = hypothesis.pose.pose
-            d.bbox.size.x = d.bbox.size.y = d.bbox.size.z = PERSON_SPHERE_DIAMETER
+            d.bbox.size.x = d.bbox.size.y = d.bbox.size.z = 2.0 * GROUND_TRUTH_BUBBLE_RADIUS
             truth.detections.append(d)
 
         self.marker_pub.publish(markers)

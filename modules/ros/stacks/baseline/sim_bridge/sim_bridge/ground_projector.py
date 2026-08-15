@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """Draw where a camera is looking on the ground.
 
-Casts a ray through each image corner, intersects the ground plane, and
-publishes the covered ground as a stock PolygonStamped that the Foxglove 3D
-panel draws without custom code. One node runs for each camera.
+Casts rays through points along the image boundary, intersects the ground
+plane, and publishes the covered ground as a stock PolygonStamped that the
+Foxglove 3D panel draws without custom code. One node runs for each camera.
+
+The footprint is truncated at FOOTPRINT_MAX_DISTANCE_M from the camera. A
+camera near the horizon still covers ground close to the drone, so its
+footprint is the near region it sees, closed by an arc at the limit,
+instead of nothing. Only a camera that sees no ground at all publishes
+nothing.
 
 The plane height comes from the drone by default: MAVROS reports altitude
 above the launch point, so the ground is at pose.z minus rel_alt. Set
@@ -25,12 +31,14 @@ from sensor_msgs.msg import CameraInfo
 from std_msgs.msg import Float64
 from tf2_ros import Buffer, TransformListener
 
-from sim_bridge.projection import footprint_on_ground, image_corners, intrinsics_ready
+from sim_bridge.projection import footprint_on_ground, image_boundary, intrinsics_ready
 
 # ------------------------------------------------------------------- tunables
 PUBLISH_RATE_HZ = 5.0
-# Beyond this slant range a corner ray is treated as missing the ground.
-MAX_RANGE = 2000.0
+# The footprint stops at this horizontal distance from the camera.
+FOOTPRINT_MAX_DISTANCE_M = 100.0
+# Boundary rays per image edge. More makes the truncation arc smoother.
+BOUNDARY_SAMPLES_PER_EDGE = 8
 
 
 class GroundProjector(Node):
@@ -94,14 +102,14 @@ class GroundProjector(Node):
         r = tf.transform.rotation
         ground_z = self.ground_z if self.rel_alt is None else t.z - self.rel_alt
 
-        corners = footprint_on_ground(
-            image_corners(self.info.width, self.info.height),
+        outline = footprint_on_ground(
+            image_boundary(self.info.width, self.info.height,
+                           BOUNDARY_SAMPLES_PER_EDGE),
             self.info.k, (t.x, t.y, t.z), (r.x, r.y, r.z, r.w),
-            ground_z, MAX_RANGE)
-        if corners is None:
-            # Looking at or above the horizon. Publishing nothing is the
-            # honest answer, because a clipped polygon would look like real
-            # coverage.
+            ground_z, FOOTPRINT_MAX_DISTANCE_M)
+        if outline is None:
+            # No ground within the limit is in view. Publishing nothing is
+            # the honest answer.
             self.missed += 1
             return
 
@@ -109,7 +117,7 @@ class GroundProjector(Node):
         footprint.header.stamp = tf.header.stamp
         footprint.header.frame_id = self.reference
         footprint.polygon.points = [
-            Point32(x=float(c[0]), y=float(c[1]), z=float(c[2])) for c in corners
+            Point32(x=float(p[0]), y=float(p[1]), z=float(p[2])) for p in outline
         ]
         self.footprint_pub.publish(footprint)
         self.published += 1

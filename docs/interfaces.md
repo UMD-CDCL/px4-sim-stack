@@ -391,20 +391,31 @@ recall figure would describe neither.
 
 | Topic | Type |
 |---|---|
-| `/ground_truth/markers` | `visualization_msgs/MarkerArray`, blue spheres |
+| `/ground_truth/markers` | `visualization_msgs/MarkerArray`, the truth bubbles |
 | `/ground_truth/truth_3d` | `vision_msgs/Detection3DArray` |
 | `/perception/<camera>/detections_3d` | `vision_msgs/Detection3DArray` with covariance |
-| `/camera/<camera>/footprint` | `geometry_msgs/PolygonStamped` |
+| `/camera/<camera>/footprint` | `geometry_msgs/PolygonStamped`, truncated at 100 m |
 | `/scoring/<camera>/verdicts` | `vision_msgs/Detection3DArray`, each labelled TP, FP or FN |
-| `/scoring/<camera>/markers` | `visualization_msgs/MarkerArray`, verdicts as spheres |
-| `/scoring/<camera>/position_error` | `std_msgs/Float64`, metres |
+| `/scoring/<camera>/markers` | `visualization_msgs/MarkerArray`, TP and FP as dots |
+| `/scoring/<camera>/position_error` | `std_msgs/Float64`, meters |
 | `/scoring/<camera>/recall`, `/scoring/<camera>/precision` | `std_msgs/Float64` |
 
-In the 3D view every person is a 1 m sphere, and the image overlay uses the
-same colors. Blue is ground truth. Green means the estimate landed within
-`SCORING_GATE_M` of a real target, red means it did not, and yellow is a
-target inside the footprint that nothing found. The color table lives in
-`sim_bridge/verdicts.py`, so the two views cannot drift apart.
+In the 3D view each truth target is a bubble with the scoring gate's radius,
+colored by its status across every camera: green when some camera detected
+it, yellow when some footprint covers it but nothing detected it, grey when
+no camera sees it. Each camera's estimates are dots: green within the gate
+of a target, red outside it. A dot inside a bubble is a hit by construction,
+because the bubble radius equals the gate. A missed target gets no dot, only
+its yellow bubble. The image overlay colors its boxes by the same verdicts.
+Scoring runs on a clock, so misses appear even while the detector is silent.
+The colors, shapes and status rules live in `sim_bridge/verdicts.py`, so the
+views cannot drift apart.
+
+The footprint is truncated at 100 m from the camera. A camera near the
+horizon reports the near ground it sees, closed by an arc at the limit, and
+only a camera that sees no ground publishes nothing. The scorers treat a
+stale footprint as no coverage, so a camera pointed at the sky stops
+counting its targets as visible.
 
 Covariance comes from constants in `detection_localizer.py`, not from a
 derivation. `COVARIANCE_DIAGONAL` is a two metre standard deviation in x and

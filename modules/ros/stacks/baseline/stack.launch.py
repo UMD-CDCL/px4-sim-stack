@@ -303,6 +303,8 @@ def generate_launch_description() -> LaunchDescription:
                 # frame starts where the vehicle spawned, which is the same
                 # point. Shift this if you spawn somewhere else.
                 "origin_offset_xyz": [0.0, 0.0, 0.0],
+                # Whose verdicts color the truth bubbles.
+                "cameras": CAMERAS,
             }],
         ),
 

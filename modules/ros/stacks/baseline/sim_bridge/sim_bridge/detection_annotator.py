@@ -81,8 +81,8 @@ class DetectionAnnotator(Node):
 
     def _box_color(self, track_id: str) -> Color:
         verdict = self.verdict_for.get(track_id)
-        r, g, b = VERDICT_COLOR.get(verdict, UNJUDGED_COLOR)
-        return Color(r=r, g=g, b=b, a=1.0)
+        rgba = VERDICT_COLOR.get(verdict, UNJUDGED_COLOR)
+        return Color(r=rgba[0], g=rgba[1], b=rgba[2], a=1.0)
 
     def _on_detections(self, msg: Detection2DArray) -> None:
         out = ImageAnnotations()

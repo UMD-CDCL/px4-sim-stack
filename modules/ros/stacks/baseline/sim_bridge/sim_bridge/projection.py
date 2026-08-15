@@ -81,34 +81,65 @@ def slant_range(a: Sequence[float], b: Sequence[float]) -> float:
     return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b)))
 
 
-def image_corners(width: int, height: int, inset: float = 0.5) -> list[tuple[float, float]]:
-    """The four image corners, in the order that draws a closed outline."""
+def image_boundary(width: int, height: int, per_edge: int,
+                   inset: float = 0.5) -> list[tuple[float, float]]:
+    """Points along the image boundary, in the order that draws an outline.
+
+    Each edge contributes per_edge points, corner included, so the list
+    holds 4 * per_edge points. More points make the truncated footprint's
+    arc smoother.
+    """
     x0, y0 = inset, inset
     x1, y1 = width - inset, height - inset
-    return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    out = []
+    for (ax, ay), (bx, by) in zip(corners, corners[1:] + corners[:1]):
+        for i in range(per_edge):
+            f = i / per_edge
+            out.append((ax + (bx - ax) * f, ay + (by - ay) * f))
+    return out
 
 
 def footprint_on_ground(
-    corners: Iterable[tuple[float, float]],
+    boundary: Iterable[tuple[float, float]],
     k: Sequence[float],
     origin: Sequence[float],
     rotation: Sequence[float],
     ground_z: float,
-    max_range: float = 5000.0,
+    max_distance: float,
 ) -> list[tuple[float, float, float]] | None:
-    """Project image corners onto the ground.
+    """Project image boundary points onto the ground, truncated at a range.
 
-    Returns None unless every corner lands on the plane. A partial footprint
-    would draw a shape that does not exist: when the camera looks at or above
-    the horizon, some corners never meet the ground, and joining the ones that
-    do produces a confident-looking lie.
+    Each boundary ray keeps its ground hit when that hit lies within
+    max_distance (horizontal meters) of the camera. A ray that misses the
+    ground, or hits beyond the limit, is clamped to the max_distance circle
+    in the direction it looks. A camera near the horizon therefore still
+    reports the near ground it sees, bounded by an arc, instead of nothing.
+
+    Returns None when no ray hits the ground within the limit, which means
+    no ground within max_distance is in view.
     """
     out = []
-    for u, v in corners:
-        d_opt = ray_in_optical(u, v, k)
-        d_world = quat_rotate(rotation, d_opt)
-        hit = intersect_ground(origin, d_world, ground_z, max_range)
-        if hit is None:
-            return None
-        out.append(hit)
-    return out
+    hits = 0
+    for u, v in boundary:
+        d = quat_rotate(rotation, ray_in_optical(u, v, k))
+        horizontal = math.hypot(d[0], d[1])
+
+        point = None
+        if d[2] < -1e-9:
+            t = (ground_z - origin[2]) / d[2]
+            if t > 0.0:
+                hx = origin[0] + t * d[0]
+                hy = origin[1] + t * d[1]
+                if math.hypot(hx - origin[0], hy - origin[1]) <= max_distance:
+                    point = (hx, hy, ground_z)
+                    hits += 1
+        if point is None:
+            if horizontal < 1e-9:
+                continue    # straight up: no direction to clamp along
+            point = (origin[0] + d[0] / horizontal * max_distance,
+                     origin[1] + d[1] / horizontal * max_distance,
+                     ground_z)
+        out.append(point)
+
+    return out if hits else None
