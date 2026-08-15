@@ -38,7 +38,13 @@ world targets into the vehicle frame with a corrected vehicle attitude,
 not with the raw EKF attitude, whose heading error measured 5 to 16
 degrees in flight. The correction comes from the one pair of sources
 that is world true: the full TF chain to the camera, and the joint
-state the node last commanded. It refreshes whenever the desired
+state in cmd_q_body_link. Those two are entangled: the chain fixes
+only their product, so only one can be updated at a time, and each
+update goes to the one that actually moved. A click first re-derives
+the joint state from the chain under the standing correction, because
+a disagreement there means another controller, usually the QGC
+joystick, moved the joints, and the correction drifts only at EKF
+speed. The correction itself refreshes whenever the desired
 attitude has stayed still long enough for the joints and the TF chain
 to catch up, and between refreshes the EKF supplies only short-term
 attitude changes, which stay accurate while its absolute heading
@@ -71,6 +77,10 @@ CORRECTION_SETTLE_S = 1.5
 # The desired attitude counts as still while consecutive updates stay
 # inside this angle. Above the EKF attitude noise in a hover.
 STILL_LIMIT_DEG = 0.2
+# A click adopts the TF-implied joint state when it disagrees with the
+# last command by more than this. Above TF lag and attitude noise, far
+# below any deliberate joystick move.
+EXTERNAL_MOVE_DEG = 3.0
 
 IDENTITY = (0.0, 0.0, 0.0, 1.0)
 
@@ -103,10 +113,12 @@ class RoiTracker:
     def track(self, point_map: tuple[float, float, float]) -> None:
         """Hold every axis on a point in the reference frame.
 
-        Called at click time, when the gimbal is settled and the TF chain
-        is current, so the correction refreshes unconditionally."""
+        Called at click time, when the TF chain is current, so the joint
+        state re-syncs and the correction refreshes unconditionally."""
         self.point, self.follow_angles = point_map, None
-        self._refresh_correction()
+        camera = self._camera_tf()
+        self._sync_joint_state(camera)
+        self._refresh_correction(camera)
         self._tick()
 
     def follow(self, pitch_world: float, yaw_world: float) -> None:
@@ -117,7 +129,9 @@ class RoiTracker:
                 "follow dropped: no vehicle attitude yet")
             return
         self.point = None
-        self._refresh_correction()
+        camera = self._camera_tf()
+        self._sync_joint_state(camera)
+        self._refresh_correction(camera)
         heading = self._heading(self._vehicle_attitude())
         self.follow_angles = (pitch_world, wrap_pi(yaw_world - heading))
         self._tick()
@@ -147,6 +161,31 @@ class RoiTracker:
             return None
         t, r = tf.transform.translation, tf.transform.rotation
         return (t.x, t.y, t.z), (r.x, r.y, r.z, r.w)
+
+    def _sync_joint_state(self, camera) -> None:
+        """Adopt the joint state the TF chain implies when it disagrees
+        with the last command.
+
+        The chain fixes the product of the vehicle attitude and the
+        joint state. A disagreement with cmd_q_body_link therefore means
+        the joints moved under a command this node never saw, usually
+        the QGC joystick, because the other factor, the correction,
+        drifts only at EKF speed. Adopting the TF answer keeps the
+        correction valid and puts the first click from any gimbal pose
+        on target, instead of offset by the external move until the
+        settle refresh caught up."""
+        if camera is None or self.vehicle_q is None:
+            return
+        _, q_map_optical = camera
+        q_link = quat_mul(
+            quat_conj(self._vehicle_attitude()),
+            quat_mul(q_map_optical, quat_conj(LINK_TO_OPTICAL)))
+        if quat_angle_deg(q_link, self.node.cmd_q_body_link) \
+                > EXTERNAL_MOVE_DEG:
+            self.node.cmd_q_body_link = q_link
+            self.node.get_logger().info(
+                "gimbal was moved by another controller; joint state "
+                "re-synced from TF")
 
     def _refresh_correction(self, camera=_UNSET) -> None:
         if camera is _UNSET:

@@ -88,10 +88,16 @@ truth, by the EKF attitude. Composing the vehicle attitude back on
 cancels the error exactly, so the full chain is safe and the
 vehicle-relative half is not. roi_tracker.py therefore converts world
 targets back to vehicle-relative joints with a corrected vehicle
-attitude, built from that chain and the joint state this node last
-commanded in cmd_q_body_link. A gimbal moved by another controller
-desynchronizes that state for one click: that click re-synchronizes
-it, and the next click lands.
+attitude, built from that chain and the joint state in
+cmd_q_body_link. A gimbal moved by another controller, usually the
+QGC joystick, leaves that state stale. Each click therefore compares
+the joint state the TF chain implies, under the standing correction,
+against cmd_q_body_link, and adopts the TF answer when they disagree:
+the disagreement belongs to the joints, because the correction only
+drifts at EKF speed. A click from any gimbal pose then lands without
+an initial offset. GIMBAL_DEVICE_SET_ATTITUDE would carry the joint
+setpoint directly, but mavros does not translate it, so the TF chain
+is the one live source.
 
 Two earlier wrong answers are worth recording. A calibration at rest
 measured a constant 90 degree yaw error and subtracted it as a mount
@@ -243,8 +249,10 @@ class ClickToGimbal(Node):
         self.setpoint_flags = FOLLOW_LOCK_FLAGS if self.earth_referenced else 0
         self.ground_z_default = float(self.get_parameter("ground_z").value)
         # The camera link orientation the joints hold, from the last command
-        # this node sent. Identity matches a device that was never commanded:
-        # GZGimbal steers the joints to zero without a setpoint, and _center
+        # this node sent. roi_tracker re-derives it from the TF chain at
+        # click time when another controller has moved the gimbal since.
+        # Identity matches a device that was never commanded: GZGimbal
+        # steers the joints to zero without a setpoint, and _center
         # commands the same zero.
         self.cmd_q_body_link = (0.0, 0.0, 0.0, 1.0)
 

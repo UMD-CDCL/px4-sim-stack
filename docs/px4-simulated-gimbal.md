@@ -74,7 +74,14 @@ stay correct. The vehicle-relative half is not safe, and a command
 computed from it misses by the EKF error. Since the joints track the last
 setpoint exactly, the last commanded attitude is the true joint state.
 Compose new vehicle-relative commands from your own last command, not from
-the report divided by the EKF.
+the report divided by the EKF. `GIMBAL_DEVICE_SET_ATTITUDE` would carry
+the joint setpoint whoever commanded it, but mavros does not translate
+that message, so it cannot cover a gimbal moved by another controller,
+such as the QGC joystick. When that happens, the last command is stale:
+re-derive the joint state by dividing your standing vehicle-attitude
+correction off the world-true camera orientation, as
+`sim_bridge/roi_tracker.py` does at click time. The correction drifts
+only at EKF speed, so a sudden disagreement always belongs to the joints.
 
 ## Summary
 
@@ -83,7 +90,7 @@ the report divided by the EKF.
 | Executes commands vehicle relative, flags ignored | Send a vehicle-relative attitude, lock flags clear |
 | Computes an ROI attitude once, earth referenced | Re-command the point yourself as the vehicle moves |
 | Reports an absolute attitude flagged vehicle relative | Divide the vehicle attitude off the left, or apply the patch |
-| Reports truth while the EKF estimates | Build earth-frame poses from the report, build command state from your own setpoints |
+| Reports truth while the EKF estimates | Build earth-frame poses from the report, build command state from your own setpoints, re-derived from TF after an external move |
 
 `sim_bridge/click_to_gimbal.py` and `sim_bridge/scene_tf.py` implement
 these accommodations, switchable back to honest MAVLink behavior for real
