@@ -80,6 +80,20 @@ there.
 
 Browse the library at <https://app.gazebosim.org/fuel/models>.
 
+### A scene from map data
+
+The `scenegen` module builds a scene of a real place: terrain from
+elevation tiles, the satellite image on the ground, OSM buildings, and
+detected cars and buses. A browser editor fixes what the data got wrong,
+and a fiducial marker ties the world to the map frame.
+
+```bash
+./px4sim genscene create --name campus --center 38.9869,-76.9426 --side 600
+./px4sim genscene --help
+```
+
+See [modules/scenegen/README.md](../modules/scenegen/README.md).
+
 ## Vehicles
 
 `x500_recon` is the default. It carries:

@@ -396,6 +396,37 @@ services:
     depends_on: [video-router, message-bus]
 
   # -------------------------------------------------------------------------
+  # scenegen - builds a Gazebo scene from real map data: satellite imagery,
+  # elevation tiles, OSM buildings, detected vehicles. Runs on demand and
+  # exits; it is not part of the running stack. It writes worlds, models and
+  # scenarios into modules/sim/scenes, which is why it mounts that directory
+  # read-write - the one exception to the "no Gazebo path outside sim" rule.
+  # Use it through ./px4sim genscene, which selects the profile and maps
+  # port 8090 for the browser editor.
+  # Profile: scenegen
+  # -------------------------------------------------------------------------
+  scenegen:
+    profiles: [scenegen]
+    build:
+      context: ./modules/scenegen
+      args:
+        <<: *ids
+    image: px4simstack/scenegen:1
+    hostname: scenegen
+    environment:
+      DATA_DIR: /data
+      SCENES_DIR: /scenes
+    volumes:
+      - ./modules/scenegen:/app
+      - ./modules/scenegen/data:/data
+      - ./modules/sim/scenes:/scenes
+    ports:
+      - "8090:8090"
+    networks:
+      simnet:
+        ipv4_address: 172.28.0.19
+
+  # -------------------------------------------------------------------------
   # xrce-agent - the uXRCE-DDS bridge. This puts PX4 uORB topics directly on
   # the ROS 2 graph and breaks the MAVLink-only contract on purpose. Turn it on
   # only for a stack that needs px4_msgs.

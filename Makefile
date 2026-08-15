@@ -24,7 +24,7 @@ DS_TAG     := $(patsubst DS_TAG=%,%,$(filter DS_TAG=%,$(DS_SELECT)))
 
 .DEFAULT_GOAL := help
 .PHONY: help preflight bootstrap x11 build build-% up up-core down restart ps logs \
-        sim ros qgc perception hub px4-console scenario scene reset \
+        sim ros qgc perception hub px4-console scenario scene reset genscene \
         clean clean-src lint-docs check endpoints
 
 ## ----------------------------------------------------------------- setup
@@ -66,7 +66,7 @@ up-core: x11 ## Start only sim, transport and QGC
 	@$(MAKE) --no-print-directory endpoints
 
 down: ## Stop the stack and remove the containers
-	COMPOSE_PROFILES=ros,perception,xrce,qgc-dev $(DC) down --remove-orphans
+	COMPOSE_PROFILES=ros,perception,xrce,qgc-dev,scenegen $(DC) down --remove-orphans
 
 restart: ## Restart one service, for example `make restart S=sim`
 	$(DC) restart $(S)
@@ -118,6 +118,9 @@ scenario: ## Re-run the scenario spawner without a sim restart
 	$(DC) exec sim /scenes/spawn_scenario.py \
 	  --world $(SCENE) --scenario /scenes/scenarios/$(SCENARIO).yaml
 
+genscene: ## Build a world from map data: `make genscene ARGS="create --name x ..."`
+	COMPOSE_PROFILES=scenegen $(DC) run --rm --service-ports scenegen $(ARGS)
+
 reset: ## Clear the scenario targets from the running world
 	$(DC) exec sim /scenes/spawn_scenario.py --world $(SCENE) --clear
 
@@ -133,7 +136,7 @@ check: preflight ## Validate the compose file and lint the docs
 ## ----------------------------------------------------------------- cleanup
 
 clean: ## Remove containers, networks and named volumes
-	COMPOSE_PROFILES=ros,perception,xrce,qgc-dev $(DC) down -v --remove-orphans
+	COMPOSE_PROFILES=ros,perception,xrce,qgc-dev,scenegen $(DC) down -v --remove-orphans
 
 clean-src: ## Delete the cloned upstream sources in ./src
 	rm -rf ./src/PX4-Autopilot ./src/qgroundcontrol ./src/ros2_ws

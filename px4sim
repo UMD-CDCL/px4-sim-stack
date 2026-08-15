@@ -15,7 +15,7 @@ DC="docker compose"
 # Every profile, so `stop` and `clean` reach containers that `start` did not
 # create. Compose ignores a service whose profile is not selected, which
 # otherwise leaves the ros and perception containers behind.
-ALL_PROFILES="ros,perception,xrce,qgc-dev"
+ALL_PROFILES="ros,perception,xrce,qgc-dev,scenegen"
 
 BOLD=$'\033[1m'; DIM=$'\033[2m'; GRN=$'\033[32m'; RED=$'\033[31m'; YEL=$'\033[33m'; OFF=$'\033[0m'
 say()  { printf '%s==> %s%s\n' "$BOLD" "$*" "$OFF"; }
@@ -77,6 +77,8 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo, ROS 2 and DeepStream in containers
     scene <name>        Switch the world and restart the simulator
     scenario [name]     Place the targets again, with no restart
     reset               Remove the targets from the running world
+    genscene <args>     Build a world from map data. Try: genscene --help
+                        ${DIM}all runs create / detect / edit (browser on :8090) / build${OFF}
 
   ${BOLD}Housekeeping${OFF}
     check               Validate the compose file and lint the docs
@@ -251,6 +253,13 @@ scenario)
 
 reset)
 	$DC exec sim /scenes/spawn_scenario.py --world "${SCENE:-recon_field}" --clear
+	;;
+
+genscene)
+	# The generator runs once and exits. The first use builds its image,
+	# which downloads the CPU torch wheel and takes a few minutes.
+	# --service-ports exposes 8090 so `genscene edit` reaches the browser.
+	COMPOSE_PROFILES="scenegen" exec $DC run --rm --service-ports scenegen "$@"
 	;;
 
 check)

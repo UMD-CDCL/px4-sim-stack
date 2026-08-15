@@ -7,6 +7,11 @@ __pycache__/
 .xauth
 modules/sim/scenes/ground_truth_actual.yaml
 
+# Fetched tiles, weights and per-scene work products. A scene rebuilds from
+# scene.json, and scene.json alone is worth committing if you want to keep
+# a scene.
+modules/scenegen/data/
+
 # Seeded from the DeepStream image on first start, and the TensorRT engine is
 # rebuilt for each GPU, driver and TensorRT version. Neither belongs in git.
 modules/perception/models/Primary_Detector/
