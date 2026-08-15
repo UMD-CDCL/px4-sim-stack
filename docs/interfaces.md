@@ -438,7 +438,8 @@ y, and `RANGE_VARIANCE_SCALE` grows that with slant range.
 
 The camera frame is built from the gimbal attitude PX4 reports. Three things
 about that report are worth knowing, because each one caused a wrong answer
-that looked plausible.
+that looked plausible. `docs/px4-simulated-gimbal.md` states the whole
+behavior set and the accommodations on one page, for use in other projects.
 
 **PX4 mislabels the frame.** `GZGimbal.cpp` builds the attitude from the gimbal
 IMU, which Gazebo reports against the world, then publishes it with
