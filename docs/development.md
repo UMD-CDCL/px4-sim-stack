@@ -186,7 +186,7 @@ Both are installed, and the container has the X11 socket:
 
 ```bash
 docker compose exec ros bash -lc rviz2
-docker compose exec ros bash -lc 'rqt_image_view /camera/gimbal/image_raw'
+docker compose exec ros bash -lc 'rqt_image_view /camera/gimbal/image_raw/compressed'
 ```
 
 ## QGroundControl

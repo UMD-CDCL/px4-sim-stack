@@ -148,7 +148,7 @@
           </range>
         </ray>
         <always_on>1</always_on>
-        <visualize>true</visualize>
+        <visualize>false</visualize>
       </sensor>
     </link>
     <joint name="lidar_sensor_joint" type="fixed">

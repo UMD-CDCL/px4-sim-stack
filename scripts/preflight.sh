@@ -27,12 +27,14 @@ if command -v nvidia-smi >/dev/null 2>&1; then
 	# Which release the driver allows, and which one the stack will therefore
 	# build. Reported rather than left to the reader, because the two used to
 	# disagree silently whenever the repository moved to another machine.
+	# One call answers both lines, so nvidia-smi runs once.
 	major=${drv%%.*}
 	if [ "$major" -lt 570 ]; then
 		bad "driver $drv is below 570.133. DeepStream 8.0 will not start."
 	else
-		ok "$(./scripts/ds-select.sh --explain)"
-		ok "perception builds $(./scripts/ds-select.sh --image)"
+		eval "$(./scripts/ds-select.sh)"
+		ok "DeepStream $DS_VERSION: $DS_REASON"
+		ok "perception builds $DS_IMAGE"
 	fi
 else
 	bad "nvidia-smi not found. Install the NVIDIA driver."

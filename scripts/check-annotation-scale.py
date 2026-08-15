@@ -45,7 +45,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import (QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy,
                        qos_profile_sensor_data)
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import CompressedImage
 from vision_msgs.msg import Detection2DArray
 
 DETECTION_QOS = QoSProfile(reliability=QoSReliabilityPolicy.BEST_EFFORT,
@@ -56,7 +56,7 @@ CANDIDATES = (1.0, 1.5, 2.0, 0.6667, 0.5)
 def grab(node: Node, camera: str, seconds: float):
     state: dict = {}
     node.create_subscription(
-        Image, f"/camera/{camera}/image_raw",
+        CompressedImage, f"/camera/{camera}/image_raw/compressed",
         lambda m: state.__setitem__("img", m), qos_profile_sensor_data)
     node.create_subscription(
         Detection2DArray, f"/perception/{camera}/detections",
@@ -72,22 +72,29 @@ def grab(node: Node, camera: str, seconds: float):
 def check(node: Node, camera: str, seconds: float, out_dir: str) -> None:
     img, det = grab(node, camera, seconds)
     if img is None:
-        print(f"  {camera}: no image on /camera/{camera}/image_raw")
-        return
-    if det is None:
-        print(f"  {camera}: image is {img.width}x{img.height}, but no detections "
-              f"arrived. Point the camera at a target.")
+        print(f"  {camera}: no image on /camera/{camera}/image_raw/compressed")
         return
 
-    frame = np.frombuffer(bytes(img.data), np.uint8).reshape(img.height, img.width, 3)
-    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR).copy()
+    # cv2.imdecode reads the JPEG straight into BGR, which is what the
+    # drawing calls below want.
+    frame = cv2.imdecode(np.frombuffer(bytes(img.data), np.uint8),
+                         cv2.IMREAD_COLOR)
+    if frame is None:
+        print(f"  {camera}: the frame did not decode as a JPEG")
+        return
+    height, width = frame.shape[:2]
+
+    if det is None:
+        print(f"  {camera}: image is {width}x{height}, but no detections "
+              f"arrived. Point the camera at a target.")
+        return
 
     right = max(d.bbox.center.position.x + d.bbox.size_x / 2 for d in det.detections)
     lower = max(d.bbox.center.position.y + d.bbox.size_y / 2 for d in det.detections)
     # The boxes must fit inside the image. Of the usual ratios, take the
     # largest that still fits, which is the space they are most likely in.
     fits = [s for s in sorted(CANDIDATES)
-            if right * s <= img.width + 1 and lower * s <= img.height + 1]
+            if right * s <= width + 1 and lower * s <= height + 1]
     guess = max(fits) if fits else 1.0
 
     for d in det.detections:
@@ -106,10 +113,10 @@ def check(node: Node, camera: str, seconds: float, out_dir: str) -> None:
     path = f"{out_dir}/annotation-scale-{camera}.jpg"
     cv2.imwrite(path, frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
     verdict = ("boxes are in image coordinates" if abs(guess - 1.0) < 0.01
-               else f"boxes look like {int(img.width / guess)}x{int(img.height / guess)}, "
+               else f"boxes look like {int(width / guess)}x{int(height / guess)}, "
                     f"so set DS_COORD_OVERRIDES={camera}="
-                    f"{int(img.width / guess)}x{int(img.height / guess)}")
-    print(f"  {camera}: image {img.width}x{img.height}, "
+                    f"{int(width / guess)}x{int(height / guess)}")
+    print(f"  {camera}: image {width}x{height}, "
           f"{len(det.detections)} detections, scale {guess:.2f}")
     print(f"           {verdict}")
     print(f"           wrote {path}")

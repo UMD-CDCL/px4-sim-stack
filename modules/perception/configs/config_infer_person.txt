@@ -12,7 +12,8 @@
 #
 # Values below come from the DeepStream sample config, with two changes:
 #   batch-size  30 -> 1     one camera, not thirty
-#   engine file          -> a path in the cache volume, so it survives restarts
+#   engine file          -> next to the ONNX in the bind-mounted models
+#                           directory, so it survives restarts and is reused
 
 [property]
 gpu-id=0

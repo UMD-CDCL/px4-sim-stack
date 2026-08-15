@@ -62,10 +62,13 @@ between stacks that declare packages with the same name.
 ```bash
 make ros                                  # a shell, with the overlay sourced
 ros2 topic list
-ros2 topic hz /camera/gimbal/image_raw
+ros2 topic hz /camera/gimbal/camera_info
 ros2 topic echo /mavros/state
 ros2 topic echo /perception/nadir/detections
 ```
+
+The rate check uses `camera_info` because the image topic publishes only
+while something subscribes to it.
 
 Set `ROS_AUTOLAUNCH=0` to bring the container up without starting the stack.
 The container then idles and waits for you.

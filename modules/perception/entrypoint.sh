@@ -34,12 +34,22 @@ RTSP_IN_2=${RTSP_IN_2:-$RTSP_BASE/$PERCEPTION_CAMERA_2}
 DS_WIDTH=${DS_WIDTH:-1920}
 DS_HEIGHT=${DS_HEIGHT:-1080}
 
-case "${ANNOTATED_STREAMS:-1}" in
-0 | false | no | off) ANNOTATED_ENABLE=0 ;;
-*) ANNOTATED_ENABLE=1 ;;
-esac
+# Which cameras get a boxes-burned-in RTSP stream, as a comma separated list
+# of camera names. "1" or "all" turns every camera on, "0" or "off" turns
+# every camera off. The default is the gimbal alone: QGC displays it, and the
+# nadir boxes already reach Foxglove as annotations over the plain stream.
+ANNOTATED_STREAMS=${ANNOTATED_STREAMS:-gimbal}
 
-export MQTT_HOST MQTT_PORT MQTT_TOPIC DS_WIDTH DS_HEIGHT ANNOTATED_ENABLE
+annotated_enabled() {
+	# Spaces after the commas are tolerated: "nadir, gimbal" works.
+	case ",${ANNOTATED_STREAMS// /}," in
+	*,1,* | *,all,* | *,true,* | *,yes,* | *,on,*) return 0 ;;
+	*,"$1",*) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+export MQTT_HOST MQTT_PORT MQTT_TOPIC DS_WIDTH DS_HEIGHT
 
 log()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[33m    %s\033[0m\n' "$*"; }
@@ -58,8 +68,7 @@ host=$(echo "$RTSP_IN" | sed -E 's|^rtsp://([^:/]+).*|\1|')
 port=$(echo "$RTSP_IN" | sed -nE 's|^rtsp://[^:/]+:([0-9]+).*|\1|p'); port=${port:-8554}
 log "Waiting for the video router at $host:$port"
 deadline=$(( $(date +%s) + ${RTSP_WAIT_SECONDS:-900} ))
-until python3 -c "import socket,sys; socket.create_connection((sys.argv[1], int(sys.argv[2])), 3).close()" \
-        "$host" "$port" 2>/dev/null; do
+until timeout 3 bash -c "exec 3<>/dev/tcp/$host/$port" 2>/dev/null; do
 	if [ "$(date +%s)" -ge "$deadline" ]; then
 		warn "No video router after ${RTSP_WAIT_SECONDS:-900} s. Starting anyway."
 		break
@@ -89,6 +98,19 @@ engine_loads() {
 	python3 /opt/perception/app/engine_check.py "$1" >/dev/null 2>&1
 }
 
+# engine_check.py deserializes the whole engine, which costs seconds on every
+# start. So each engine that passes it gets a sentinel file next to it holding
+# the engine's size, mtime and the driver version. A later start whose values
+# still match trusts the sentinel and skips the check; any mismatch falls back
+# to the full check.
+engine_fingerprint() {
+	echo "$(stat -c '%s %Y' "$1" 2>/dev/null) $(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1)"
+}
+
+mark_engine_ok() {
+	engine_fingerprint "$1" > "$1.ok"
+}
+
 # Hold until the engine on disk loads, so the second camera never joins a build
 # that is still running.
 wait_for_engine() {
@@ -96,10 +118,11 @@ wait_for_engine() {
 	local deadline=$(( $(date +%s) + ${ENGINE_WAIT_SECONDS:-900} ))
 	while [ "$(date +%s)" -lt "$deadline" ]; do
 		if engine_loads "$engine"; then
+			mark_engine_ok "$engine"
 			log "The engine is built. Starting the second camera."
 			return 0
 		fi
-		sleep 5
+		sleep 1
 	done
 	warn "No usable engine after ${ENGINE_WAIT_SECONDS:-900} s. Starting the second camera anyway."
 	return 1
@@ -128,13 +151,18 @@ fi
 ENGINE_READY=0
 if [ -z "$ENGINE" ]; then
 	warn "No model-engine-file in the config. Both cameras start together and may each build an engine."
+elif [ -f "$ENGINE" ] && [ -f "$ENGINE.ok" ] &&
+	[ "$(cat "$ENGINE.ok")" = "$(engine_fingerprint "$ENGINE")" ]; then
+	# The engine passed the load check before and has not changed since.
+	ENGINE_READY=1
 elif engine_loads "$ENGINE"; then
 	ENGINE_READY=1
+	mark_engine_ok "$ENGINE"
 elif [ -f "$ENGINE" ]; then
 	# Left by a build that raced, by another GPU, or by another TensorRT.
 	# nvinfer would overwrite it anyway; removing it keeps the state readable.
 	warn "The cached engine does not load. Removing it and building once."
-	rm -f "$ENGINE"
+	rm -f "$ENGINE" "$ENGINE.ok"
 fi
 
 pids=""
@@ -162,6 +190,8 @@ start_camera() {
 	# passed as a command prefix.
 	export DS_SENSOR_ID=$name RTSP_IN=$uri DS_RTSP_PORT=$rtsp_port
 	export DS_UDP_PORT=$udp_port DS_PAYLOAD_DIR=$payload_dir
+	if annotated_enabled "$name"; then ANNOTATED_ENABLE=1; else ANNOTATED_ENABLE=0; fi
+	export ANNOTATED_ENABLE
 
 	# deepstream-app resolves relative paths against the config file's
 	# directory, so the whole directory is copied and expanded together.
@@ -174,16 +204,21 @@ start_camera() {
 	# topic, and the sensorId in each payload says which camera it came from.
 	if [ "${PAYLOAD_FORWARDER:-1}" = "1" ]; then
 		python3 /opt/perception/app/payload_forwarder.py \
-			--dir "$payload_dir" --host "$MQTT_HOST" --port "$MQTT_PORT" \
-			--topic "$MQTT_TOPIC" --poll 0.02 &
+			--dir "$payload_dir" --name "$name" \
+			--host "$MQTT_HOST" --port "$MQTT_PORT" \
+			--topic "$MQTT_TOPIC" &
 		pids="$pids $!"
 	fi
 
 	( cd "$run_dir" && exec deepstream-app -c "$run_dir/$DS_CONFIG" ) &
 	pids="$pids $!"
 	printf '    %-8s %s\n' "$name" "$uri"
-	printf '    %-8s annotated rtsp://perception:%s/ds-test -> %s_annotated\n' \
-		"" "$rtsp_port" "$name"
+	if [ "$ANNOTATED_ENABLE" = 1 ]; then
+		printf '    %-8s annotated rtsp://perception:%s/ds-test -> %s_annotated\n' \
+			"" "$rtsp_port" "$name"
+	else
+		printf '    %-8s annotated off (ANNOTATED_STREAMS=%s)\n' "" "$ANNOTATED_STREAMS"
+	fi
 }
 
 log "Starting deepstream-app for each camera with $DS_CONFIG"
@@ -191,7 +226,7 @@ cat <<EOF
     detector    ${DS_WIDTH}x${DS_HEIGHT} for each camera, which is also the box
                 coordinate space the ROS side reads
     detections  mqtt://$MQTT_HOST:$MQTT_PORT topic $MQTT_TOPIC
-    annotated   $([ "$ANNOTATED_ENABLE" = 1 ] && echo "on" || echo "off (ANNOTATED_STREAMS=0)")
+    annotated   $ANNOTATED_STREAMS
 
     The first run builds a TensorRT engine, which takes one to three minutes.
     The first camera builds it and the second waits, so one plan is written

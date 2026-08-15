@@ -67,16 +67,21 @@ class FiducialAlignment(Node):
 
         self.origin: tuple[float, float, float] | None = None
         self.local: tuple[float, float, float] | None = None
-        self.create_subscription(PoseStamped, "/mavros/local_position/pose",
-                                 self._on_local, qos_profile_sensor_data)
-        self.create_subscription(NavSatFix, "/mavros/global_position/global",
-                                 self._on_fix, qos_profile_sensor_data)
 
         if not self.enabled:
+            # Off means nothing to compute, so take no inputs at all.
             self.get_logger().info(
                 "fiducial correction is off. Localizations stay in the vehicle's "
                 "own frame. See the module docstring to turn it on.")
-        self.create_timer(1.0, self._try_publish)
+            return
+
+        self.sub_local = self.create_subscription(
+            PoseStamped, "/mavros/local_position/pose",
+            self._on_local, qos_profile_sensor_data)
+        self.sub_fix = self.create_subscription(
+            NavSatFix, "/mavros/global_position/global",
+            self._on_fix, qos_profile_sensor_data)
+        self.timer = self.create_timer(1.0, self._try_publish)
 
     def _on_local(self, msg) -> None:
         p = msg.pose.position
@@ -120,6 +125,12 @@ class FiducialAlignment(Node):
             f"fiducial correction: east {correction[0]:+.2f} m, "
             f"north {correction[1]:+.2f} m, up {correction[2]:+.2f} m. "
             f"Positions in '{self.fiducial_frame}' carry it.")
+
+        # Done for good: the broadcaster latches the transform. Re-publishing
+        # on a parameter change would need these recreated.
+        self.timer.cancel()
+        self.destroy_subscription(self.sub_local)
+        self.destroy_subscription(self.sub_fix)
 
 
 def main() -> None:

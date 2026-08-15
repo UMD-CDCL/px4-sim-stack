@@ -69,6 +69,8 @@ Port=14552
 Mode=Server
 Address=127.0.0.1
 Port=14553
+# HEARTBEAT (msg id 0) is the one message keepalive.py reads, so send only that.
+AllowMsgIdOut=0
 EOF
 
 if [ -n "$QGC_ADDR" ]; then
@@ -98,12 +100,19 @@ echo "=== mavlink-router config ==="
 cat "$CONF"
 echo "============================="
 
-if [ "${KEEPALIVE:-1}" = "1" ]; then
+case "${KEEPALIVE:-1}" in
+0|false|no|off)
+	# The same off switches keepalive.py itself accepts.
+	;;
+*)
 	# PX4 now pushes telemetry on its own, so this is no longer needed to
 	# start the link. It keeps a ground station heartbeat present, which stops
 	# the PX4 data link loss failsafe from firing when no ground station is
-	# attached. Set KEEPALIVE=0 to test that failsafe.
+	# attached. Set KEEPALIVE=0 to test that failsafe, or KEEPALIVE=bootstrap
+	# to stop the heartbeat once vehicle traffic appears. keepalive.py reads
+	# the mode from the KEEPALIVE it inherits here.
 	python3 /usr/local/bin/keepalive.py --host 127.0.0.1 --port 14553 &
-fi
+	;;
+esac
 
 exec mavlink-routerd -c "$CONF"

@@ -242,8 +242,9 @@ uses ffplay and already passes the right ones.
 
 `offline` means nobody is publishing, and a player will get a 404 or a timeout.
 `gimbal` and `nadir` come from the simulator, so they stay offline until Gazebo
-is up and the vehicle has spawned. `gimbal_annotated` stays offline until the
-perception profile runs.
+is up and the vehicle has spawned. An annotated stream stays offline until the
+perception profile runs with that camera in `ANNOTATED_STREAMS` (default:
+`gimbal`).
 
 ### No stream at rtsp://localhost:8554/gimbal
 
@@ -283,7 +284,9 @@ perception profile runs.
 ### gimbal_annotated is empty
 
 That path proxies the DeepStream RTSP server. It appears only when
-`perception` is up and has a source.
+`perception` is up and has a source, and only when `ANNOTATED_STREAMS`
+names the camera. The default is `gimbal`, so `nadir_annotated` needs
+`ANNOTATED_STREAMS=nadir,gimbal` (or `1` for every camera).
 
 ```bash
 docker compose ps perception
@@ -346,9 +349,11 @@ republishes them as `<camera>_annotated`.
 
 This used to be one batched pipeline that split the cameras again with
 nvstreamdemux, and those demuxed sinks never served a frame. One pipeline for
-each camera replaced it. If the streams are still empty, check
-`ANNOTATED_STREAMS` is not 0, and remember the router pulls them on demand, so
-nothing connects until something asks for the stream.
+each camera replaced it. If a stream is still empty, check that
+`ANNOTATED_STREAMS` names its camera; the default is `gimbal` alone, and
+`1` enables every camera. And remember the router
+pulls them on demand, so nothing connects until something asks for the
+stream.
 
 ### Detection boxes sit off the target, in pixel coordinates
 
@@ -389,28 +394,20 @@ box, so a box in the wrong place is a target in the wrong place on the map, and
 
 ### The image panel is empty, but the topic is listed
 
-Point the panel at `/camera/<name>/image_raw/compressed` rather than at
-`/camera/<name>/image_raw`.
+Point the panel at `/camera/<name>/image_raw/compressed`. That is the only
+image topic the camera nodes publish: there is no raw topic, because a raw
+1080p stream is about 93 MB/s that the foxglove_bridge websocket cannot
+carry and nothing needs whole.
 
-A raw 1280x720 rgb8 frame is 2.76 MB. At 12 frames a second that is 33 MB/s on
-one topic, and `foxglove_bridge` holds a 10 MB send buffer. The bridge
-advertises the topic, and it subscribes to it when the panel asks, so the topic
-appears in the list and the panel offers it. The frames then never reach the
-browser. Nothing is logged, which is what makes this hard to see: the symptom is
-an empty panel next to a topic that looks healthy.
+To confirm the stream is healthy, measure it:
 
-To confirm it, compare the two encodings of the same frames:
-
-    ros2 topic bw /camera/nadir/image_raw
     ros2 topic bw /camera/nadir/image_raw/compressed
 
-The compressed topic runs about a fortieth of the raw one. Both come from one
-node with one QoS profile, so size is the only difference between the topic that
-arrives and the topic that does not.
+The topic publishes only while something subscribes to it, so the `bw`
+subscription itself is what starts it.
 
-`ros2 topic hz` understates the raw rate for the same reason. A Python
-subscriber cannot keep up with 33 MB/s either, so it drops frames and reports a
-rate below the true one. Measure the rate on the compressed topic.
+`ros2 topic hz` behaves the same way: the hz subscription itself starts the
+stream, so the first reading settles after a second or two.
 
 ### The boxes in ROS are in the wrong place
 

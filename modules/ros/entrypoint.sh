@@ -14,6 +14,8 @@ ROS_DISTRO=${ROS_DISTRO:-jazzy}
 ROS_STACK=${ROS_STACK:-baseline}
 STACK_DIR=/stacks/$ROS_STACK
 AUTOLAUNCH=${ROS_AUTOLAUNCH:-1}
+FORCE_BUILD=${ROS_FORCE_BUILD:-0}
+STAMP=/ws/install/.stamp
 
 log()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[33m    %s\033[0m\n' "$*"; }
@@ -33,16 +35,43 @@ fi
 
 # ---------------------------------------------------------------- build
 # The workspace lives on the host at ./src/ros2_ws, so build output survives a
-# container restart and your editor sees the same tree.
+# container restart and your editor sees the same tree. A restart with an
+# unchanged tree therefore needs no build at all. The stamp records which
+# stack built last, and find looks for any source newer than it. -L follows
+# the stack symlink and covers extra packages you put in /ws/src yourself.
 mkdir -p /ws/src
-ln -sfn "$STACK_DIR" "/ws/src/$ROS_STACK"
+# Re-link only when the link is wrong: ln -sfn always recreates the link,
+# which touches /ws/src and would read as a change on every boot.
+[ "$(readlink "/ws/src/$ROS_STACK" 2>/dev/null)" = "$STACK_DIR" ] \
+	|| ln -sfn "$STACK_DIR" "/ws/src/$ROS_STACK"
 
-log "Building stack '$ROS_STACK'"
+build_is_current() {
+	[ "$FORCE_BUILD" != "1" ] || return 1
+	[ -f /ws/install/setup.bash ] || return 1
+	[ -f "$STAMP" ] || return 1
+	[ "$(cat "$STAMP")" = "$ROS_STACK" ] || return 1
+	# Bytecode caches are written at run time, so they do not count.
+	[ -z "$(find -L /ws/src -name __pycache__ -prune -o -newer "$STAMP" \
+		-print -quit)" ]
+}
+
 cd /ws
-if ! colcon build --symlink-install --event-handlers console_direct+ \
-       --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo; then
-	warn "colcon build failed."
-	idle
+if build_is_current; then
+	log "Stack '$ROS_STACK' is unchanged, not building. ROS_FORCE_BUILD=1 builds anyway."
+else
+	log "Building stack '$ROS_STACK'"
+	# The stamp carries the pre-build time, so a file edited while colcon
+	# runs still reads as newer on the next boot.
+	build_started=$(mktemp)
+	if ! colcon build --symlink-install --event-handlers console_direct+ \
+	       --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo; then
+		rm -f "$build_started"
+		warn "colcon build failed."
+		idle
+	fi
+	echo "$ROS_STACK" > "$STAMP"
+	touch -r "$build_started" "$STAMP"
+	rm -f "$build_started"
 fi
 
 # shellcheck disable=SC1091

@@ -21,6 +21,7 @@ import os
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import yaml
@@ -30,10 +31,22 @@ SCENES_DIR = Path(os.environ.get("SCENES_DIR", "/scenes"))
 # Where the spawner records the poses Gazebo actually gave each entity. The
 # ROS ground truth node prefers this over the scenario file.
 RESOLVED_FILE = Path(os.environ.get("RESOLVED_TRUTH_FILE", "/tmp/ground_truth_actual.yaml"))
+# How many `gz service` calls run at the same time. The calls are independent
+# and Gazebo accepts them concurrently.
+GZ_SERVICE_WORKERS = 4
+# The longest wait for spawned entities to show up in the pose stream, and how
+# often to look. The old fixed sleep paid the full ceiling every time.
+SPAWN_SETTLE_CEILING_S = 1.5
+POSE_POLL_INTERVAL_S = 0.2
 
 
-def gz_service(service: str, reqtype: str, req: str, timeout_ms: int = 8000) -> bool:
-    """Call one Gazebo service. Return True when Gazebo answers with data: true."""
+def gz_service(service: str, reqtype: str, req: str, timeout_ms: int = 8000,
+               label: str = "") -> bool:
+    """Call one Gazebo service. Return True when Gazebo answers with data: true.
+
+    Calls run concurrently, so `label` names the entity in error lines.
+    """
+    prefix = f"[{label}] " if label else ""
     cmd = [
         "gz", "service", "-s", service,
         "--reqtype", reqtype,
@@ -44,12 +57,12 @@ def gz_service(service: str, reqtype: str, req: str, timeout_ms: int = 8000) -> 
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_ms / 1000 + 5)
     except subprocess.TimeoutExpired:
-        print(f"    timed out calling {service}", file=sys.stderr)
+        print(f"    {prefix}timed out calling {service}", file=sys.stderr)
         return False
     if "data: true" in out.stdout:
         return True
     detail = (out.stdout + out.stderr).strip().replace("\n", " ")
-    print(f"    service {service} refused: {detail[:200]}", file=sys.stderr)
+    print(f"    {prefix}service {service} refused: {detail[:200]}", file=sys.stderr)
     return False
 
 
@@ -73,12 +86,12 @@ def spawn(world: str, entity: dict) -> bool:
         "</include></sdf>"
     )
     req = f"name: \"{name}\", allow_renaming: false, sdf: '{sdf}'"
-    return gz_service(f"/world/{world}/create", "gz.msgs.EntityFactory", req)
+    return gz_service(f"/world/{world}/create", "gz.msgs.EntityFactory", req, label=name)
 
 
 def remove(world: str, name: str) -> bool:
     req = f'name: "{name}", type: MODEL'
-    return gz_service(f"/world/{world}/remove", "gz.msgs.Entity", req)
+    return gz_service(f"/world/{world}/remove", "gz.msgs.Entity", req, label=name)
 
 
 def read_world_poses(world: str) -> dict[str, tuple[float, float, float]]:
@@ -121,9 +134,25 @@ def read_world_poses(world: str) -> dict[str, tuple[float, float, float]]:
     return poses
 
 
-def write_resolved(world: str, entities: list[dict]) -> None:
+def wait_for_poses(world: str, names: list[str]) -> dict[str, tuple[float, float, float]]:
+    """Poll the world pose data until every spawned name appears.
+
+    A spawned model shows up in the pose stream a physics step later. The poll
+    returns as soon as Gazebo reports every entity, and it never waits past
+    the ceiling that the old fixed sleep paid in full every run.
+    """
+    wanted = set(names)
+    deadline = time.monotonic() + SPAWN_SETTLE_CEILING_S
+    while True:
+        poses = read_world_poses(world)
+        if wanted <= poses.keys() or time.monotonic() >= deadline:
+            return poses
+        time.sleep(POSE_POLL_INTERVAL_S)
+
+
+def write_resolved(world: str, entities: list[dict],
+                   actual: dict[str, tuple[float, float, float]]) -> None:
     """Record the actual pose of every entity we placed."""
-    actual = read_world_poses(world)
     if not actual:
         print("    could not read back poses from Gazebo; scoring will use the "
               "scenario file", file=sys.stderr)
@@ -178,7 +207,8 @@ def cmd_clear(world: str) -> int:
         print("Nothing recorded as spawned.")
         return 0
     target_world = world or state.get("world")
-    removed = sum(1 for n in names if remove(target_world, n))
+    with ThreadPoolExecutor(max_workers=GZ_SERVICE_WORKERS) as pool:
+        removed = sum(pool.map(lambda n: remove(target_world, n), names))
     print(f"Removed {removed} of {len(names)} entities from '{target_world}'.")
     save_state(target_world, [])
     return 0
@@ -193,22 +223,39 @@ def cmd_spawn(world: str, path: Path) -> int:
 
     # Replace whatever the previous scenario left behind.
     previous = load_state()
-    for name in previous.get("names", []):
-        remove(previous.get("world") or world, name)
+    previous_world = previous.get("world") or world
+    stale_names = previous.get("names", [])
+    if stale_names:
+        with ThreadPoolExecutor(max_workers=GZ_SERVICE_WORKERS) as pool:
+            list(pool.map(lambda n: remove(previous_world, n), stale_names))
 
-    placed = []
+    valid = []
     for entity in entities:
         if "name" not in entity or "uri" not in entity:
             print(f"    skipping an entry without name and uri: {entity}", file=sys.stderr)
             continue
-        if spawn(world, entity):
-            placed.append(entity["name"])
-            print(f"    placed {entity['name']:24s} {entity['uri']}")
+        valid.append(entity)
+
+    placed = []
+    with ThreadPoolExecutor(max_workers=GZ_SERVICE_WORKERS) as pool:
+        futures = {pool.submit(spawn, world, e): e for e in valid}
+        for future in as_completed(futures):
+            entity = futures[future]
+            # One bad entity must not abort the batch: the siblings still
+            # spawn, and the state file must record them.
+            try:
+                ok = future.result()
+            except Exception as exc:  # noqa: BLE001 - report and continue
+                print(f"    [{entity['name']}] spawn failed: {exc}",
+                      file=sys.stderr)
+                continue
+            if ok:
+                placed.append(entity["name"])
+                print(f"    placed {entity['name']:24s} {entity['uri']}")
 
     save_state(world, placed)
-    # Give Gazebo a moment to settle before reading poses back.
-    time.sleep(1.5)
-    write_resolved(world, [e for e in entities if e.get("name") in placed])
+    actual = wait_for_poses(world, placed)
+    write_resolved(world, [e for e in entities if e.get("name") in placed], actual)
     print(f"Scenario '{data.get('name', path.stem)}': {len(placed)} of {len(entities)} entities placed.")
     if len(placed) < len(entities):
         print("A Fuel model downloads on first use. Check the network and try again.",

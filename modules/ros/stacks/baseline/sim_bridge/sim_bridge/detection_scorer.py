@@ -30,6 +30,9 @@ Publishes, under /scoring/<camera>/
     position_error  std_msgs/Float64, meters, one per matched estimate
     recall          std_msgs/Float64, over the running window
     precision       std_msgs/Float64, over the running window
+
+The three metrics go out only while something subscribes to them. The
+windows update either way, so a late subscriber sees correct values.
 """
 
 from __future__ import annotations
@@ -177,7 +180,8 @@ class DetectionScorer(Node):
             else:
                 unclaimed.remove(best_index)
                 self.true_positives.append(1)
-                self.error_pub.publish(Float64(data=best_distance))
+                if self.error_pub.get_subscription_count() > 0:
+                    self.error_pub.publish(Float64(data=best_distance))
                 verdicts.detections.append(
                     self._verdict("TP", track_id, x, y, z,
                                   score=best_distance,
@@ -239,12 +243,14 @@ class DetectionScorer(Node):
         return out
 
     def _publish_metrics(self) -> None:
+        # The windows are cumulative state, so a Plot panel that subscribes
+        # late still reads correct values from its first message.
         tp = len(self.true_positives)
         fp = len(self.false_positives)
         fn = len(self.false_negatives)
-        if tp + fn:
+        if (tp + fn) and self.recall_pub.get_subscription_count() > 0:
             self.recall_pub.publish(Float64(data=tp / (tp + fn)))
-        if tp + fp:
+        if (tp + fp) and self.precision_pub.get_subscription_count() > 0:
             self.precision_pub.publish(Float64(data=tp / (tp + fp)))
 
 

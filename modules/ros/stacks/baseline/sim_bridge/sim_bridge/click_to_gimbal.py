@@ -10,6 +10,14 @@ because it is one parameter the modes cannot overlap:
             the horizon, and yaw follows the vehicle heading.
     off     ignore clicks.
 
+Foxglove can flood the click topic with cursor events, and each
+processed click runs a TF lookup that can block for TF_TIMEOUT_S. A
+trailing-edge guard therefore processes at most one click each
+CLICK_MIN_INTERVAL_S: a click inside the interval waits as the pending
+click, newest wins, and a one-shot timer lands it when the interval
+ends. No final click is dropped, and a same-pixel re-click lands like
+any other, because it is the user's recovery action.
+
 Both click behaviors are the gimbal protocol's stabilized ones. An ROI
 holds every axis on the point. A point click uses the protocol's
 default lock flags: roll and pitch locked to the horizon, yaw
@@ -116,7 +124,8 @@ Subscribes
     /mavros/local_position/pose             the vehicle attitude
     /mavros/global_position/rel_alt         the ground plane height
     /mavros/global_position/global          the ROI altitude datum
-    /mavros/altitude                        AMSL for DO_SET_ROI_LOCATION
+    /mavros/altitude                        AMSL for DO_SET_ROI_LOCATION,
+                                            mavlink convention only
 
 Publishes
     /mavros/gimbal_control/manager/set_attitude
@@ -132,6 +141,7 @@ Serves
 from __future__ import annotations
 
 import math
+import time
 
 import rclpy
 from geometry_msgs.msg import PointStamped, PoseStamped
@@ -166,6 +176,11 @@ CLAIM_RETRY_S = 5.0
 CLAIM_RECOVER_S = 10.0
 # How long a click waits for the transform before it is dropped.
 TF_TIMEOUT_S = 0.2
+# The shortest interval between processed clicks, against a Foxglove
+# cursor-event flood. A click inside the interval waits as the pending
+# click, newest wins, and a one-shot timer lands it when the interval
+# ends, so no final click is ever dropped.
+CLICK_MIN_INTERVAL_S = 0.15
 
 CLICK_MODES = ("roi", "point", "off")
 
@@ -249,28 +264,11 @@ class ClickToGimbal(Node):
         self.in_control: bool | None = None
         self.claim_acked = False
         self.claim_inflight = False
-
-        # Sensor QoS on the mavros topics: they are best effort, and a
-        # reliable subscription to a best effort publisher receives nothing.
-        self.create_subscription(CameraInfo,
-                                 self.get_parameter("camera_info_topic").value,
-                                 self._on_info, qos_profile_sensor_data)
-        self.create_subscription(GimbalManagerStatus,
-                                 "/mavros/gimbal_control/manager/status",
-                                 self._on_status, qos_profile_sensor_data)
-        self.create_subscription(PoseStamped, "/mavros/local_position/pose",
-                                 self._on_pose, qos_profile_sensor_data)
-        if self.get_parameter("use_rel_alt").value:
-            self.create_subscription(Float64, "/mavros/global_position/rel_alt",
-                                     self._on_rel_alt, qos_profile_sensor_data)
-        self.create_subscription(NavSatFix, "/mavros/global_position/global",
-                                 self._on_fix, qos_profile_sensor_data)
-        self.create_subscription(Altitude, "/mavros/altitude",
-                                 self._on_altitude, qos_profile_sensor_data)
-        # Foxglove publishes clicks reliable, the default.
-        self.create_subscription(PointStamped,
-                                 self.get_parameter("click_topic").value,
-                                 self._on_click, 10)
+        # Trailing-edge flood guard state: the newest held-back click and
+        # the one-shot timer that lands it.
+        self.pending_click: PointStamped | None = None
+        self.pending_click_timer = None
+        self.last_click_at = -CLICK_MIN_INTERVAL_S
 
         self.setpoint_pub = self.create_publisher(
             GimbalManagerSetAttitude,
@@ -282,12 +280,17 @@ class ClickToGimbal(Node):
         self.roi_point_pub = self.create_publisher(PointStamped,
                                                    "/gimbal/roi_local", LATCHED)
         self.claim_client = self.create_client(CommandLong, "/mavros/cmd/command")
-        self.roi_client = self.create_client(CommandInt,
-                                             "/mavros/cmd/command_int")
+        # CommandInt carries only the ROI location commands, which exist
+        # only on the mavlink convention.
+        self.roi_client = (self.create_client(CommandInt,
+                                              "/mavros/cmd/command_int")
+                           if self.earth_referenced else None)
         self.claim_sent_at = 0.0
         self.claim_future = None
 
-        self.origin = MapOrigin(self)
+        # This node already subscribes to the pose and fix topics, so it
+        # feeds the origin instead of letting it subscribe again.
+        self.origin = MapOrigin(self, external_updates=True)
         # The whole stabilization emulation for the simulated gimbal lives
         # in roi_tracker.py. An honest gimbal stabilizes flagged commands
         # itself and needs none of it.
@@ -307,6 +310,35 @@ class ClickToGimbal(Node):
             Trigger, "/gimbal/center",
             lambda request, response: self._on_center_service(response))
 
+        # Subscriptions come last. The TF listener's spin thread can run
+        # this node's callbacks as soon as a subscription exists, so
+        # everything a callback touches must already be built.
+        # Sensor QoS on the mavros topics: they are best effort, and a
+        # reliable subscription to a best effort publisher receives nothing.
+        self.create_subscription(CameraInfo,
+                                 self.get_parameter("camera_info_topic").value,
+                                 self._on_info, qos_profile_sensor_data)
+        self.create_subscription(GimbalManagerStatus,
+                                 "/mavros/gimbal_control/manager/status",
+                                 self._on_status, qos_profile_sensor_data)
+        self.create_subscription(PoseStamped, "/mavros/local_position/pose",
+                                 self._on_pose, qos_profile_sensor_data)
+        if self.get_parameter("use_rel_alt").value:
+            self.create_subscription(Float64, "/mavros/global_position/rel_alt",
+                                     self._on_rel_alt, qos_profile_sensor_data)
+        self.create_subscription(NavSatFix, "/mavros/global_position/global",
+                                 self._on_fix, qos_profile_sensor_data)
+        if self.earth_referenced:
+            # AMSL serves only DO_SET_ROI_LOCATION, a mavlink-convention
+            # path.
+            self.create_subscription(Altitude, "/mavros/altitude",
+                                     self._on_altitude,
+                                     qos_profile_sensor_data)
+        # Foxglove publishes clicks reliable, the default.
+        self.create_subscription(PointStamped,
+                                 self.get_parameter("click_topic").value,
+                                 self._on_click, 10)
+
         self.create_timer(CLAIM_RETRY_S, self._claim_tick)
         # The timer first fires a full period from now. Against an already
         # running mavros the service is ready at once, so try now and close
@@ -318,8 +350,13 @@ class ClickToGimbal(Node):
         self.info = msg
 
     def _on_pose(self, msg: PoseStamped) -> None:
+        # The one pose subscription in this process: the tracker and the
+        # origin both feed from it.
         q = msg.pose.orientation
         self.vehicle_q = (q.x, q.y, q.z, q.w)
+        if self.roi_tracker is not None:
+            self.roi_tracker.on_vehicle(msg)
+        self.origin.on_local(msg)
 
     def _on_rel_alt(self, msg: Float64) -> None:
         self.rel_alt = float(msg.data)
@@ -327,6 +364,7 @@ class ClickToGimbal(Node):
     def _on_fix(self, msg: NavSatFix) -> None:
         if msg.status.status >= 0:
             self.fix_altitude = msg.altitude
+        self.origin.on_fix(msg)
 
     def _on_altitude(self, msg: Altitude) -> None:
         self.amsl = msg.amsl
@@ -474,6 +512,41 @@ class ClickToGimbal(Node):
 
     # ------------------------------------------------------------------- click
     def _on_click(self, msg: PointStamped) -> None:
+        """The trailing-edge flood guard. _process_click does the work."""
+        now = time.monotonic()
+        if now - self.last_click_at >= CLICK_MIN_INTERVAL_S:
+            # This click supersedes any held one: disarm the timer so a
+            # stale older click can never land after a newer one.
+            self.pending_click = None
+            if self.pending_click_timer is not None \
+                    and not self.pending_click_timer.is_canceled():
+                self.pending_click_timer.cancel()
+            self.last_click_at = now
+            self._process_click(msg)
+            return
+        # Inside the interval: hold the click, newest wins, and let the
+        # timer land it. A genuine rapid re-click arrives at most one
+        # interval late, never dropped.
+        self.pending_click = msg
+        if self.pending_click_timer is not None:
+            if not self.pending_click_timer.is_canceled():
+                return    # already armed; the newest click rides it
+            # A spent timer from an earlier burst. This subscription
+            # callback is a safe place to destroy it; its own was not.
+            self.destroy_timer(self.pending_click_timer)
+        remaining = CLICK_MIN_INTERVAL_S - (now - self.last_click_at)
+        self.pending_click_timer = self.create_timer(
+            remaining, self._on_pending_click)
+
+    def _on_pending_click(self) -> None:
+        self.pending_click_timer.cancel()
+        msg, self.pending_click = self.pending_click, None
+        if msg is None:
+            return    # a newer click already consumed the pending state
+        self.last_click_at = time.monotonic()
+        self._process_click(msg)
+
+    def _process_click(self, msg: PointStamped) -> None:
         if not intrinsics_ready(self.info):
             self.get_logger().warn("click ignored: no camera intrinsics yet")
             return
@@ -484,7 +557,8 @@ class ClickToGimbal(Node):
                 f"{self.info.width}x{self.info.height} image")
             return
         if self.mode == "off":
-            self.get_logger().info("click ignored: click_mode is off")
+            self.get_logger().info("click ignored: click_mode is off",
+                                   throttle_duration_sec=5.0)
             return
 
         camera = self._camera_pose()

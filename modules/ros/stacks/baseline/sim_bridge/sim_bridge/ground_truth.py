@@ -17,6 +17,11 @@ A billboard label names each target. The Map panel gets the same gate
 circle and colors from one GeoJSON message that carries every target.
 The tooltip on a target shows its name and altitude.
 
+Markers and truth_3d go out on every timer tick. Ticks are cheap: the
+messages are built once, and a tick only restamps them and recolors the
+bubbles. The GeoJSON topic is latched, so it goes out only when a status
+or the origin changes, and the Map panel still sees the current state.
+
 Scenario poses are Gazebo world coordinates, x east and y north in meters.
 PX4's local frame starts where the vehicle spawned, so the two line up.
 origin_offset_xyz shifts them when they do not.
@@ -28,7 +33,7 @@ Publishes
     /ground_truth/geojson      foxglove_msgs/GeoJSON, every target in one
                                message, for the Map panel. Each target is a
                                gate circle plus a pin. The tooltip shows the
-                               name and the altitude.
+                               name and the altitude. Sent only on a change.
 """
 
 from __future__ import annotations
@@ -42,6 +47,7 @@ import rclpy
 import yaml
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile
+from std_msgs.msg import ColorRGBA
 from vision_msgs.msg import (
     BoundingBox3D,
     Detection3D,
@@ -72,9 +78,19 @@ VERDICT_TIMEOUT_S = 3.0
 # Vertices of the gate circle on the Map panel. GeoJSON has no circle
 # primitive, so the circle is a polygon.
 GATE_CIRCLE_SEGMENTS = 24
+GATE_CIRCLE_ANGLES = [2.0 * math.pi * k / GATE_CIRCLE_SEGMENTS
+                      for k in range(GATE_CIRCLE_SEGMENTS)]
+# The fix-fallback origin re-estimates on every fix, so its last decimals
+# jitter constantly. Only a move the Map panel could show counts as a
+# change. One millionth of a degree is about 0.1 m.
+ORIGIN_CHANGE_DEG = 1e-6
 
 LATCHED = QoSProfile(durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
                      history=QoSHistoryPolicy.KEEP_LAST, depth=1)
+
+# One ColorRGBA per status, shared by every bubble that has that status.
+BUBBLE_COLOR = {status: ColorRGBA(r=rgba[0], g=rgba[1], b=rgba[2], a=rgba[3])
+                for status, rgba in GROUND_TRUTH_COLOR.items()}
 
 
 class GroundTruth(Node):
@@ -91,7 +107,7 @@ class GroundTruth(Node):
             "RESOLVED_TRUTH_FILE", "/scenes/ground_truth_actual.yaml"))
         self.declare_parameter("reference_frame", "map")
         self.declare_parameter("origin_offset_xyz", [0.0, 0.0, 0.0])
-        self.declare_parameter("rate_hz", 2.0)
+        self.declare_parameter("rate_hz", 10.0)
         self.declare_parameter("cameras", ["nadir", "gimbal"])
 
         self.reference = self.get_parameter("reference_frame").value
@@ -127,6 +143,14 @@ class GroundTruth(Node):
                 "foxglove_msgs is missing, so the Map panel gets no ground "
                 "truth. Install ros-$ROS_DISTRO-foxglove-msgs.")
         self.origin = MapOrigin(self)
+
+        # Positions, labels and sizes never change, so the tick messages are
+        # built once here. A tick only restamps and recolors them.
+        self.marker_msg, self.bubbles = self._build_markers()
+        self.truth_msg = self._build_truth()
+        self.last_geojson_statuses: dict[str, str] | None = None
+        self.last_geojson_origin: tuple[float, float] | None = None
+        self.target_shapes: list[tuple[list, float, float]] = []
 
         rate = float(self.get_parameter("rate_hz").value)
         self.create_timer(1.0 / max(rate, 0.1), self._publish)
@@ -188,35 +212,46 @@ class GroundTruth(Node):
         self.visible_by[cam] = visible
         self.verdict_stamp[cam] = self.get_clock().now().nanoseconds / 1e9
 
-    def _status(self, name: str) -> str:
+    def _statuses(self) -> dict[str, str]:
+        """The scene status of every target, from one clock read."""
         now = self.get_clock().now().nanoseconds / 1e9
-        fresh = [cam for cam, stamp in self.verdict_stamp.items()
-                 if (now - stamp) <= VERDICT_TIMEOUT_S]
-        if any(name in self.detected_by[cam] for cam in fresh):
-            return "detected"
-        if any(name in self.visible_by[cam] for cam in fresh):
-            return "visible"
-        return "out_of_view"
+        detected: set[str] = set()
+        visible: set[str] = set()
+        for cam, stamp in self.verdict_stamp.items():
+            if (now - stamp) <= VERDICT_TIMEOUT_S:
+                detected |= self.detected_by[cam]
+                visible |= self.visible_by[cam]
+        out = {}
+        for target in self.targets:
+            name = target["name"]
+            if name in detected:
+                out[name] = "detected"
+            elif name in visible:
+                out[name] = "visible"
+            else:
+                out[name] = "out_of_view"
+        return out
 
     # ---------------------------------------------------------------- output
-    def _publish(self) -> None:
-        now = self.get_clock().now().to_msg()
+    def _build_markers(self) -> tuple[MarkerArray, list]:
+        """Build the marker set once. The second return pairs each bubble
+        with its target name, for recoloring."""
         markers = MarkerArray()
-        truth = Detection3DArray()
-        truth.header.stamp = now
-        truth.header.frame_id = self.reference
-
+        bubbles = []
+        stamp = self.get_clock().now().to_msg()
         for i, target in enumerate(self.targets):
             # The bubble's equator sits at ground level, so a detection dot
             # inside the visible half is within the gate by construction.
-            markers.markers.append(marker(
+            bubble = marker(
                 ns="ground_truth",
                 marker_id=i,
                 frame_id=self.reference,
-                stamp=now,
+                stamp=stamp,
                 position=(target["x"], target["y"], target["z"]),
                 size_m=2.0 * GROUND_TRUTH_BUBBLE_RADIUS,
-                rgba=GROUND_TRUTH_COLOR[self._status(target["name"])]))
+                rgba=GROUND_TRUTH_COLOR["out_of_view"])
+            markers.markers.append(bubble)
+            bubbles.append((bubble, target["name"]))
             # A marker cannot follow the camera, so the label sits on top
             # of the bubble. From the usual overhead view, that is centered
             # on the target and one gate radius toward the camera.
@@ -224,13 +259,20 @@ class GroundTruth(Node):
                 ns="ground_truth_labels",
                 marker_id=i,
                 frame_id=self.reference,
-                stamp=now,
+                stamp=stamp,
                 position=(target["x"], target["y"],
                           target["z"] + GROUND_TRUTH_BUBBLE_RADIUS),
                 size_m=GROUND_TRUTH_LABEL_HEIGHT,
                 rgba=GROUND_TRUTH_LABEL_COLOR,
                 text=target["name"]))
+        return markers, bubbles
 
+    def _build_truth(self) -> Detection3DArray:
+        """Build truth_3d once. Every detection shares the array header, so
+        one restamp per tick covers the whole message."""
+        truth = Detection3DArray()
+        truth.header.frame_id = self.reference
+        for target in self.targets:
             d = Detection3D()
             d.header = truth.header
             d.id = target["name"]
@@ -246,28 +288,55 @@ class GroundTruth(Node):
             d.bbox.center = hypothesis.pose.pose
             d.bbox.size.x = d.bbox.size.y = d.bbox.size.z = 2.0 * GROUND_TRUTH_BUBBLE_RADIUS
             truth.detections.append(d)
+        return truth
 
-        self.marker_pub.publish(markers)
-        self.truth_pub.publish(truth)
-        self._publish_geojson()
+    def _publish(self) -> None:
+        now = self.get_clock().now().to_msg()
+        statuses = self._statuses()
+        for m in self.marker_msg.markers:
+            m.header.stamp = now
+        for bubble, name in self.bubbles:
+            bubble.color = BUBBLE_COLOR[statuses[name]]
+        self.truth_msg.header.stamp = now
+        self.marker_pub.publish(self.marker_msg)
+        self.truth_pub.publish(self.truth_msg)
+        self._publish_geojson(statuses)
 
-    def _publish_geojson(self) -> None:
+    def _origin_moved(self, origin: tuple[float, float]) -> bool:
+        last = self.last_geojson_origin
+        return (last is None
+                or abs(origin[0] - last[0]) > ORIGIN_CHANGE_DEG
+                or abs(origin[1] - last[1]) > ORIGIN_CHANGE_DEG)
+
+    def _target_shape(self, target: dict) -> tuple[list, float, float]:
+        """The gate circle ring and the pin position of one target. Both
+        depend only on the target position and the origin."""
+        ring = self.origin.geojson_ring(
+            [(target["x"] + GROUND_TRUTH_BUBBLE_RADIUS * math.cos(a),
+              target["y"] + GROUND_TRUTH_BUBBLE_RADIUS * math.sin(a))
+             for a in GATE_CIRCLE_ANGLES])
+        lat, lon = self.origin.to_lla(target["x"], target["y"])
+        return ring, lat, lon
+
+    def _publish_geojson(self, statuses: dict[str, str]) -> None:
         """Publish every target in one GeoJSON message for the Map panel.
         Each target becomes a gate circle in its status color, plus a pin.
-        The tooltip on both shows the name and the altitude."""
+        The tooltip on both shows the name and the altitude.
+
+        The topic is latched, so the message goes out only when a status or
+        the origin changed since the last publish."""
         if self.geojson_pub is None or not self.origin.ready:
             return
+        origin = (self.origin.lat, self.origin.lon)
+        moved = self._origin_moved(origin)
+        if statuses == self.last_geojson_statuses and not moved:
+            return
+        if moved:
+            self.target_shapes = [self._target_shape(t) for t in self.targets]
         features = []
-        for target in self.targets:
-            status = self._status(target["name"])
+        for target, (ring, lat, lon) in zip(self.targets, self.target_shapes):
+            status = statuses[target["name"]]
             rgba = GROUND_TRUTH_COLOR[status]
-            angles = [2.0 * math.pi * k / GATE_CIRCLE_SEGMENTS
-                      for k in range(GATE_CIRCLE_SEGMENTS)]
-            ring = self.origin.geojson_ring(
-                [(target["x"] + GROUND_TRUTH_BUBBLE_RADIUS * math.cos(a),
-                  target["y"] + GROUND_TRUTH_BUBBLE_RADIUS * math.sin(a))
-                 for a in angles])
-            lat, lon = self.origin.to_lla(target["x"], target["y"])
             # The Map panel shows `name` and `metadata` in the hover tooltip,
             # and reads Leaflet path options from `style`. The fill alpha
             # matches the 3D bubble.
@@ -292,6 +361,11 @@ class GroundTruth(Node):
         msg.geojson = json.dumps(
             {"type": "FeatureCollection", "features": features})
         self.geojson_pub.publish(msg)
+        self.last_geojson_statuses = statuses
+        # Anchor the origin only when it moved, so a slow drift cannot ratchet
+        # under the threshold forever.
+        if moved:
+            self.last_geojson_origin = origin
 
 
 def main() -> None:

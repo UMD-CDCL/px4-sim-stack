@@ -19,8 +19,34 @@
 
 /**:
   ros__parameters:
+    # Deny every plugin, then allow the ones this stack reads. The full set is
+    # about forty plugins, and the traffic nobody reads held most of a core.
+    plugin_denylist:
+      - '*'
+    # Why each entry stays:
+    #   sys_status, sys_time  link health and time sync
+    #   command               gimbal claim and roi commands
+    #   param                 parameter bridge
+    #   imu                   attitude source for the local_position pose
+    #   local_position        pose and the map -> base_link transform
+    #   global_position       fix, rel_alt, gp_origin for the Map panel and
+    #                         the ground plane
+    #   altitude              AMSL for roi location commands
+    #   distance_sensor       the rangefinder this file exists for
+    #   gimbal_control        the gimbal manager topics
+    #   sim_state             the sim ground-truth track on the Map panel
     plugin_allowlist:
+      - sys_status
+      - sys_time
+      - command
+      - param
+      - imu
+      - local_position
+      - global_position
+      - altitude
       - distance_sensor
+      - gimbal_control
+      - sim_state
 
 # Without this there is no map -> base_link transform, and every projection and
 # localization fails with "no transform at the frame time". MAVROS ships it off.

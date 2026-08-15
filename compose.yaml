@@ -255,6 +255,8 @@ services:
       # at full load and delivered nothing.
       GROUND_IMAGE_SIZE: ${GROUND_IMAGE_SIZE:-640x360}
       GROUND_IMAGE_RATE: ${GROUND_IMAGE_RATE:-1.0}
+      # The rtsp_camera H.264 decoder element. nvh264dec is the NVDEC option.
+      RTSP_DECODER: ${RTSP_DECODER:-avdec_h264}
       # foxglove_bridge send buffer, bytes. The default 10 MB is smaller than
       # one ground projection cloud, and over the limit the bridge drops the
       # channel without logging anything.
@@ -286,6 +288,8 @@ services:
       GIMBAL_OFFSET_PITCH: ${GIMBAL_OFFSET_PITCH:-0.0}
       GIMBAL_OFFSET_YAW: ${GIMBAL_OFFSET_YAW:-0.0}
       GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO:-urban_casualties}.yaml
+      # Ground truth marker rate, hertz. 10 keeps the projected markers smooth.
+      GROUND_TRUTH_RATE: ${GROUND_TRUTH_RATE:-10}
       RESOLVED_TRUTH_FILE: /scenes/ground_truth_actual.yaml
       # Which camera feeds detection and localization. The nadir camera
       # looks straight down, which is what an overhead search wants, and
@@ -348,11 +352,13 @@ services:
       # and the payload's sensorId says which one a detection came from.
       RTSP_IN_2: rtsp://video-router:8554/${PERCEPTION_CAMERA_2:-gimbal}
       PERCEPTION_CAMERA_2: ${PERCEPTION_CAMERA_2:-gimbal}
-      # Burn the boxes into an RTSP stream for each camera, served as
-      # <camera>_annotated by the video router. Set 0 to save two H.264 encodes
-      # on a busy GPU: the detections still reach ROS, and Foxglove still draws
-      # the boxes over the plain streams.
-      ANNOTATED_STREAMS: ${ANNOTATED_STREAMS:-1}
+      # Which cameras get a boxes-burned-in RTSP stream, served as
+      # <camera>_annotated by the video router. A comma separated list of
+      # camera names; 1 or all turns every camera on, 0 turns every camera
+      # off. Default is the gimbal alone: QGC displays gimbal_annotated, and
+      # Foxglove draws its own boxes over the plain streams. Each enabled
+      # camera costs one H.264 encode on the GPU.
+      ANNOTATED_STREAMS: ${ANNOTATED_STREAMS:-gimbal}
       # The resolution each pipeline works in. Keep it equal to the camera
       # resolution: nvstreammux then neither scales down, which would throw
       # away detail before the detector sees it, nor up, which would cost
@@ -363,6 +369,9 @@ services:
       MQTT_HOST: message-bus
       MQTT_PORT: "1883"
       MQTT_TOPIC: perception/detections
+      # The CUDA JIT cache lands in the persisted perception-cache volume.
+      CUDA_CACHE_PATH: /root/.cache/nv-compute
+      CUDA_CACHE_MAXSIZE: "1073741824"
     volumes:
       - ./modules/perception/configs:/opt/perception/configs
       - ./modules/perception/app:/opt/perception/app

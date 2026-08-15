@@ -31,10 +31,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-${ROS_DISTRO}-geographic-msgs \
       ros-${ROS_DISTRO}-rviz2 \
       ros-${ROS_DISTRO}-rqt-image-view \
-      ros-${ROS_DISTRO}-image-transport \
-      ros-${ROS_DISTRO}-image-transport-plugins \
-      ros-${ROS_DISTRO}-camera-info-manager \
-      ros-${ROS_DISTRO}-gscam \
       python3-colcon-common-extensions \
       python3-gi python3-gi-cairo gir1.2-glib-2.0 \
       gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 \

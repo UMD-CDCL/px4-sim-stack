@@ -116,9 +116,14 @@ clean, so `git status` there shows only your own work.
 
 | Name | Source | Resolution | Rate | Bitrate |
 |---|---|---|---|---|
-| `gimbal` | 3-axis gimbal camera | 1280x720 | 30 | 4 Mbit/s |
-| `nadir` | Fixed downward camera | 1280x720 | 15 | 2.5 Mbit/s |
-| `<camera>_annotated` | DeepStream, with boxes | 1280x720 | 30 | 4 Mbit/s |
+| `gimbal` | 3-axis gimbal camera | 1920x1080 | 15 | 2.5 Mbit/s |
+| `nadir` | Fixed downward camera | 1920x1080 | 15 | 2.5 Mbit/s |
+| `<camera>_annotated` | DeepStream, with boxes | 1920x1080 | 15 | 4 Mbit/s |
+
+The router serves an annotated stream only while the `perception` profile
+runs with that camera in `ANNOTATED_STREAMS`, a comma separated list of
+camera names. The default is `gimbal`, the stream QGC displays. `1` enables
+every camera, `0` disables all of them.
 
 ### Reading
 
@@ -261,10 +266,8 @@ The baseline stack publishes:
 | `/mavros/local_position/pose` | `geometry_msgs/PoseStamped` |
 | `/mavros/global_position/rel_alt` | `std_msgs/Float64` |
 | `/mavros/rangefinder_pub` | `sensor_msgs/Range` |
-| `/camera/gimbal/image_raw` | `sensor_msgs/Image`, rgb8 |
 | `/camera/gimbal/image_raw/compressed` | `sensor_msgs/CompressedImage`, jpeg |
 | `/camera/gimbal/camera_info` | `sensor_msgs/CameraInfo` |
-| `/camera/nadir/image_raw` | `sensor_msgs/Image`, rgb8 |
 | `/camera/nadir/image_raw/compressed` | `sensor_msgs/CompressedImage`, jpeg |
 | `/camera/nadir/camera_info` | `sensor_msgs/CameraInfo` |
 | `/perception/<camera>/detections` | `vision_msgs/Detection2DArray` |
@@ -282,19 +285,19 @@ and the hold survives vehicle motion. `point` turns the camera onto the
 pixel, holds pitch and roll against the horizon, and lets yaw follow the
 vehicle heading, the gimbal protocol's default lock flags. `off` ignores
 clicks, and a standing hold continues until a new click or the
-`/gimbal/center` service. The mode switches at runtime from the Foxglove
-Parameters panel or the `/gimbal/click_mode/*` services, and the layout's
-indicator shows the current mode from `/gimbal/click_mode`. An honest
+`/gimbal/center` service. The mode switches at runtime from the layout's
+mode buttons, the Foxglove Parameters panel, or the `/gimbal/click_mode/*`
+services, and the current mode is published latched on `/gimbal/click_mode`. An honest
 MAVLink gimbal stabilizes both behaviors because the flags say so, and
 `sim_bridge/roi_tracker.py` emulates them for the simulated gimbal, which
 ignores the flags. The `gimbal_convention` parameter picks between them,
 and `sim_bridge/click_to_gimbal.py` documents both.
 
-Each camera publishes the same frame twice. Use the raw topic inside the ROS
-container, where a large message costs shared memory. Use the compressed topic
-in Foxglove, because the raw one is too large to cross the websocket. The two
-carry the same header stamp, so they refer to one capture, and the Foxglove
-layout points its image panels at the compressed topics.
+Each camera publishes one encoding: JPEG, at the full stream rate,
+published only while something subscribes to it. The Foxglove layout points
+its image panels at it, and every in-container consumer that wants pixels,
+the ground projector included, decodes it at its own rate. There is no raw
+image topic: a raw 1080p stream is about 93 MB/s that nothing needs whole.
 
 The rangefinder topic is `/mavros/rangefinder_pub`, not
 `/mavros/distance_sensor/rangefinder_pub`. MAVROS names the topic after the

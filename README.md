@@ -150,8 +150,9 @@ exercised end to end:
 - Restarting `mavlink-hub` alone recovers telemetry with no simulator restart.
 - MAVROS reports `connected: true`. The rangefinder arrives on
   `/mavros/rangefinder_pub` at 9.8 Hz, reading 0.15 m on the ground.
-- Both cameras arrive in ROS at `/camera/gimbal/image_raw` and
-  `/camera/nadir/image_raw`, about 24 Hz.
+- Both cameras arrive in ROS at `/camera/gimbal/image_raw/compressed` and
+  `/camera/nadir/image_raw/compressed`, at the stream rate, published while
+  something subscribes.
 - The scenario places all six targets from Gazebo Fuel.
 - The vehicle arms, takes off, repositions over a target and lands, all over
   MAVLink.

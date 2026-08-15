@@ -86,8 +86,8 @@ Browse the library at <https://app.gazebosim.org/fuel/models>.
 
 | Payload | Detail | Where it goes |
 |---|---|---|
-| Gimbal camera | 1280x720, 30 fps, 3-axis mount | `rtsp://video-router:8554/gimbal` |
-| Nadir camera | 1280x720, 15 fps, fixed, points down | `rtsp://video-router:8554/nadir` |
+| Gimbal camera | 1920x1080, 15 fps, 3-axis mount | `rtsp://video-router:8554/gimbal` |
+| Nadir camera | 1920x1080, 15 fps, fixed, points down | `rtsp://video-router:8554/nadir` |
 | Rangefinder | LW20 laser, 100 m, points down | MAVLink `DISTANCE_SENSOR` |
 
 The upstream PX4 vehicles are available too: `x500`, `x500_gimbal`,

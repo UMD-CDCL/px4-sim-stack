@@ -37,19 +37,30 @@ class MapOrigin:
     Attach one to a node, then call `to_lla` to convert. `ready` is False
     until the vehicle has a fix, and every caller must handle that: the
     drone publishes a local position long before it publishes a usable one.
+
+    By default the origin subscribes to the pose and fix topics itself. An
+    owner that already subscribes to them passes external_updates=True and
+    forwards the messages to on_local and on_fix, so the process holds one
+    subscription per topic. Once gp_origin has spoken, on_local and on_fix
+    decide nothing, and the default-mode subscriptions are destroyed.
     """
 
-    def __init__(self, node) -> None:
+    def __init__(self, node, *, external_updates: bool = False) -> None:
         self.node = node
         self.lat: float | None = None
         self.lon: float | None = None
         self.from_fix = False
         self._local: tuple[float, float] | None = None
+        self._local_sub = self._fix_sub = None
+        self._drop_timer = None
 
-        node.create_subscription(PoseStamped, "/mavros/local_position/pose",
-                                 self._on_local, qos_profile_sensor_data)
-        node.create_subscription(NavSatFix, "/mavros/global_position/global",
-                                 self._on_fix, qos_profile_sensor_data)
+        if not external_updates:
+            self._local_sub = node.create_subscription(
+                PoseStamped, "/mavros/local_position/pose",
+                self.on_local, qos_profile_sensor_data)
+            self._fix_sub = node.create_subscription(
+                NavSatFix, "/mavros/global_position/global",
+                self.on_fix, qos_profile_sensor_data)
         if HAVE_GEO:
             node.create_subscription(GeoPointStamped,
                                      "/mavros/global_position/gp_origin",
@@ -65,11 +76,27 @@ class MapOrigin:
             self.lat = msg.position.latitude
             self.lon = msg.position.longitude
             self.from_fix = False
+            self._drop_feed_subscriptions()
 
-    def _on_local(self, msg) -> None:
+    def _drop_feed_subscriptions(self) -> None:
+        """Once gp_origin has spoken, on_local and on_fix decide nothing,
+        so their subscriptions go. A one-shot timer does the destroying:
+        a timer callback is the safe place to destroy entities, a
+        subscription callback is not. No-op with external_updates."""
+        if self._local_sub is None or self._drop_timer is not None:
+            return
+        self._drop_timer = self.node.create_timer(0.0, self._on_drop_timer)
+
+    def _on_drop_timer(self) -> None:
+        self.node.destroy_subscription(self._local_sub)
+        self.node.destroy_subscription(self._fix_sub)
+        self._local_sub = self._fix_sub = None
+        self._drop_timer.cancel()
+
+    def on_local(self, msg) -> None:
         self._local = (msg.pose.position.x, msg.pose.position.y)
 
-    def _on_fix(self, msg) -> None:
+    def on_fix(self, msg) -> None:
         # Stop once gp_origin has spoken: it is the real origin, not a guess.
         if self.lat is not None and not self.from_fix:
             return

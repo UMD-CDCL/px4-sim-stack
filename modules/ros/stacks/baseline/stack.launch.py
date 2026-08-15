@@ -73,6 +73,10 @@ CAMERAS = [PERCEPTION_CAMERA, PERCEPTION_CAMERA_2]
 # stamping, because it is the largest known part of the capture delay.
 RTSP_LATENCY_MS = 100
 
+# The GStreamer element that decodes each H.264 stream. nvh264dec moves the
+# decode to NVDEC.
+RTSP_DECODER = os.environ.get("RTSP_DECODER", "avdec_h264")
+
 # An estimate counts as finding a target only within this many meters. Two
 # meters means "a position good enough to send someone to". A wider gate
 # scores geometry that is not actually useful as a success.
@@ -83,6 +87,15 @@ SCORING_GATE_M = float(os.environ.get("SCORING_GATE_M", "2.0"))
 # 230,400 points and 3.7 MB per message.
 GROUND_IMAGE_SIZE = os.environ.get("GROUND_IMAGE_SIZE", "640x360")
 GROUND_IMAGE_RATE_HZ = float(os.environ.get("GROUND_IMAGE_RATE", "1.0"))
+
+# How often ground truth publishes, in hertz. The markers project into the
+# image panels, and 10 Hz keeps them smooth there. Do not lower it.
+GROUND_TRUTH_RATE_HZ = float(os.environ.get("GROUND_TRUTH_RATE", "10.0"))
+
+# Every sim_bridge node comes back this many seconds after a crash. Without
+# respawn a dead per-camera node vanishes silently and takes its half of the
+# layout with it.
+RESPAWN_DELAY_S = 2.0
 
 REFERENCE_FRAME = "map"
 
@@ -143,6 +156,8 @@ def generate_launch_description() -> LaunchDescription:
             executable="scene_tf",
             name="scene_tf",
             output="screen",
+            respawn=True,
+            respawn_delay=RESPAWN_DELAY_S,
             parameters=[{
                 "base_frame": "base_link",
                 "gimbal_mount_xyz": [0.0, 0.0, 0.10],
@@ -181,12 +196,14 @@ def generate_launch_description() -> LaunchDescription:
                 name=f"{cam}_camera",
                 namespace=f"camera/{cam}",
                 output="screen",
+                respawn=True,
+                respawn_delay=RESPAWN_DELAY_S,
                 parameters=[{
                     "url": f"{RTSP_BASE}/{cam}",
                     "frame_id": CAMERA[cam]["optical_frame"],
                     "latency_ms": RTSP_LATENCY_MS,
                     "protocols": "tcp",
-                    "decoder": "avdec_h264",
+                    "decoder": RTSP_DECODER,
                     "hfov": CAMERA[cam]["hfov"],
                 }],
             )
@@ -199,6 +216,8 @@ def generate_launch_description() -> LaunchDescription:
             executable="detections_bridge",
             name="detections_bridge",
             output="screen",
+            respawn=True,
+            respawn_delay=RESPAWN_DELAY_S,
             parameters=[{
                 "host": MQTT_HOST,
                 "port": 1883,
@@ -236,6 +255,8 @@ def generate_launch_description() -> LaunchDescription:
                 name=f"{cam}_annotator",
                 namespace=f"camera/{cam}",
                 output="screen",
+                respawn=True,
+                respawn_delay=RESPAWN_DELAY_S,
                 parameters=[{
                     "detections_topic": f"/perception/{cam}/detections",
                     "annotations_topic": "annotations",
@@ -254,6 +275,8 @@ def generate_launch_description() -> LaunchDescription:
                 name=f"{cam}_ground_projector",
                 namespace=f"camera/{cam}",
                 output="screen",
+                respawn=True,
+                respawn_delay=RESPAWN_DELAY_S,
                 parameters=[{
                     "camera": cam,
                     "camera_info_topic": f"/camera/{cam}/camera_info",
@@ -274,6 +297,8 @@ def generate_launch_description() -> LaunchDescription:
                 name=f"{cam}_localizer",
                 namespace=f"perception/{cam}",
                 output="screen",
+                respawn=True,
+                respawn_delay=RESPAWN_DELAY_S,
                 parameters=[{
                     "camera": cam,
                     "detections_topic": f"/perception/{cam}/detections",
@@ -296,11 +321,14 @@ def generate_launch_description() -> LaunchDescription:
             executable="ground_truth",
             name="ground_truth",
             output="screen",
+            respawn=True,
+            respawn_delay=RESPAWN_DELAY_S,
             parameters=[{
                 "scenario_file": os.environ.get(
                     "GROUND_TRUTH_FILE",
                     "/scenes/scenarios/urban_casualties.yaml"),
                 "reference_frame": REFERENCE_FRAME,
+                "rate_hz": GROUND_TRUTH_RATE_HZ,
                 # Scenario poses are Gazebo world coordinates and PX4's local
                 # frame starts where the vehicle spawned, which is the same
                 # point. Shift this if you spawn somewhere else.
@@ -321,6 +349,8 @@ def generate_launch_description() -> LaunchDescription:
                 name=f"{cam}_scorer",
                 namespace=f"scoring/{cam}",
                 output="screen",
+                respawn=True,
+                respawn_delay=RESPAWN_DELAY_S,
                 parameters=[{
                     "camera": cam,
                     "detections_topic": f"/perception/{cam}/detections_3d",
@@ -339,6 +369,8 @@ def generate_launch_description() -> LaunchDescription:
             executable="fiducial_alignment",
             name="fiducial_alignment",
             output="screen",
+            respawn=True,
+            respawn_delay=RESPAWN_DELAY_S,
             parameters=[{
                 "enabled": FIDUCIAL_ENABLED,
                 "surveyed_lla": [
@@ -365,8 +397,10 @@ def generate_launch_description() -> LaunchDescription:
                 name=f"{cam}_ground_image",
                 namespace=f"camera/{cam}",
                 output="screen",
+                respawn=True,
+                respawn_delay=RESPAWN_DELAY_S,
                 parameters=[{
-                    "image_topic": f"/camera/{cam}/image_raw",
+                    "image_topic": f"/camera/{cam}/image_raw/compressed",
                     "camera_info_topic": f"/camera/{cam}/camera_info",
                     "optical_frame": CAMERA[cam]["optical_frame"],
                     "reference_frame": REFERENCE_FRAME,
@@ -390,6 +424,8 @@ def generate_launch_description() -> LaunchDescription:
                 executable="click_to_gimbal",
                 name="click_to_gimbal",
                 output="screen",
+                respawn=True,
+                respawn_delay=RESPAWN_DELAY_S,
                 parameters=[{
                     "click_topic": "/foxglove/cursor/click",
                     "camera_info_topic": "/camera/gimbal/camera_info",

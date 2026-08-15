@@ -1,5 +1,38 @@
 {
   "configById": {
+    "CallService!1zqf9al": {
+      "requestPayload": "{}",
+      "layout": "vertical",
+      "timeoutSeconds": 10,
+      "serviceName": "/gimbal/click_mode/roi",
+      "editingMode": false,
+      "buttonText": "ROI"
+    },
+    "CallService!3gws9j9": {
+      "requestPayload": "{}",
+      "layout": "vertical",
+      "timeoutSeconds": 10,
+      "serviceName": "/gimbal/click_mode/point",
+      "buttonText": "Point",
+      "editingMode": false
+    },
+    "CallService!3r27hzg": {
+      "requestPayload": "{}",
+      "layout": "vertical",
+      "timeoutSeconds": 10,
+      "serviceName": "/gimbal/click_mode/off",
+      "buttonText": "Off",
+      "editingMode": false
+    },
+    "CallService!2gftbwi": {
+      "requestPayload": "{}",
+      "layout": "vertical",
+      "timeoutSeconds": 10,
+      "serviceName": "/gimbal/center",
+      "buttonText": "Center",
+      "editingMode": false
+    },
+    "Parameters!3t5mz9g": {},
     "3D!scene": {
       "cameraState": {
         "distance": 150.31643131022855,
@@ -237,6 +270,31 @@
         }
       }
     },
+    "Stack!2rrsv1h": {
+      "panels": [
+        {
+          "panelId": "CallService!1zqf9al",
+          "size": 0.25
+        },
+        {
+          "panelId": "CallService!3gws9j9",
+          "size": 0.25
+        },
+        {
+          "panelId": "CallService!3r27hzg",
+          "size": 0.25
+        },
+        {
+          "panelId": "CallService!2gftbwi",
+          "size": 0.25
+        },
+        {
+          "panelId": "Parameters!3t5mz9g",
+          "size": 0.25
+        }
+      ],
+      "foxglovePanelTitle": "Gimbal Control Mode"
+    },
     "Image!gimbal": {
       "imageTopic": "/camera/gimbal/image_raw/compressed",
       "calibrationTopic": "/camera/gimbal/camera_info",
@@ -381,34 +439,7 @@
         }
       },
       "layers": []
-    },
-    "Indicator!clickmode": {
-      "path": "/gimbal/click_mode.data",
-      "style": "background",
-      "fallbackColor": "#68686e",
-      "fallbackLabel": "click mode unknown",
-      "rules": [
-        {
-          "operator": "=",
-          "rawValue": "roi",
-          "color": "#2d7d46",
-          "label": "click sets ROI"
-        },
-        {
-          "operator": "=",
-          "rawValue": "point",
-          "color": "#1d6fc4",
-          "label": "click points gimbal"
-        },
-        {
-          "operator": "=",
-          "rawValue": "off",
-          "color": "#68686e",
-          "label": "clicks disabled"
-        }
-      ]
-    },
-    "Parameters!stack": {}
+    }
   },
   "globalVariables": {},
   "userNodes": {},
@@ -419,25 +450,20 @@
     "first": {
       "first": "3D!scene",
       "second": {
-        "first": "Image!nadir",
+        "first": {
+          "first": "Image!nadir",
+          "second": "Stack!2rrsv1h",
+          "direction": "row",
+          "splitPercentage": 82.9817158931083
+        },
         "second": "Image!gimbal",
         "direction": "column",
-        "splitPercentage": 50
+        "splitPercentage": 57.069113625644576
       },
       "direction": "row",
-      "splitPercentage": 68
+      "splitPercentage": 61.681487469684726
     },
-    "second": {
-      "first": "map!world",
-      "second": {
-        "first": "Indicator!clickmode",
-        "second": "Parameters!stack",
-        "direction": "column",
-        "splitPercentage": 25
-      },
-      "direction": "row",
-      "splitPercentage": 78
-    },
+    "second": "map!world",
     "direction": "column",
     "splitPercentage": 62
   }

@@ -8,10 +8,11 @@ The stamp is arrival time minus the jitter buffer, plus time_offset. A frame
 reaches this node well after capture, and stamping with the arrival time
 would put the image later than the pose it belongs to.
 
-Both a raw and a JPEG topic are published. The raw frames are too large for
-the foxglove_bridge websocket, so the image panels read the JPEG topic. The
-ground projector reads the raw topic inside the same container, where the
-cost is shared memory.
+Only the JPEG encoding is published. Raw frames are too large for the
+foxglove_bridge websocket, and every consumer that wants pixels, the ground
+projector included, decodes the JPEG at its own rate. The topic is published
+only while something subscribes to it; the encode itself keeps running so a
+new subscriber gets the next frame.
 
 Parameters
     url            RTSP address to read
@@ -26,7 +27,6 @@ Parameters
     time_offset    extra seconds added to the image stamp, for calibration
 
 Topics
-    <ns>/image_raw             sensor_msgs/Image, rgb8
     <ns>/image_raw/compressed  sensor_msgs/CompressedImage, jpeg
     <ns>/camera_info           sensor_msgs/CameraInfo
 """
@@ -44,7 +44,7 @@ from gi.repository import Gst  # noqa: E402
 import rclpy  # noqa: E402
 from rclpy.node import Node  # noqa: E402
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy  # noqa: E402
-from sensor_msgs.msg import CameraInfo, CompressedImage, Image  # noqa: E402
+from sensor_msgs.msg import CameraInfo, CompressedImage  # noqa: E402
 
 
 # ------------------------------------------------------------------- tunables
@@ -78,16 +78,14 @@ class RtspCamera(Node):
         self.stamp_shift = -(int(self.get_parameter("latency_ms").value) / 1000.0) \
             + float(self.get_parameter("time_offset").value)
 
-        self.image_pub = self.create_publisher(Image, "image_raw", SENSOR_QOS)
         self.jpeg_pub = self.create_publisher(
             CompressedImage, "image_raw/compressed", SENSOR_QOS)
         self.info_pub = self.create_publisher(CameraInfo, "camera_info", SENSOR_QOS)
 
         Gst.init(None)
         self.pipeline = None
-        self.appsink = None
         self.jpegsink = None
-        self.last_stamp = None
+        self.info_cache: dict[tuple[int, int], CameraInfo] = {}
         self.frames = 0
         self.stop = threading.Event()
 
@@ -104,16 +102,16 @@ class RtspCamera(Node):
         protocols = self.get_parameter("protocols").value
         decoder = self.get_parameter("decoder").value
 
-        # One decode, two sinks. Encoding the JPEG here rather than in a
-        # separate republish node keeps it off the Python side entirely.
+        # One decode, one sink. jpegenc reads the decoder's 4:2:0 output
+        # directly; the videoconvert is passthrough for I420 and keeps
+        # negotiation working when a decoder outputs NV12. Encoding the JPEG
+        # here rather than in a separate republish node keeps it off the
+        # Python side entirely.
         desc = (
             f"rtspsrc location={self.url} latency={latency} protocols={protocols} "
             f"drop-on-latency=true "
-            f"! rtph264depay ! h264parse ! {decoder} ! videoconvert ! tee name=t "
-            f"t. ! queue max-size-buffers=2 leaky=downstream "
-            f"! video/x-raw,format=RGB "
-            f"! appsink name=sink max-buffers=1 drop=true sync=false "
-            f"t. ! queue max-size-buffers=2 leaky=downstream ! videoconvert "
+            f"! rtph264depay ! h264parse ! {decoder} "
+            f"! queue max-size-buffers=2 leaky=downstream ! videoconvert "
             f"! jpegenc quality={JPEG_QUALITY} "
             f"! appsink name=jpeg max-buffers=1 drop=true sync=false"
         )
@@ -123,7 +121,6 @@ class RtspCamera(Node):
             self.get_logger().error(f"cannot build the pipeline: {exc}")
             return False
 
-        self.appsink = self.pipeline.get_by_name("sink")
         self.jpegsink = self.pipeline.get_by_name("jpeg")
         if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
             self.get_logger().error("cannot start the pipeline")
@@ -135,9 +132,8 @@ class RtspCamera(Node):
         if self.pipeline is not None:
             self.pipeline.set_state(Gst.State.NULL)
         self.pipeline = None
-        self.appsink = None
         self.jpegsink = None
-        self.last_stamp = None
+        self.info_cache.clear()
 
     # ------------------------------------------------------------------- loop
     def _run(self) -> None:
@@ -146,7 +142,7 @@ class RtspCamera(Node):
                 self.stop.wait(3.0)
                 continue
 
-            sample = self.appsink.emit("try-pull-sample", Gst.SECOND)
+            sample = self.jpegsink.emit("try-pull-sample", Gst.SECOND)
             if sample is None:
                 if self._pipeline_failed():
                     self.get_logger().warn("stream dropped, reconnecting")
@@ -154,8 +150,7 @@ class RtspCamera(Node):
                     self.stop.wait(2.0)
                 continue
 
-            self._publish(sample)
-            self._publish_jpeg()
+            self._publish_jpeg(sample)
 
     def _pipeline_failed(self) -> bool:
         bus = self.pipeline.get_bus()
@@ -168,46 +163,20 @@ class RtspCamera(Node):
         return True
 
     # ---------------------------------------------------------------- publish
-    def _publish(self, sample) -> None:
-        buf = sample.get_buffer()
+    def _stamp(self):
+        return (self.get_clock().now()
+                + rclpy.duration.Duration(seconds=self.stamp_shift)).to_msg()
+
+    def _publish_jpeg(self, sample) -> None:
         caps = sample.get_caps().get_structure(0)
         width = caps.get_value("width")
         height = caps.get_value("height")
+        stamp = self._stamp()
 
-        ok, info = buf.map(Gst.MapFlags.READ)
-        if not ok:
-            return
-        try:
-            stamp = (self.get_clock().now()
-                     + rclpy.duration.Duration(seconds=self.stamp_shift)).to_msg()
-            # Held for the JPEG branch, which carries the same decoded frame and
-            # must therefore carry the same capture time, not a later reading of
-            # the clock. Anything downstream that syncs on the stamp needs the
-            # two encodings of one frame to agree.
-            self.last_stamp = stamp
+        self.info_pub.publish(self._camera_info(stamp, width, height))
+        self.frames += 1
 
-            image = Image()
-            image.header.stamp = stamp
-            image.header.frame_id = self.frame_id
-            image.height = height
-            image.width = width
-            image.encoding = "rgb8"
-            image.is_bigendian = 0
-            image.step = width * 3
-            image.data = bytes(info.data)
-            self.image_pub.publish(image)
-
-            self.info_pub.publish(self._camera_info(stamp, width, height))
-            self.frames += 1
-        finally:
-            buf.unmap(info)
-
-    def _publish_jpeg(self) -> None:
-        """Drain whatever the JPEG branch has ready. Never blocks the raw path."""
-        if self.jpegsink is None or self.last_stamp is None:
-            return
-        sample = self.jpegsink.emit("try-pull-sample", 0)
-        if sample is None:
+        if self.jpeg_pub.get_subscription_count() == 0:
             return
         buf = sample.get_buffer()
         ok, info = buf.map(Gst.MapFlags.READ)
@@ -215,7 +184,7 @@ class RtspCamera(Node):
             return
         try:
             msg = CompressedImage()
-            msg.header.stamp = self.last_stamp
+            msg.header.stamp = stamp
             msg.header.frame_id = self.frame_id
             msg.format = "jpeg"
             msg.data = bytes(info.data)
@@ -224,24 +193,28 @@ class RtspCamera(Node):
             buf.unmap(info)
 
     def _camera_info(self, stamp, width: int, height: int) -> CameraInfo:
-        # A pinhole model from the field of view. It is not a calibration. It is
-        # close enough to project a detection into a bearing, and it is exactly
-        # right for the simulated camera, which is an ideal pinhole.
-        fx = (width / 2.0) / math.tan(self.hfov / 2.0)
-        fy = fx
-        cx = width / 2.0
-        cy = height / 2.0
+        info = self.info_cache.get((width, height))
+        if info is None:
+            # A pinhole model from the field of view. It is not a calibration.
+            # It is close enough to project a detection into a bearing, and it
+            # is exactly right for the simulated camera, which is an ideal
+            # pinhole.
+            fx = (width / 2.0) / math.tan(self.hfov / 2.0)
+            fy = fx
+            cx = width / 2.0
+            cy = height / 2.0
 
-        info = CameraInfo()
+            info = CameraInfo()
+            info.header.frame_id = self.frame_id
+            info.width = width
+            info.height = height
+            info.distortion_model = "plumb_bob"
+            info.d = [0.0, 0.0, 0.0, 0.0, 0.0]
+            info.k = [fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0]
+            info.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+            info.p = [fx, 0.0, cx, 0.0, 0.0, fy, cy, 0.0, 0.0, 0.0, 1.0, 0.0]
+            self.info_cache[(width, height)] = info
         info.header.stamp = stamp
-        info.header.frame_id = self.frame_id
-        info.width = width
-        info.height = height
-        info.distortion_model = "plumb_bob"
-        info.d = [0.0, 0.0, 0.0, 0.0, 0.0]
-        info.k = [fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0]
-        info.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
-        info.p = [fx, 0.0, cx, 0.0, 0.0, fy, cy, 0.0, 0.0, 0.0, 1.0, 0.0]
         return info
 
     def _report(self) -> None:

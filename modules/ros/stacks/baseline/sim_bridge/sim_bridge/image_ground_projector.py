@@ -17,26 +17,41 @@ only for pixels that land inside the limit, so the cost tracks what is
 displayed: a camera near the horizon pays for the near ground it shows,
 not for the sky.
 
+The frame arrives as the camera's JPEG stream, the same encoding the image
+panels read, so no raw image topic has to exist. The rate limit, the
+subscriber check, and the intrinsics check all run before the JPEG is
+decoded, so a frame that will not be displayed costs almost nothing. The
+decode runs through GStreamer, the library the camera node encodes with.
+The rays through the grid depend only on the grid and the intrinsics, so
+they are computed once and reused: a steady stream pays only for one decode
+per period, the rotation, the intersection, and the packing.
+
 `size` is the resolution the frame is sampled down to, and it bounds the
 cost for both cameras. 640x360 is at most 230,400 points and 3.7 MB per
 message, which already reads as a picture.
 
 Subscribes
-    <ns>/image_raw, <ns>/camera_info
+    <ns>/image_raw/compressed, <ns>/camera_info
 Publishes
     <ns>/ground_projection    sensor_msgs/PointCloud2 in the reference frame
 """
 
 from __future__ import annotations
 
-import numpy as np
-import rclpy
-from rclpy.duration import Duration
-from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import CameraInfo, Image, PointCloud2, PointField
-from std_msgs.msg import Float64
-from tf2_ros import Buffer, TransformListener
+import gi
+
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst  # noqa: E402
+
+import numpy as np  # noqa: E402
+import rclpy  # noqa: E402
+from rclpy.duration import Duration  # noqa: E402
+from rclpy.node import Node  # noqa: E402
+from rclpy.qos import (HistoryPolicy, QoSProfile, ReliabilityPolicy,  # noqa: E402
+                       qos_profile_sensor_data)
+from sensor_msgs.msg import CameraInfo, CompressedImage, PointCloud2, PointField  # noqa: E402
+from std_msgs.msg import Float64  # noqa: E402
+from tf2_ros import Buffer, TransformListener  # noqa: E402
 
 from sim_bridge.projection import GROUND_VIEW_MAX_DISTANCE_M, intrinsics_ready
 
@@ -49,6 +64,11 @@ POINT_DTYPE = np.dtype([("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("rgb", "<u4")
 STANDARD_SIZES = ("1920x1080", "1280x720", "960x540", "854x480", "640x360",
                   "480x270", "426x240")
 
+# Keep only the newest frame. The publisher's queue is one deep, and this
+# node never wants an older frame than the one it just got.
+IMAGE_QOS = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
+                       history=HistoryPolicy.KEEP_LAST, depth=1)
+
 
 def parse_size(text: str) -> tuple[int, int] | None:
     """Read "WxH" into a pair. Returns None if it does not read as one."""
@@ -59,11 +79,74 @@ def parse_size(text: str) -> tuple[int, int] | None:
     return (w, h) if w > 0 and h > 0 else None
 
 
+class JpegDecoder:
+    """One JPEG in, one RGB frame out, through GStreamer. A pipeline that
+    errors is rebuilt on the next call, so one bad frame cannot silence the
+    ground projection for good."""
+
+    def __init__(self) -> None:
+        Gst.init(None)
+        self.pipeline = None
+        self.src = self.sink = None
+        self._build()
+
+    def _build(self) -> None:
+        self.close()
+        self.pipeline = Gst.parse_launch(
+            "appsrc name=src caps=image/jpeg is-live=true format=time "
+            "! jpegdec ! videoconvert ! video/x-raw,format=RGB "
+            "! appsink name=sink max-buffers=1 drop=true sync=false")
+        self.src = self.pipeline.get_by_name("src")
+        self.sink = self.pipeline.get_by_name("sink")
+        self.pipeline.set_state(Gst.State.PLAYING)
+
+    def _failed(self) -> bool:
+        bus = self.pipeline.get_bus()
+        return bus.timed_pop_filtered(0, Gst.MessageType.ERROR) is not None
+
+    def decode(self, data) -> tuple | None:
+        """The frame as (pixels, width, height, row_step), or None when the
+        bytes do not decode. row_step comes from the buffer itself, so a
+        converter that pads its rows still indexes correctly."""
+        # Discard a frame left by a decode that timed out earlier, so it can
+        # never come back paired with this message's stamp.
+        self.sink.emit("try-pull-sample", 0)
+        push = self.src.emit("push-buffer", Gst.Buffer.new_wrapped(bytes(data)))
+        if push != Gst.FlowReturn.OK:
+            self._build()
+            return None
+        sample = self.sink.emit("try-pull-sample", Gst.SECOND // 2)
+        if sample is None:
+            if self._failed():
+                self._build()
+            return None
+        caps = sample.get_caps().get_structure(0)
+        width = caps.get_value("width")
+        height = caps.get_value("height")
+        buf = sample.get_buffer()
+        ok, info = buf.map(Gst.MapFlags.READ)
+        if not ok:
+            return None
+        try:
+            pixels = np.frombuffer(info.data, dtype=np.uint8).copy()
+        finally:
+            buf.unmap(info)
+        if height <= 0 or width <= 0 or pixels.size < width * height * 3:
+            return None
+        return pixels, width, height, pixels.size // height
+
+    def close(self) -> None:
+        if self.pipeline is not None:
+            self.pipeline.set_state(Gst.State.NULL)
+        self.pipeline = None
+        self.src = self.sink = None
+
+
 class ImageGroundProjector(Node):
     def __init__(self) -> None:
         super().__init__("image_ground_projector")
 
-        self.declare_parameter("image_topic", "image_raw")
+        self.declare_parameter("image_topic", "image_raw/compressed")
         self.declare_parameter("camera_info_topic", "camera_info")
         self.declare_parameter("optical_frame", "nadir_camera_optical_frame")
         self.declare_parameter("reference_frame", "map")
@@ -91,21 +174,27 @@ class ImageGroundProjector(Node):
         # when the camera resolution changes, which it does not in flight.
         self.grid_for: tuple[int, int] | None = None
         self.us = self.vs = None
+        # The rays through the grid, cached with it. They depend only on the
+        # grid and the intrinsics, so a steady stream reuses them.
+        self.rays_for: tuple | None = None
+        self.ray_x = self.ray_y = None
         self.ground_z = float(self.get_parameter("ground_z").value)
         self.min_period = 1.0 / max(float(self.get_parameter("rate_hz").value), 0.1)
 
         self.info: CameraInfo | None = None
         self.rel_alt: float | None = None
-        self.last_publish = 0.0
+        self.last_processed = 0.0
 
+        self.decoder = JpegDecoder()
         self.tf_buffer = Buffer(cache_time=Duration(seconds=5.0))
         self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
 
         self.create_subscription(CameraInfo,
                                  self.get_parameter("camera_info_topic").value,
                                  self._on_info, qos_profile_sensor_data)
-        self.create_subscription(Image, self.get_parameter("image_topic").value,
-                                 self._on_image, qos_profile_sensor_data)
+        self.create_subscription(CompressedImage,
+                                 self.get_parameter("image_topic").value,
+                                 self._on_image, IMAGE_QOS)
         if self.get_parameter("use_rel_alt").value:
             self.create_subscription(Float64, "/mavros/global_position/rel_alt",
                                      self._on_rel_alt, qos_profile_sensor_data)
@@ -119,14 +208,26 @@ class ImageGroundProjector(Node):
     def _on_rel_alt(self, msg: Float64) -> None:
         self.rel_alt = float(msg.data)
 
-    def _on_image(self, msg: Image) -> None:
+    def _on_image(self, msg: CompressedImage) -> None:
         now = self.get_clock().now().nanoseconds / 1e9
-        if now - self.last_publish < self.min_period:
+        if now - self.last_processed < self.min_period:
+            return
+        # The throttle does not advance here, so the first frame after a
+        # client subscribes is processed at once.
+        if self.pub.get_subscription_count() == 0:
             return
         if not intrinsics_ready(self.info):
             return
-        if msg.encoding != "rgb8":
+        # All the cheap gates passed. Advance the throttle before the work,
+        # so a frame with no ground in view or no TF still counts.
+        self.last_processed = now
+
+        if "jpeg" not in msg.format.lower():
             return
+        decoded = self.decoder.decode(msg.data)
+        if decoded is None:
+            return
+        pixels, width, height, step = decoded
 
         try:
             # At the image's own timestamp, the same rule the localizer follows,
@@ -147,7 +248,8 @@ class ImageGroundProjector(Node):
         rot = (r.x, r.y, r.z, r.w)
         ground_z = self.ground_z if self.rel_alt is None else t.z - self.rel_alt
 
-        points = self._project(msg, origin, rot, ground_z)
+        points = self._project(pixels, width, height, step,
+                               origin, rot, ground_z)
         if points is None or not len(points):
             return
         count = len(points)
@@ -169,7 +271,6 @@ class ImageGroundProjector(Node):
         cloud.is_dense = True
         cloud.data = points.tobytes()
         self.pub.publish(cloud)
-        self.last_publish = now
 
     # -------------------------------------------------------------- the math
     def _sample_grid(self, width: int, height: int):
@@ -194,14 +295,15 @@ class ImageGroundProjector(Node):
             f"{out_w * out_h} points, {out_w * out_h * POINT_DTYPE.itemsize / 1e6:.1f} MB")
         return self.us, self.vs
 
-    def _project(self, msg: Image, origin, rot, ground_z):
+    def _project(self, pixels, width: int, height: int, step: int,
+                 origin, rot, ground_z):
         """Sampled pixels that land on the ground within the view limit.
 
         The same geometry as sim_bridge.projection, written over whole
         arrays. The mask comes first, so colors are gathered and points
         packed only for the pixels that will be displayed.
         """
-        us, vs = self._sample_grid(msg.width, msg.height)
+        us, vs = self._sample_grid(width, height)
 
         k = self.info.k
         fx, cx, fy, cy = k[0], k[2], k[4], k[5]
@@ -210,10 +312,15 @@ class ImageGroundProjector(Node):
 
         # Rays through the grid, in the optical frame. Unnormalized: neither
         # the plane intersection nor the horizontal cut needs unit length.
-        x = (us[None, :].astype(np.float64) - cx) / fx
-        y = (vs[:, None].astype(np.float64) - cy) / fy
-        x = np.broadcast_to(x, (len(vs), len(us)))
-        y = np.broadcast_to(y, (len(vs), len(us)))
+        # Rebuilt only when the grid or the intrinsics change.
+        rays_key = (self.grid_for, fx, cx, fy, cy)
+        if self.rays_for != rays_key:
+            x = (us[None, :].astype(np.float64) - cx) / fx
+            y = (vs[:, None].astype(np.float64) - cy) / fy
+            self.ray_x = np.broadcast_to(x, (len(vs), len(us)))
+            self.ray_y = np.broadcast_to(y, (len(vs), len(us)))
+            self.rays_for = rays_key
+        x, y = self.ray_x, self.ray_y
 
         # quat_rotate over the grid, with d = (x, y, 1):
         # t = 2*(qv x d); d' = d + qw*t + qv x t
@@ -234,11 +341,11 @@ class ImageGroundProjector(Node):
         if not good.any():
             return None
 
-        frame = np.frombuffer(msg.data, dtype=np.uint8)
-        if frame.size < msg.height * msg.step:
+        if pixels.size < height * step:
             return None
-        # Index through msg.step rather than width*3: a row can carry padding.
-        frame = frame[:msg.height * msg.step].reshape(msg.height, msg.step)
+        # Index through the row step rather than width*3: a row can carry
+        # padding.
+        frame = pixels[:height * step].reshape(height, step)
         row_index, col_index = np.nonzero(good)
         rows = vs[row_index]
         cols = us[col_index] * 3
@@ -250,7 +357,7 @@ class ImageGroundProjector(Node):
         out = np.empty(t.size, dtype=POINT_DTYPE)
         out["x"] = origin[0] + t * wx[good]
         out["y"] = origin[1] + t * wy[good]
-        out["z"] = origin[2] + t * wz[good]
+        out["z"] = ground_z  # every kept point lies on the ground plane
         out["rgb"] = (red << 16) | (green << 8) | blue
         return out
 
@@ -263,6 +370,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        node.decoder.close()
         node.destroy_node()
         rclpy.try_shutdown()
 

@@ -130,7 +130,7 @@ class DetectionsBridge(Node):
         for name in sensor_ids:
             self.create_subscription(
                 CameraInfo, f"/camera/{name}/camera_info",
-                lambda msg, n=name: self.image_size.__setitem__(n, (msg.width, msg.height)),
+                lambda msg, n=name: self._on_camera_info(n, msg),
                 qos_profile_sensor_data)
 
         self.publisher_for = {
@@ -160,6 +160,13 @@ class DetectionsBridge(Node):
 
         self.get_logger().info(f"reading mqtt://{host}:{port} topic '{topic}'")
         self.create_timer(60.0, self._report)
+
+    def _on_camera_info(self, sensor: str, msg: CameraInfo) -> None:
+        # The size almost never changes, so most calls return here.
+        size = (msg.width, msg.height)
+        if self.image_size.get(sensor) == size:
+            return
+        self.image_size[sensor] = size
 
     # ------------------------------------------------------------------- mqtt
     def _on_connect(self, client, userdata, flags, reason_code, properties=None):

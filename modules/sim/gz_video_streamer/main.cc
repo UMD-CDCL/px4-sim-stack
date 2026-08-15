@@ -89,7 +89,8 @@ bool HaveFactory(const char *name) {
 bool EncoderWorks(const std::string &fragment) {
   const std::string desc =
       "videotestsrc num-buffers=5 ! video/x-raw,format=RGB,width=640,height=480"
-      " ! queue ! videoconvert ! videorate ! video/x-raw,format={ NV12, I420 },framerate=15/1 ! " +
+      " ! queue ! videoconvert n-threads=2 ! videorate drop-only=true"
+      " ! video/x-raw,format={ NV12, I420 },framerate=15/1 ! " +
       fragment + " ! h264parse ! fakesink";
 
   GError *err = nullptr;
@@ -101,7 +102,7 @@ bool EncoderWorks(const std::string &fragment) {
   if (gst_element_set_state(pipeline, GST_STATE_PLAYING) != GST_STATE_CHANGE_FAILURE) {
     GstBus *bus = gst_element_get_bus(pipeline);
     GstMessage *msg = gst_bus_timed_pop_filtered(
-        bus, 15 * GST_SECOND,
+        bus, 3 * GST_SECOND,
         static_cast<GstMessageType>(GST_MESSAGE_EOS | GST_MESSAGE_ERROR));
     ok = msg != nullptr && GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS;
     if (msg != nullptr) gst_message_unref(msg);
@@ -316,8 +317,8 @@ class Stream {
     // The pair below is what every consumer can read: 8 bit, 4:2:0.
     p << "appsrc name=src is-live=true do-timestamp=true format=time block=false"
       << " ! queue leaky=downstream max-size-buffers=4"
-      << " ! videoconvert"
-      << " ! videorate"
+      << " ! videoconvert n-threads=2"
+      << " ! videorate drop-only=true"
       << " ! video/x-raw,format={ NV12, I420 },framerate=" << spec_.fps << "/1"
       << " ! " << encoder_
       << " ! h264parse config-interval=1"
@@ -384,8 +385,7 @@ class Stream {
     }
 
     const auto &data = msg.data();
-    GstBuffer *buf = gst_buffer_new_allocate(nullptr, data.size(), nullptr);
-    gst_buffer_fill(buf, 0, data.data(), data.size());
+    GstBuffer *buf = gst_buffer_new_memdup(data.data(), data.size());
     if (gst_app_src_push_buffer(GST_APP_SRC(appsrc_), buf) != GST_FLOW_OK) {
       std::cerr << "[" << spec_.name << "] push failed, restarting the pipeline"
                 << std::endl;
@@ -543,15 +543,22 @@ int main(int argc, char **argv) {
   gz::transport::Node discovery;
   int quiet_ticks = 0;
   while (g_run) {
-    std::vector<std::string> topics;
-    discovery.TopicList(topics);
-
     bool all_bound = true;
-    for (auto &s : streams) {
-      if (!s->bound()) {
-        s->TryBind(topics);
+    for (const auto &s : streams) all_bound = all_bound && s->bound();
+
+    // The topic list only serves binding, and streams never unbind. Once
+    // every stream is bound, stop asking discovery for it.
+    if (!all_bound) {
+      std::vector<std::string> topics;
+      discovery.TopicList(topics);
+      all_bound = true;
+      for (auto &s : streams) {
+        if (!s->bound()) s->TryBind(topics);
         all_bound = all_bound && s->bound();
       }
+    }
+
+    for (auto &s : streams) {
       s->ServiceBus();
     }
 

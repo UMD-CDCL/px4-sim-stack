@@ -56,7 +56,6 @@ RANGE_VARIANCE_SCALE = 0.0004
 PERSON_HEIGHT = 1.7
 # Beyond this slant range a ray is treated as missing the ground.
 MAX_RANGE = 2000.0
-TF_TIMEOUT_S = 0.25
 # The detection stamp is often a few tens of milliseconds newer than the
 # newest transform, because the detection pipeline outruns telemetry. Within
 # this bound the newest transform is close enough. Past it, drop.
@@ -138,10 +137,13 @@ class DetectionLocalizer(Node):
 
         stamp = Time.from_msg(msg.header.stamp)
         try:
-            # The frame time, not now. See the module docstring.
+            # The frame time, not now, and no blocking wait. The frame time
+            # is already in the past when a detection arrives, so the
+            # transform is in the buffer or it is not: waiting here once let
+            # the full detection rate starve this node's own TF listener,
+            # and then every lookup failed.
             tf = self.tf_buffer.lookup_transform(
-                self.reference, self.optical, stamp,
-                timeout=Duration(seconds=TF_TIMEOUT_S))
+                self.reference, self.optical, stamp)
         except Exception as exc:
             tf = self._clamped_lookup(stamp, exc)
             if tf is None:
@@ -151,6 +153,14 @@ class DetectionLocalizer(Node):
         origin = (t.x, t.y, t.z)
         rotation = (r.x, r.y, r.z, r.w)
         ground_z = self.ground_z if self.rel_alt is None else t.z - self.rel_alt
+
+        # The output transform is static, so one lookup serves every
+        # detection in the array.
+        output_tf = None
+        if self.output_frame != self.reference:
+            output_tf = self._output_transform()
+            if output_tf is None:
+                return
 
         out = Detection3DArray()
         out.header.stamp = msg.header.stamp
@@ -168,10 +178,7 @@ class DetectionLocalizer(Node):
                 self.no_ground += 1
                 continue
 
-            ground_point = self._to_output(ground_point)
-            if ground_point is None:
-                continue
-
+            ground_point = self._to_output(ground_point, output_tf)
             distance = slant_range(origin, ground_point)
             range_variance = RANGE_VARIANCE_SCALE * distance * distance
 
@@ -209,12 +216,10 @@ class DetectionLocalizer(Node):
         if out.detections:
             self.det3d_pub.publish(out)
 
-    def _to_output(self, point):
-        """Move a point into the output frame, if that is not the reference."""
-        if self.output_frame == self.reference:
-            return point
+    def _output_transform(self):
+        """The transform into the output frame, or None while it is missing."""
         try:
-            tf = self.tf_buffer.lookup_transform(
+            return self.tf_buffer.lookup_transform(
                 self.output_frame, self.reference, Time())
         except Exception as exc:
             if not self.warned_output:
@@ -224,8 +229,14 @@ class DetectionLocalizer(Node):
                     f"transform from '{self.reference}' to it ({exc}). Is "
                     f"fiducial_alignment enabled? Publishing nothing until it is.")
             return None
-        t = tf.transform.translation
-        r = tf.transform.rotation
+
+    def _to_output(self, point, output_tf):
+        """Move a point into the output frame. output_tf None means the
+        output frame is the reference, so the point stays put."""
+        if output_tf is None:
+            return point
+        t = output_tf.transform.translation
+        r = output_tf.transform.rotation
         moved = quat_rotate((r.x, r.y, r.z, r.w), point)
         return (moved[0] + t.x, moved[1] + t.y, moved[2] + t.z)
 

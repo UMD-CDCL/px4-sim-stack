@@ -92,8 +92,10 @@ ll-config-file=/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/
 display-tracking-id=1
 
 # ------------------------------------------------------------------- the boxes
+# Drawn boxes only exist in the annotated encode, so the OSD follows the same
+# switch as sink0. With the annotated stream off, drawing them is pure waste.
 [osd]
-enable=1
+enable=${ANNOTATED_ENABLE}
 gpu-id=0
 border-width=3
 text-size=14
@@ -112,9 +114,11 @@ process-mode=1
 # No link-to-demux here. There is one source, so the sink takes the pipeline
 # output directly, which is the arrangement that was serving frames before.
 #
-# Set ANNOTATED_STREAMS=0 in compose to turn this off for both cameras. The
-# boxes still reach ROS as messages, and Foxglove still overlays them on the
-# plain streams; what is saved is one H.264 encode for each camera.
+# ANNOTATED_STREAMS in compose names the cameras that get this encode. The
+# default is gimbal, the stream QGC displays; 1 or all enables every camera,
+# 0 disables every camera. A camera without it saves one H.264 encode, and
+# its boxes still reach ROS as messages, which Foxglove overlays on the
+# plain stream.
 [sink0]
 enable=${ANNOTATED_ENABLE}
 type=4
@@ -139,7 +143,7 @@ type=6
 msg-conv-config=msgconv.txt
 msg-conv-payload-type=1
 msg-conv-msg2p-new-api=1
-msg-conv-frame-interval=5
+msg-conv-frame-interval=1
 msg-broker-proto-lib=/opt/nvidia/deepstream/deepstream/lib/libnvds_mqtt_proto.so
 msg-broker-conn-str=${MQTT_HOST};${MQTT_PORT}
 topic=${MQTT_TOPIC}
@@ -162,9 +166,9 @@ msg-conv-config=msgconv.txt
 msg-conv-msg2p-lib=/opt/nvidia/deepstream/deepstream/lib/libnvds_msgconv.so
 msg-conv-payload-type=1
 msg-conv-msg2p-new-api=1
-# Publish every Nth frame. 5 gives 6 Hz from a 30 fps stream, which is enough
-# for a planner and keeps the bus quiet.
-msg-conv-frame-interval=5
+# Publish every frame the detector saw, so every inferenced detection
+# reaches ROS. 15 fps in, 15 payloads/s out for each camera.
+msg-conv-frame-interval=1
 # One directory for each camera, so two pipelines never read each other's
 # payloads and the forwarder for one cannot delete the other's work.
 debug-payload-dir=${DS_PAYLOAD_DIR}

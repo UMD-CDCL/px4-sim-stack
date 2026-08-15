@@ -17,17 +17,19 @@ joint angles with the frame flags ignored. So this file recomputes the
 vehicle-relative attitude as the vehicle moves, roll level.
 docs/px4-simulated-gimbal.md records the device behaviors.
 
-The cadence matches PX4's own gimbal manager, which recomputes on
-fresh vehicle state each 20 ms loop and publishes every cycle. The
-tracker re-commands on every vehicle attitude message and streams the
-setpoint unconditionally. The simulated device polls its setpoint at
+ClickToGimbal forwards each vehicle attitude message to on_vehicle,
+and the tracker recomputes on that stream, gated to 20 Hz
+(TICK_MIN_INTERVAL_S). The simulated device polls its setpoint at
 5 Hz (GZGimbal.cpp, ScheduleOnInterval 200 ms), which is the cap on
-how fast the joints react, not the commands.
+how fast the joints react, so the 20 Hz cadence commands the same
+motion as recomputing on every message. A click bypasses the gate:
+track and follow recompute at once.
 
 The whole emulation lives in this one file so it is easy to drop,
 revert, or improve. ClickToGimbal owns one RoiTracker and gives it a
 narrow surface: tf_buffer, reference and optical frame names,
-cmd_q_body_link, command_body_attitude, and its logger. Delete this
+cmd_q_body_link, command_body_attitude, its logger, and the vehicle
+pose stream forwarded to on_vehicle. Delete this
 file and the few lines that build and call it, and the stack is back
 to one-shot commands.
 
@@ -50,8 +52,6 @@ import time
 
 import rclpy
 from geometry_msgs.msg import PoseStamped
-from rclpy.duration import Duration
-from rclpy.qos import qos_profile_sensor_data
 
 from sim_bridge.projection import (LINK_TO_OPTICAL, body_frd_to_flu,
                                    pointing_rpy_body, quat_conj,
@@ -59,6 +59,11 @@ from sim_bridge.projection import (LINK_TO_OPTICAL, body_frd_to_flu,
                                    ros_to_aerospace, rpy_from_quat, wrap_pi)
 
 # ------------------------------------------------------------------- tunables
+# The shortest interval between pose-driven recomputes, 20 Hz. The
+# simulated device polls its setpoint at 5 Hz (GZGimbal.cpp, 200 ms), so
+# this cadence commands the same motion as the raw pose rate. A click
+# bypasses the gate: track and follow recompute at once.
+TICK_MIN_INTERVAL_S = 0.05
 # How long the desired attitude must stay still before the TF chain is
 # trusted for the attitude correction. Covers the joint slew plus one
 # device report.
@@ -68,6 +73,11 @@ CORRECTION_SETTLE_S = 1.5
 STILL_LIMIT_DEG = 0.2
 
 IDENTITY = (0.0, 0.0, 0.0, 1.0)
+
+# "No camera TF was passed" versus "the fetch was tried and failed" (None).
+# Without the distinction, a failed fetch in _tick would make each callee
+# retry the lookup on its own.
+_UNSET = object()
 
 
 def quat_angle_deg(a, b) -> float:
@@ -87,10 +97,8 @@ class RoiTracker:
         self.correction = IDENTITY
         self.desired_link = None
         self.still_since = time.monotonic()
-        # Every vehicle attitude message drives one recompute, the same
-        # trigger PX4's gimbal manager loop reacts to.
-        node.create_subscription(PoseStamped, "/mavros/local_position/pose",
-                                 self._on_vehicle, qos_profile_sensor_data)
+        # When the last pose-driven recompute ran, for the 20 Hz gate.
+        self.last_pose_tick = 0.0
 
     def track(self, point_map: tuple[float, float, float]) -> None:
         """Hold every axis on a point in the reference frame.
@@ -117,24 +125,32 @@ class RoiTracker:
     def clear(self) -> None:
         self.point = self.follow_angles = None
 
-    # ---------------------------------------------------------------- internal
-    def _on_vehicle(self, msg: PoseStamped) -> None:
+    def on_vehicle(self, msg: PoseStamped) -> None:
+        """Take one vehicle attitude message, forwarded by ClickToGimbal.
+        The attitude is always stored; the recompute is gated to 20 Hz."""
         q = msg.pose.orientation
         self.vehicle_q = (q.x, q.y, q.z, q.w)
+        now = time.monotonic()
+        if now - self.last_pose_tick < TICK_MIN_INTERVAL_S:
+            return
+        self.last_pose_tick = now
         self._tick()
 
+    # ---------------------------------------------------------------- internal
     def _camera_tf(self):
         try:
+            # Latest available, no wait: a blocking lookup on the shared
+            # executor starves the click and service callbacks when TF lags.
             tf = self.node.tf_buffer.lookup_transform(
-                self.node.reference, self.node.optical, rclpy.time.Time(),
-                timeout=Duration(seconds=0.05))
+                self.node.reference, self.node.optical, rclpy.time.Time())
         except Exception:  # noqa: BLE001 - lookup raises several types
             return None
         t, r = tf.transform.translation, tf.transform.rotation
         return (t.x, t.y, t.z), (r.x, r.y, r.z, r.w)
 
-    def _refresh_correction(self) -> None:
-        camera = self._camera_tf()
+    def _refresh_correction(self, camera=_UNSET) -> None:
+        if camera is _UNSET:
+            camera = self._camera_tf()
         if camera is None or self.vehicle_q is None:
             return
         _, q_map_optical = camera
@@ -152,9 +168,10 @@ class RoiTracker:
         """The vehicle compass heading in radians, aerospace convention."""
         return rpy_from_quat(ros_to_aerospace(q_vehicle_enu))[2]
 
-    def _point_attitude(self, q_vehicle_enu):
+    def _point_attitude(self, q_vehicle_enu, camera=_UNSET):
         """The vehicle-relative attitude that puts the axis on the point."""
-        camera = self._camera_tf()
+        if camera is _UNSET:
+            camera = self._camera_tf()
         if camera is None:
             return None
         position, _ = camera
@@ -170,8 +187,9 @@ class RoiTracker:
         the roll, and keeps the yaw offset from the heading."""
         q_vehicle = ros_to_aerospace(q_vehicle_enu)
         pitch_world, yaw_offset = self.follow_angles
+        heading = rpy_from_quat(q_vehicle)[2]
         desired = quat_from_rpy(
-            0.0, pitch_world, wrap_pi(self._heading(q_vehicle_enu) + yaw_offset))
+            0.0, pitch_world, wrap_pi(heading + yaw_offset))
         return rpy_from_quat(quat_mul(quat_conj(q_vehicle), desired))
 
     def _tick(self) -> None:
@@ -180,11 +198,14 @@ class RoiTracker:
             return
         # The TF chain lags a moving gimbal by up to one device report, so
         # the correction refreshes only after the desired attitude has
-        # stayed still that long.
-        if time.monotonic() - self.still_since > CORRECTION_SETTLE_S:
-            self._refresh_correction()
+        # stayed still that long. One TF fetch serves both callees.
+        settled = time.monotonic() - self.still_since > CORRECTION_SETTLE_S
+        camera = (self._camera_tf()
+                  if settled or self.point is not None else None)
+        if settled:
+            self._refresh_correction(camera)
         q_vehicle_enu = self._vehicle_attitude()
-        attitude = (self._point_attitude(q_vehicle_enu)
+        attitude = (self._point_attitude(q_vehicle_enu, camera)
                     if self.point is not None
                     else self._follow_attitude(q_vehicle_enu))
         if attitude is None:

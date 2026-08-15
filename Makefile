@@ -14,9 +14,13 @@ endif
 # Which DeepStream this machine can run, from the driver. These override the
 # .env values above, which is the point: the release that starts here is a
 # property of this machine, not of the file. See scripts/ds-select.sh.
-DS_VERSION := $(shell ./scripts/ds-select.sh --version)
-DS_IMAGE   := $(shell ./scripts/ds-select.sh --image)
-DS_TAG     := $(shell ./scripts/ds-select.sh --tag)
+# One $(shell) call resolves all three values, so nvidia-smi runs once, not
+# three times. The .env pins go to the script on its command line, because
+# GNU Make below 4.4 does not export variables to $(shell).
+DS_SELECT  := $(shell DS_IMAGE="$(DS_IMAGE)" DS_VERSION="$(DS_VERSION)" DS_FLAVOUR="$(DS_FLAVOUR)" ./scripts/ds-select.sh)
+DS_VERSION := $(patsubst DS_VERSION=%,%,$(filter DS_VERSION=%,$(DS_SELECT)))
+DS_IMAGE   := $(patsubst DS_IMAGE=%,%,$(filter DS_IMAGE=%,$(DS_SELECT)))
+DS_TAG     := $(patsubst DS_TAG=%,%,$(filter DS_TAG=%,$(DS_SELECT)))
 
 .DEFAULT_GOAL := help
 .PHONY: help preflight bootstrap x11 build build-% up up-core down restart ps logs \
