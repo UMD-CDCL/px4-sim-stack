@@ -232,7 +232,6 @@ class ClickToGimbal(Node):
         # GZGimbal steers the joints to zero without a setpoint, and _center
         # commands the same zero.
         self.cmd_q_body_link = (0.0, 0.0, 0.0, 1.0)
-        self.last_command_time = 0.0
 
         self.tf_buffer = Buffer()
         # spin_thread=True is required. On this node's executor, a lookup that
@@ -442,7 +441,6 @@ class ClickToGimbal(Node):
         # Only a dispatched center resets the joint state, so the state
         # keeps matching the joints when the command cannot go out.
         self.cmd_q_body_link = (0.0, 0.0, 0.0, 1.0)
-        self.last_command_time = self.get_clock().now().nanoseconds / 1e9
         return True
 
     def _send_command(self, request) -> bool:
@@ -651,7 +649,6 @@ class ClickToGimbal(Node):
         cmd.angular_velocity_y = math.nan
         cmd.angular_velocity_z = math.nan
         self.setpoint_pub.publish(cmd)
-        self.last_command_time = self.get_clock().now().nanoseconds / 1e9
 
 
 def main() -> None:
