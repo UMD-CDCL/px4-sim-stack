@@ -387,13 +387,13 @@
         }
       ],
       "disabledTopics": [
+        "/mavros/global_position/global",
         "/mavros/sim_state/global_position",
         "/mavros/global_position/raw/fix"
       ],
       "followTopic": "",
       "layer": "satellite",
       "topicColors": {
-        "/mavros/global_position/global": "#4e98e2",
         "/camera/nadir/footprint_geojson": "#4dd0e1",
         "/camera/gimbal/footprint_geojson": "#ffb74d",
         "/scoring/nadir/true_positives": "#00ff00",
@@ -401,7 +401,8 @@
         "/scoring/gimbal/true_positives": "#00ff00",
         "/scoring/gimbal/false_positives": "#ff0000",
         "/mavros/global_position/raw/fix": "#f5774d",
-        "/mavros/sim_state/global_position": "#f7df71"
+        "/mavros/sim_state/global_position": "#f7df71",
+        "/gimbal/roi_geojson": "#ffb74d"
       },
       "zoomLevel": 20,
       "maxNativeZoom": 19,
@@ -410,46 +411,48 @@
       "topicConfig": {
         "/mavros/global_position/global": {
           "historyMode": "none",
-          "pointSize": 6,
-          "pointDisplayMode": "diamond",
-          "order": 1
+          "pointSize": 6
         },
         "/scoring/nadir/true_positives": {
           "historyMode": "previous",
-          "pointSize": 6,
-          "order": 5
+          "pointSize": 6
         },
         "/scoring/nadir/false_positives": {
           "historyMode": "previous",
           "pointSize": 6,
-          "pointDisplayMode": "cross",
-          "order": 3
+          "pointDisplayMode": "cross"
         },
         "/scoring/gimbal/true_positives": {
           "historyMode": "previous",
-          "pointSize": 6,
-          "order": 4
+          "pointSize": 6
         },
         "/scoring/gimbal/false_positives": {
           "historyMode": "previous",
           "pointSize": 6,
-          "pointDisplayMode": "cross",
-          "order": 2
+          "pointDisplayMode": "cross"
         },
         "/mavros/global_position/raw/fix": {
           "historyMode": "none",
-          "pointSize": 6,
-          "order": 6
+          "pointSize": 6
         },
         "/mavros/sim_state/global_position": {
           "historyMode": "none",
-          "pointSize": 6,
-          "order": 7
+          "pointSize": 6
         },
         "/ground_truth/geojson": {
           "historyMode": "none",
           "pointSize": 6,
           "pointDisplayMode": "pin"
+        },
+        "/gimbal/roi_geojson": {
+          "historyMode": "none",
+          "pointSize": 6,
+          "pointDisplayMode": "pin"
+        },
+        "/drone/position": {
+          "historyMode": "none",
+          "pointSize": 6,
+          "pointDisplayMode": "arrowhead"
         }
       },
       "layers": []

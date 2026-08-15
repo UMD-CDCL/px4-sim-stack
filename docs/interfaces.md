@@ -272,15 +272,16 @@ The baseline stack publishes:
 | `/camera/nadir/camera_info` | `sensor_msgs/CameraInfo` |
 | `/perception/<camera>/detections` | `vision_msgs/Detection2DArray` |
 | `/gimbal/click_mode` | `std_msgs/String`, latched, the current click mode |
-| `/gimbal/roi` | `sensor_msgs/NavSatFix`, latched, the held region of interest |
+| `/gimbal/roi_geojson` | `foxglove_msgs/GeoJSON`, latched, the held region of interest as one point feature, an empty collection when unset |
 | `/gimbal/roi_local` | `geometry_msgs/PointStamped`, latched, the same point in the reference frame |
+| `/drone/position` | `foxglove_msgs/LocationFix`, the vehicle fix with its compass heading |
 
 One topic goes the other way. `click_to_gimbal` subscribes to
 `/foxglove/cursor/click` (`geometry_msgs/PointStamped`, x and y in gimbal
 image pixels). Its `click_mode` parameter decides what one click does, and
 one parameter means the modes cannot overlap. `roi`, the default, projects
 the pixel onto the ground plane and holds the camera on that world point:
-the point is published latched on `/gimbal/roi` and `/gimbal/roi_local`,
+the point is published latched on `/gimbal/roi_geojson` and `/gimbal/roi_local`,
 and the hold survives vehicle motion. `point` turns the camera onto the
 pixel, holds pitch and roll against the horizon, and lets yaw follow the
 vehicle heading, the gimbal protocol's default lock flags. `off` ignores

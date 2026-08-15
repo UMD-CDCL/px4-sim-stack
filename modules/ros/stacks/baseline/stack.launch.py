@@ -18,6 +18,7 @@ What runs here
   image_ground_projector  the live image laid flat on the ground, one per camera
   fiducial_alignment  frame correction against a surveyed point, off by default
   click_to_gimbal     a click on the gimbal image becomes a gimbal command
+  drone_position      the vehicle fix with its heading, for the Map panel
   foxglove_bridge     a websocket for the browser, on port 8765
 
 Every per-camera stage runs once for each camera and nothing merges the two.
@@ -448,6 +449,19 @@ def generate_launch_description() -> LaunchDescription:
         ] if "gimbal" in CAMERAS else []),
 
         # ------------------------------------------------- observability
+        # The vehicle fix paired with the compass heading, as one
+        # foxglove_msgs/LocationFix. NavSatFix cannot carry a heading, and
+        # with one the Map panel draws an arrowhead that turns with the
+        # drone.
+        Node(
+            package="sim_bridge",
+            executable="drone_position",
+            name="drone_position",
+            output="screen",
+            respawn=True,
+            respawn_delay=RESPAWN_DELAY_S,
+        ),
+
         Node(
             package="foxglove_bridge",
             executable="foxglove_bridge",

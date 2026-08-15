@@ -29,6 +29,7 @@ setup(
             "detection_annotator = sim_bridge.detection_annotator:main",
             "image_ground_projector = sim_bridge.image_ground_projector:main",
             "click_to_gimbal = sim_bridge.click_to_gimbal:main",
+            "drone_position = sim_bridge.drone_position:main",
         ],
     },
 )

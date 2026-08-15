@@ -38,9 +38,13 @@ ahead, pitch and yaw zero, the same center command the recovery path
 uses. The mode does not change.
 
 In roi mode the node casts the pixel ray with the camera intrinsics,
-meets the ground plane, and records the region of interest: latched
-NavSatFix on /gimbal/roi, altitude in the datum of the vehicle's own
-fix, and a latched reference-frame PointStamped on /gimbal/roi_local.
+meets the ground plane, and records the region of interest: a latched
+reference-frame PointStamped on /gimbal/roi_local, and one latched
+GeoJSON point feature on /gimbal/roi_geojson for the Map panel. GeoJSON
+rather than a NavSatFix because a latched NavSatFix cannot be taken
+back: when the hold is released, by a point click or by /gimbal/center,
+an empty feature collection goes out and the marker leaves the map, the
+same clearing the footprints use.
 The ground plane sits rel_alt below the camera, or at ground_z with
 use_rel_alt false, the same convention the ground projector uses. A ray
 that meets no ground within the footprint limit drops the click with a
@@ -129,15 +133,15 @@ Subscribes
     /mavros/gimbal_control/manager/status   who holds control
     /mavros/local_position/pose             the vehicle attitude
     /mavros/global_position/rel_alt         the ground plane height
-    /mavros/global_position/global          the ROI altitude datum
+    /mavros/global_position/global          feeds the map origin
     /mavros/altitude                        AMSL for DO_SET_ROI_LOCATION,
                                             mavlink convention only
 
 Publishes
     /mavros/gimbal_control/manager/set_attitude
     /gimbal/click_mode   std_msgs/String, latched
-    /gimbal/roi          sensor_msgs/NavSatFix, latched
     /gimbal/roi_local    geometry_msgs/PointStamped, latched
+    /gimbal/roi_geojson  foxglove_msgs/GeoJSON, latched, empty when unset
 
 Serves
     /gimbal/click_mode/{roi,point,off}   std_srvs/Trigger
@@ -146,6 +150,7 @@ Serves
 
 from __future__ import annotations
 
+import json
 import math
 import time
 
@@ -159,10 +164,16 @@ from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import (QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile,
                        qos_profile_sensor_data)
-from sensor_msgs.msg import CameraInfo, NavSatFix, NavSatStatus
+from sensor_msgs.msg import CameraInfo, NavSatFix
 from std_msgs.msg import Float64, String
 from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformListener
+
+try:
+    from foxglove_msgs.msg import GeoJSON
+    HAVE_FOXGLOVE = True
+except ImportError:
+    HAVE_FOXGLOVE = False
 
 from sim_bridge.geo import MapOrigin
 from sim_bridge.projection import (GROUND_VIEW_MAX_DISTANCE_M,
@@ -265,7 +276,6 @@ class ClickToGimbal(Node):
         self.info: CameraInfo | None = None
         self.vehicle_q: tuple[float, float, float, float] | None = None
         self.rel_alt: float | None = None
-        self.fix_altitude: float | None = None
         self.amsl: float | None = None
         # None until the first manager status arrives. True while these
         # MAVROS_SYSID and MAVROS_COMPID ids hold primary control.
@@ -283,10 +293,16 @@ class ClickToGimbal(Node):
             "/mavros/gimbal_control/manager/set_attitude", 10)
         self.mode_pub = self.create_publisher(String, "/gimbal/click_mode",
                                               LATCHED)
-        self.roi_fix_pub = self.create_publisher(NavSatFix, "/gimbal/roi",
-                                                 LATCHED)
         self.roi_point_pub = self.create_publisher(PointStamped,
                                                    "/gimbal/roi_local", LATCHED)
+        self.roi_geojson_pub = None
+        if HAVE_FOXGLOVE:
+            self.roi_geojson_pub = self.create_publisher(
+                GeoJSON, "/gimbal/roi_geojson", LATCHED)
+        else:
+            self.get_logger().error(
+                "foxglove_msgs is missing, so the Map panel gets no ROI "
+                "marker. Install ros-$ROS_DISTRO-foxglove-msgs.")
         self.claim_client = self.create_client(CommandLong, "/mavros/cmd/command")
         # CommandInt carries only the ROI location commands, which exist
         # only on the mavlink convention.
@@ -370,8 +386,6 @@ class ClickToGimbal(Node):
         self.rel_alt = float(msg.data)
 
     def _on_fix(self, msg: NavSatFix) -> None:
-        if msg.status.status >= 0:
-            self.fix_altitude = msg.altitude
         self.origin.on_fix(msg)
 
     def _on_altitude(self, msg: Altitude) -> None:
@@ -417,6 +431,7 @@ class ClickToGimbal(Node):
             self.roi_tracker.clear()
         if self.roi_active:
             self.roi_active = False
+            self._publish_roi_geojson(None)
             if self.earth_referenced:
                 self._send_roi_none()
 
@@ -649,17 +664,25 @@ class ClickToGimbal(Node):
             self.get_logger().warn(
                 "ROI has no lat/lon yet: the map origin is not known")
             return
-        fix = NavSatFix()
-        fix.header.stamp = stamp
-        fix.header.frame_id = self.reference
-        fix.status.status = NavSatStatus.STATUS_FIX
-        fix.status.service = NavSatStatus.SERVICE_GPS
-        fix.latitude, fix.longitude = latlon
-        # The ground in the datum of the vehicle's own fix.
-        fix.altitude = (float("nan")
-                        if self.fix_altitude is None or self.rel_alt is None
-                        else self.fix_altitude - self.rel_alt)
-        self.roi_fix_pub.publish(fix)
+        self._publish_roi_geojson(latlon)
+
+    def _publish_roi_geojson(self, latlon) -> None:
+        """Publish the ROI to the Map panel as one GeoJSON point, or clear
+        it with an empty collection when latlon is None."""
+        if self.roi_geojson_pub is None:
+            return
+        features = []
+        if latlon is not None:
+            features.append({
+                "type": "Feature",
+                "geometry": {"type": "Point",
+                             "coordinates": [latlon[1], latlon[0]]},
+                "properties": {"name": "gimbal roi"},
+            })
+        msg = GeoJSON()
+        msg.geojson = json.dumps(
+            {"type": "FeatureCollection", "features": features})
+        self.roi_geojson_pub.publish(msg)
 
     def _send_roi_location(self, hit) -> None:
         latlon = self.origin.to_lla(hit[0], hit[1])
