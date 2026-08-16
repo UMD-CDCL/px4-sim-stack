@@ -383,6 +383,18 @@ The anchor follows from that. Looking obliquely, the bottom edge of a box is
 where the subject meets the ground. Looking straight down, the box centre is.
 Using the wrong one shifts every estimate by a constant.
 
+### Localization mode
+
+`LOCALIZATION_MODE` selects what the detection ray intersects. `plane`, the
+default, uses a flat plane latched at the takeoff altitude. `scene` uses the
+terrain grid and the building roofs from `worlds/<SCENE>_surface.json`, which
+`scenegen build` writes next to the world. Walls are not in the surface on
+purpose: a detection on a wall lands on the terrain behind it. Over sloped
+ground or a roof, `scene` removes the offset that a flat plane bakes into
+every estimate. A missing surface file falls back to the plane, with an
+error in the log. Scenes that were built before the surface export need one
+`scenegen build` re-run to produce the file.
+
 ### Timestamps
 
 `detections_bridge` stamps each `Detection2DArray` with DeepStream's frame

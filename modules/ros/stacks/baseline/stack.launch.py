@@ -90,6 +90,15 @@ SCORING_GATE_M = float(os.environ.get("SCORING_GATE_M", "2.0"))
 SCORING_DETECTION_RADIUS_M = float(
     os.environ.get("SCORING_DETECTION_RADIUS_M", "10.0"))
 
+# How a detection ray becomes a ground position. "plane" intersects the
+# flat plane latched at the takeoff altitude. "scene" intersects the
+# terrain and the roofs from the surface file scenegen build writes next
+# to the world; walls are not in it on purpose. A missing surface file
+# falls back to the plane, with an error in the log.
+LOCALIZATION_MODE = os.environ.get("LOCALIZATION_MODE", "plane")
+SCENE = os.environ.get("SCENE", "")
+SURFACE_FILE = f"/scenes/worlds/{SCENE}_surface.json" if SCENE else ""
+
 # Whose verdicts color the truth bubbles. The nadir camera keeps most of
 # the scene in view from above, so counting it marks every target it sees
 # as a miss even while only the gimbal hunts. The gimbal alone is the
@@ -324,6 +333,8 @@ def generate_launch_description() -> LaunchDescription:
                     "use_rel_alt": True,
                     "anchor": CAMERA[cam]["anchor"],
                     "output_frame": OUTPUT_FRAME,
+                    "localization_mode": LOCALIZATION_MODE,
+                    "surface_file": SURFACE_FILE,
                 }],
             )
             for cam in CAMERAS

@@ -15,7 +15,7 @@ The module runs on demand and exits. The sim never depends on it.
 | `import-casualties` | Load a lat/lon casualty file into the scene's targets | targets in `scene.json` |
 | `detect` | Find cars and buses in the imagery | vehicles in `scene.json` |
 | `edit` | Serve the browser editor on port 8090 | your corrections in `scene.json` |
-| `build` | Write the world, terrain model and target scenario | files in `modules/sim/scenes/` |
+| `build` | Write the world, the localization surface, terrain model and target scenario | files in `modules/sim/scenes/` |
 
 Each stage is resumable. Run `detect` again after an edit and it replaces
 only its own detections; hand-placed vehicles stay.

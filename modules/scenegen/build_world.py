@@ -6,6 +6,9 @@ Outputs, all into modules/sim/scenes/ (SCENES_DIR):
   worlds/<name>.sdf                     the world. <world name> equals the
                                         file name; the sim entrypoint
                                         refuses a mismatch.
+  worlds/<name>_surface.json            terrain heights and roof boxes, for
+                                        scene-based localization
+                                        (sim_bridge/scene_surface.py)
   models/<name>_terrain/                textured terrain mesh model
   scenarios/<name>_casualties.yaml      always; spawn_scenario.py places
                                         the targets at run time, so they
@@ -27,6 +30,7 @@ numbers to PX4 and QGC; apply them, or the map and the world disagree.
 
 from __future__ import annotations
 
+import json
 import math
 import shutil
 import sys
@@ -137,6 +141,37 @@ def _building_top_at(scene: scene_model.SceneSpec, grid, meta, east: float,
         roof = _building_base(grid, meta, building, origin_alt) + building.height_m
         top = roof if top is None else max(top, roof)
     return top
+
+
+def surface_json(scene: scene_model.SceneSpec, grid, meta) -> str:
+    """The localization surface: terrain heights and roof boxes, scene z.
+
+    sim_bridge/scene_surface.py reads this to intersect detection rays with
+    the scene instead of a flat plane. Walls are absent on purpose: the
+    surface holds only what a camera above looks down onto. A building with
+    a model override keeps its box roof, the best height on record.
+    """
+    origin_alt = scene.origin_alt_m
+    n = meta["grid_n"]
+    terrain = [[round(float(grid[j, i]) - origin_alt, 2) for i in range(n + 1)]
+               for j in range(n + 1)]
+    buildings = [{
+        "east_m": round(building.east_m, 2),
+        "north_m": round(building.north_m, 2),
+        "length_m": round(building.length_m, 2),
+        "width_m": round(building.width_m, 2),
+        "yaw_deg": round(building.yaw_deg, 2),
+        "roof_z": round(_building_base(grid, meta, building, origin_alt)
+                        + building.height_m, 2),
+    } for building in scene.buildings if building.enabled]
+    return json.dumps({
+        "format": "scenegen-surface/1",
+        "side_m": meta["side_m"],
+        "grid_n": n,
+        "row0": meta.get("row0", "south"),
+        "terrain_z": terrain,
+        "buildings": buildings,
+    })
 
 
 def build_target_scenario(scene: scene_model.SceneSpec, grid, meta,
@@ -398,6 +433,8 @@ def run(scene_data_dir: Path, scenes_dir: Path) -> int:
     world_path = scenes_dir / "worlds" / f"{scene.name}.sdf"
     world_path.parent.mkdir(parents=True, exist_ok=True)
     world_path.write_text(world)
+    surface_path = world_path.with_name(f"{scene.name}_surface.json")
+    surface_path.write_text(surface_json(scene, grid, meta))
 
     fiducial_lat, fiducial_lon, fiducial_alt = frame.enu_to_latlon(
         scene.fiducial["east_m"], scene.fiducial["north_m"],
@@ -425,6 +462,7 @@ def run(scene_data_dir: Path, scenes_dir: Path) -> int:
         + "".join(f"# {key}={value}\n" for key, value in geo_meta.items()))
 
     report = [f"world      {world_path}",
+              f"surface    {surface_path}",
               f"terrain    {mesh_stats['vertices']} vertices, "
               f"{mesh_stats['triangles']} triangles, "
               f"z {mesh_stats['z_min']} to {mesh_stats['z_max']} m",
@@ -441,11 +479,12 @@ def run(scene_data_dir: Path, scenes_dir: Path) -> int:
     if abs(mesh_stats["z_min"]) > 5 or abs(mesh_stats["z_max"]) > 5:
         report.append("")
         report.append(f"NOTE: terrain spans {mesh_stats['z_min']} to "
-                      f"{mesh_stats['z_max']} m around the origin. The ROS "
-                      "localization nodes project onto a flat plane at the "
-                      "takeoff altitude; expect offsets over ground far above "
-                      "or below the takeoff point. Flatten zones can level "
-                      "the areas you fly over.")
+                      f"{mesh_stats['z_max']} m around the origin. With "
+                      "LOCALIZATION_MODE=plane the ROS localizers project "
+                      "onto a flat plane at the takeoff altitude; expect "
+                      "offsets over ground far above or below the takeoff "
+                      "point. LOCALIZATION_MODE=scene reads the surface "
+                      "file instead and follows the terrain and the roofs.")
     text = "\n".join(report)
     (scene_data_dir / "build_report.txt").write_text(text + "\n")
     print(text)

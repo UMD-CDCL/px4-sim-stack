@@ -309,6 +309,11 @@ services:
       # camera sees most of the scene from above, so counting it marks every
       # target in its view as a miss even while only the gimbal hunts.
       GROUND_TRUTH_CAMERAS: ${GROUND_TRUTH_CAMERAS:-gimbal}
+      # How a detection ray becomes a ground position: "plane" uses a flat
+      # plane at the takeoff altitude, "scene" follows the terrain and the
+      # roofs from worlds/<SCENE>_surface.json, written by scenegen build.
+      LOCALIZATION_MODE: ${LOCALIZATION_MODE:-plane}
+      SCENE: ${SCENE:-recon_field}
       RESOLVED_TRUTH_FILE: /scenes/ground_truth_actual.yaml
       # Which camera feeds detection and localization. The nadir camera
       # looks straight down, which is what an overhead search wants, and

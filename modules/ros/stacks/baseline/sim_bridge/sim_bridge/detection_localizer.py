@@ -2,7 +2,13 @@
 """Turn image-space detections into ground positions.
 
 For each detection this casts a ray through its box anchor, intersects the
-ground plane, and reports where the object stands.
+scene, and reports where the object stands. Two localization modes select
+what the scene is. "plane" intersects a flat plane latched at the takeoff
+altitude. "scene" intersects the terrain and the roofs from the surface
+file that scenegen build writes next to the world; walls are not in it,
+so a detection on a wall lands on the terrain behind it. A missing or
+unreadable surface file falls back to the plane, with an error in the
+log.
 
 Every transform lookup uses the detection stamp, which is the frame time
 DeepStream reported, not the arrival time. Detections arrive 60 to 90 ms
@@ -43,6 +49,7 @@ from sim_bridge.geo import GroundPlane
 from sim_bridge.projection import (PERSON_HEIGHT_M, intersect_ground,
                                    intrinsics_ready, quat_rotate,
                                    ray_in_optical, slant_range)
+from sim_bridge.scene_surface import SceneSurface
 
 # ------------------------------------------------------------------- tunables
 # Diagonal of the 6x6 pose covariance, in m^2 and rad^2, as
@@ -81,6 +88,8 @@ class DetectionLocalizer(Node):
         # it to the fiducial frame to remove the surveyed bias, see
         # fiducial_alignment.py.
         self.declare_parameter("output_frame", "")
+        self.declare_parameter("localization_mode", "plane")
+        self.declare_parameter("surface_file", "")
 
         self.camera = self.get_parameter("camera").value
         self.optical = self.get_parameter("optical_frame").value
@@ -91,6 +100,7 @@ class DetectionLocalizer(Node):
         # takeoff altitude. See sim_bridge/geo.py.
         self.ground_plane = GroundPlane(self)
         self.warned_output = False
+        self.surface = self._load_surface()
 
         self.tf_buffer = Buffer(cache_time=Duration(seconds=10.0))
         # spin_thread=True is required. On this node's executor, a lookup that
@@ -118,7 +128,33 @@ class DetectionLocalizer(Node):
         self.create_timer(30.0, self._report)
         self.get_logger().info(
             f"localizing {self.camera} into {self.reference} from "
-            f"{self.optical}, anchor={self.anchor}")
+            f"{self.optical}, anchor={self.anchor}, "
+            f"onto {'the scene surface' if self.surface else 'the ground plane'}")
+
+    def _load_surface(self) -> SceneSurface | None:
+        """The scene surface when localization_mode asks for it and the
+        file loads. None means the ground plane."""
+        mode = self.get_parameter("localization_mode").value
+        if mode == "plane":
+            return None
+        path = self.get_parameter("surface_file").value
+        if mode != "scene":
+            self.get_logger().warn(
+                f"localization_mode {mode!r} is not 'plane' or 'scene'. "
+                f"Using the ground plane.")
+            return None
+        try:
+            surface = SceneSurface.load(path)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            self.get_logger().error(
+                f"localization_mode is 'scene' but no usable surface at "
+                f"'{path}' ({exc}). Using the ground plane. Re-run scenegen "
+                f"build to write the surface next to the world.")
+            return None
+        self.get_logger().info(
+            f"scene surface: {len(surface.roofs)} roofs, terrain "
+            f"{surface.side:.0f} m square")
+        return surface
 
     def _on_info(self, msg: CameraInfo) -> None:
         self.info = msg
@@ -166,7 +202,10 @@ class DetectionLocalizer(Node):
                 v += det.bbox.size_y / 2.0
 
             direction = quat_rotate(rotation, ray_in_optical(u, v, self.info.k))
-            ground_point = intersect_ground(origin, direction, ground_z, MAX_RANGE)
+            if self.surface is not None:
+                ground_point = self.surface.intersect(origin, direction, MAX_RANGE)
+            else:
+                ground_point = intersect_ground(origin, direction, ground_z, MAX_RANGE)
             if ground_point is None:
                 self.no_ground += 1
                 continue
