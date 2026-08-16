@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 """Terrain: the elevation grid becomes a textured COLLADA mesh.
 
-COLLADA rather than OBJ because it states its own up axis. Gazebo reads
-<up_axis>Z_UP</up_axis> and the mesh lands in the world the way the grid
-meant it, with no guess about axis conventions.
-
 Texture coordinates come from the imagery georeference, vertex by vertex,
 not from a linear stretch. The crop's sub-pixel edges and the slight
 mercator curvature across the square are absorbed here, so a feature in
-the texture sits over its own coordinates.
+the texture sits over its own coordinates. The same mapping serves the
+building roofs, so a roof shows the pixels that sit over its footprint.
 """
 
 from __future__ import annotations
@@ -19,14 +16,10 @@ from pathlib import Path
 import numpy as np
 import shapely
 
+import collada
 import geo
 import sources
 from scene_model import FlattenZone
-
-# ------------------------------------------------------------------- tunables
-# A visual sits exactly on the collision surface and z-fights nothing,
-# because the terrain is the only thing at its height. No offset needed.
-DAE_FLOAT_FORMAT = "{:.3f}"
 
 
 def load_elevation(scene_data_dir: Path) -> tuple[np.ndarray, dict]:
@@ -83,19 +76,26 @@ def apply_flatten_zones(grid: np.ndarray, meta: dict, zones: list[FlattenZone],
     return flattened
 
 
-def _vertex_uvs(frame: geo.GeoFrame, imagery: dict,
-                east: np.ndarray, north: np.ndarray) -> np.ndarray:
+def imagery_pixels(frame: geo.GeoFrame, imagery: dict,
+                   east_north: np.ndarray) -> np.ndarray:
+    """The raster pixel over each ENU point, shape (n, 2)."""
     georef = sources.RasterGeoref(imagery["zoom"], imagery["origin_px"],
                                   imagery["origin_py"])
-    uvs = np.zeros((east.size, 2))
-    flat_east, flat_north = east.ravel(), north.ravel()
-    for index in range(east.size):
-        lat, lon, _ = frame.enu_to_latlon(float(flat_east[index]), float(flat_north[index]))
-        px, py = georef.latlon_to_raster_px(lat, lon)
-        # COLLADA texture space puts v=0 at the image bottom; pixel rows
-        # count from the top.
-        uvs[index] = (px / imagery["width_px"], 1.0 - py / imagery["height_px"])
-    return uvs
+    pixels = np.zeros((len(east_north), 2))
+    for index, (east, north) in enumerate(east_north):
+        lat, lon, _ = frame.enu_to_latlon(float(east), float(north))
+        pixels[index] = georef.latlon_to_raster_px(lat, lon)
+    return pixels
+
+
+def imagery_uv(frame: geo.GeoFrame, imagery: dict,
+               east_north: np.ndarray) -> np.ndarray:
+    """Texture coordinates over each ENU point, shape (n, 2). COLLADA
+    texture space puts v=0 at the image bottom; pixel rows count from the
+    top."""
+    pixels = imagery_pixels(frame, imagery, east_north)
+    return np.column_stack([pixels[:, 0] / imagery["width_px"],
+                            1.0 - pixels[:, 1] / imagery["height_px"]])
 
 
 def _vertex_normals(z: np.ndarray, step_m: float) -> np.ndarray:
@@ -131,108 +131,14 @@ def write_terrain_dae(frame: geo.GeoFrame, grid_amsl: np.ndarray, meta: dict,
 
     positions = np.column_stack([east.ravel(), north.ravel(), z.ravel()])
     normals = _vertex_normals(z, step)
-    uvs = _vertex_uvs(frame, imagery, east, north)
+    uvs = imagery_uv(frame, imagery,
+                     np.column_stack([east.ravel(), north.ravel()]))
     triangles = _triangle_indices(n)
 
-    fmt = DAE_FLOAT_FORMAT.format
-    positions_text = " ".join(fmt(v) for v in positions.ravel())
-    normals_text = " ".join(fmt(v) for v in normals.ravel())
-    uvs_text = " ".join("{:.6f}".format(v) for v in uvs.ravel())
-    # One index stream per input, Blender style. Position, normal and uv
-    # share indices here, so each corner repeats its index three times.
-    # Gazebo's collada-to-physics path needs this layout: inputs that share
-    # offset 0 reach ODE with no index array and crash the server.
-    corner_indices = np.repeat(triangles.ravel(), 3).reshape(-1, 3)
-    indices_text = " ".join(str(i) for i in corner_indices.ravel())
-    vertex_count = positions.shape[0]
-
-    dae = f"""<?xml version="1.0" encoding="utf-8"?>
-<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
- <asset>
-  <unit name="meter" meter="1"/>
-  <up_axis>Z_UP</up_axis>
- </asset>
- <library_images>
-  <image id="satellite-image"><init_from>{texture_rel_path}</init_from></image>
- </library_images>
- <library_effects>
-  <effect id="terrain-effect">
-   <profile_COMMON>
-    <newparam sid="satellite-surface">
-     <surface type="2D"><init_from>satellite-image</init_from></surface>
-    </newparam>
-    <newparam sid="satellite-sampler">
-     <sampler2D><source>satellite-surface</source></sampler2D>
-    </newparam>
-    <technique sid="common">
-     <lambert>
-      <diffuse><texture texture="satellite-sampler" texcoord="UVMAP"/></diffuse>
-     </lambert>
-    </technique>
-   </profile_COMMON>
-  </effect>
- </library_effects>
- <library_materials>
-  <material id="terrain-material"><instance_effect url="#terrain-effect"/></material>
- </library_materials>
- <library_geometries>
-  <geometry id="terrain-geometry">
-   <mesh>
-    <source id="terrain-positions">
-     <float_array id="terrain-positions-array" count="{vertex_count * 3}">{positions_text}</float_array>
-     <technique_common>
-      <accessor source="#terrain-positions-array" count="{vertex_count}" stride="3">
-       <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
-      </accessor>
-     </technique_common>
-    </source>
-    <source id="terrain-normals">
-     <float_array id="terrain-normals-array" count="{vertex_count * 3}">{normals_text}</float_array>
-     <technique_common>
-      <accessor source="#terrain-normals-array" count="{vertex_count}" stride="3">
-       <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
-      </accessor>
-     </technique_common>
-    </source>
-    <source id="terrain-uvs">
-     <float_array id="terrain-uvs-array" count="{vertex_count * 2}">{uvs_text}</float_array>
-     <technique_common>
-      <accessor source="#terrain-uvs-array" count="{vertex_count}" stride="2">
-       <param name="S" type="float"/><param name="T" type="float"/>
-      </accessor>
-     </technique_common>
-    </source>
-    <vertices id="terrain-vertices">
-     <input semantic="POSITION" source="#terrain-positions"/>
-    </vertices>
-    <triangles material="terrain-material-symbol" count="{triangles.shape[0]}">
-     <input semantic="VERTEX" source="#terrain-vertices" offset="0"/>
-     <input semantic="NORMAL" source="#terrain-normals" offset="1"/>
-     <input semantic="TEXCOORD" source="#terrain-uvs" offset="2" set="0"/>
-     <p>{indices_text}</p>
-    </triangles>
-   </mesh>
-  </geometry>
- </library_geometries>
- <library_visual_scenes>
-  <visual_scene id="terrain-scene">
-   <node id="terrain-node">
-    <instance_geometry url="#terrain-geometry">
-     <bind_material>
-      <technique_common>
-       <instance_material symbol="terrain-material-symbol" target="#terrain-material">
-        <bind_vertex_input semantic="UVMAP" input_semantic="TEXCOORD" input_set="0"/>
-       </instance_material>
-      </technique_common>
-     </bind_material>
-    </instance_geometry>
-   </node>
-  </visual_scene>
- </library_visual_scenes>
- <scene><instance_visual_scene url="#terrain-scene"/></scene>
-</COLLADA>
-"""
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(dae)
-    return {"vertices": vertex_count, "triangles": int(triangles.shape[0]),
+    collada.write_dae(
+        out_path,
+        [collada.Material(id="terrain-material", texture=texture_rel_path)],
+        [collada.Geometry(id="terrain", positions=positions, normals=normals,
+                          uvs=uvs, groups=[("terrain-material", triangles)])])
+    return {"vertices": positions.shape[0], "triangles": int(triangles.shape[0]),
             "z_min": round(float(z.min()), 2), "z_max": round(float(z.max()), 2)}

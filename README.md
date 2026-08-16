@@ -45,7 +45,8 @@ its neighbors.
 
 ```bash
 ./px4sim doctor    # check the driver, docker, GPU runtime and X11
-./px4sim setup     # clone PX4 into ./src, create the ROS workspace
+./px4sim setup     # clone PX4 into ./src, create the ROS workspace,
+                   # and build the scenes that ship in modules/scenegen/data
 ./px4sim build     # build the images, about 20 minutes
 ./px4sim start     # start the stack
 ```

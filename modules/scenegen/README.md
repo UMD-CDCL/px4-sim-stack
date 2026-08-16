@@ -2,8 +2,9 @@
 
 Give it a coordinate and a side length. It builds a Gazebo scene of that
 square from real map data: terrain from elevation tiles, the satellite
-image draped over the terrain, OSM buildings as boxes, and detected
-vehicles as models. A browser editor then fixes what the data got wrong.
+image draped over the terrain, OSM buildings extruded from their
+footprints with the same image over the roofs, and detected vehicles as
+models. A browser editor then fixes what the data got wrong.
 
 The module runs on demand and exits. The sim never depends on it.
 
@@ -15,7 +16,7 @@ The module runs on demand and exits. The sim never depends on it.
 | `import-casualties` | Load a lat/lon casualty file into the scene's targets | targets in `scene.json` |
 | `detect` | Find cars and buses in the imagery | vehicles in `scene.json` |
 | `edit` | Serve the browser editor on port 8090 | your corrections in `scene.json` |
-| `build` | Write the world, the localization surface, terrain model and target scenario | files in `modules/sim/scenes/` |
+| `build` | Write the world, the localization surface, the terrain and building models, the Foxglove building payload and the target scenario | files in `modules/sim/scenes/` |
 
 Each stage is resumable. Run `detect` again after an edit and it replaces
 only its own detections; hand-placed vehicles stay.
@@ -49,6 +50,17 @@ The first `genscene` builds the image, which downloads the CPU torch wheel
 and takes a few minutes. Paths you give the container, such as the
 casualty file, must sit under a mounted directory: `/data` is
 `modules/scenegen/data` and `/scenes` is `modules/sim/scenes`.
+
+Git carries the scene sources (`scene.json`, the elevation grid and the
+satellite image, per scene in `data/`), not the build products in
+`modules/sim/scenes`. `./px4sim setup` runs `genscene build-all`, which
+builds every scene in `data/` in one pass, so a fresh clone starts with
+every scene in place. Run it yourself after a pull that brings new
+scenes:
+
+```bash
+./px4sim genscene build-all
+```
 
 `build` prints the two .env lines that select everything:
 
@@ -93,7 +105,7 @@ Everything is graphical. You never edit a file to fix the scene.
   Sizes and target names stay one at a time.
 - Undo and redo cover every edit: `Ctrl+Z` and `Ctrl+Y`, or the arrow
   buttons in the toolbar. One drag is one step.
-- Click a building to set its height, replace its box with a model URI,
+- Click a building to set its height, replace its mesh with a model URI,
   or take it out of the world (`Del` toggles an OSM building, removes a
   hand-placed one).
 - `+ Target`: click to place a ground-truth casualty (green circle with
@@ -112,6 +124,37 @@ Everything is graphical. You never edit a file to fix the scene.
 
 Save writes straight back to `scene.json`; the previous version becomes
 `scene.json.bak`. Then run `build` again.
+
+## Buildings
+
+A building is its OSM footprint extruded to its height. A concave shape
+stays concave, and a courtyard hole in the map becomes a hole in the
+mesh. The roof carries the satellite image through the same georeference
+as the terrain, so the real roof pixels sit on it. Walls get one flat
+gray per building. The localization surface holds the same footprint, so
+a detection ray into a courtyard lands on the ground inside it, not on a
+phantom roof.
+
+The scene square truncates every footprint. The terrain and the imagery
+end at the square, so the part outside it is cut off rather than left to
+float in the void. A building that stands entirely outside the square is
+left out, and the build report counts the drops.
+
+The editor edits the rectangle around the footprint. A drag, a turn or a
+resize carries the outline and its holes along, and the build extrudes
+the moved outline. A building placed by hand has no outline and builds
+as its rectangle. A model URI set in the editor still replaces the whole
+mesh with that model.
+
+The Foxglove 3D panel shows the same buildings. The build writes
+`worlds/<name>_buildings.json`, and the `scene_buildings` node publishes
+it as one latched MarkerArray on `/scene/buildings`, with the roofs in
+their satellite colors. Buildings only: vehicle props stay out of the
+panel on purpose.
+
+A scene fetched before courtyard support holds no holes in `scene.json`.
+`create --force` refetches the footprints, but it also discards your
+edits, so keep the scene as it is unless a courtyard matters.
 
 ## Ground-truth targets
 
@@ -150,7 +193,7 @@ full configuration.
 |---|---|---|
 | Imagery | Google satellite tiles (default) or Esri | Check the imagery terms for your use. `--imagery esri` switches. |
 | Elevation | AWS terrain tiles, terrarium encoding | Public, no key. About 4 m per pixel. |
-| Buildings | OSM Overpass | Height from the `height` tag, else levels x 3.2 m, else 6 m. |
+| Buildings | OSM Overpass | Ways and multipolygon relations, courtyard holes included. Height from the `height` tag, else levels x 3.2 m, else 6 m. |
 | Vehicle models | Gazebo Fuel | Downloaded by the sim on first world load. |
 
 ## Known limits

@@ -205,6 +205,9 @@
         }
       },
       "topics": {
+        "/scene/buildings": {
+          "visible": true
+        },
         "/ground_truth/markers": {
           "visible": true
         },

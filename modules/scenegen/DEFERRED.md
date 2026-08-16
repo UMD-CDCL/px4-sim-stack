@@ -7,8 +7,6 @@ back in. An entry here is a decision, not an omission.
 
 | Feature | Why it waits | Where it plugs in |
 |---|---|---|
-| Extruded meshes for L-shaped buildings | The first pass boxes each footprint with its minimum-area rectangle. A concave footprint needs triangulated extrusion and roof geometry. `scene.json` keeps the full outline per building, so the data survives. | `build_world.py`, next to the box emitter |
-| OSM multipolygons with holes | Ways and simple outer rings cover most buildings. Courtyard holes need ring assembly and even-odd triangulation. The fetch report counts the skipped rings. | `sources.py: fetch_osm_buildings` |
 | Automatic overhang detection | `bridge=yes` and `man_made=canopy` tags could seed flatten zones. The manual flatten-zone tool covers the need first. | `sources.py` and `scene_model.py` |
 | Vehicle models scaled to the detected size | SDF `<include>` cannot scale a model. A generated per-instance wrapper could. Each vehicle keeps its detected size in `scene.json`, unused for now. | `build_world.py: vehicle emitter` |
 | Vehicle front against back | Overhead imagery fixes the axis, not the direction. A heading can sit 180 degrees off. The editor has a flip button. | `detect_vehicles.py` |
@@ -23,3 +21,12 @@ back in. An entry here is a decision, not an omission.
 |---|---|---|
 | Detector recall tuning | Confidence 0.10 with the DOTA model finds most vehicles, and the editor absorbs the rest. Zoom-20 imagery or an aerial-trained model would lift recall. Not measured yet. | `detect_vehicles.py` tunables |
 | Fuel model heading offsets | Each Fuel vehicle has its own forward axis. A per-model yaw offset table would correct a model that spawns sideways. All offsets stay 0 until someone measures them in the sim. | `build_world.py: VEHICLE_MODEL_POOLS` |
+
+## Cut with the extruded buildings
+
+| Feature | Why it waits | Where it plugs in |
+|---|---|---|
+| Wall textures from imagery | Satellite pixels see roofs, not walls. A wall texture would smear the roof edge downward. The flat per-building gray reads better until oblique imagery exists. | `build_world.py: write_buildings_model` |
+| Hole editing in the editor | Holes come from OSM and ride along with every rectangle edit. Drawing or reshaping one by hand needs a polygon tool the editor does not have. | `editor.html`, next to the flatten-zone tool |
+| Outline redraw for scenes edited before the sync | The editor now moves the outline with the rectangle. A building nudged before that keeps its outline where it was; the build corrects it through the fitted-rectangle transform, but the editor draws the stored points. | `editor.html: draw`, with a JS minimum-area rectangle |
+| Roof detail above the sampling grid | The Foxglove roof colors sample one satellite pixel per vertex on an 8 m grid. Finer detail means more vertices in every latched message. | `build_world.py: ROOF_SAMPLE_EDGE_M` |

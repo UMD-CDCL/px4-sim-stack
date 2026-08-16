@@ -5,9 +5,11 @@ Run: python3 tests/test_build.py
 
 A synthetic scene with hand-computable geometry goes through the real
 build: flat ground at 100 m AMSL with one 10 m bump, one 20x10x7 building
-rotated 30 degrees, one car heading 45 degrees, one flatten zone over the
-bump, and two casualties at known offsets. Every expected number below is
-computed by hand from those inputs.
+rotated 30 degrees, one L-shaped building, one building with a courtyard
+hole, one building straddling the square edge, one building fully outside
+the square, one car heading 45 degrees, one flatten zone over the bump,
+and casualties at known offsets. Every expected number below is computed
+by hand from those inputs.
 """
 
 from __future__ import annotations
@@ -28,10 +30,15 @@ import yaml
 from PIL import Image
 
 import build_world
+import building_mesh
 import geo
 import scene_model
 import sources
 import terrain_mesh
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "modules" / "ros"
+                       / "stacks" / "baseline" / "sim_bridge"))
+from sim_bridge import scene_surface  # noqa: E402 - path set just above
 
 CENTER_LAT, CENTER_LON = 38.9869, -76.9426
 SIDE_M = 200.0
@@ -69,12 +76,43 @@ def make_synthetic_scene(data_dir: Path) -> scene_model.SceneSpec:
                "m_per_px": geo.ground_resolution_m_per_px(CENTER_LAT, zoom),
                "origin_px": float(left), "origin_py": float(top)}
 
+    # The L covers a 20 x 20 square minus its 12 x 12 northeast notch, so
+    # its area is 400 - 144 = 256. The courtyard ring is a 16 x 16 square
+    # minus a 4 x 4 hole, 240. Rectangle fields come from the same fit the
+    # create stage uses, so the build maps the outlines through identity.
+    l_outline = [[-40.0, -70.0], [-20.0, -70.0], [-20.0, -62.0], [-32.0, -62.0],
+                 [-32.0, -50.0], [-40.0, -50.0], [-40.0, -70.0]]
+    court_outline = [[52.0, 32.0], [68.0, 32.0], [68.0, 48.0], [52.0, 48.0],
+                     [52.0, 32.0]]
+    court_hole = [[58.0, 38.0], [62.0, 38.0], [62.0, 42.0], [58.0, 42.0],
+                  [58.0, 38.0]]
+
+    def outlined(building_id: str, outline: list, holes: list,
+                 height_m: float) -> scene_model.Building:
+        east, north, length, width, yaw = scene_model.oriented_rectangle(
+            [tuple(p) for p in outline])
+        return scene_model.Building(
+            id=building_id, east_m=round(east, 2), north_m=round(north, 2),
+            length_m=round(length, 2), width_m=round(width, 2),
+            yaw_deg=round(yaw, 2), height_m=height_m,
+            outline_m=outline, holes_m=holes)
+
     scene = scene_model.SceneSpec(
         name="synthtest", center_lat=CENTER_LAT, center_lon=CENTER_LON,
         side_m=SIDE_M, origin_alt_m=ORIGIN_ALT, imagery=imagery, elevation=meta,
         buildings=[scene_model.Building(
             id="b_test", east_m=30.0, north_m=-20.0, length_m=20.0, width_m=10.0,
-            yaw_deg=30.0, height_m=7.0)],
+            yaw_deg=30.0, height_m=7.0),
+            outlined("b_lshape", l_outline, [], 5.0),
+            outlined("b_court", court_outline, [court_hole], 10.0),
+            # Straddles the east edge of the 200 m square: x 90..110 clips
+            # to 90..100, so half the 20 x 10 rectangle survives.
+            scene_model.Building(
+                id="b_edge", east_m=100.0, north_m=-80.0, length_m=20.0,
+                width_m=10.0, yaw_deg=0.0, height_m=6.0),
+            scene_model.Building(
+                id="b_outside", east_m=140.0, north_m=140.0, length_m=10.0,
+                width_m=10.0, yaw_deg=0.0, height_m=6.0)],
         vehicles=[scene_model.Vehicle(
             id="v_1", cls="car", east_m=10.0, north_m=5.0, length_m=4.5,
             width_m=1.9, heading_deg=45.0, source="manual")],
@@ -90,7 +128,17 @@ def make_synthetic_scene(data_dir: Path) -> scene_model.SceneSpec:
                                east_m=30.0, north_m=-20.0, on_building=True),
             scene_model.Target(id="t_manual_4", name="casualty_offbuilding",
                                east_m=80.0, north_m=80.0, on_building=True,
-                               agl_m=1.5)])
+                               agl_m=1.5),
+            scene_model.Target(id="t_manual_5", name="casualty_notch",
+                               east_m=-25.0, north_m=-55.0, on_building=True),
+            scene_model.Target(id="t_manual_6", name="casualty_court",
+                               east_m=60.0, north_m=40.0, on_building=True),
+            scene_model.Target(id="t_manual_7", name="casualty_ring",
+                               east_m=55.0, north_m=40.0, on_building=True),
+            scene_model.Target(id="t_manual_8", name="casualty_onclip",
+                               east_m=95.0, north_m=-80.0, on_building=True),
+            scene_model.Target(id="t_manual_9", name="casualty_offclip",
+                               east_m=105.0, north_m=-80.0, on_building=True)])
     scene_model.save_scene(scene, data_dir / "scene.json")
     return scene
 
@@ -117,10 +165,10 @@ def run_build(tmp: Path) -> tuple[Path, Path]:
     # The file imports into the scene; the scene is what the build reads.
     imported, kept = scene_model.import_casualty_file(scene, casualties)
     check("import adds file targets and keeps hand-placed ones",
-          imported == 3 and kept == 4, f"imported {imported}, kept {kept}")
+          imported == 3 and kept == 9, f"imported {imported}, kept {kept}")
     imported, kept = scene_model.import_casualty_file(scene, casualties)
     check("a re-import replaces imports, not hand-placed targets",
-          imported == 3 and kept == 4 and len(scene.targets) == 7)
+          imported == 3 and kept == 9 and len(scene.targets) == 12)
     scene_model.save_scene(scene, data_dir / "scene.json")
     code = build_world.run(data_dir, scenes_dir)
     check("build exits 0", code == 0)
@@ -139,21 +187,11 @@ def test_world(scenes_dir: Path) -> None:
           abs(float(spherical.find("latitude_deg").text) - CENTER_LAT) < 1e-6
           and abs(float(spherical.find("elevation").text) - ORIGIN_ALT) < 0.01)
 
-    buildings = [m for m in world.findall("model") if m.get("name") == "synthtest_buildings"]
-    check("one buildings model", len(buildings) == 1)
-    link = buildings[0].find("link")
-    size = link.find("visual/geometry/box/size").text.split()
-    check("building box is 20 x 10 x 7",
-          [float(v) for v in size] == [20.0, 10.0, 7.0], " ".join(size))
-    pose = [float(v) for v in link.find("pose").text.split()]
-    check("building sits on flat ground, center at half height",
-          abs(pose[0] - 30) < 0.01 and abs(pose[1] + 20) < 0.01
-          and abs(pose[2] - 3.5) < 0.01, str(pose[:3]))
-    check("building yaw is 30 degrees in radians",
-          abs(pose[5] - math.radians(30)) < 1e-3, f"{pose[5]:.4f}")
-
     includes = {inc.find("name").text: inc for inc in world.findall("include")}
     check("terrain include present", "synthtest_terrain" in includes)
+    check("buildings model include present", "synthtest_buildings" in includes
+          and includes["synthtest_buildings"].find("uri").text
+          == "model://synthtest_buildings")
     vehicle = includes.get("v_1")
     check("vehicle include present", vehicle is not None)
     if vehicle is not None:
@@ -210,6 +248,103 @@ def test_terrain(scenes_dir: Path) -> None:
     check("texture copied into the model", texture.is_file())
 
 
+def test_buildings(scenes_dir: Path) -> None:
+    print("buildings: mesh, texture, viz payload, surface")
+    model_dir = scenes_dir / "models" / "synthtest_buildings"
+    check("satellite texture copied into the buildings model",
+          (model_dir / "materials" / "textures" / "satellite.jpg").is_file())
+
+    ns = {"c": "http://www.collada.org/2005/11/COLLADASchema"}
+    root = ET.parse(model_dir / "meshes" / "buildings.dae").getroot()
+    check("buildings mesh states Z_UP",
+          root.find("c:asset/c:up_axis", ns).text == "Z_UP")
+    geometries = root.findall("c:library_geometries/c:geometry", ns)
+    check("one geometry per extruded building, the outside one dropped",
+          len(geometries) == 4
+          and "b_outside-geometry" not in [g.get("id") for g in geometries],
+          str([g.get("id") for g in geometries]))
+    for geometry in geometries:
+        groups = geometry.findall("c:mesh/c:triangles", ns)
+        symbols = [g.get("material") for g in groups]
+        check(f"{geometry.get('id')} carries a textured roof and a wall group",
+              "satellite-symbol" in symbols
+              and any(s.endswith("-wall-symbol") for s in symbols), str(symbols))
+        for group in groups:
+            indices = group.find("c:p", ns).text.split()
+            check(f"{geometry.get('id')}/{group.get('material')} triples "
+                  f"its indices",
+                  len(indices) == 9 * int(group.get("count")))
+    arrays = {a.get("id"): a for a in
+              root.iter("{http://www.collada.org/2005/11/COLLADASchema}float_array")}
+    positions = np.fromstring(arrays["b_test-positions-array"].text,
+                              sep=" ").reshape(-1, 3)
+    check("rectangle fallback tops out at its height and reaches the ground",
+          abs(positions[:, 2].max() - 7.0) < 1e-3
+          and abs(positions[:, 2].min()) < 1e-3,
+          f"z {positions[:, 2].min()}..{positions[:, 2].max()}")
+    normal_count = np.fromstring(arrays["b_test-normals-array"].text,
+                                 sep=" ").size
+    check("per-vertex normals match the vertex count",
+          normal_count == positions.size)
+
+    viz = json.loads(
+        (scenes_dir / "worlds" / "synthtest_buildings.json").read_text())
+    check("viz payload format", viz["format"] == "scenegen-buildings/1"
+          and viz["frame"] == "map")
+    entries = {b["id"]: b for b in viz["buildings"]}
+    check("viz carries the extruded buildings, not the outside one",
+          sorted(entries) == ["b_court", "b_edge", "b_lshape", "b_test"],
+          str(sorted(entries)))
+
+    def roof_area(entry: dict) -> float:
+        triangles = np.array(entry["roof"]["points"]).reshape(-1, 3, 3)
+        return building_mesh.triangle_area_m2(triangles[:, :, :2])
+
+    check("L roof area is the L, not its bounding box",
+          abs(roof_area(entries["b_lshape"]) - 256.0) < 1.0,
+          f"{roof_area(entries['b_lshape']):.1f}")
+    check("courtyard roof area excludes the hole",
+          abs(roof_area(entries["b_court"]) - 240.0) < 1.0,
+          f"{roof_area(entries['b_court']):.1f}")
+    check("the straddling building keeps only its inside half",
+          abs(roof_area(entries["b_edge"]) - 100.0) < 0.5,
+          f"{roof_area(entries['b_edge']):.1f}")
+    edge_points = np.array(entries["b_edge"]["roof"]["points"]
+                           + entries["b_edge"]["walls"]["points"])
+    check("no clipped vertex pokes past the square",
+          float(edge_points[:, 0].max()) <= 100.0 + 0.01,
+          f"max east {edge_points[:, 0].max():.2f}")
+    surface_data = json.loads(
+        (scenes_dir / "worlds" / "synthtest_surface.json").read_text())
+    largest = max(abs(value) for b in surface_data["buildings"]
+                  for ring in [b["footprint"], *b["holes"]]
+                  for point in ring for value in point)
+    check("surface footprints stay inside the square", largest <= 100.01,
+          f"max |coordinate| {largest:.2f}")
+    check("a satellite color pairs with every roof vertex",
+          all(len(b["roof"]["points"]) % 3 == 0
+              and len(b["roof"]["colors"]) == len(b["roof"]["points"])
+              for b in viz["buildings"]))
+    sampled = entries["b_test"]["roof"]["colors"][0]
+    check("the synthetic satellite color lands on the roof, JPEG noise aside",
+          all(abs(sampled[i] - [90 / 255, 120 / 255, 80 / 255][i]) < 0.02
+              for i in range(3)),
+          str(sampled))
+
+    surface = scene_surface.SceneSurface.load(
+        str(scenes_dir / "worlds" / "synthtest_surface.json"))
+    down = (0.0, 0.0, -1.0)
+    courtyard = surface.intersect((60.0, 40.0, 50.0), down, 200.0)
+    check("a ray into the courtyard reaches the terrain",
+          courtyard is not None and abs(courtyard[2]) < 0.05, str(courtyard))
+    ring = surface.intersect((55.0, 40.0, 50.0), down, 200.0)
+    check("a ray onto the courtyard ring lands on the 10 m roof",
+          ring is not None and abs(ring[2] - 10.0) < 0.01, str(ring))
+    notch = surface.intersect((-25.0, -55.0, 50.0), down, 200.0)
+    check("a ray into the L notch reaches the terrain",
+          notch is not None and abs(notch[2]) < 0.05, str(notch))
+
+
 def test_flatten_modes() -> None:
     print("flatten zone modes")
     grid = np.array([[100.0, 100], [110, 120]], dtype=np.float32)
@@ -231,18 +366,38 @@ def test_scenario(scenes_dir: Path, tmp: Path) -> None:
     data = yaml.safe_load(scenario_path.read_text())
     entities = {e["name"]: e for e in data["entities"]}
     check("enabled targets are in, the disabled one is out",
-          len(entities) == 6 and "casualty_off" not in entities,
+          len(entities) == 11 and "casualty_off" not in entities,
           str(sorted(entities)))
     check("hand-placed target came through", "person_manual" in entities)
 
     roof = entities.get("casualty_roof")
-    check("snap to building lands on the roof of the 7 m box",
+    check("snap to building lands on the roof of the 7 m building",
           roof is not None and abs(roof["pose"][2] - 7.0) < 0.01,
           str(roof["pose"][2] if roof else None))
     fallback = entities.get("casualty_offbuilding")
     check("snap with no building there falls back to terrain plus offset",
           fallback is not None and abs(fallback["pose"][2] - 1.5) < 0.01,
           str(fallback["pose"][2] if fallback else None))
+    notch = entities.get("casualty_notch")
+    check("snap inside the L notch falls to the terrain",
+          notch is not None and abs(notch["pose"][2]) < 0.01,
+          str(notch["pose"][2] if notch else None))
+    court = entities.get("casualty_court")
+    check("snap inside the courtyard falls to the terrain",
+          court is not None and abs(court["pose"][2]) < 0.01,
+          str(court["pose"][2] if court else None))
+    ring = entities.get("casualty_ring")
+    check("snap on the courtyard ring lands on the 10 m roof",
+          ring is not None and abs(ring["pose"][2] - 10.0) < 0.01,
+          str(ring["pose"][2] if ring else None))
+    onclip = entities.get("casualty_onclip")
+    check("snap on the kept half of a clipped building lands on its roof",
+          onclip is not None and abs(onclip["pose"][2] - 6.0) < 0.01,
+          str(onclip["pose"][2] if onclip else None))
+    offclip = entities.get("casualty_offclip")
+    check("snap on the cut-away half falls to the terrain",
+          offclip is not None and abs(offclip["pose"][2]) < 0.01,
+          str(offclip["pose"][2] if offclip else None))
 
     alpha = entities.get("casualty_alpha")
     check("designated name and model survive",
@@ -331,6 +486,7 @@ def main() -> int:
         _, scenes_dir = run_build(tmp)
         test_world(scenes_dir)
         test_terrain(scenes_dir)
+        test_buildings(scenes_dir)
         test_flatten_modes()
         test_scenario(scenes_dir, tmp)
         test_legacy_alt_key()

@@ -388,7 +388,9 @@ Using the wrong one shifts every estimate by a constant.
 `LOCALIZATION_MODE` selects what the detection ray intersects. `plane`, the
 default, uses a flat plane latched at the takeoff altitude. `scene` uses the
 terrain grid and the building roofs from `worlds/<SCENE>_surface.json`, which
-`scenegen build` writes next to the world. Walls are not in the surface on
+`scenegen build` writes next to the world. A roof is the building's own
+footprint polygon, courtyard holes cut out, so a ray into a courtyard lands
+on the ground inside it. Walls are not in the surface on
 purpose: a detection on a wall lands on the terrain behind it. Over sloped
 ground or a roof, `scene` removes the offset that a flat plane bakes into
 every estimate. A missing surface file falls back to the plane, with an
@@ -442,6 +444,7 @@ recall figure would describe neither.
 | `/ground_truth/markers` | `visualization_msgs/MarkerArray`, the truth bubbles and their name labels |
 | `/ground_truth/truth_3d` | `vision_msgs/Detection3DArray` |
 | `/ground_truth/geojson` | `foxglove_msgs/GeoJSON`, every target in one message, for the Map panel. Each target is a gate-radius circle in its status color, plus a pin whose tooltip shows the name and altitude |
+| `/scene/buildings` | `visualization_msgs/MarkerArray`, latched: the scene's buildings as triangle meshes for the 3D panel, roofs colored from the satellite image. Buildings only; vehicle props stay out on purpose |
 | `/perception/<camera>/detections_3d` | `vision_msgs/Detection3DArray` with covariance |
 | `/camera/<camera>/footprint` | `geometry_msgs/PolygonStamped`, truncated at 100 m |
 | `/camera/<camera>/footprint_geojson` | `foxglove_msgs/GeoJSON`, the same outline for the Map panel. The Foxglove layout colors it to match the 3D panel line |

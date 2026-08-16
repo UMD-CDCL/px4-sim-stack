@@ -27,6 +27,9 @@ SCENE_FORMAT = "scenegen-scene/1"
 # Keep buildings whose footprint touches the square grown by this margin,
 # so a wall on the boundary still stands.
 BUILDING_KEEP_MARGIN_M = 5.0
+# Below this fitted length or width, an outline is a line or a point, and
+# the build falls back to the rectangle fields.
+MIN_FOOTPRINT_EXTENT_M = 0.5
 FIDUCIAL_DIAMETER_M = 0.5
 # A target without a designated model draws from this pool at build time,
 # by a stable hash of its name, so a rebuild never reshuffles the draw.
@@ -63,6 +66,7 @@ class Building:
     height_source: str = "default"
     name: str = ""
     outline_m: list = field(default_factory=list)   # [[east, north], ...] closed
+    holes_m: list = field(default_factory=list)     # inner rings, same shape
     source: str = "osm"
     model_uri: str | None = None  # a higher-detail stand-in replaces the box
     enabled: bool = True
@@ -216,6 +220,71 @@ def oriented_rectangle(points_en: list[tuple[float, float]]) -> tuple[float, flo
     return center.x, center.y, length, width, yaw
 
 
+def _rectangle_ring(east: float, north: float, length: float, width: float,
+                    yaw_deg: float) -> list[list[float]]:
+    yaw = math.radians(yaw_deg)
+    cos_yaw, sin_yaw = math.cos(yaw), math.sin(yaw)
+    half_l, half_w = length / 2.0, width / 2.0
+    return [[east + dx * cos_yaw - dy * sin_yaw, north + dx * sin_yaw + dy * cos_yaw]
+            for dx, dy in [(-half_l, -half_w), (half_l, -half_w),
+                           (half_l, half_w), (-half_l, half_w)]]
+
+
+def placed_footprint(building: Building) -> tuple[list, list]:
+    """The footprint the build extrudes, in scene ENU: (outer ring, holes),
+    rings open (no repeated last point), outer counterclockwise and holes
+    clockwise, the winding building_mesh.extrude expects.
+
+    The editor edits only the rectangle fields (center, yaw, length,
+    width) and never touches the outline. So the delta between the
+    outline's own fitted rectangle and the stored one is exactly the
+    user's edit, and this maps the outline and its holes through it. An
+    unedited building maps through the identity. A building without a
+    usable outline gets the rectangle itself.
+    """
+    ring = [p for p in building.outline_m]
+    if len(ring) >= 2 and ring[0] == ring[-1]:
+        ring = ring[:-1]
+    if len(ring) < 3:
+        return _rectangle_ring(building.east_m, building.north_m,
+                               building.length_m, building.width_m,
+                               building.yaw_deg), []
+    fit_east, fit_north, fit_length, fit_width, fit_yaw = oriented_rectangle(ring)
+    if fit_length < MIN_FOOTPRINT_EXTENT_M or fit_width < MIN_FOOTPRINT_EXTENT_M:
+        return _rectangle_ring(building.east_m, building.north_m,
+                               building.length_m, building.width_m,
+                               building.yaw_deg), []
+    scale_length = building.length_m / fit_length
+    scale_width = building.width_m / fit_width
+    fit = math.radians(fit_yaw)
+    placed = math.radians(building.yaw_deg)
+    cos_fit, sin_fit = math.cos(fit), math.sin(fit)
+    cos_placed, sin_placed = math.cos(placed), math.sin(placed)
+
+    def transform(east: float, north: float) -> list[float]:
+        de, dn = east - fit_east, north - fit_north
+        local_x = (de * cos_fit + dn * sin_fit) * scale_length
+        local_y = (-de * sin_fit + dn * cos_fit) * scale_width
+        return [building.east_m + local_x * cos_placed - local_y * sin_placed,
+                building.north_m + local_x * sin_placed + local_y * cos_placed]
+
+    outer = [transform(e, n) for e, n in ring]
+    if not shapely.LinearRing(outer).is_ccw:
+        outer.reverse()
+    holes = []
+    for hole in building.holes_m:
+        hole_ring = [p for p in hole]
+        if len(hole_ring) >= 2 and hole_ring[0] == hole_ring[-1]:
+            hole_ring = hole_ring[:-1]
+        if len(hole_ring) < 3:
+            continue
+        placed_hole = [transform(e, n) for e, n in hole_ring]
+        if shapely.LinearRing(placed_hole).is_ccw:
+            placed_hole.reverse()
+        holes.append(placed_hole)
+    return outer, holes
+
+
 def buildings_from_osm(raw_buildings: list[dict], frame, side_m: float) -> tuple[list[Building], int]:
     """Fetched footprints to Building entries in scene ENU. Returns the
     buildings and how many fell outside the square and were dropped."""
@@ -226,6 +295,8 @@ def buildings_from_osm(raw_buildings: list[dict], frame, side_m: float) -> tuple
     for raw in raw_buildings:
         outline_en = [tuple(frame.latlon_to_enu(lat, lon)[:2])
                       for lat, lon in raw["outline"]]
+        holes_en = [[tuple(frame.latlon_to_enu(lat, lon)[:2]) for lat, lon in ring]
+                    for ring in raw.get("holes", [])]
         polygon = shapely.Polygon(outline_en)
         if not polygon.is_valid:
             polygon = polygon.buffer(0)
@@ -239,5 +310,7 @@ def buildings_from_osm(raw_buildings: list[dict], frame, side_m: float) -> tuple
             length_m=round(length, 2), width_m=round(width, 2),
             yaw_deg=round(yaw, 2), height_m=raw["height_m"],
             height_source=raw["height_source"], name=raw["name"],
-            outline_m=[[round(e, 2), round(n, 2)] for e, n in outline_en]))
+            outline_m=[[round(e, 2), round(n, 2)] for e, n in outline_en],
+            holes_m=[[[round(e, 2), round(n, 2)] for e, n in ring]
+                     for ring in holes_en]))
     return kept, dropped

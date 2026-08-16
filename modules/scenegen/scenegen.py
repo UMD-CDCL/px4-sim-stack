@@ -30,6 +30,10 @@ building.
     scenegen.py edit   --name campus
     scenegen.py build  --name campus
 
+build-all builds every scene in the data directory in one run. A fresh
+clone carries the scene sources but none of the build products, so this
+is the setup step that fills modules/sim/scenes.
+
 Then: SCENE=campus and the printed HOME_* values in .env, and restart the
 sim. See README.md.
 """
@@ -131,8 +135,8 @@ def cmd_create(args: argparse.Namespace) -> int:
     sources.write_buildings_geojson(raw_buildings, directory / "buildings.geojson")
     buildings, dropped = scene_model.buildings_from_osm(raw_buildings, frame, args.side)
     print(f"      {len(buildings)} kept ({report['ways']} ways, "
-          f"{report['relation_rings']} relation rings, {dropped} outside the square, "
-          f"{report['skipped_relations_holes']} holes ignored)")
+          f"{report['relation_rings']} relation rings with {report['holes']} holes, "
+          f"{dropped} outside the square)")
 
     scene = scene_model.SceneSpec(
         name=args.name, center_lat=lat, center_lon=lon, side_m=args.side,
@@ -230,6 +234,35 @@ def cmd_all(args: argparse.Namespace) -> int:
     return build_world.run(directory, SCENES_DIR)
 
 
+def cmd_build_all(_args: argparse.Namespace) -> int:
+    """Build every scene that has a scene.json in DATA_DIR. One failure
+    does not stop the rest; the exit code reports whether any failed."""
+    import build_world
+
+    scene_dirs = sorted(path for path in DATA_DIR.iterdir()
+                        if (path / "scene.json").is_file()) \
+        if DATA_DIR.is_dir() else []
+    if not scene_dirs:
+        print(f"No scenes to build. DATA_DIR is {DATA_DIR}")
+        return 0
+    failures = []
+    for directory in scene_dirs:
+        print(f"=== build {directory.name}")
+        try:
+            code = build_world.run(directory, SCENES_DIR)
+        except Exception as error:  # noqa: BLE001 - report, then keep building
+            print(f"{directory.name}: {error}", file=sys.stderr)
+            code = 1
+        if code:
+            failures.append(directory.name)
+        print()
+    print(f"{len(scene_dirs) - len(failures)} of {len(scene_dirs)} scenes "
+          f"built into {SCENES_DIR}")
+    if failures:
+        print("failed: " + ", ".join(failures), file=sys.stderr)
+    return 1 if failures else 0
+
+
 def cmd_list(_args: argparse.Namespace) -> int:
     if not DATA_DIR.is_dir():
         print(f"No scenes yet. DATA_DIR is {DATA_DIR}")
@@ -320,6 +353,11 @@ def main() -> int:
                                 "into modules/sim/scenes, all from scene.json")
     build.add_argument("--name", required=True)
     build.set_defaults(handler=cmd_build)
+
+    build_all = sub.add_parser("build-all",
+                               help="build every scene in the data directory; "
+                                    "the setup step for a fresh clone")
+    build_all.set_defaults(handler=cmd_build_all)
 
     scene_list = sub.add_parser("list", help="show the scenes on disk")
     scene_list.set_defaults(handler=cmd_list)

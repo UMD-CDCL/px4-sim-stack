@@ -250,6 +250,57 @@ def resolve_building_height(tags: dict) -> tuple[float, str]:
     return DEFAULT_BUILDING_HEIGHT_M, "default"
 
 
+def _stitch_rings(fragments: list[list[list[float]]]) -> tuple[list[list[list[float]]], int]:
+    """Join way fragments into closed rings by their shared endpoints.
+
+    Overpass returns a multipolygon boundary as the member ways, in any
+    order and any direction. Endpoint coordinates of adjacent fragments
+    are bit-identical, because they come from one OSM node, so exact
+    comparison joins them. Returns (rings, fragments left unclosed).
+    """
+    rings: list[list[list[float]]] = []
+    open_fragments: list[list[list[float]]] = []
+    unclosed = 0
+    for fragment in fragments:
+        if len(fragment) >= 4 and fragment[0] == fragment[-1]:
+            rings.append(fragment)
+        elif len(fragment) >= 2:
+            open_fragments.append(fragment)
+        else:
+            unclosed += 1
+    while open_fragments:
+        chain = open_fragments.pop(0)
+        grew = True
+        while grew and chain[0] != chain[-1]:
+            grew = False
+            for index, fragment in enumerate(open_fragments):
+                if fragment[0] == chain[-1]:
+                    chain += fragment[1:]
+                elif fragment[-1] == chain[-1]:
+                    chain += fragment[-2::-1]
+                else:
+                    continue
+                open_fragments.pop(index)
+                grew = True
+                break
+        if len(chain) >= 4 and chain[0] == chain[-1]:
+            rings.append(chain)
+        else:
+            unclosed += 1
+    return rings, unclosed
+
+
+def _ring_contains(ring: list[list[float]], lat: float, lon: float) -> bool:
+    """Even-odd test with lon as x and lat as y. Buildings are small, so
+    treating degrees as planar is exact enough to pick the right ring."""
+    inside = False
+    for (lat1, lon1), (lat2, lon2) in zip(ring, ring[1:]):
+        if (lat1 > lat) != (lat2 > lat) \
+                and lon < lon1 + (lat - lat1) / (lat2 - lat1) * (lon2 - lon1):
+            inside = not inside
+    return inside
+
+
 def fetch_osm_buildings(frame: geo.GeoFrame, side_m: float) -> tuple[list[dict], dict]:
     """Building outlines inside the square, from Overpass.
 
@@ -259,8 +310,9 @@ def fetch_osm_buildings(frame: geo.GeoFrame, side_m: float) -> tuple[list[dict],
       height_m      resolved height
       height_source "height tag" | "levels tag" | "default"
       outline       [[lat, lon], ...], closed ring
-    Relations contribute their outer rings as independent outlines; holes
-    are ignored (see DEFERRED.md).
+      holes         inner rings inside the outline, same shape, often []
+    A relation contributes one building per assembled outer ring, and each
+    inner ring becomes a hole of the outer ring that contains it.
     """
     half = side_m / 2.0 + BUILDING_FETCH_MARGIN_M
     south, west, _ = frame.enu_to_latlon(-half, -half)
@@ -284,39 +336,50 @@ def fetch_osm_buildings(frame: geo.GeoFrame, side_m: float) -> tuple[list[dict],
     if reply is None:
         raise RuntimeError(f"every Overpass mirror failed: {last_error}")
 
-    elements = reply.json().get("elements", [])
-    buildings: list[dict] = []
-    report = {"ways": 0, "relation_rings": 0, "skipped_open_rings": 0,
-              "skipped_relations_holes": 0}
+    return buildings_from_overpass(reply.json().get("elements", []))
 
-    def add_ring(ring_id: str, tags: dict, points: list[dict]) -> None:
-        outline = [[p["lat"], p["lon"]] for p in points]
+
+def buildings_from_overpass(elements: list[dict]) -> tuple[list[dict], dict]:
+    """The element parsing behind fetch_osm_buildings, network-free so the
+    tests can feed it a canned reply."""
+    buildings: list[dict] = []
+    report = {"ways": 0, "relation_rings": 0, "holes": 0, "skipped_open_rings": 0}
+
+    def add_building(ring_id: str, tags: dict, outline: list[list[float]],
+                     holes: list[list[list[float]]]) -> None:
         if len(outline) >= 3 and outline[0] != outline[-1]:
-            outline.append(outline[0])
+            outline = outline + [outline[0]]
         if len(outline) < 4:
             report["skipped_open_rings"] += 1
             return
         height, height_source = resolve_building_height(tags)
         buildings.append({"id": ring_id, "name": tags.get("name", ""),
                           "height_m": round(height, 2),
-                          "height_source": height_source, "outline": outline})
+                          "height_source": height_source, "outline": outline,
+                          "holes": holes})
+
+    def member_fragments(element: dict, role: str) -> list[list[list[float]]]:
+        return [[[p["lat"], p["lon"]] for p in member["geometry"]]
+                for member in element.get("members", [])
+                if member.get("role") == role and "geometry" in member]
 
     for element in elements:
         tags = element.get("tags", {})
         if element["type"] == "way" and "geometry" in element:
-            add_ring(f"way/{element['id']}", tags, element["geometry"])
+            add_building(f"way/{element['id']}", tags,
+                         [[p["lat"], p["lon"]] for p in element["geometry"]], [])
             report["ways"] += 1
         elif element["type"] == "relation":
-            outer_index = 0
-            for member in element.get("members", []):
-                if member.get("role") != "outer" or "geometry" not in member:
-                    if member.get("role") == "inner":
-                        report["skipped_relations_holes"] += 1
-                    continue
-                add_ring(f"relation/{element['id']}-{outer_index}", tags,
-                         member["geometry"])
-                outer_index += 1
+            outers, unclosed = _stitch_rings(member_fragments(element, "outer"))
+            inners, inner_unclosed = _stitch_rings(member_fragments(element, "inner"))
+            report["skipped_open_rings"] += unclosed + inner_unclosed
+            for outer_index, outer in enumerate(outers):
+                holes = [inner for inner in inners
+                         if _ring_contains(outer, inner[0][0], inner[0][1])]
+                add_building(f"relation/{element['id']}-{outer_index}", tags,
+                             outer, holes)
                 report["relation_rings"] += 1
+                report["holes"] += len(holes)
     return buildings, report
 
 
@@ -324,7 +387,8 @@ def write_buildings_geojson(buildings: list[dict], path: Path) -> None:
     """The raw footprints in lat/lon, for inspection in any GeoJSON viewer."""
     features = []
     for building in buildings:
-        coordinates = [[[lon, lat] for lat, lon in building["outline"]]]
+        coordinates = [[[lon, lat] for lat, lon in ring]
+                       for ring in [building["outline"]] + building.get("holes", [])]
         features.append({"type": "Feature",
                          "properties": {key: building[key] for key in
                                         ("id", "name", "height_m", "height_source")},

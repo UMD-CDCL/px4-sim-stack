@@ -1,0 +1,35 @@
+{
+ "name": "allsmoke",
+ "center_lat": 39.0968,
+ "center_lon": -120.0324,
+ "side_m": 120.0,
+ "origin_alt_m": 1897.55,
+ "imagery": {
+  "source": "esri",
+  "zoom": 19,
+  "file": "satellite.jpg",
+  "width_px": 518,
+  "height_px": 520,
+  "m_per_px": 0.2317,
+  "origin_px": 22357283,
+  "origin_py": 51248490
+ },
+ "elevation": {
+  "grid_n": 128,
+  "side_m": 120.0,
+  "zoom": 15,
+  "row0": "south",
+  "origin_alt_m": 1897.55,
+  "min_m": 1897.55,
+  "max_m": 1897.55
+ },
+ "fiducial": {
+  "east_m": 0.0,
+  "north_m": 0.0,
+  "diameter_m": 0.5
+ },
+ "buildings": [],
+ "vehicles": [],
+ "flatten_zones": [],
+ "format": "scenegen-scene/1"
+}

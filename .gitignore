@@ -7,10 +7,32 @@ __pycache__/
 .xauth
 modules/sim/scenes/ground_truth_actual.yaml
 
-# Fetched tiles, weights and per-scene work products. A scene rebuilds from
-# scene.json, and scene.json alone is worth committing if you want to keep
-# a scene.
-modules/scenegen/data/
+# Scene sources stay in git: scene.json, the elevation grid and the
+# satellite image are what a rebuild needs, and a rebuild from them is
+# deterministic. Tile caches, detector weights and per-scene work
+# products do not.
+modules/scenegen/data/weights/
+modules/scenegen/data/*/tiles/
+modules/scenegen/data/*/report/
+modules/scenegen/data/*/build_report.txt
+modules/scenegen/data/*/env.snippet
+modules/scenegen/data/*/buildings.geojson
+modules/scenegen/data/*/scene.json.bak
+
+# Everything scenegen build writes into the sim is a build product: the
+# worlds with their localization surfaces and Foxglove building payloads,
+# the terrain and building models, and the casualty scenarios.
+# `./px4sim genscene build-all` (run by setup) rebuilds them all from
+# modules/scenegen/data. A hand-written world or scenario gets its own
+# unignore line here.
+modules/sim/scenes/worlds/*.sdf
+modules/sim/scenes/worlds/*_surface.json
+modules/sim/scenes/worlds/*_buildings.json
+modules/sim/scenes/models/*_terrain/
+modules/sim/scenes/models/*_buildings/
+modules/sim/scenes/scenarios/*_casualties.yaml
+!modules/sim/scenes/worlds/recon_field.sdf
+!modules/sim/scenes/scenarios/urban_casualties.yaml
 
 # Seeded from the DeepStream image on first start, and the TensorRT engine is
 # rebuilt for each GPU, driver and TensorRT version. Neither belongs in git.

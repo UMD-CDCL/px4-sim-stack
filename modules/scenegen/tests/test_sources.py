@@ -119,6 +119,47 @@ def test_terrarium_decode() -> None:
           and sources.parse_height_m("tall") is None)
 
 
+def test_multipolygon_assembly() -> None:
+    print("multipolygon assembly, canned Overpass reply")
+
+    def way_points(*latlon):
+        return [{"lat": lat, "lon": lon} for lat, lon in latlon]
+
+    # The outer square arrives as two open fragments, the second reversed,
+    # the way Overpass hands relation members over. The inner square is a
+    # courtyard.
+    a, b, c, d = (10.0, 10.0), (10.0, 11.0), (11.0, 11.0), (11.0, 10.0)
+    hole = [(10.4, 10.4), (10.4, 10.6), (10.6, 10.6), (10.6, 10.4), (10.4, 10.4)]
+    elements = [{
+        "type": "relation", "id": 7,
+        "tags": {"building": "yes", "building:levels": "2"},
+        "members": [
+            {"role": "outer", "geometry": way_points(a, b, c)},
+            {"role": "outer", "geometry": way_points(a, d, c)},
+            {"role": "inner", "geometry": way_points(*hole)},
+        ],
+    }]
+    buildings, report = sources.buildings_from_overpass(elements)
+    check("two open fragments close into one outer ring",
+          len(buildings) == 1 and report["relation_rings"] == 1, str(report))
+    building = buildings[0]
+    outline = building["outline"]
+    check("the assembled outline is a closed ring",
+          len(outline) >= 5 and outline[0] == outline[-1], f"{len(outline)} points")
+    check("the courtyard lands in the outer ring that contains it",
+          len(building["holes"]) == 1 and report["holes"] == 1)
+    check("levels resolve to meters",
+          building["height_m"] == 2 * sources.METERS_PER_BUILDING_LEVEL)
+
+    orphan = [{"type": "relation", "id": 8, "tags": {"building": "yes"},
+               "members": [{"role": "outer",
+                            "geometry": way_points(a, b, c)}]}]
+    _, report = sources.buildings_from_overpass(orphan)
+    check("a fragment with no partner counts as skipped",
+          report["skipped_open_rings"] == 1 and report["relation_rings"] == 0,
+          str(report))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--cache", type=Path,
@@ -126,6 +167,7 @@ def main() -> int:
     args = ap.parse_args()
 
     test_terrarium_decode()
+    test_multipolygon_assembly()
     test_elevation_known_points(args.cache)
     test_satellite_structure(args.cache)
     test_buildings_known_footprints()

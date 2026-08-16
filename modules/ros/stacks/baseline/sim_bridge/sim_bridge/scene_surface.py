@@ -2,9 +2,10 @@
 
 Loads the worlds/<scene>_surface.json that scenegen build writes next to
 the world, and answers where a ray first meets the scene. The surface is
-2.5D: a terrain height grid, plus one horizontal roof rectangle per
-building. A wall has no horizontal surface, so a ray aimed at one lands
-on the terrain behind it on purpose.
+2.5D: a terrain height grid, plus one horizontal roof polygon per
+building, with courtyard holes cut out. A wall has no horizontal surface,
+so a ray aimed at one lands on the terrain behind it on purpose. Format 1
+files carry roof rectangles instead of polygons; both load.
 
 Heights are scene z, which equals the map frame under the same convention
 the ground truth node relies on: the world origin is the spawn point.
@@ -19,7 +20,7 @@ import json
 import math
 from pathlib import Path
 
-SURFACE_FORMAT = "scenegen-surface/1"
+SURFACE_FORMATS = ("scenegen-surface/1", "scenegen-surface/2")
 
 # ------------------------------------------------------------------- tunables
 # Terrain march step along the ray, meters. Under half a grid cell, so a
@@ -30,13 +31,52 @@ MARCH_STEP_M = 2.0
 BISECTION_PASSES = 20
 
 
+def _rectangle_covers(building: dict):
+    yaw = math.radians(building["yaw_deg"])
+    east, north = building["east_m"], building["north_m"]
+    cos_yaw, sin_yaw = math.cos(yaw), math.sin(yaw)
+    half_length = building["length_m"] / 2.0
+    half_width = building["width_m"] / 2.0
+
+    def covers(hit_east: float, hit_north: float) -> bool:
+        de, dn = hit_east - east, hit_north - north
+        local_x = de * cos_yaw + dn * sin_yaw
+        local_y = -de * sin_yaw + dn * cos_yaw
+        return abs(local_x) <= half_length and abs(local_y) <= half_width
+
+    return covers
+
+
+def _polygon_covers(building: dict):
+    """Even-odd over the footprint and its holes together, so a point in a
+    courtyard crosses an even number of edges and counts as outside."""
+    rings = [building["footprint"]] + building.get("holes", [])
+    edges = []
+    for ring in rings:
+        for i, (east1, north1) in enumerate(ring):
+            east2, north2 = ring[(i + 1) % len(ring)]
+            if north1 != north2:
+                edges.append((east1, north1, east2, north2))
+
+    def covers(hit_east: float, hit_north: float) -> bool:
+        inside = False
+        for east1, north1, east2, north2 in edges:
+            if (north1 > hit_north) != (north2 > hit_north) \
+                    and hit_east < east1 + (hit_north - north1) \
+                    / (north2 - north1) * (east2 - east1):
+                inside = not inside
+        return inside
+
+    return covers
+
+
 class SceneSurface:
     def __init__(self, side_m: float, grid_n: int,
                  terrain: list[list[float]], roofs: list[tuple]) -> None:
         self.side = float(side_m)
         self.n = int(grid_n)
         self.terrain = terrain
-        # (east, north, cos_yaw, sin_yaw, half_length, half_width, roof_z)
+        # (roof_z, covers), covers a callable on (east, north)
         self.roofs = roofs
         self.lowest = min(min(row) for row in terrain)
 
@@ -44,15 +84,14 @@ class SceneSurface:
     def load(cls, path: str) -> "SceneSurface":
         """Raises OSError on a missing file and ValueError on a wrong one."""
         data = json.loads(Path(path).read_text())
-        if data.get("format") != SURFACE_FORMAT:
+        if data.get("format") not in SURFACE_FORMATS:
             raise ValueError(f"{path} carries format {data.get('format')!r}, "
-                             f"this code reads {SURFACE_FORMAT!r}")
+                             f"this code reads {SURFACE_FORMATS}")
         roofs = []
-        for b in data["buildings"]:
-            yaw = math.radians(b["yaw_deg"])
-            roofs.append((b["east_m"], b["north_m"], math.cos(yaw),
-                          math.sin(yaw), b["length_m"] / 2.0,
-                          b["width_m"] / 2.0, b["roof_z"]))
+        for building in data["buildings"]:
+            covers = _polygon_covers(building) if "footprint" in building \
+                else _rectangle_covers(building)
+            roofs.append((building["roof_z"], covers))
         return cls(data["side_m"], data["grid_n"], data["terrain_z"], roofs)
 
     def terrain_z(self, east: float, north: float) -> float:
@@ -90,15 +129,11 @@ class SceneSurface:
 
     def _nearest_roof(self, origin, direction, max_range: float):
         best = None
-        for east, north, cos_yaw, sin_yaw, half_length, half_width, roof_z in self.roofs:
+        for roof_z, covers in self.roofs:
             t = (roof_z - origin[2]) / direction[2]
             if t <= 0.0 or t > max_range or (best is not None and t >= best):
                 continue
-            hit_east = origin[0] + t * direction[0] - east
-            hit_north = origin[1] + t * direction[1] - north
-            local_x = hit_east * cos_yaw + hit_north * sin_yaw
-            local_y = -hit_east * sin_yaw + hit_north * cos_yaw
-            if abs(local_x) <= half_length and abs(local_y) <= half_width:
+            if covers(origin[0] + t * direction[0], origin[1] + t * direction[1]):
                 best = t
         return best
 

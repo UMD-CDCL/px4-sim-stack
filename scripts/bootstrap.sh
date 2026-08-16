@@ -45,6 +45,18 @@ if [ "$WHAT" = "all" ] || [ "$WHAT" = "qgc" ]; then
 	clone_at https://github.com/mavlink/qgroundcontrol.git src/qgroundcontrol "$QGC_REF"
 fi
 
+# Git carries the scene sources (modules/scenegen/data), not the worlds
+# built from them. Build them all here, so a fresh clone starts with every
+# scene in place. The first run builds the scenegen image, which takes a
+# few minutes.
+if [ "$WHAT" = "default" ] || [ "$WHAT" = "all" ]; then
+	if ls modules/scenegen/data/*/scene.json >/dev/null 2>&1; then
+		echo "==> Building the scenes in modules/scenegen/data"
+		./px4sim genscene build-all \
+			|| echo "==> Scene build failed. Run it later: ./px4sim genscene build-all"
+	fi
+fi
+
 echo ""
 echo "Done. Sources:"
 for d in src/*/; do

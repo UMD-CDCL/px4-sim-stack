@@ -14,6 +14,8 @@ What runs here
   ground_projector    the camera footprint on the ground, one per camera
   detection_localizer detections placed on the ground, one per camera
   ground_truth        where the targets really are, simulation only
+  scene_buildings     the scene's buildings for the 3D panel, from the
+                      file scenegen build writes next to the world
   detection_scorer    estimates against truth, one per camera
   image_ground_projector  the live image laid flat on the ground, one per camera
   fiducial_alignment  frame correction against a surveyed point, off by default
@@ -98,6 +100,9 @@ SCORING_DETECTION_RADIUS_M = float(
 LOCALIZATION_MODE = os.environ.get("LOCALIZATION_MODE", "plane")
 SCENE = os.environ.get("SCENE", "")
 SURFACE_FILE = f"/scenes/worlds/{SCENE}_surface.json" if SCENE else ""
+# Buildings for the 3D panel, written by the same build. Buildings only:
+# vehicle props stay out of the panel on purpose.
+BUILDINGS_FILE = f"/scenes/worlds/{SCENE}_buildings.json" if SCENE else ""
 
 # Whose verdicts color the truth bubbles. The nadir camera keeps most of
 # the scene in view from above, so counting it marks every target it sees
@@ -361,6 +366,22 @@ def generate_launch_description() -> LaunchDescription:
                 # point. Shift this if you spawn somewhere else.
                 "origin_offset_xyz": [0.0, 0.0, 0.0],
                 "cameras": GROUND_TRUTH_CAMERAS,
+            }],
+        ),
+
+        # The scene's buildings as one latched MarkerArray for the 3D
+        # panel. Reads the file scenegen build writes next to the world;
+        # without one it publishes an empty scene and waits for it.
+        Node(
+            package="sim_bridge",
+            executable="scene_buildings",
+            name="scene_buildings",
+            output="screen",
+            respawn=True,
+            respawn_delay=RESPAWN_DELAY_S,
+            parameters=[{
+                "buildings_file": BUILDINGS_FILE,
+                "reference_frame": REFERENCE_FRAME,
             }],
         ),
 

@@ -24,6 +24,7 @@ setup(
             "ground_projector = sim_bridge.ground_projector:main",
             "detection_localizer = sim_bridge.detection_localizer:main",
             "ground_truth = sim_bridge.ground_truth:main",
+            "scene_buildings = sim_bridge.scene_buildings:main",
             "detection_scorer = sim_bridge.detection_scorer:main",
             "fiducial_alignment = sim_bridge.fiducial_alignment:main",
             "detection_annotator = sim_bridge.detection_annotator:main",

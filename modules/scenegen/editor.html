@@ -165,7 +165,12 @@ function draw() {
     ctx.strokeStyle = b.enabled ? "#62d98c" : "#777";
     ctx.setLineDash(b.enabled ? [] : [lw(6), lw(5)]);
     ctx.lineWidth = lw(selected ? 2.4 : 1.2);
-    if (b.outline_m.length > 2) { polyPath(b.outline_m); ctx.stroke(); }
+    if (b.outline_m.length > 2) {
+      polyPath(b.outline_m); ctx.stroke();
+      (b.holes_m || []).forEach(ring => {
+        if (ring.length > 2) { polyPath(ring); ctx.stroke(); }
+      });
+    }
     if (selected || b.outline_m.length <= 2 || b.source !== "osm") {
       ctx.setLineDash([lw(5), lw(4)]);
       polyPath(corners(b.east_m, b.north_m, b.length_m, b.width_m, b.yaw_deg));
@@ -333,6 +338,30 @@ function nearestZoneEdge(zone, e, n) {
   return null;
 }
 
+// The outline is what the build extrudes, so every rectangle edit
+// carries it along: into the old box frame, scale, and back out at the
+// new center and heading. Holes ride the same transform.
+function applyBuildingBox(b, p) {
+  if (b.outline_m.length > 2) {
+    const old = b.yaw_deg * Math.PI / 180, now = p.heading * Math.PI / 180;
+    const cosOld = Math.cos(old), sinOld = Math.sin(old);
+    const cosNew = Math.cos(now), sinNew = Math.sin(now);
+    const scaleL = b.length_m > 0.01 ? p.length / b.length_m : 1;
+    const scaleW = b.width_m > 0.01 ? p.width / b.width_m : 1;
+    const map = ([e, n]) => {
+      const de = e - b.east_m, dn = n - b.north_m;
+      const lx = (de * cosOld + dn * sinOld) * scaleL;
+      const ly = (-de * sinOld + dn * cosOld) * scaleW;
+      return [+(p.x + lx * cosNew - ly * sinNew).toFixed(4),
+              +(p.y + lx * sinNew + ly * cosNew).toFixed(4)];
+    };
+    b.outline_m = b.outline_m.map(map);
+    b.holes_m = (b.holes_m || []).map(ring => ring.map(map));
+  }
+  b.east_m = p.x; b.north_m = p.y; b.length_m = p.length;
+  b.width_m = p.width; b.yaw_deg = p.heading;
+}
+
 function boxOf(selectionRef) {
   if (selectionRef.kind === "vehicle") {
     const v = scene.vehicles[selectionRef.index];
@@ -343,9 +372,7 @@ function boxOf(selectionRef) {
   }
   const b = scene.buildings[selectionRef.index];
   return { x: b.east_m, y: b.north_m, length: b.length_m, width: b.width_m,
-           heading: b.yaw_deg, set(p) {
-             b.east_m = p.x; b.north_m = p.y; b.length_m = p.length;
-             b.width_m = p.width; b.yaw_deg = p.heading; } };
+           heading: b.yaw_deg, set(p) { applyBuildingBox(b, p); } };
 }
 
 function hitAt(e, n) {
@@ -371,7 +398,10 @@ function hitAt(e, n) {
     const b = scene.buildings[i];
     const outline = b.outline_m.length > 2 ? b.outline_m
       : corners(b.east_m, b.north_m, b.length_m, b.width_m, b.yaw_deg);
-    if (inPolygon(e, n, outline)) return { kind: "building", index: i };
+    const inHole = (b.holes_m || []).some(
+      ring => ring.length > 2 && inPolygon(e, n, ring));
+    if (inPolygon(e, n, outline) && !inHole)
+      return { kind: "building", index: i };
   }
   return null;
 }
@@ -416,6 +446,9 @@ function setHeading(member, degrees) {
   const normalized = +((((degrees + 180) % 360) + 360) % 360 - 180).toFixed(1);
   const o = memberObject(member);
   if (member.kind === "vehicle") o.heading_deg = normalized;
+  else if (member.kind === "building")
+    applyBuildingBox(o, { x: o.east_m, y: o.north_m, length: o.length_m,
+                          width: o.width_m, heading: normalized });
   else o.yaw_deg = normalized;
 }
 function deleteMembers(members) {
@@ -455,7 +488,8 @@ function addBuilding(e, n, props) {
     east_m: +e.toFixed(2), north_m: +n.toFixed(2),
     length_m: props.length_m, width_m: props.width_m, yaw_deg: props.yaw_deg,
     height_m: props.height_m, height_source: "manual", name: "",
-    outline_m: [], source: "manual", model_uri: props.model_uri, enabled: true });
+    outline_m: [], holes_m: [], source: "manual", model_uri: props.model_uri,
+    enabled: true });
   return { kind: "building", index: scene.buildings.length - 1 };
 }
 function addTarget(e, n, props) {
@@ -706,14 +740,18 @@ function showPanel() {
     field("width m", `<input id="p-w" type="number" step="0.5" value="${b.width_m}">`) +
     `</div></div>` +
     field("yaw deg", `<input id="p-y" type="number" step="1" value="${b.yaw_deg}">`) +
-    field("model uri (empty = box)",
-          `<input id="p-uri" value="${b.model_uri ?? ""}" placeholder="model://… replaces the box">`) +
+    field("model uri (empty = extruded mesh)",
+          `<input id="p-uri" value="${b.model_uri ?? ""}" placeholder="model://… replaces the mesh">`) +
     field("", `<label style="display:flex;gap:6px;align-items:center;margin-top:8px">
       <input id="p-en" type="checkbox" style="width:auto"${b.enabled ? " checked" : ""}>
       include in the world</label>`);
   bind("p-h", v => { b.height_m = v; b.height_source = "manual"; });
-  bind("p-l", v => b.length_m = v); bind("p-w", v => b.width_m = v);
-  bind("p-y", v => b.yaw_deg = v);
+  const boxWith = patch => applyBuildingBox(b, {
+    x: b.east_m, y: b.north_m, length: b.length_m, width: b.width_m,
+    heading: b.yaw_deg, ...patch });
+  bind("p-l", v => boxWith({ length: v }));
+  bind("p-w", v => boxWith({ width: v }));
+  bind("p-y", v => boxWith({ heading: v }));
   document.getElementById("p-uri").onchange = ev => {
     pushUndo(); b.model_uri = ev.target.value.trim() || null; markDirty(); };
   document.getElementById("p-en").onchange = ev => {
@@ -894,8 +932,12 @@ window.addEventListener("mousemove", event => {
   } else if (drag.kind === "groupmove") {
     multi.forEach((m, i) => {
       const o = memberObject(m);
-      o.east_m = +(e + drag.offsets[i].de).toFixed(2);
-      o.north_m = +(n + drag.offsets[i].dn).toFixed(2);
+      const easted = +(e + drag.offsets[i].de).toFixed(2);
+      const northed = +(n + drag.offsets[i].dn).toFixed(2);
+      if (m.kind === "building")
+        applyBuildingBox(o, { x: easted, y: northed, length: o.length_m,
+                              width: o.width_m, heading: o.yaw_deg });
+      else { o.east_m = easted; o.north_m = northed; }
     });
     markDirty();
   } else if (drag.kind === "grouprotate") {
