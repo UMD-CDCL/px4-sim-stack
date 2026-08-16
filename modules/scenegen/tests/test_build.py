@@ -115,7 +115,16 @@ def make_synthetic_scene(data_dir: Path) -> scene_model.SceneSpec:
                 width_m=10.0, yaw_deg=0.0, height_m=6.0)],
         vehicles=[scene_model.Vehicle(
             id="v_1", cls="car", east_m=10.0, north_m=5.0, length_m=4.5,
-            width_m=1.9, heading_deg=45.0, source="manual")],
+            width_m=1.9, heading_deg=45.0, source="manual"),
+            scene_model.Vehicle(
+                id="v_2", cls="bus", east_m=-20.0, north_m=30.0, length_m=12.0,
+                width_m=2.5, heading_deg=10.0, source="manual"),
+            scene_model.Vehicle(
+                id="v_3", cls="car", east_m=30.0, north_m=-20.0, length_m=4.5,
+                width_m=1.9, heading_deg=0.0, source="manual", on_building=True),
+            scene_model.Vehicle(
+                id="v_4", cls="car", east_m=60.0, north_m=-60.0, length_m=4.5,
+                width_m=1.9, heading_deg=0.0, source="manual", agl_m=2.0)],
         flatten_zones=[scene_model.FlattenZone(
             id="fz_1", polygon_m=[[-60, 40], [-40, 40], [-40, 60], [-60, 60]],
             mode="manual", height_m=0.0)],
@@ -201,6 +210,23 @@ def test_world(scenes_dir: Path) -> None:
               and abs(vehicle_pose[5] - math.radians(45)) < 1e-3)
         check("vehicle model drawn from the car pool",
               vehicle.find("uri").text in build_world.VEHICLE_MODEL_POOLS["car"])
+    bus = includes.get("v_2")
+    check("bus include present", bus is not None)
+    if bus is not None:
+        bus_pose = [float(v) for v in bus.find("pose").text.split()]
+        check("the Bus model turns 90 degrees onto its box heading",
+              abs(bus_pose[5] - math.radians(10.0 + 90.0)) < 1e-3,
+              f"{bus_pose[5]:.4f}")
+    roof_car = includes.get("v_3")
+    check("a vehicle snapped to the building rides on its 7 m roof",
+          roof_car is not None
+          and abs(float(roof_car.find("pose").text.split()[2]) - 7.0) < 0.01,
+          roof_car.find("pose").text if roof_car is not None else "missing")
+    raised_car = includes.get("v_4")
+    check("a vehicle offset rides that far above the terrain",
+          raised_car is not None
+          and abs(float(raised_car.find("pose").text.split()[2]) - 2.0) < 0.01,
+          raised_car.find("pose").text if raised_car is not None else "missing")
 
     fiducial = [m for m in world.findall("model") if m.get("name") == "fiducial_marker"]
     check("fiducial marker present", len(fiducial) == 1)

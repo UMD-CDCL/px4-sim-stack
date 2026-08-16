@@ -65,6 +65,13 @@ VEHICLE_MODEL_POOLS = {
             "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Pickup"],
     "bus": ["https://fuel.gazebosim.org/1.0/OpenRobotics/models/Bus"],
 }
+# Each Fuel model has its own forward axis, so a model can spawn sideways
+# in a heading that is correct for its bounding box. This offset turns the
+# model, not the box: scene.json and the editor keep the true box heading.
+# The Bus stands 90 degrees off its box without one.
+VEHICLE_MODEL_YAW_OFFSET_DEG = {
+    "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Bus": 90.0,
+}
 # The pool a target without a model draws from lives in scene_model
 # (CASUALTY_MODEL_POOL), next to the Target type and the import.
 FIDUCIAL_THICKNESS_M = 0.02
@@ -193,6 +200,19 @@ def _roof_above(placed: list[PlacedBuilding], east: float,
     return max(tops) if tops else None
 
 
+def _floor_z(placed: list[PlacedBuilding], grid, meta, origin_alt: float,
+             east: float, north: float, on_building: bool) -> float:
+    """The surface something stands on, scene z: the terrain, or the top
+    of the building under the point when on_building asks for it. With no
+    building there it falls back to the terrain."""
+    floor = _ground_at(grid, meta, east, north, origin_alt)
+    if on_building:
+        roof = _roof_above(placed, east, north)
+        if roof is not None:
+            floor = roof
+    return floor
+
+
 def _rounded_ring(ring: list) -> list:
     return [[round(east, 2), round(north, 2)] for east, north in ring]
 
@@ -245,12 +265,8 @@ def build_target_scenario(scene: scene_model.SceneSpec,
             name = f"{base}_{counter}"
             counter += 1
         used_names.add(name)
-        floor = _ground_at(grid, meta, target.east_m, target.north_m,
-                           scene.origin_alt_m)
-        if target.on_building:
-            roof = _roof_above(placed, target.east_m, target.north_m)
-            if roof is not None:
-                floor = roof
+        floor = _floor_z(placed, grid, meta, scene.origin_alt_m,
+                         target.east_m, target.north_m, target.on_building)
         z = floor + (target.agl_m or 0.0)
         uri = target.model_uri or _stable_choice(scene_model.CASUALTY_MODEL_POOL,
                                                  scene.name + name)
@@ -294,11 +310,14 @@ def build_world_sdf(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
             continue
         uri = vehicle.model_uri or _stable_choice(
             VEHICLE_MODEL_POOLS.get(vehicle.cls, VEHICLE_MODEL_POOLS["car"]), vehicle.id)
-        ground = _ground_at(grid, meta, vehicle.east_m, vehicle.north_m, origin_alt)
+        floor = _floor_z(placed, grid, meta, origin_alt,
+                         vehicle.east_m, vehicle.north_m, vehicle.on_building)
+        model_yaw = vehicle.heading_deg + VEHICLE_MODEL_YAW_OFFSET_DEG.get(uri, 0.0)
         vehicle_includes.append(_include(
             vehicle.id, uri,
-            _pose(vehicle.east_m, vehicle.north_m, ground,
-                  math.radians(vehicle.heading_deg))))
+            _pose(vehicle.east_m, vehicle.north_m,
+                  floor + (vehicle.agl_m or 0.0),
+                  math.radians(model_yaw))))
         counts["vehicles"] += 1
 
     fiducial = scene.fiducial

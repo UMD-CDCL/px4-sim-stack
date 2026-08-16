@@ -88,21 +88,27 @@ switch to a scenario with a different fiducial, restart it:
 Everything is graphical. You never edit a file to fix the scene.
 
 - Drag a vehicle to move it. The round handle rotates, the square handle
-  resizes, `F` flips it 180 degrees, `Del` removes it.
+  resizes, `F` flips it 180 degrees, `Del` removes it. The panel gives a
+  vehicle the same height options as a target: snap to the building
+  under it, and an offset above that floor.
 - `+ Car`, `+ Bus`, `+ Building`: click the map to place one. Hold shift
   to keep placing.
-- Shift-click on the ground stamps a copy of the last vehicle or target
-  you placed or selected. A copy takes the source's properties as they
-  are at that moment, edits included; a target copy gets a fresh name,
-  because the scorer treats the name as identity. Stamp a parking row or
-  a cluster of casualties in a few clicks; a shift-drag grabs the row
-  afterward as a group. Buildings do not stamp.
-- Shift-drag draws a selection rectangle over vehicles, buildings and
-  targets; shift-click adds or drops one object. A selection moves as a
-  group. The white handle turns every selected object in place; positions
-  hold. The group flips and takes class or model changes, and selected
-  targets take floor, offset and scenario-inclusion changes together.
-  Sizes and target names stay one at a time.
+- Shift-click stamps a copy of the last vehicle or target you placed or
+  selected, at the click point. Buildings and the fiducial do not stamp:
+  selecting one leaves the stamp source on the last vehicle or target. A
+  copy takes the source's properties as they are at that moment, edits
+  included; a target copy gets a fresh name, because the scorer treats
+  the name as identity. Stamp a parking row or a cluster of casualties
+  in a few clicks; a ctrl-drag grabs the row afterward as a group.
+- Ctrl-drag (Cmd on macOS) draws a selection rectangle over vehicles,
+  buildings and targets; ctrl-click adds or drops one object. A selection
+  moves as a group. The white handle turns every selected object in
+  place; positions hold. The panel edits every field the selected objects
+  share, in bulk: rotation always, length and width for vehicles and
+  buildings, height for buildings, class for vehicles, floor and offset
+  for vehicles and targets, and model and inclusion for everything. A
+  field only some
+  of the selection has stays hidden, and target names stay one at a time.
 - Undo and redo cover every edit: `Ctrl+Z` and `Ctrl+Y`, or the arrow
   buttons in the toolbar. One drag is one step.
 - Click a building to set its height, replace its mesh with a model URI,

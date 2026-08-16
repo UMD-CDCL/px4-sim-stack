@@ -20,7 +20,7 @@ back in. An entry here is a decision, not an omission.
 | Feature | Why it waits | Where it plugs in |
 |---|---|---|
 | Detector recall tuning | Confidence 0.10 with the DOTA model finds most vehicles, and the editor absorbs the rest. Zoom-20 imagery or an aerial-trained model would lift recall. Not measured yet. | `detect_vehicles.py` tunables |
-| Fuel model heading offsets | Each Fuel vehicle has its own forward axis. A per-model yaw offset table would correct a model that spawns sideways. All offsets stay 0 until someone measures them in the sim. | `build_world.py: VEHICLE_MODEL_POOLS` |
+| Fuel model heading offsets for the cars | Each Fuel vehicle has its own forward axis. The offset table exists and the Bus carries its measured 90 degrees. The car models look right so far; measure and add an offset when one spawns sideways. | `build_world.py: VEHICLE_MODEL_YAW_OFFSET_DEG` |
 
 ## Cut with the extruded buildings
 

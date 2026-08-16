@@ -451,6 +451,18 @@ function setHeading(member, degrees) {
                           width: o.width_m, heading: normalized });
   else o.yaw_deg = normalized;
 }
+function setSize(member, patch) {
+  const o = memberObject(member);
+  if (member.kind === "building")
+    applyBuildingBox(o, { x: o.east_m, y: o.north_m,
+                          length: patch.length ?? o.length_m,
+                          width: patch.width ?? o.width_m,
+                          heading: o.yaw_deg });
+  else {
+    if (patch.length !== undefined) o.length_m = patch.length;
+    if (patch.width !== undefined) o.width_m = patch.width;
+  }
+}
 function deleteMembers(members) {
   pushUndo();
   members.filter(m => m.kind === "vehicle").map(m => m.index)
@@ -480,7 +492,8 @@ function addVehicle(e, n, props) {
     east_m: +e.toFixed(2), north_m: +n.toFixed(2),
     length_m: props.length_m, width_m: props.width_m,
     heading_deg: props.heading_deg, confidence: 1.0, source: "manual",
-    model_uri: props.model_uri, enabled: true });
+    model_uri: props.model_uri, agl_m: props.agl_m ?? null,
+    on_building: props.on_building ?? false, enabled: true });
   return { kind: "vehicle", index: scene.vehicles.length - 1 };
 }
 function addBuilding(e, n, props) {
@@ -528,7 +541,8 @@ function stampAt(e, n) {
   const ref = stampRef.kind === "vehicle"
     ? addVehicle(e, n, { cls: source.cls, length_m: source.length_m,
         width_m: source.width_m, heading_deg: source.heading_deg,
-        model_uri: source.model_uri })
+        model_uri: source.model_uri, agl_m: source.agl_m,
+        on_building: source.on_building })
     // A target copy keeps model and height but gets a fresh name: the
     // name is the identity the scorer sees, so two must never share one.
     : addTarget(e, n, { agl_m: source.agl_m, on_building: source.on_building,
@@ -542,69 +556,101 @@ function field(labelText, inputHtml) {
   return `<label>${labelText}</label>${inputHtml}`;
 }
 
+// The group panel edits every field the selected kinds share, in bulk.
+// Only names stay out: a target's name is the identity the scorer keys
+// on, so it edits one at a time. A field the kinds do not share is
+// absent rather than disabled.
 function showMultiPanel() {
-  const vehicleMembers = multi.filter(m => m.kind === "vehicle");
-  const targetCount = multi.filter(m => m.kind === "target").length;
-  const buildingCount = multi.length - vehicleMembers.length - targetCount;
+  const kinds = [...new Set(multi.map(m => m.kind))];
+  const only = (...allowed) => kinds.every(k => allowed.includes(k));
+  const vehicles = multi.filter(m => m.kind === "vehicle");
+  const buildings = multi.filter(m => m.kind === "building");
+  const targets = multi.filter(m => m.kind === "target");
   panelTitle.textContent = `${multi.length} selected`;
-  panelBody.innerHTML =
-    `<p style="color:var(--dim)">${vehicleMembers.length} vehicles, ` +
-    `${buildingCount} buildings, ${targetCount} targets. Drag a selected ` +
-    `object to move the group. The white handle turns every object in ` +
-    `place; positions hold. Sizes stay as they are.</p>` +
-    (vehicleMembers.length ? field("class (vehicles)", `<select id="m-cls">
-        <option value="">leave as is</option>
-        <option value="car">car</option>
-        <option value="bus">bus</option></select>`) : "") +
-    (targetCount ? field("floor (targets)", `<select id="m-floor">
-        <option value="">leave as is</option>
-        <option value="terrain">terrain</option>
-        <option value="building">building under it</option></select>`) +
-      field("offset above the floor m (targets, empty = leave as is)",
-            `<input id="m-agl" placeholder="a number sets all">`) +
-      field("in the scenario (targets)", `<select id="m-en">
-        <option value="">leave as is</option>
-        <option value="yes">include</option>
-        <option value="no">exclude</option></select>`) : "") +
-    field("model uri for everything selected",
-          `<input id="m-uri" placeholder="URI, or the word none for the pool">`) +
-    (vehicleMembers.length ? `<button id="m-flip">Flip vehicles 180°</button>` : "") +
-    `<button id="m-del" class="danger">Delete selection</button>`;
-  if (vehicleMembers.length) {
-    document.getElementById("m-cls").onchange = ev => {
-      if (!ev.target.value) return;
-      pushUndo();
-      vehicleMembers.forEach(m => { memberObject(m).cls = ev.target.value; });
-      markDirty(); draw();
-    };
-    document.getElementById("m-flip").onclick = flipMembers;
-  }
-  if (targetCount) {
-    // Every target field edits in bulk except the name: names are the
-    // identities the scorer keys on, so they stay one at a time.
-    const targetMembers = multi.filter(m => m.kind === "target");
-    document.getElementById("m-floor").onchange = ev => {
-      if (!ev.target.value) return;
-      pushUndo();
-      targetMembers.forEach(m => {
-        memberObject(m).on_building = ev.target.value === "building"; });
-      markDirty();
-    };
-    document.getElementById("m-agl").onchange = ev => {
+
+  const uniform = read => {
+    const values = multi.map(read);
+    return values.every(v => v === values[0]) ? values[0] : null;
+  };
+  const numberField = (id, label, step, read) => {
+    const value = uniform(read);
+    const attr = value === null || value === undefined
+      ? `placeholder="mixed - a number sets all"` : `value="${value}"`;
+    return field(label,
+                 `<input id="${id}" type="number" step="${step}" ${attr}>`);
+  };
+  const selectField = (id, label, options, read) => {
+    const value = uniform(read);
+    const items = [`<option value="">mixed - leave as is</option>`]
+      .concat(options.map(([v, text]) =>
+        `<option value="${v}"${v === value ? " selected" : ""}>${text}</option>`));
+    return field(label, `<select id="${id}">${items.join("")}</select>`);
+  };
+
+  let html =
+    `<p style="color:var(--dim)">${vehicles.length} vehicles, ` +
+    `${buildings.length} buildings, ${targets.length} targets. Drag a ` +
+    `selected object to move the group; the white handle turns every ` +
+    `object in place. Each field below sets the whole selection.</p>`;
+  if (only("vehicle"))
+    html += selectField("m-cls", "class", [["car", "car"], ["bus", "bus"]],
+                        m => memberObject(m).cls);
+  if (only("building"))
+    html += numberField("m-h", "height m", 0.5, m => memberObject(m).height_m);
+  if (only("vehicle", "building"))
+    html += `<div class="row"><div>`
+      + numberField("m-l", "length m", 0.5, m => memberObject(m).length_m)
+      + `</div><div>`
+      + numberField("m-w", "width m", 0.5, m => memberObject(m).width_m)
+      + `</div></div>`;
+  html += numberField("m-rot", "rotation deg", 1, m => headingOf(m));
+  if (only("vehicle", "target"))
+    html += selectField("m-floor", "floor",
+                        [["terrain", "terrain"], ["building", "building under it"]],
+                        m => (memberObject(m).on_building ? "building" : "terrain"))
+      + numberField("m-agl", "offset above the floor m", 0.5,
+                    m => memberObject(m).agl_m ?? 0);
+  html += selectField("m-en",
+                      only("target") ? "in the scenario" : "included in the world",
+                      [["yes", "include"], ["no", "exclude"]],
+                      m => (memberObject(m).enabled ? "yes" : "no"))
+    + field("model uri",
+            `<input id="m-uri" placeholder="URI, or the word none for the pool">`)
+    + (vehicles.length ? `<button id="m-flip">Flip vehicles 180°</button>` : "")
+    + `<button id="m-del" class="danger">Delete selection</button>`;
+  panelBody.innerHTML = html;
+
+  const bulkNumber = (id, apply) => {
+    const input = document.getElementById(id);
+    if (!input) return;
+    input.onchange = ev => {
       const value = parseFloat(ev.target.value);
       if (Number.isNaN(value)) return;
       pushUndo();
-      targetMembers.forEach(m => { memberObject(m).agl_m = value; });
-      markDirty();
-    };
-    document.getElementById("m-en").onchange = ev => {
-      if (!ev.target.value) return;
-      pushUndo();
-      targetMembers.forEach(m => {
-        memberObject(m).enabled = ev.target.value === "yes"; });
+      multi.forEach(m => apply(m, value));
       markDirty(); draw();
     };
-  }
+  };
+  const bulkSelect = (id, apply) => {
+    const select = document.getElementById(id);
+    if (!select) return;
+    select.onchange = ev => {
+      if (!ev.target.value) return;
+      pushUndo();
+      multi.forEach(m => apply(m, ev.target.value));
+      markDirty(); draw();
+    };
+  };
+  bulkSelect("m-cls", (m, v) => { memberObject(m).cls = v; });
+  bulkNumber("m-h", (m, v) => { const b = memberObject(m);
+                                b.height_m = v; b.height_source = "manual"; });
+  bulkNumber("m-l", (m, v) => setSize(m, { length: v }));
+  bulkNumber("m-w", (m, v) => setSize(m, { width: v }));
+  bulkNumber("m-rot", (m, v) => setHeading(m, v));
+  bulkSelect("m-floor", (m, v) => {
+    memberObject(m).on_building = v === "building"; });
+  bulkNumber("m-agl", (m, v) => { memberObject(m).agl_m = v; });
+  bulkSelect("m-en", (m, v) => { memberObject(m).enabled = v === "yes"; });
   document.getElementById("m-uri").onchange = ev => {
     const raw = ev.target.value.trim();
     if (!raw) return;
@@ -613,6 +659,8 @@ function showMultiPanel() {
     multi.forEach(m => { memberObject(m).model_uri = value; });
     markDirty();
   };
+  if (vehicles.length)
+    document.getElementById("m-flip").onclick = flipMembers;
   document.getElementById("m-del").onclick = () => deleteMembers(multi);
 }
 
@@ -711,6 +759,11 @@ function showPanel() {
       `</div></div>` +
       field("heading deg (ccw from east)",
             `<input id="p-hd" type="number" step="1" value="${v.heading_deg}">`) +
+      field("", `<label style="display:flex;gap:6px;align-items:center;margin-top:8px">
+        <input id="p-roof" type="checkbox" style="width:auto"${v.on_building ? " checked" : ""}>
+        snap to the building under it</label>`) +
+      field("offset above the floor m (empty = 0)",
+            `<input id="p-alt" value="${v.agl_m ?? ""}">`) +
       field("model uri (empty = pool)",
             `<input id="p-uri" value="${v.model_uri ?? ""}" placeholder="https://fuel… or model://…">`) +
       `<button id="p-flip">Flip 180°</button>` +
@@ -719,6 +772,11 @@ function showPanel() {
       pushUndo(); v.cls = ev.target.value; markDirty(); };
     bind("p-l", val => v.length_m = val); bind("p-w", val => v.width_m = val);
     bind("p-hd", val => v.heading_deg = val);
+    document.getElementById("p-roof").onchange = ev => {
+      pushUndo(); v.on_building = ev.target.checked; markDirty(); };
+    document.getElementById("p-alt").onchange = ev => {
+      const value = parseFloat(ev.target.value);
+      pushUndo(); v.agl_m = Number.isNaN(value) ? null : value; markDirty(); };
     document.getElementById("p-uri").onchange = ev => {
       pushUndo(); v.model_uri = ev.target.value.trim() || null; markDirty(); };
     document.getElementById("p-flip").onclick = () => {
@@ -845,16 +903,24 @@ canvas.addEventListener("mousedown", event => {
     scene.fiducial.east_m = +e.toFixed(2); scene.fiducial.north_m = +n.toFixed(2);
     markDirty(); draw(); return;
   }
-  if (event.shiftKey) {
+  if (event.ctrlKey || event.metaKey) {
+    // Ctrl selects: a click toggles one object in the group, a drag from
+    // empty ground opens a selection rectangle. Mousemove decides which.
     const hit = hitAt(e, n);
     if (hit && (hit.kind === "vehicle" || hit.kind === "building"
                 || hit.kind === "target")) {
       toggleMember(hit);
       return;
     }
-    // A still shift-click stamps a copy of the last object; a shift-drag
-    // opens a selection rectangle. Mouseup decides which one it was.
-    drag = { kind: "shiftpending", startE: e, startN: n,
+    drag = { kind: "boxpending", startE: e, startN: n,
+             startX: event.clientX, startY: event.clientY };
+    return;
+  }
+  if (event.shiftKey) {
+    // A still shift-click stamps a copy of the last stampable selection
+    // at the click point, over an object or not: a casualty lands next
+    // to a car that way. A drag turns into a pan.
+    drag = { kind: "stamppending", startE: e, startN: n,
              startX: event.clientX, startY: event.clientY };
     return;
   }
@@ -924,9 +990,13 @@ window.addEventListener("mousemove", event => {
   if (drag.kind === "pan") {
     view.panX = drag.panX - (event.clientX - drag.startX) / view.s;
     view.panY = drag.panY - (event.clientY - drag.startY) / view.s;
-  } else if (drag.kind === "shiftpending") {
+  } else if (drag.kind === "boxpending") {
     if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 4)
       drag = { kind: "marquee", startE: drag.startE, startN: drag.startN, e, n };
+  } else if (drag.kind === "stamppending") {
+    if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 4)
+      drag = { kind: "pan", startX: event.clientX, startY: event.clientY,
+               panX: view.panX, panY: view.panY };
   } else if (drag.kind === "marquee") {
     drag.e = e; drag.n = n;
   } else if (drag.kind === "groupmove") {
@@ -984,7 +1054,7 @@ window.addEventListener("mousemove", event => {
 });
 
 window.addEventListener("mouseup", () => {
-  if (drag && drag.kind === "shiftpending") {
+  if (drag && drag.kind === "stamppending") {
     stampAt(drag.startE, drag.startN);
   } else if (drag && drag.kind === "marquee") {
     const minE = Math.min(drag.startE, drag.e), maxE = Math.max(drag.startE, drag.e);

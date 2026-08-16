@@ -51,6 +51,8 @@ class Vehicle:
     confidence: float = 1.0
     source: str = "manual"        # "auto" from the detector, "manual" from a person
     model_uri: str | None = None  # None picks from the class pool at build time
+    agl_m: float | None = None    # meters above the floor; None sits on it
+    on_building: bool = False     # floor = the building top under it, else terrain
     enabled: bool = True
 
 
