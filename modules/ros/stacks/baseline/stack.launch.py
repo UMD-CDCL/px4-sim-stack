@@ -262,6 +262,14 @@ def generate_launch_description() -> LaunchDescription:
                 ],
                 "log_gimbal_diagnostics":
                     os.environ.get("GIMBAL_DIAGNOSTICS", "0") == "1",
+                # Seconds each chain's report trails the motion it describes.
+                # scene_tf stamps every moving transform with its source
+                # message's time less this, so tf2 interpolates the pose at
+                # any instant and no consumer carries an offset of its own.
+                # scripts/check-localization-lag.py reports the value that
+                # flattens the error against slew rate and against speed.
+                "vehicle_delay": float(os.environ.get("VEHICLE_DELAY", "0.0")),
+                "gimbal_delay": float(os.environ.get("GIMBAL_DELAY", "0.0")),
         }),
 
         # --------------------------------------------------------- video

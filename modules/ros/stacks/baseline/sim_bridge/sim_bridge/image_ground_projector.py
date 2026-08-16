@@ -32,15 +32,14 @@ gi.require_version("Gst", "1.0")
 from gi.repository import Gst  # noqa: E402
 
 import numpy as np  # noqa: E402
-import rclpy  # noqa: E402
-from rclpy.duration import Duration  # noqa: E402
 from rclpy.node import Node  # noqa: E402
 from rclpy.qos import qos_profile_sensor_data  # noqa: E402
 from sensor_msgs.msg import CameraInfo, CompressedImage, PointCloud2, PointField  # noqa: E402
 
+from sim_bridge.frames import CameraFrame  # noqa: E402
 from sim_bridge.localization import GroundLocalizer  # noqa: E402
 from sim_bridge.projection import GROUND_VIEW_MAX_DISTANCE_M, intrinsics_ready
-from sim_bridge.runtime import NEWEST_ONLY, now_s, spin, tf_buffer  # noqa: E402
+from sim_bridge.runtime import NEWEST_ONLY, now_s, spin  # noqa: E402
 
 # The point layout, as one 16 byte record. Naming it here means point_step,
 # row_step and the packing can never drift apart.
@@ -50,6 +49,9 @@ POINT_DTYPE = np.dtype([("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("rgb", "<u4")
 # the aspect ratio of both cameras.
 STANDARD_SIZES = ("1920x1080", "1280x720", "960x540", "854x480", "640x360",
                   "480x270", "426x240", "240x135")
+# How long a pose lookup waits at the image's own stamp before it settles for
+# the newest one.
+TF_TIMEOUT_S = 0.1
 
 
 def parse_size(text: str) -> tuple[int, int] | None:
@@ -169,7 +171,7 @@ class ImageGroundProjector(Node):
         self.last_processed = 0.0
 
         self.decoder = JpegDecoder()
-        self.tf_buffer = tf_buffer(self, cache_time=Duration(seconds=5.0))
+        self.camera_frame = CameraFrame(self, self.optical, self.reference)
 
         self.create_subscription(CameraInfo,
                                  self.get_parameter("camera_info_topic").value,
@@ -209,13 +211,14 @@ class ImageGroundProjector(Node):
             return
         pixels, width, height, step = decoded
 
-        tf = self._camera_tf(msg.header.stamp)
-        if tf is None:
+        # At the image's own stamp, so the mosaic drapes where the camera was
+        # when the frame was taken. or_latest because this is a picture: a
+        # slightly stale drape reads better than a hole.
+        pose = self.camera_frame.at(msg.header.stamp, timeout_s=TF_TIMEOUT_S,
+                                    or_latest=True)
+        if pose is None:
             return
-
-        t, r = tf.transform.translation, tf.transform.rotation
-        origin = (t.x, t.y, t.z)
-        rot = (r.x, r.y, r.z, r.w)
+        origin, rot = pose.position, pose.rotation
 
         points = self._project(pixels, width, height, step, origin, rot)
         if points is None or not len(points):
@@ -239,21 +242,6 @@ class ImageGroundProjector(Node):
         cloud.is_dense = True
         cloud.data = points.tobytes()
         self.pub.publish(cloud)
-
-    def _camera_tf(self, stamp):
-        """The camera pose at the frame time, so the imagery lands where the
-        camera was when it was taken. Falls back to the newest transform, and
-        gives up rather than draping a frame on a pose that never held."""
-        attempts = ((rclpy.time.Time.from_msg(stamp), 0.1),
-                    (rclpy.time.Time(), 0.0))
-        for when, timeout in attempts:
-            try:
-                return self.tf_buffer.lookup_transform(
-                    self.reference, self.optical, when,
-                    timeout=Duration(seconds=timeout))
-            except Exception:
-                continue
-        return None
 
     # -------------------------------------------------------------- the math
     def _sample_grid(self, width: int, height: int):

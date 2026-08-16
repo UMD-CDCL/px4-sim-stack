@@ -5,11 +5,11 @@ Each detection casts a ray through its box anchor onto the surface
 sim_bridge/localization.py selects, so a click and a detection through the
 same pixel land on the same point.
 
-Every transform lookup uses the detection stamp, the frame time DeepStream
-reported. Detections arrive 60 to 90 ms after capture, and a moving drone or
-a slewing gimbal makes "where is the camera now" the wrong question. With no
-transform at the frame time the detection is dropped: a silently wrong
-position is worse than a missing one.
+The pose comes from the frame tree at the detection's stamp, which
+detections_bridge has already resolved to the instant the frame was captured.
+A moving drone or a slewing gimbal makes "where is the camera now" the wrong
+question. With no pose at that instant the detection is dropped: a silently
+wrong position is worse than a missing one.
 
 Publishes, under /perception/<camera>/
     detections_3d   vision_msgs/Detection3DArray with covariance
@@ -20,7 +20,6 @@ from __future__ import annotations
 import math
 
 from geometry_msgs.msg import Pose
-from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
@@ -33,10 +32,11 @@ from vision_msgs.msg import (
     ObjectHypothesisWithPose,
 )
 
+from sim_bridge.frames import CameraFrame
 from sim_bridge.localization import GroundLocalizer
 from sim_bridge.projection import (intrinsics_ready, quat_rotate,
                                    ray_in_optical, slant_range)
-from sim_bridge.runtime import BEST_EFFORT, spin, tf_buffer
+from sim_bridge.runtime import BEST_EFFORT, spin
 
 # ------------------------------------------------------------------- tunables
 # Diagonal of the 6x6 pose covariance, in m^2 and rad^2, as
@@ -50,10 +50,6 @@ COVARIANCE_DIAGONAL = [4.0, 4.0, 1.0, 0.0, 0.0, 0.0]
 RANGE_VARIANCE_SCALE = 0.0004
 # Beyond this slant range a ray is treated as missing the ground.
 MAX_RANGE = 2000.0
-# The detection stamp is often a few tens of milliseconds newer than the
-# newest transform, because the detection pipeline outruns telemetry. Within
-# this bound the newest transform is close enough. Past it, drop.
-FUTURE_TOLERANCE_S = 0.15
 
 
 class DetectionLocalizer(Node):
@@ -83,7 +79,7 @@ class DetectionLocalizer(Node):
         self.output_frame = self.get_parameter("output_frame").value or self.reference
         self.localizer = GroundLocalizer(self)
         self.warned_output = False
-        self.tf_buffer = tf_buffer(self, cache_time=Duration(seconds=10.0))
+        self.camera_frame = CameraFrame(self, self.optical, self.reference)
 
         self.info: CameraInfo | None = None
         self.create_subscription(CameraInfo,
@@ -95,7 +91,7 @@ class DetectionLocalizer(Node):
 
         self.det3d_pub = self.create_publisher(Detection3DArray, "detections_3d", 10)
 
-        self.localized = self.no_tf = self.no_ground = self.clamped = 0
+        self.localized = self.no_tf = self.no_ground = 0
         self.create_timer(30.0, self._report)
         self.get_logger().info(
             f"localizing {self.camera} into {self.reference} from "
@@ -111,22 +107,15 @@ class DetectionLocalizer(Node):
             return
 
         stamp = Time.from_msg(msg.header.stamp)
-        try:
-            # The frame time, not now, and no blocking wait. The frame time
-            # is already in the past when a detection arrives, so the
-            # transform is in the buffer or it is not: waiting here once let
-            # the full detection rate starve this node's own TF listener,
-            # and then every lookup failed.
-            tf = self.tf_buffer.lookup_transform(
-                self.reference, self.optical, stamp)
-        except Exception as exc:
-            tf = self._clamped_lookup(stamp, exc)
-            if tf is None:
-                return
-
-        t, r = tf.transform.translation, tf.transform.rotation
-        origin = (t.x, t.y, t.z)
-        rotation = (r.x, r.y, r.z, r.w)
+        # The capture time, not now, and no blocking wait. That instant is
+        # already in the past when a detection arrives, so the pose is in the
+        # buffer or it is not: waiting here once let the full detection rate
+        # starve this node's own TF listener, and then every lookup failed.
+        pose = self.camera_frame.at(stamp)
+        if pose is None:
+            self._note_drop()
+            return
+        origin, rotation = pose.position, pose.rotation
 
         # The output transform is static, so one lookup serves every
         # detection in the array.
@@ -192,7 +181,7 @@ class DetectionLocalizer(Node):
     def _output_transform(self):
         """The transform into the output frame, or None while it is missing."""
         try:
-            return self.tf_buffer.lookup_transform(
+            return self.camera_frame.buffer.lookup_transform(
                 self.output_frame, self.reference, Time())
         except Exception as exc:
             if not self.warned_output:
@@ -213,42 +202,23 @@ class DetectionLocalizer(Node):
         moved = quat_rotate((r.x, r.y, r.z, r.w), point)
         return (moved[0] + t.x, moved[1] + t.y, moved[2] + t.z)
 
-    def _clamped_lookup(self, stamp: Time, first_error: Exception):
-        """Fall back to the newest transform when the frame time runs ahead.
-
-        Only within FUTURE_TOLERANCE_S, and only forward in time. A lookup
-        that failed for any other reason, such as a missing frame, still fails.
-        """
-        try:
-            latest = self.tf_buffer.lookup_transform(
-                self.reference, self.optical, Time())
-        except Exception:
-            self._note_drop(first_error)
-            return None
-
-        latest_ns = (latest.header.stamp.sec * 1_000_000_000
-                     + latest.header.stamp.nanosec)
-        ahead = (stamp.nanoseconds - latest_ns) / 1e9
-        if 0.0 <= ahead <= FUTURE_TOLERANCE_S:
-            self.clamped += 1
-            return latest
-        self._note_drop(first_error)
-        return None
-
-    def _note_drop(self, exc: Exception) -> None:
+    def _note_drop(self) -> None:
         self.no_tf += 1
         if self.no_tf in (1, 200):
             self.get_logger().warn(
-                f"no transform {self.reference} -> {self.optical} at the frame "
-                f"time ({exc}). Those detections are dropped.")
+                f"no pose {self.reference} -> {self.optical} at the capture "
+                f"time. Those detections are dropped. A steady count here "
+                f"means the stamps disagree; check scene_tf and the "
+                f"detections_bridge snap rate.")
 
     def _report(self) -> None:
         if self.localized or self.no_tf or self.no_ground:
             self.get_logger().info(
-                f"{self.camera}: {self.localized} localized ({self.clamped} clamped to the "
-                f"newest transform), {self.no_tf} dropped with no transform at "
-                f"the frame time, {self.no_ground} rays that missed the ground")
-        self.localized = self.no_tf = self.no_ground = self.clamped = 0
+                f"{self.camera}: {self.localized} localized, {self.no_tf} "
+                f"dropped with no pose at the capture time, {self.no_ground} "
+                f"rays that missed the ground")
+        self.localized = self.no_tf = self.no_ground = 0
+        self.camera_frame.reset_counts()
 
 
 def main() -> None:

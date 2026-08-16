@@ -59,12 +59,10 @@ from __future__ import annotations
 import math
 import time
 
-import rclpy
 from geometry_msgs.msg import PointStamped, PoseStamped
 from mavros_msgs.msg import Altitude, GimbalManagerSetAttitude, GimbalManagerStatus
 from mavros_msgs.srv import CommandInt, CommandLong
 from rcl_interfaces.msg import SetParametersResult
-from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import qos_profile_sensor_data
@@ -72,6 +70,7 @@ from sensor_msgs.msg import CameraInfo, NavSatFix
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
+from sim_bridge.frames import CameraFrame
 from sim_bridge.geo import MapOrigin
 from sim_bridge.localization import GroundLocalizer
 from sim_bridge.projection import (GROUND_VIEW_MAX_DISTANCE_M,
@@ -162,7 +161,7 @@ class ClickToGimbal(Node):
         # steers the joints to zero without a setpoint, and _center
         # commands the same zero.
         self.cmd_q_body_link = (0.0, 0.0, 0.0, 1.0)
-        self.tf_buffer = tf_buffer(self)
+        self.camera_frame = CameraFrame(self, self.optical, self.reference)
 
         self.info: CameraInfo | None = None
         self.vehicle_q: tuple[float, float, float, float] | None = None
@@ -503,21 +502,14 @@ class ClickToGimbal(Node):
             f"({hit[0]:.1f}, {hit[1]:.1f}, {hit[2]:.1f})")
 
     def _camera_pose(self):
-        """Reference frame position and rotation of the optical frame, or
-        None with a warning when the transform is not available."""
-        try:
-            # Latest available rather than the click stamp: the command
-            # steers from where the camera looks now.
-            tf = self.tf_buffer.lookup_transform(
-                self.reference, self.optical, rclpy.time.Time(),
-                timeout=Duration(seconds=TF_TIMEOUT_S))
-        except Exception as err:  # noqa: BLE001 - lookup raises several types
+        """Where the camera looks now, or None with a warning. The newest
+        pose rather than the click stamp: the command steers from here."""
+        pose = self.camera_frame.latest(timeout_s=TF_TIMEOUT_S)
+        if pose is None:
             self.get_logger().warn(
-                f"click dropped: no transform {self.reference} -> "
-                f"{self.optical} ({err})")
+                f"click dropped: no pose {self.reference} -> {self.optical}")
             return None
-        t, r = tf.transform.translation, tf.transform.rotation
-        return (t.x, t.y, t.z), (r.x, r.y, r.z, r.w)
+        return pose.position, pose.rotation
 
     # --------------------------------------------------------------------- roi
     def _publish_roi(self, hit) -> None:

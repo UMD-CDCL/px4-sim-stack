@@ -61,12 +61,13 @@ from std_msgs.msg import Float64
 from vision_msgs.msg import Detection3D, Detection3DArray, ObjectHypothesisWithPose
 from visualization_msgs.msg import MarkerArray
 
+from sim_bridge.frames import CameraFrame
 from sim_bridge.geo import MapOrigin
 from sim_bridge.projection import (GROUND_VIEW_MAX_DISTANCE_M,
                                    intrinsics_ready, point_in_view,
                                    point_to_ray_distance)
 from sim_bridge.runtime import (LATCHED, geojson_publisher, now_s,
-                                publish_features, spin, tf_buffer)
+                                publish_features, spin)
 from sim_bridge.verdicts import (CROSS_VERDICTS, DETECTION_CROSS_LIFT,
                                  DETECTION_CROSS_SPAN, DETECTION_DOT_DIAMETER,
                                  MAP_VERDICT_COLOR, MAP_VERDICT_TOPIC,
@@ -121,7 +122,7 @@ class DetectionScorer(Node):
         self.estimates: list[Estimate] = []
         self.estimates_stamp = 0.0
         self.window = deque(maxlen=METRIC_WINDOW)
-        self.tf_buffer = tf_buffer(self)
+        self.camera_frame = CameraFrame(self, self.optical, self.reference)
 
         self.create_subscription(Detection3DArray, "/ground_truth/truth_3d",
                                  self._on_truth, LATCHED)
@@ -180,25 +181,20 @@ class DetectionScorer(Node):
         if (self._now() - self.info_stamp) > CAMERA_TIMEOUT_S \
                 or not intrinsics_ready(self.info):
             return None, set()
-        try:
-            # Latest available rather than a specific time: scoring judges
-            # the current view, and asking for "now" races the transform.
-            tf = self.tf_buffer.lookup_transform(
-                self.reference, self.optical, rclpy.time.Time())
-        except Exception:
+        # The newest pose, not one instant: scoring judges the current view.
+        pose = self.camera_frame.latest()
+        if pose is None:
             return None, set()
-        t, r = tf.transform.translation, tf.transform.rotation
-        origin = (t.x, t.y, t.z)
-        rotation = (r.x, r.y, r.z, r.w)
 
         # The exact truth point decides the view, nothing around it. A
         # target whose point sits just off frame is not in view, and only
         # an actual detection can claim it.
-        return origin, {target[0] for target in self.truth
-                        if point_in_view((target[1], target[2], target[3]),
-                                         self.info.k, self.info.width,
-                                         self.info.height, origin, rotation,
-                                         GROUND_VIEW_MAX_DISTANCE_M)}
+        return pose.position, {
+            target[0] for target in self.truth
+            if point_in_view((target[1], target[2], target[3]),
+                             self.info.k, self.info.width, self.info.height,
+                             pose.position, pose.rotation,
+                             GROUND_VIEW_MAX_DISTANCE_M)}
 
     def _score(self) -> None:
         camera, in_view = self._current_view()

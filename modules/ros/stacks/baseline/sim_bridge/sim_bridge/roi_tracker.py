@@ -62,7 +62,6 @@ from __future__ import annotations
 import math
 import time
 
-import rclpy
 from geometry_msgs.msg import PoseStamped
 
 from sim_bridge.projection import (LINK_TO_OPTICAL, body_frd_to_flu,
@@ -178,15 +177,9 @@ class RoiTracker:
 
     # ---------------------------------------------------------------- internal
     def _camera_tf(self):
-        try:
-            # Latest available, no wait: a blocking lookup on the shared
-            # executor starves the click and service callbacks when TF lags.
-            tf = self.node.tf_buffer.lookup_transform(
-                self.node.reference, self.node.optical, rclpy.time.Time())
-        except Exception:  # noqa: BLE001 - lookup raises several types
-            return None
-        t, r = tf.transform.translation, tf.transform.rotation
-        return (t.x, t.y, t.z), (r.x, r.y, r.z, r.w)
+        # The newest pose, no wait: a blocking lookup on the shared executor
+        # starves the click and service callbacks when TF lags.
+        return self.node.camera_frame.latest()
 
     def _sync_joint_state(self, camera) -> None:
         """Adopt the joint state the TF chain implies when it disagrees
@@ -202,7 +195,7 @@ class RoiTracker:
         settle refresh caught up."""
         if camera is None or self.vehicle_q is None:
             return
-        _, q_map_optical = camera
+        q_map_optical = camera.rotation
         q_link = quat_mul(
             quat_conj(self._vehicle_attitude()),
             quat_mul(q_map_optical, quat_conj(LINK_TO_OPTICAL)))
@@ -218,7 +211,7 @@ class RoiTracker:
             camera = self._camera_tf()
         if camera is None or self.vehicle_q is None:
             return
-        _, q_map_optical = camera
+        q_map_optical = camera.rotation
         q_vehicle_true = quat_mul(
             q_map_optical,
             quat_conj(quat_mul(self.node.cmd_q_body_link, LINK_TO_OPTICAL)))
@@ -241,8 +234,7 @@ class RoiTracker:
             camera = self._camera_tf()
         if camera is None:
             return None
-        position, _ = camera
-        to_target = tuple(t - p for t, p in zip(self.point, position))
+        to_target = tuple(t - p for t, p in zip(self.point, camera.position))
         norm = math.sqrt(sum(v * v for v in to_target))
         if norm < 1.0:
             return None    # directly on top of the point: no useful direction

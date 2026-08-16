@@ -15,19 +15,17 @@ Publishes
 
 from __future__ import annotations
 
-import rclpy
 from geometry_msgs.msg import Point32, PolygonStamped
-from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo
 
+from sim_bridge.frames import CameraFrame
 from sim_bridge.geo import MapOrigin
 from sim_bridge.localization import GroundLocalizer
 from sim_bridge.projection import (GROUND_VIEW_MAX_DISTANCE_M,
                                    image_boundary, intrinsics_ready)
-from sim_bridge.runtime import (geojson_publisher, publish_features, spin,
-                                tf_buffer)
+from sim_bridge.runtime import geojson_publisher, publish_features, spin
 
 # ------------------------------------------------------------------- tunables
 PUBLISH_RATE_HZ = 5.0
@@ -49,7 +47,7 @@ class GroundProjector(Node):
         self.optical = self.get_parameter("optical_frame").value
         self.reference = self.get_parameter("reference_frame").value
         self.localizer = GroundLocalizer(self)
-        self.tf_buffer = tf_buffer(self)
+        self.camera_frame = CameraFrame(self, self.optical, self.reference)
 
         self.info: CameraInfo | None = None
         self.create_subscription(CameraInfo,
@@ -72,23 +70,17 @@ class GroundProjector(Node):
     def _publish_footprint(self) -> None:
         if not intrinsics_ready(self.info):
             return
-        try:
-            # Latest available rather than a specific time: this draws the
-            # current view, and asking for "now" races the transform.
-            tf = self.tf_buffer.lookup_transform(
-                self.reference, self.optical, rclpy.time.Time(),
-                timeout=Duration(seconds=TF_TIMEOUT_S))
-        except Exception:
+        # The newest pose, not one instant: this draws the current view, and
+        # asking for "now" races the transform.
+        pose = self.camera_frame.latest(timeout_s=TF_TIMEOUT_S)
+        if pose is None:
             self.missed += 1
             return
-
-        t = tf.transform.translation
-        r = tf.transform.rotation
 
         outline = self.localizer.footprint(
             image_boundary(self.info.width, self.info.height,
                            BOUNDARY_SAMPLES_PER_EDGE),
-            self.info.k, (t.x, t.y, t.z), (r.x, r.y, r.z, r.w),
+            self.info.k, pose.position, pose.rotation,
             GROUND_VIEW_MAX_DISTANCE_M)
         if outline is None:
             self.missed += 1
@@ -96,7 +88,7 @@ class GroundProjector(Node):
             return
 
         footprint = PolygonStamped()
-        footprint.header.stamp = tf.header.stamp
+        footprint.header.stamp = pose.stamp
         footprint.header.frame_id = self.reference
         footprint.polygon.points = [
             Point32(x=float(p[0]), y=float(p[1]), z=float(p[2])) for p in outline

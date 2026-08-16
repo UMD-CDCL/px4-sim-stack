@@ -48,13 +48,13 @@
       - gimbal_control
       - sim_state
 
-# Without this there is no map -> base_link transform, and every projection and
-# localization fails with "no transform at the frame time". MAVROS ships it off.
+# scene_tf publishes map -> base_link from this plugin's pose topic, so that
+# one node owns the whole tree and one file decides what every stamp means. A
+# transform scene_tf does not publish is one it cannot apply vehicle_delay to,
+# and two publishers of the same transform would fight.
 /mavros/local_position:
   ros__parameters:
-    tf.send: true
-    tf.frame_id: "map"
-    tf.child_frame_id: "base_link"
+    tf.send: false
 
 /mavros/distance_sensor:
   ros__parameters:
