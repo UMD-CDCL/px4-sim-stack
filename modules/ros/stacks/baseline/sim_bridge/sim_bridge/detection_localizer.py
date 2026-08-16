@@ -46,9 +46,8 @@ from vision_msgs.msg import (
 )
 
 from sim_bridge.geo import GroundPlane
-from sim_bridge.projection import (PERSON_HEIGHT_M, intersect_ground,
-                                   intrinsics_ready, quat_rotate,
-                                   ray_in_optical, slant_range)
+from sim_bridge.projection import (intersect_ground, intrinsics_ready,
+                                   quat_rotate, ray_in_optical, slant_range)
 from sim_bridge.scene_surface import SceneSurface
 
 # ------------------------------------------------------------------- tunables
@@ -241,7 +240,7 @@ class DetectionLocalizer(Node):
             d3.bbox.center = pose
             d3.bbox.size.x = 2.0 * math.sqrt(covariance[0])
             d3.bbox.size.y = 2.0 * math.sqrt(covariance[7])
-            d3.bbox.size.z = PERSON_HEIGHT_M
+            d3.bbox.size.z = 2.0 * math.sqrt(covariance[14])
             out.detections.append(d3)
             self.localized += 1
 

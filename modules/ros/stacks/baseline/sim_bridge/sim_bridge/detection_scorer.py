@@ -14,22 +14,26 @@ the ground far beyond, so an estimate whose ray from the camera passes
 within the gate of a target claims that target, whatever the ground
 distance.
 
+Association is pure geometry over every target, in view or not. A real
+detection therefore overrides what the view alone would say about a
+target: one behind a roof still turns green or yellow when a detection
+lands on it.
+
 The ground distance then splits detection from localization. Within
 gate_radius the verdict is TP: the detector saw the target and placed it.
 Otherwise a matched estimate is MISLOCALIZED: the detector saw the target,
 but the position it reported is not good enough to act on. An unmatched
 estimate is FP.
 
-A target counts as visible when the camera sees it in 3D: some part of its
-standing height projects inside the image, in front of the camera, within
-the same distance that truncates the footprint. The footprint polygon would
-miss an elevated target, on a roof for instance, whose ground coordinates
-fall outside the polygon while the camera looks straight at it. Occlusion
+The view decides only what counts as a miss: an unclaimed target is an FN
+when the camera sees it, and nothing when it does not. A target counts as
+in view when its exact point projects inside the image, in front of the
+camera, within the same distance that truncates the footprint. Occlusion
 is not modelled: a target behind a structure but inside the view still
 counts, the same flat-scene assumption the rest of the pipeline makes.
 
-CameraInfo that stops arriving means the camera is down, so nothing is
-visible and nothing is a miss. Estimates also expire, so a detector that
+CameraInfo that stops arriving means the camera is down, so nothing is in
+view and nothing is a miss. Estimates also expire, so a detector that
 goes quiet turns its hits into misses instead of freezing the last answer.
 
 A TP or MISLOCALIZED verdict carries the matched target name as a second
@@ -80,8 +84,8 @@ from visualization_msgs.msg import MarkerArray
 
 from sim_bridge.geo import MapOrigin
 from sim_bridge.projection import (GROUND_VIEW_MAX_DISTANCE_M,
-                                   PERSON_HEIGHT_M, intrinsics_ready,
-                                   point_in_view, point_to_ray_distance)
+                                   intrinsics_ready, point_in_view,
+                                   point_to_ray_distance)
 from sim_bridge.verdicts import (CROSS_VERDICTS, DETECTION_CROSS_LIFT,
                                  DETECTION_CROSS_SPAN, DETECTION_DOT_DIAMETER,
                                  VERDICT_COLOR, cross_marker, marker)
@@ -188,46 +192,46 @@ class DetectionScorer(Node):
 
     # ------------------------------------------------------------------ score
     def _current_view(self):
-        """The camera position and the truth targets it sees, as
-        (origin, targets). No usable view means (None, [])."""
+        """The camera position and the names of the truth targets it sees,
+        as (origin, names). No usable view means (None, an empty set)."""
         if (self._now() - self.info_stamp) > CAMERA_TIMEOUT_S \
                 or not intrinsics_ready(self.info):
-            return None, []
+            return None, set()
         try:
             # Latest available rather than a specific time: scoring judges
             # the current view, and asking for "now" races the transform.
             tf = self.tf_buffer.lookup_transform(
                 self.reference, self.optical, rclpy.time.Time())
         except Exception:
-            return None, []
+            return None, set()
         t, r = tf.transform.translation, tf.transform.rotation
         origin = (t.x, t.y, t.z)
         rotation = (r.x, r.y, r.z, r.w)
 
-        def sees(x: float, y: float, z: float) -> bool:
-            return point_in_view((x, y, z), self.info.k, self.info.width,
-                                 self.info.height, origin, rotation,
-                                 GROUND_VIEW_MAX_DISTANCE_M)
-
-        # Both ends of the standing height: a person's base can project just
-        # off the frame edge while the torso shows, and the detector still
-        # boxes the torso.
-        return origin, [target for target in self.truth
-                        if sees(target[1], target[2], target[3])
-                        or sees(target[1], target[2], target[3] + PERSON_HEIGHT_M)]
+        # The exact truth point decides the view, nothing around it. A
+        # target whose point sits just off frame is not in view, and only
+        # an actual detection can claim it.
+        return origin, {target[0] for target in self.truth
+                        if point_in_view((target[1], target[2], target[3]),
+                                         self.info.k, self.info.width,
+                                         self.info.height, origin, rotation,
+                                         GROUND_VIEW_MAX_DISTANCE_M)}
 
     def _score(self) -> None:
-        camera, visible = self._current_view()
+        camera, in_view = self._current_view()
+        targets = self.truth
         estimates = (self.estimates
                      if (self._now() - self.estimates_stamp) <= ESTIMATE_TIMEOUT_S
                      else [])
 
         # Greedy matching, closest pair first, so a far estimate cannot take
-        # a target from a near one.
+        # a target from a near one. Every target takes part, in view or not:
+        # association is pure geometry, and the view decides only what
+        # counts as a miss below.
         pairs = sorted(
             (math.hypot(ex - tx, ey - ty), e, t)
             for e, (_, ex, ey, _) in enumerate(estimates)
-            for t, (_, tx, ty, _) in enumerate(visible))
+            for t, (_, tx, ty, _) in enumerate(targets))
         match: dict[int, tuple[int, float]] = {}
         claimed: set[int] = set()
         for distance, e, t in pairs:
@@ -246,19 +250,16 @@ class DetectionScorer(Node):
         # anyone acting on the estimate would experience.
         if camera is not None:
             ray_pairs = sorted(
-                (min(point_to_ray_distance((tx, ty, tz), camera, (ex, ey, ez)),
-                     point_to_ray_distance((tx, ty, tz + PERSON_HEIGHT_M),
-                                           camera, (ex, ey, ez))),
-                 e, t)
+                (point_to_ray_distance((tx, ty, tz), camera, (ex, ey, ez)), e, t)
                 for e, (_, ex, ey, ez) in enumerate(estimates) if e not in match
-                for t, (_, tx, ty, tz) in enumerate(visible) if t not in claimed)
+                for t, (_, tx, ty, tz) in enumerate(targets) if t not in claimed)
             for ray_distance, e, t in ray_pairs:
                 if ray_distance >= self.gate:
                     break
                 if e in match or t in claimed:
                     continue
-                match[e] = (t, math.hypot(estimates[e][1] - visible[t][1],
-                                          estimates[e][2] - visible[t][2]))
+                match[e] = (t, math.hypot(estimates[e][1] - targets[t][1],
+                                          estimates[e][2] - targets[t][2]))
                 claimed.add(t)
 
         verdicts = Detection3DArray()
@@ -270,7 +271,7 @@ class DetectionScorer(Node):
             else:
                 t, distance = match[e]
                 kind = "TP" if distance <= self.gate else "MISLOCALIZED"
-                matched = visible[t][0]
+                matched = targets[t][0]
                 if self.error_pub.get_subscription_count() > 0:
                     self.error_pub.publish(Float64(data=distance))
             self.window.append(kind)
@@ -279,8 +280,8 @@ class DetectionScorer(Node):
                               score=distance, matched=matched))
             self._publish_fix(kind, x, y, verdicts.header.stamp)
 
-        for t, (name, x, y, z) in enumerate(visible):
-            if t in claimed:
+        for t, (name, x, y, z) in enumerate(targets):
+            if t in claimed or name not in in_view:
                 continue
             self.window.append("FN")
             verdicts.detections.append(self._verdict("FN", name, x, y, z))

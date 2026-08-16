@@ -38,11 +38,12 @@ DETECTION_CROSS_LIFT = 0.05
 # --------------------------------------------------- ground truth, whole scene
 # A target's scene status combines the cameras GROUND_TRUTH_CAMERAS selects,
 # the gimbal alone by default. The colors follow the verdict colors: green
-# localized, yellow mislocalized, red undetected.
+# localized, yellow mislocalized, red undetected. The first two need no
+# view: a detection overrides what the view alone would say.
 #   detected      some camera placed an estimate within the gate of it
 #   mislocalized  some camera detected it, but every estimate failed the gate
 #   visible       in some camera's view, but nothing detected it
-#   out_of_view   no camera sees it
+#   out_of_view   no camera sees it, and nothing matched it
 GROUND_TRUTH_COLOR = {
     "detected": (0.18, 0.80, 0.44, 0.30),      # green
     "mislocalized": (0.95, 0.77, 0.06, 0.30),  # yellow

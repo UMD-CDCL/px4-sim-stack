@@ -156,7 +156,12 @@ class GroundProjector(Node):
             features.append({
                 "type": "Feature",
                 "geometry": {"type": "Polygon", "coordinates": [ring]},
-                "properties": {"name": f"{self.camera} footprint"},
+                # fill false, not a transparent fill: without a fill layer
+                # the interior takes no clicks. The Map panel merges `style`
+                # over the topic color, so the stroke keeps this camera's
+                # color.
+                "properties": {"name": f"{self.camera} footprint",
+                               "style": {"fill": False}},
             })
         msg = GeoJSON()
         msg.geojson = json.dumps(

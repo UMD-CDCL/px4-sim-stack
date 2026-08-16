@@ -19,10 +19,6 @@ from typing import Iterable, Sequence
 # outline that frames it.
 GROUND_VIEW_MAX_DISTANCE_M = 100.0
 
-# A standing person's vertical extent. The localizer sizes its boxes with
-# it, and the scorer judges a target seen when any part of it is in frame.
-PERSON_HEIGHT_M = 1.7
-
 
 def intrinsics_ready(info) -> bool:
     """True when a CameraInfo carries a usable pinhole matrix.

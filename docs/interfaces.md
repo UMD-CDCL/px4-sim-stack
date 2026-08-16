@@ -424,12 +424,13 @@ with one exception: an estimate whose viewing ray from the camera passes
 within the gate of an unclaimed target detected that target through the
 ground-plane assumption, a roof target being the usual case, and it scores
 MISLOCALIZED at any ground distance.
-Only targets the camera sees count: a target's 3D position must project into
-the image within the same 100 m limit that truncates the footprint. The 3D
-test, rather than the footprint polygon, is what covers an elevated target
-whose ground coordinates fall outside the polygon while the camera looks
-straight at it. So flying away from the scene does not read as a collapse in
-recall, and a rooftop target is a miss only when it is truly in view.
+Association is pure geometry over every target, in view or not, so a real
+detection overrides what the view alone would say about a target. The view
+decides only what counts as a miss: a target is in view when its exact
+point projects into the image within the same 100 m limit that truncates
+the footprint, and an unclaimed target in view is an FN. So flying away
+from the scene does not read as a collapse in recall, and a rooftop target
+is a miss only when it is truly in view.
 
 Every camera is localized and scored on its own, under `/perception/<camera>/`
 and `/scoring/<camera>/`. Nothing merges them. A camera looking straight down
@@ -456,7 +457,9 @@ colored by its status across the cameras GROUND_TRUTH_CAMERAS selects, the
 gimbal alone by default: green when some camera placed an
 estimate within the gate of it, yellow when some camera detected it but
 every estimate failed the gate, red when some camera's view covers it but
-nothing detected it, grey when no camera sees it. Each camera's estimates
+nothing detected it, grey when no camera sees it and nothing matched it.
+Green and yellow need no view: a detection overrides what the view alone
+would say about a target. Each camera's estimates
 are marks: a green dot within the gate of a target, a yellow cross for a
 matched estimate outside it, a red cross for an estimate that matched
 nothing. A dot inside a bubble is a hit by construction, because the bubble

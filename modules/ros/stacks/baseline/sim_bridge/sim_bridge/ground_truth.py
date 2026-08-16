@@ -11,9 +11,11 @@ its scene status across the cameras the `cameras` parameter selects, the
 gimbal alone by default: green when some camera placed an
 estimate within the gate of it, yellow when some camera detected it but
 every estimate failed the gate, red when some camera's view covers it but
-nothing detected it, grey when no camera sees it. The status comes from
-the scorers' verdicts: an FN names a visible undetected target, and a TP
-or MISLOCALIZED verdict carries the name of the target it matched.
+nothing detected it, grey when no camera sees it and nothing matched it.
+Green and yellow need no view: a detection overrides what the view alone
+would say. The status comes from the scorers' verdicts: an FN names a
+target in view but undetected, and a TP or MISLOCALIZED verdict carries
+the name of the target it matched.
 
 A billboard label names each target. The Map panel gets the same gate
 circle and colors from one GeoJSON message that carries every target.
@@ -401,8 +403,9 @@ class GroundTruth(Node):
             status = statuses[target["name"]]
             rgba = GROUND_TRUTH_COLOR[status]
             # The Map panel shows `name` and `metadata` in the hover tooltip,
-            # and reads Leaflet path options from `style`. The fill alpha
-            # matches the 3D bubble.
+            # and reads Leaflet path options from `style`. fill false, not a
+            # transparent fill: without a fill layer the interior takes no
+            # clicks, so the circle cannot cover what sits inside it.
             tooltip = {
                 "name": target["name"],
                 "metadata": {"altitude_m": round(target["z"], 1),
@@ -412,8 +415,7 @@ class GroundTruth(Node):
                 "type": "Feature",
                 "geometry": {"type": "Polygon", "coordinates": [ring]},
                 "properties": dict(tooltip, style={
-                    "color": hex_rgb(rgba), "weight": 2,
-                    "fillColor": hex_rgb(rgba), "fillOpacity": rgba[3]}),
+                    "color": hex_rgb(rgba), "weight": 2, "fill": False}),
             })
             features.append({
                 "type": "Feature",
