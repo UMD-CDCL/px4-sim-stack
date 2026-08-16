@@ -95,3 +95,17 @@ only at EKF speed, so a sudden disagreement always belongs to the joints.
 `sim_bridge/click_to_gimbal.py` and `sim_bridge/scene_tf.py` implement
 these accommodations, switchable back to honest MAVLink behavior for real
 hardware through `gimbal_convention` and `gimbal_reference`.
+
+## The rates, and the patch that raises them
+
+Stock GZGimbal runs its whole cycle at 5 Hz (`ScheduleOnInterval(200_ms)`):
+setpoint poll, joint move, and attitude report alike. The joints therefore
+step toward a stabilization target five times a second and the camera
+visibly lags the airframe through any maneuver. On top of that, the
+GIMBAL_DEVICE_ATTITUDE_STATUS mavlink stream runs at the profile default,
+one report every few seconds, so the ROS frame tree is seconds stale.
+`patches/px4-gzgimbal-rate.patch` raises the cycle to 50 Hz, and px4-rcS
+streams the report at 50 Hz to match. With both in place the joints follow
+a streamed setpoint within 20 ms and `scene_tf` can trust the report as
+the live camera orientation, which is what keeps image overlays glued to
+the video.

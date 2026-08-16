@@ -43,9 +43,15 @@ from sim_bridge.projection import (LINK_TO_OPTICAL, aerospace_to_ros,
 
 # ------------------------------------------------------------------- tunables
 GIMBAL_PUBLISH_RATE_HZ = 30.0
-# How long a commanded setpoint stays authoritative before the device report
-# takes over, in gimbal_source "auto".
+# How long a commanded setpoint stays authoritative before the stale device
+# report takes over, in gimbal_source "auto".
 SETPOINT_TIMEOUT_S = 3.0
+# A device report counts as fresh this long. With the 50 Hz report
+# (patches/px4-gzgimbal-rate.patch plus the px4-rcS stream rate) the report
+# is always fresh and wins in "auto": it carries the actual joints, so the
+# frame tree matches what the camera image shows. At the mavlink default
+# rate, one report every few seconds, the setpoint bridges the gaps.
+STATUS_FRESH_S = 0.5
 
 # GIMBAL_DEVICE_FLAGS_YAW_LOCK
 YAW_LOCK = 16
@@ -86,9 +92,12 @@ class SceneTf(Node):
         #   setpoint  GIMBAL_DEVICE_SET_ATTITUDE, the commanded angles,
         #             already vehicle relative.
         #   status    GIMBAL_DEVICE_ATTITUDE_STATUS, what the device reports.
-        #   auto      prefer a fresh setpoint, fall back to the status. An
-        #             untouched gimbal produces no setpoint at all, so "auto"
-        #             avoids sitting at identity until the first command.
+        #   auto      prefer a fresh device report, then a fresh setpoint.
+        #             The report is the actual joints, so it matches the
+        #             image; the setpoint leads the joints by the device
+        #             cycle and covers a report stream that runs slow. An
+        #             untouched gimbal produces no setpoint at all, so the
+        #             stale report is the last resort.
         self.declare_parameter("gimbal_source", "auto")
         # A fixed mounting rotation applied after the attitude is made body
         # relative, in degrees, as roll, pitch, yaw. The diagnostics log
@@ -114,6 +123,7 @@ class SceneTf(Node):
         self.vehicle_q = (0.0, 0.0, 0.0, 1.0)
         self.gimbal_q = (0.0, 0.0, 0.0, 1.0)
         self.last_setpoint = None
+        self.last_status = None
         self.gimbal_seen = False
         self.logged_yaw_lock = False
         self.logged_setpoint = False
@@ -217,6 +227,7 @@ class SceneTf(Node):
 
         # MAVROS passes the PX4 quaternion through untouched, in aerospace
         # convention: NED reference, FRD body axes.
+        self.last_status = self.get_clock().now().nanoseconds / 1e9
         absolute = aerospace_to_ros((msg.q.x, msg.q.y, msg.q.z, msg.q.w))
         if self.gimbal_reference == "earth":
             # The report is absolute, so divide the vehicle attitude off the
@@ -234,13 +245,26 @@ class SceneTf(Node):
         now = self.get_clock().now().nanoseconds / 1e9
         return (now - self.last_setpoint) < SETPOINT_TIMEOUT_S
 
-    def _publish_gimbal(self) -> None:
+    def _status_fresh(self) -> bool:
+        if self.last_status is None:
+            return False
+        now = self.get_clock().now().nanoseconds / 1e9
+        return (now - self.last_status) < STATUS_FRESH_S
+
+    def _gimbal_choice(self) -> tuple[str, tuple]:
+        """The orientation the frame tree gets, and its source for the log."""
         if self.gimbal_source == "setpoint":
-            self.gimbal_q = self.q_setpoint
-        elif self.gimbal_source == "auto" and self._setpoint_fresh():
-            self.gimbal_q = self.q_setpoint
-        else:
-            self.gimbal_q = self.q_status
+            return "setpoint", self.q_setpoint
+        if self.gimbal_source == "status":
+            return "status", self.q_status
+        if self._status_fresh():
+            return "status", self.q_status
+        if self._setpoint_fresh():
+            return "setpoint", self.q_setpoint
+        return "status", self.q_status
+
+    def _publish_gimbal(self) -> None:
+        _, self.gimbal_q = self._gimbal_choice()
 
         t = TransformStamped()
         t.header.stamp = self.get_clock().now().to_msg()
@@ -260,7 +284,7 @@ class SceneTf(Node):
         self.get_logger().info(
             f"yaw deg: vehicle {vehicle_yaw:+7.1f}  gimbal absolute "
             f"{absolute_yaw:+7.1f}  gimbal rel body {relative_yaw:+7.1f}  "
-            f"source={'setpoint' if self._setpoint_fresh() else 'status'}")
+            f"source={self._gimbal_choice()[0]}")
 
     def _report(self) -> None:
         if not self.gimbal_seen:

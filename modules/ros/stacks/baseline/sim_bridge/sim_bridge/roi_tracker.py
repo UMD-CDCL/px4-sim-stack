@@ -20,10 +20,16 @@ docs/px4-simulated-gimbal.md records the device behaviors.
 ClickToGimbal forwards each vehicle attitude message to on_vehicle,
 and the tracker recomputes on that stream, gated to 20 Hz
 (TICK_MIN_INTERVAL_S). The simulated device polls its setpoint at
-5 Hz (GZGimbal.cpp, ScheduleOnInterval 200 ms), which is the cap on
-how fast the joints react, so the 20 Hz cadence commands the same
-motion as recomputing on every message. A click bypasses the gate:
-track and follow recompute at once.
+50 Hz (GZGimbal.cpp with patches/px4-gzgimbal-rate.patch), so every
+command lands on the joints within one tick and the 20 Hz cadence is
+the pacing item. A click bypasses the gate: track and follow
+recompute at once.
+
+A recompute becomes a command only when it moves the desired attitude
+by more than COMMAND_DEADBAND_DEG. The vehicle attitude stream carries
+hover noise, and a device that chases it twitches on a point it
+already holds. A click bypasses the band too: a deliberate small
+correction always lands.
 
 The whole emulation lives in this one file so it is easy to drop,
 revert, or improve. ClickToGimbal owns one RoiTracker and gives it a
@@ -44,11 +50,11 @@ update goes to the one that actually moved. A click first re-derives
 the joint state from the chain under the standing correction, because
 a disagreement there means another controller, usually the QGC
 joystick, moved the joints, and the correction drifts only at EKF
-speed. The correction itself refreshes whenever the desired
-attitude has stayed still long enough for the joints and the TF chain
-to catch up, and between refreshes the EKF supplies only short-term
-attitude changes, which stay accurate while its absolute heading
-drifts.
+speed. The correction itself refreshes on every tick, blended a tenth
+at a time (CORRECTION_BLEND): the TF chain trails the joints by up to
+one device cycle, and the blend keeps that transient under the command
+deadband while real EKF drift still tracks with a time constant well
+under a second, so the stabilization stays current through flight.
 """
 
 from __future__ import annotations
@@ -66,17 +72,25 @@ from sim_bridge.projection import (LINK_TO_OPTICAL, body_frd_to_flu,
 
 # ------------------------------------------------------------------- tunables
 # The shortest interval between pose-driven recomputes, 20 Hz. The
-# simulated device polls its setpoint at 5 Hz (GZGimbal.cpp, 200 ms), so
-# this cadence commands the same motion as the raw pose rate. A click
-# bypasses the gate: track and follow recompute at once.
+# simulated device polls its setpoint at 50 Hz (GZGimbal.cpp with
+# patches/px4-gzgimbal-rate.patch), so this cadence is the pacing item.
+# A click bypasses the gate: track and follow recompute at once.
 TICK_MIN_INTERVAL_S = 0.05
-# How long the desired attitude must stay still before the TF chain is
-# trusted for the attitude correction. Covers the joint slew plus one
-# device report.
-CORRECTION_SETTLE_S = 1.5
-# The desired attitude counts as still while consecutive updates stay
-# inside this angle. Above the EKF attitude noise in a hover.
-STILL_LIMIT_DEG = 0.2
+# How much of each measured correction folds in per tick. The measurement
+# mis-attributes up to one command step to the vehicle while the TF chain
+# trails the joints by a device cycle, so folding it in a tenth at a time
+# keeps that transient under the deadband, while real EKF drift, degrees
+# per minute, still tracks with a time constant well under a second. A
+# click snaps the correction exactly instead: at click time the joints
+# are settled, so the chain is current.
+CORRECTION_BLEND = 0.1
+# The smallest attitude change worth commanding. The vehicle attitude and
+# the device report both carry noise; below this band a new setpoint only
+# makes the joints chase that noise, and the camera twitches on a point it
+# already holds. 0.5 degrees sits above the hover noise and shifts the
+# view by under a meter at typical working distances. A click bypasses
+# the band, so a deliberate small correction always lands.
+COMMAND_DEADBAND_DEG = 0.5
 # A click adopts the TF-implied joint state when it disagrees with the
 # last command by more than this. Above TF lag and attitude noise, far
 # below any deliberate joystick move.
@@ -95,6 +109,16 @@ def quat_angle_deg(a, b) -> float:
     return math.degrees(2.0 * math.acos(min(1.0, dot)))
 
 
+def quat_nlerp(a, b, t: float):
+    """Normalized lerp from a toward b by t. Enough for the small angles
+    the correction moves by between ticks."""
+    if sum(x * y for x, y in zip(a, b)) < 0.0:
+        b = tuple(-v for v in b)
+    mix = tuple(av + (bv - av) * t for av, bv in zip(a, b))
+    norm = math.sqrt(sum(v * v for v in mix)) or 1.0
+    return tuple(v / norm for v in mix)
+
+
 class RoiTracker:
     def __init__(self, node) -> None:
         self.node = node
@@ -105,9 +129,10 @@ class RoiTracker:
         # The body yaw the EKF attitude is missing, refreshed against the
         # TF chain. Identity only until the first target arrives.
         self.correction = IDENTITY
-        self.desired_link = None
-        self.still_since = time.monotonic()
         self.last_pose_tick = 0.0
+        # True for the tick a click starts, so that tick commands even
+        # inside the deadband.
+        self.force_command = False
 
     def track(self, point_map: tuple[float, float, float]) -> None:
         """Hold every axis on a point in the reference frame.
@@ -118,6 +143,7 @@ class RoiTracker:
         camera = self._camera_tf()
         self._sync_joint_state(camera)
         self._refresh_correction(camera)
+        self.force_command = True
         self._tick()
 
     def follow(self, pitch_world: float, yaw_world: float) -> None:
@@ -133,6 +159,7 @@ class RoiTracker:
         self._refresh_correction(camera)
         heading = self._heading(self._vehicle_attitude())
         self.follow_angles = (pitch_world, wrap_pi(yaw_world - heading))
+        self.force_command = True
         self._tick()
 
     def clear(self) -> None:
@@ -186,7 +213,7 @@ class RoiTracker:
                 "gimbal was moved by another controller; joint state "
                 "re-synced from TF")
 
-    def _refresh_correction(self, camera=_UNSET) -> None:
+    def _refresh_correction(self, camera=_UNSET, blend: float = 1.0) -> None:
         if camera is _UNSET:
             camera = self._camera_tf()
         if camera is None or self.vehicle_q is None:
@@ -195,7 +222,9 @@ class RoiTracker:
         q_vehicle_true = quat_mul(
             q_map_optical,
             quat_conj(quat_mul(self.node.cmd_q_body_link, LINK_TO_OPTICAL)))
-        self.correction = quat_mul(quat_conj(self.vehicle_q), q_vehicle_true)
+        measured = quat_mul(quat_conj(self.vehicle_q), q_vehicle_true)
+        self.correction = (measured if blend >= 1.0
+                           else quat_nlerp(self.correction, measured, blend))
 
     def _vehicle_attitude(self):
         """The corrected vehicle attitude, map ENU reference, FLU body."""
@@ -234,14 +263,13 @@ class RoiTracker:
         if (self.point is None and self.follow_angles is None) \
                 or self.vehicle_q is None:
             return
-        # The TF chain lags a moving gimbal by up to one device report, so
-        # the correction refreshes only after the desired attitude has
-        # stayed still that long. One TF fetch serves both callees.
-        settled = time.monotonic() - self.still_since > CORRECTION_SETTLE_S
-        camera = (self._camera_tf()
-                  if settled or self.point is not None else None)
-        if settled:
-            self._refresh_correction(camera)
+        # One TF fetch serves the refresh and the point attitude. The
+        # 50 Hz device report keeps the chain within one cycle of the
+        # joints, so the correction refreshes on every tick, blended,
+        # and the stabilization stays current through flight instead of
+        # waiting for a still moment that flight never offers.
+        camera = self._camera_tf()
+        self._refresh_correction(camera, blend=CORRECTION_BLEND)
         q_vehicle_enu = self._vehicle_attitude()
         attitude = (self._point_attitude(q_vehicle_enu, camera)
                     if self.point is not None
@@ -250,9 +278,10 @@ class RoiTracker:
             return
 
         desired_link = body_frd_to_flu(quat_from_rpy(*attitude))
-        if self.desired_link is None \
-                or quat_angle_deg(desired_link, self.desired_link) \
-                > STILL_LIMIT_DEG:
-            self.still_since = time.monotonic()
-            self.desired_link = desired_link
+        # The joints hold the last setpoint exactly, so inside the
+        # deadband a new command only chases noise.
+        force, self.force_command = self.force_command, False
+        if not force and quat_angle_deg(
+                desired_link, self.node.cmd_q_body_link) < COMMAND_DEADBAND_DEG:
+            return
         self.node.command_body_attitude(*attitude)

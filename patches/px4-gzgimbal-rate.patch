@@ -1,0 +1,41 @@
+Raise the simulated gimbal's cycle rate from 5 Hz to 50 Hz.
+
+GZGimbal runs one work item that polls the setpoint, moves the joints, and
+publishes GIMBAL_DEVICE_ATTITUDE_STATUS:
+
+    src/modules/simulation/gz_bridge/GZGimbal.cpp
+        ScheduleOnInterval(200_ms); // @5Hz
+
+At 5 Hz the joints step toward a stabilization target five times a second,
+so the camera visibly lags the airframe during any maneuver, and the
+attitude report is up to 200 ms of joint motion stale. Every consumer that
+projects through the camera frame inherits that lag: image overlays swim
+against the video while the gimbal stabilizes.
+
+At 50 Hz the joints follow a streamed setpoint within 20 ms, which is
+below one video frame, and the report keeps the TF tree honest at the
+same cadence. The work item does little per cycle (a few uORB reads and
+gz topic publishes; the device info publish is request-gated), so the
+extra rate costs nothing measurable.
+
+Pair this with a mavlink stream rate for the report, or mavros still
+receives it at the profile default:
+
+    mavlink stream -r 50 -s GIMBAL_DEVICE_ATTITUDE_STATUS -u <mavros udp port>
+
+px4-sim-stack applies this patch and sets that stream in px4-rcS.
+
+    cd src/PX4-Autopilot
+    git apply ../../patches/px4-gzgimbal-rate.patch
+
+--- a/src/modules/simulation/gz_bridge/GZGimbal.cpp
++++ b/src/modules/simulation/gz_bridge/GZGimbal.cpp
+@@ -52,7 +52,7 @@
+
+ 	updateParameters();
+
+-	ScheduleOnInterval(200_ms); // @5Hz
++	ScheduleOnInterval(20_ms); // @50Hz
+
+ 	// Schedule on vehicle command messages
+ 	if (!_vehicle_command_sub.registerCallback()) {

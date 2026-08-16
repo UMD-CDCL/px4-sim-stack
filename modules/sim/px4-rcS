@@ -60,3 +60,10 @@ mavlink stream -r 10 -s DISTANCE_SENSOR -u 14569
 # source that does not need that lie undone.
 mavlink stream -r 20 -s GIMBAL_DEVICE_SET_ATTITUDE -u 14569
 mavlink stream -r 20 -s MOUNT_ORIENTATION -u 14569
+
+# The device report itself, at the rate the patched gimbal produces it
+# (patches/px4-gzgimbal-rate.patch, 50 Hz). The default stream rate
+# delivered one report every few seconds, which left the camera frame
+# seconds stale while the gimbal stabilized. scene_tf prefers this report
+# whenever it is fresh, and undoes the mislabeled frame it carries.
+mavlink stream -r 50 -s GIMBAL_DEVICE_ATTITUDE_STATUS -u 14569
