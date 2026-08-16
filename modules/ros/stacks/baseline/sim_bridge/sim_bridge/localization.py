@@ -16,8 +16,12 @@ falls back to the plane, with an error in the log.
 
 from __future__ import annotations
 
+import math
+
+import numpy as np
+
 from sim_bridge.geo import GroundPlane
-from sim_bridge.projection import intersect_ground
+from sim_bridge.projection import intersect_ground, quat_rotate, ray_in_optical
 from sim_bridge.scene_surface import SceneSurface
 
 
@@ -76,3 +80,72 @@ class GroundLocalizer:
         if self.surface is not None:
             return self.surface.intersect(origin, direction, max_range)
         return intersect_ground(origin, direction, ground_z, max_range)
+
+    def intersect_batch(self, origin, dirs: np.ndarray,
+                        max_range: np.ndarray) -> np.ndarray:
+        """intersect() for one origin and many unit rays at once, for the
+        image mosaic's pixel grid. dirs is (n, 3), max_range per ray.
+        Returns the ray parameter per ray, np.inf where a ray misses.
+        In plane mode a ray on either side of the plane can meet it, the
+        same rule intersect_ground applies."""
+        ground_z = self.ground_plane.z(origin[2])
+        if self.surface is not None:
+            return self.surface.intersect_batch(origin, dirs, max_range)
+        uz = dirs[:, 2]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            t = (ground_z - origin[2]) / uz
+        keep = (np.abs(uz) >= 1e-9) & (t > 0.0) & (t <= max_range)
+        return np.where(keep, t, np.inf)
+
+    def ground_z_at(self, east: float, north: float,
+                    pose_z: float | None = None) -> float:
+        """The ground under a point: the terrain in scene mode, the
+        latched plane otherwise. Roofs stay out on purpose: this answers
+        where a clamped footprint arc point rests, and that is a ground
+        line even beside a building."""
+        if self.surface is not None:
+            return self.surface.terrain_z(east, north)
+        return self.ground_plane.z(pose_z)
+
+    def footprint(self, boundary, k, origin, rotation,
+                  max_distance: float) -> list | None:
+        """The camera's covered ground: each image-boundary ray's surface
+        hit, truncated at max_distance horizontal meters.
+
+        A ray that misses the surface, or hits beyond the limit, clamps
+        to the limit circle in the direction it looks, resting on the
+        ground there. A camera near the horizon therefore still reports
+        the near ground it sees, bounded by an arc, instead of nothing.
+        Returns the outline as (x, y, z) tuples, or None when no ray hits
+        within the limit: no ground in view. Hits follow the same surface
+        the detections localize onto, so the outline drapes over terrain
+        and roofs in scene mode.
+        """
+        rays = [quat_rotate(rotation, ray_in_optical(u, v, k))
+                for u, v in boundary]
+        dirs = np.asarray(rays, dtype=np.float64)
+        dirs /= np.linalg.norm(dirs, axis=1, keepdims=True)
+        horizontal = np.hypot(dirs[:, 0], dirs[:, 1])
+        with np.errstate(divide="ignore", invalid="ignore"):
+            max_range = max_distance / np.maximum(horizontal, 1e-12)
+        t = self.intersect_batch(origin, dirs, max_range)
+        # Only a downward hit counts, the rule the plane footprint always
+        # had: a camera under the latched plane clamps instead of drawing
+        # a footprint overhead.
+        t = np.where(dirs[:, 2] < -1e-9, t, np.inf)
+
+        out = []
+        hits = 0
+        for index in range(dirs.shape[0]):
+            if math.isfinite(t[index]):
+                out.append((origin[0] + t[index] * dirs[index, 0],
+                            origin[1] + t[index] * dirs[index, 1],
+                            origin[2] + t[index] * dirs[index, 2]))
+                hits += 1
+                continue
+            if horizontal[index] < 1e-9:
+                continue    # straight up: no direction to clamp along
+            east = origin[0] + dirs[index, 0] / horizontal[index] * max_distance
+            north = origin[1] + dirs[index, 1] / horizontal[index] * max_distance
+            out.append((east, north, self.ground_z_at(east, north, origin[2])))
+        return out if hits else None

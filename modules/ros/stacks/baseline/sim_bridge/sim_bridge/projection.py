@@ -12,7 +12,7 @@ Conventions
 from __future__ import annotations
 
 import math
-from typing import Iterable, Sequence
+from typing import Sequence
 
 # Both the footprint polygon and the projected imagery stop at this
 # horizontal distance from the camera, so the picture always fills the
@@ -262,46 +262,5 @@ def image_boundary(width: int, height: int, per_edge: int,
     return out
 
 
-def footprint_on_ground(
-    boundary: Iterable[tuple[float, float]],
-    k: Sequence[float],
-    origin: Sequence[float],
-    rotation: Sequence[float],
-    ground_z: float,
-    max_distance: float,
-) -> list[tuple[float, float, float]] | None:
-    """Project image boundary points onto the ground, truncated at a range.
-
-    Each boundary ray keeps its ground hit when that hit lies within
-    max_distance (horizontal meters) of the camera. A ray that misses the
-    ground, or hits beyond the limit, is clamped to the max_distance circle
-    in the direction it looks. A camera near the horizon therefore still
-    reports the near ground it sees, bounded by an arc, instead of nothing.
-
-    Returns None when no ray hits the ground within the limit, which means
-    no ground within max_distance is in view.
-    """
-    out = []
-    hits = 0
-    for u, v in boundary:
-        d = quat_rotate(rotation, ray_in_optical(u, v, k))
-        horizontal = math.hypot(d[0], d[1])
-
-        point = None
-        if d[2] < -1e-9:
-            t = (ground_z - origin[2]) / d[2]
-            if t > 0.0:
-                hx = origin[0] + t * d[0]
-                hy = origin[1] + t * d[1]
-                if math.hypot(hx - origin[0], hy - origin[1]) <= max_distance:
-                    point = (hx, hy, ground_z)
-                    hits += 1
-        if point is None:
-            if horizontal < 1e-9:
-                continue    # straight up: no direction to clamp along
-            point = (origin[0] + d[0] / horizontal * max_distance,
-                     origin[1] + d[1] / horizontal * max_distance,
-                     ground_z)
-        out.append(point)
-
-    return out if hits else None
+# The footprint outline lives in localization.GroundLocalizer.footprint,
+# next to the intersection it depends on.

@@ -388,9 +388,14 @@ Using the wrong one shifts every estimate by a constant.
 ### Localization mode
 
 `LOCALIZATION_MODE` selects what a localization ray intersects, for the
-detection localizers and for the gimbal ROI click alike: one localizer class
-(`sim_bridge/localization.py`) serves both, so a click on a detection's
-pixel holds the gimbal on the point the detection was localized to. `plane`,
+detection localizers, the gimbal ROI click, the ground-projection image
+mosaic, and the camera footprints alike: one localizer class
+(`sim_bridge/localization.py`) serves them all, so a click on a
+detection's pixel holds the gimbal on the point the detection was
+localized to, and the mosaic pixel that shows a target lies where the
+localizer puts that target. In `scene` mode the mosaic and the footprint
+outlines drape over the terrain and the roofs instead of lying flat, in
+the 3D panel and on the map. `plane`,
 the default, uses a flat plane latched at the takeoff altitude. `scene` uses
 the terrain grid and the building roofs from `worlds/<SCENE>_surface.json`,
 which `scenegen build` writes next to the world. A roof is the building's own
@@ -451,8 +456,8 @@ recall figure would describe neither.
 | `/ground_truth/geojson` | `foxglove_msgs/GeoJSON`, every target in one message, for the Map panel. Each target is a gate-radius circle in its status color, plus a pin whose tooltip shows the name and altitude |
 | `/scene/buildings` | `visualization_msgs/MarkerArray`, latched: the scene's buildings as triangle meshes for the 3D panel, roofs colored from the satellite image. Buildings only; vehicle props stay out on purpose |
 | `/perception/<camera>/detections_3d` | `vision_msgs/Detection3DArray` with covariance |
-| `/camera/<camera>/footprint` | `geometry_msgs/PolygonStamped`, truncated at 100 m |
-| `/camera/<camera>/footprint_geojson` | `foxglove_msgs/GeoJSON`, the same outline for the Map panel. The Foxglove layout colors it to match the 3D panel line |
+| `/camera/<camera>/footprint` | `geometry_msgs/PolygonStamped`, truncated at 100 m. In `scene` mode the outline drapes over the terrain and the roofs |
+| `/camera/<camera>/footprint_geojson` | `foxglove_msgs/GeoJSON`, the same outline vertices for the Map panel, so both panels carry one shape. The Foxglove layout colors it to match the 3D panel line |
 | `/scoring/<camera>/verdicts` | `vision_msgs/Detection3DArray`, each labelled TP, MISLOCALIZED, FP or FN |
 | `/scoring/<camera>/markers` | `visualization_msgs/MarkerArray`, a TP as a green dot, a MISLOCALIZED estimate as a yellow cross, an FP as a red cross |
 | `/scoring/<camera>/true_positives`, `missed_localizations`, `false_positives` | `sensor_msgs/NavSatFix`, one per verdict, for the Map panel and recordings |

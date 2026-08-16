@@ -20,6 +20,8 @@ import json
 import math
 from pathlib import Path
 
+import numpy as np
+
 SURFACE_FORMATS = ("scenegen-surface/1", "scenegen-surface/2")
 
 # ------------------------------------------------------------------- tunables
@@ -70,15 +72,49 @@ def _polygon_covers(building: dict):
     return covers
 
 
+def _rectangle_ring(building: dict) -> list:
+    yaw = math.radians(building["yaw_deg"])
+    cos_yaw, sin_yaw = math.cos(yaw), math.sin(yaw)
+    half_length = building["length_m"] / 2.0
+    half_width = building["width_m"] / 2.0
+    return [[building["east_m"] + dx * cos_yaw - dy * sin_yaw,
+             building["north_m"] + dx * sin_yaw + dy * cos_yaw]
+            for dx, dy in [(-half_length, -half_width), (half_length, -half_width),
+                           (half_length, half_width), (-half_length, half_width)]]
+
+
+def _batch_roof(building: dict) -> tuple:
+    """(roof_z, bbox, edges) for the vectorized pass: every non-horizontal
+    ring edge as one row of (x1, y1, x2, y2), and the outer bounding box
+    as a cheap prefilter. A format-1 rectangle becomes its corner ring."""
+    if "footprint" in building:
+        rings = [building["footprint"]] + building.get("holes", [])
+    else:
+        rings = [_rectangle_ring(building)]
+    edges = []
+    for ring in rings:
+        for i, (x1, y1) in enumerate(ring):
+            x2, y2 = ring[(i + 1) % len(ring)]
+            if y1 != y2:
+                edges.append((x1, y1, x2, y2))
+    outer = rings[0]
+    bbox = (min(p[0] for p in outer), min(p[1] for p in outer),
+            max(p[0] for p in outer), max(p[1] for p in outer))
+    return building["roof_z"], bbox, np.asarray(edges, dtype=np.float64)
+
+
 class SceneSurface:
     def __init__(self, side_m: float, grid_n: int,
-                 terrain: list[list[float]], roofs: list[tuple]) -> None:
+                 terrain: list[list[float]], roofs: list[tuple],
+                 batch_roofs: list[tuple] | None = None) -> None:
         self.side = float(side_m)
         self.n = int(grid_n)
-        self.terrain = terrain
+        self.terrain = np.asarray(terrain, dtype=np.float64)
         # (roof_z, covers), covers a callable on (east, north)
         self.roofs = roofs
-        self.lowest = min(min(row) for row in terrain)
+        # (roof_z, bbox, edges) per roof, for intersect_batch
+        self.batch_roofs = batch_roofs or []
+        self.lowest = float(self.terrain.min())
 
     @classmethod
     def load(cls, path: str) -> "SceneSurface":
@@ -88,11 +124,14 @@ class SceneSurface:
             raise ValueError(f"{path} carries format {data.get('format')!r}, "
                              f"this code reads {SURFACE_FORMATS}")
         roofs = []
+        batch_roofs = []
         for building in data["buildings"]:
             covers = _polygon_covers(building) if "footprint" in building \
                 else _rectangle_covers(building)
             roofs.append((building["roof_z"], covers))
-        return cls(data["side_m"], data["grid_n"], data["terrain_z"], roofs)
+            batch_roofs.append(_batch_roof(building))
+        return cls(data["side_m"], data["grid_n"], data["terrain_z"], roofs,
+                   batch_roofs)
 
     def terrain_z(self, east: float, north: float) -> float:
         """Bilinear terrain height. Points outside the square clamp to the
@@ -173,3 +212,90 @@ class SceneSurface:
             else:
                 above = middle
         return below
+
+    # ------------------------------------------------------------------ batch
+    def _terrain_z_batch(self, east: np.ndarray, north: np.ndarray) -> np.ndarray:
+        """terrain_z over arrays, same clamping, same bilinear weights."""
+        n = self.n
+        fi = np.clip((east + self.side / 2.0) / self.side * n, 0.0, n - 1e-9)
+        fj = np.clip((north + self.side / 2.0) / self.side * n, 0.0, n - 1e-9)
+        i = fi.astype(np.int64)
+        j = fj.astype(np.int64)
+        di, dj = fi - i, fj - j
+        t = self.terrain
+        return (t[j, i] * (1 - di) * (1 - dj) + t[j, i + 1] * di * (1 - dj)
+                + t[j + 1, i] * (1 - di) * dj + t[j + 1, i + 1] * di * dj)
+
+    def intersect_batch(self, origin, dirs: np.ndarray,
+                        max_range: np.ndarray) -> np.ndarray:
+        """intersect() for one origin and many unit rays at once.
+
+        dirs is (n, 3), max_range per ray. Returns the ray parameter per
+        ray, np.inf where a ray misses. Same rules as the scalar path:
+        only descending rays intersect, roofs are horizontal, and walls
+        stay out, so a ray past a roof edge lands on the terrain behind
+        it. The image mosaic feeds a whole pixel grid through here.
+        """
+        ox, oy, oz = float(origin[0]), float(origin[1]), float(origin[2])
+        ux, uy, uz = dirs[:, 0], dirs[:, 1], dirs[:, 2]
+        misses = np.full(ux.shape, np.inf)
+        descending = uz < -1e-9
+        if not descending.any() or (oz - self.terrain_z(ox, oy)) <= 0.0:
+            return misses
+
+        roof_t = np.full(ux.shape, np.inf)
+        for roof_z, (x0, y0, x1, y1), edges in self.batch_roofs:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                t = (roof_z - oz) / uz
+            candidates = np.nonzero(descending & (t > 0.0) & (t <= max_range)
+                                    & (t < roof_t))[0]
+            if not candidates.size:
+                continue
+            px = ox + t[candidates] * ux[candidates]
+            py = oy + t[candidates] * uy[candidates]
+            in_box = (px >= x0) & (px <= x1) & (py >= y0) & (py <= y1)
+            candidates, px, py = candidates[in_box], px[in_box], py[in_box]
+            if not candidates.size:
+                continue
+            inside = np.zeros(px.shape, dtype=bool)
+            for ex1, ey1, ex2, ey2 in edges:
+                crosses = (ey1 > py) != (ey2 > py)
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    cross_x = ex1 + (py - ey1) / (ey2 - ey1) * (ex2 - ex1)
+                inside ^= crosses & (px < cross_x)
+            hit = candidates[inside]
+            roof_t[hit] = t[hit]
+
+        # The terrain march, every ray in step, capped per ray at its
+        # range, its roof, and the depth below the lowest terrain.
+        with np.errstate(divide="ignore", invalid="ignore"):
+            floor_t = (self.lowest - oz) / uz
+        limit = np.minimum(np.minimum(max_range, roof_t),
+                           np.where(descending, floor_t, 0.0))
+        alive = np.nonzero(descending & (limit > 0.0))[0]
+        ground_t = np.full(ux.shape, np.inf)
+        march = MARCH_STEP_M
+        top = float(limit[alive].max()) if alive.size else 0.0
+        while alive.size and march <= top + MARCH_STEP_M:
+            t_step = np.minimum(march, limit[alive])
+            px = ox + t_step * ux[alive]
+            py = oy + t_step * uy[alive]
+            pz = oz + t_step * uz[alive]
+            crossed = (pz - self._terrain_z_batch(px, py)) <= 0.0
+            ground_t[alive[crossed]] = t_step[crossed]
+            alive = alive[~(crossed | (t_step >= limit[alive]))]
+            march += MARCH_STEP_M
+        found = np.nonzero(np.isfinite(ground_t))[0]
+        if found.size:
+            below = ground_t[found]
+            above = np.maximum(below - MARCH_STEP_M, 0.0)
+            fx, fy, fz = ux[found], uy[found], uz[found]
+            for _ in range(BISECTION_PASSES):
+                middle = (above + below) / 2.0
+                under = (oz + middle * fz
+                         - self._terrain_z_batch(ox + middle * fx,
+                                                 oy + middle * fy)) <= 0.0
+                below = np.where(under, middle, below)
+                above = np.where(under, above, middle)
+            ground_t[found] = below
+        return np.where(np.isfinite(ground_t), ground_t, roof_t)

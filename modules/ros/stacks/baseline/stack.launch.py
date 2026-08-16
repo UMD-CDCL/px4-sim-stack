@@ -17,7 +17,8 @@ What runs here
   scene_buildings     the scene's buildings for the 3D panel, from the
                       file scenegen build writes next to the world
   detection_scorer    estimates against truth, one per camera
-  image_ground_projector  the live image laid flat on the ground, one per camera
+  image_ground_projector  the live image draped on the localization
+                      surface, one per camera
   fiducial_alignment  frame correction against a surveyed point, off by default
   click_to_gimbal     a click on the gimbal image becomes a gimbal command
   drone_position      the vehicle fix with its heading, for the Map panel
@@ -314,6 +315,10 @@ def generate_launch_description() -> LaunchDescription:
                     "optical_frame": CAMERA[cam]["optical_frame"],
                     "reference_frame": REFERENCE_FRAME,
                     "use_rel_alt": True,
+                    # The footprint drapes over the same surface everything
+                    # else localizes onto: one localizer class.
+                    "localization_mode": LOCALIZATION_MODE,
+                    "surface_file": SURFACE_FILE,
                 }],
             )
             for cam in CAMERAS
@@ -438,8 +443,8 @@ def generate_launch_description() -> LaunchDescription:
             }],
         ),
 
-        # The live image laid flat on the ground plane, so the 3D view shows
-        # the camera's own picture where the localizer thinks it is.
+        # The live image draped on the localization surface, so the 3D view
+        # shows the camera's own picture where the localizer thinks it is.
         *[
             Node(
                 package="sim_bridge",
@@ -455,6 +460,10 @@ def generate_launch_description() -> LaunchDescription:
                     "optical_frame": CAMERA[cam]["optical_frame"],
                     "reference_frame": REFERENCE_FRAME,
                     "use_rel_alt": True,
+                    # The mosaic drapes over the same surface detections
+                    # and ROI clicks localize onto: one localizer class.
+                    "localization_mode": LOCALIZATION_MODE,
+                    "surface_file": SURFACE_FILE,
                     "size": GROUND_IMAGE_SIZE,
                     "rate_hz": GROUND_IMAGE_RATE_HZ,
                 }],

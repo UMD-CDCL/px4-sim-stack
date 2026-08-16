@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """Draw where a camera is looking on the ground.
 
-Casts rays through points along the image boundary, intersects the ground
-plane, and publishes the covered ground as a stock PolygonStamped that the
+Casts rays through points along the image boundary, intersects the scene,
+and publishes the covered ground as a stock PolygonStamped that the
 Foxglove 3D panel draws without custom code. One node runs for each camera.
+
+The intersection comes from sim_bridge/localization.py, the one localizer
+this stack has: detections, the gimbal ROI click and the image mosaic use
+the same one. In plane mode the outline lies flat at the takeoff
+altitude; in scene mode it drapes over the terrain and the roofs, the
+shape the mosaic inside it takes.
 
 The footprint is truncated at GROUND_VIEW_MAX_DISTANCE_M from the camera. A
 camera near the horizon still covers ground close to the drone, so its
@@ -12,15 +18,10 @@ instead of nothing. Only a camera that sees no ground at all publishes
 nothing. The projected imagery stops at the same limit, so the picture
 fills the outline that frames it.
 
-The plane height is latched at the takeoff altitude: MAVROS reports
-altitude above the launch point, so pose.z minus rel_alt is the ground at
-the launch, taken once and held for the flight. Set use_rel_alt false to
-pin the plane to ground_z instead. This is a flat-earth assumption, and
-over a slope the footprint is wrong in the way you expect.
-
-The Map panel gets the same outline as one GeoJSON polygon. The Foxglove
-layout colors it, with the same color it gives the 3D panel line. A camera
-that sees no ground publishes an empty collection, which clears its outline
+The Map panel gets the same outline as one GeoJSON polygon, the same
+vertices in lat/lon, so both panels carry one shape. The Foxglove layout
+colors it, with the same color it gives the 3D panel line. A camera that
+sees no ground publishes an empty collection, which clears its outline
 from the map.
 
 Publishes
@@ -40,10 +41,10 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo
 from tf2_ros import Buffer, TransformListener
 
-from sim_bridge.geo import GroundPlane, MapOrigin
+from sim_bridge.geo import MapOrigin
+from sim_bridge.localization import GroundLocalizer
 from sim_bridge.projection import (GROUND_VIEW_MAX_DISTANCE_M,
-                                   footprint_on_ground, image_boundary,
-                                   intrinsics_ready)
+                                   image_boundary, intrinsics_ready)
 
 try:
     from foxglove_msgs.msg import GeoJSON
@@ -69,9 +70,10 @@ class GroundProjector(Node):
         self.camera = self.get_parameter("camera").value
         self.optical = self.get_parameter("optical_frame").value
         self.reference = self.get_parameter("reference_frame").value
-        # Declares use_rel_alt and ground_z, and latches the plane at the
-        # takeoff altitude. See sim_bridge/geo.py.
-        self.ground_plane = GroundPlane(self)
+        # Declares localization_mode, surface_file, use_rel_alt and
+        # ground_z, and answers every ray the same way the detection
+        # localizers answer theirs.
+        self.localizer = GroundLocalizer(self)
 
         self.tf_buffer = Buffer()
         # spin_thread=True is required. On this node's executor, a lookup that
@@ -120,13 +122,12 @@ class GroundProjector(Node):
 
         t = tf.transform.translation
         r = tf.transform.rotation
-        ground_z = self.ground_plane.z(t.z)
 
-        outline = footprint_on_ground(
+        outline = self.localizer.footprint(
             image_boundary(self.info.width, self.info.height,
                            BOUNDARY_SAMPLES_PER_EDGE),
             self.info.k, (t.x, t.y, t.z), (r.x, r.y, r.z, r.w),
-            ground_z, GROUND_VIEW_MAX_DISTANCE_M)
+            GROUND_VIEW_MAX_DISTANCE_M)
         if outline is None:
             # No ground within the limit is in view. Publishing nothing is
             # the honest answer, and the map outline is cleared.

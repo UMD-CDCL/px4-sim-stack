@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""Lay the live camera image flat on the ground plane, in 3D.
+"""Lay the live camera image on the localization surface, in 3D.
 
 Foxglove's 3D panel cannot texture a surface with an image, so this projects
-a subsampled grid of pixels onto the ground plane and publishes them as a
-colored PointCloud2. The result is the camera view lying on the ground, next
-to the detections and the ground truth.
+a subsampled grid of pixels onto the scene and publishes them as a colored
+PointCloud2. The result is the camera view draped over the ground, next to
+the detections and the ground truth.
 
-It is the same geometry the localizer performs, applied to a grid of pixels.
-When the imagery lines up with the ground truth bubbles, the localization is
-correct. When it does not, the picture shows which way it is out.
+The intersection comes from sim_bridge/localization.py, the one localizer
+this stack has: detections and the gimbal ROI click use the same one, so
+the mosaic pixel that shows a target lies exactly where the localizer puts
+that target. In plane mode the imagery lies flat at the takeoff altitude;
+in scene mode it drapes over the terrain and the roofs. When the imagery
+lines up with the ground truth bubbles, the localization is correct. When
+it does not, the picture shows which way it is out.
 
 The cloud stops at GROUND_VIEW_MAX_DISTANCE_M, the same limit that
 truncates the footprint, so the imagery fills the outline that frames it.
@@ -28,7 +32,9 @@ per period, the rotation, the intersection, and the packing.
 
 `size` is the resolution the frame is sampled down to, and it bounds the
 cost for both cameras. 640x360 is at most 230,400 points and 3.7 MB per
-message, which already reads as a picture.
+message, which already reads as a picture. Scene mode marches every ray
+over the terrain, about 1.5 s for that grid; a mosaic that lags the
+GROUND_IMAGE_RATE is the sign to lower GROUND_IMAGE_SIZE.
 
 Subscribes
     <ns>/image_raw/compressed, <ns>/camera_info
@@ -52,7 +58,7 @@ from rclpy.qos import (HistoryPolicy, QoSProfile, ReliabilityPolicy,  # noqa: E4
 from sensor_msgs.msg import CameraInfo, CompressedImage, PointCloud2, PointField  # noqa: E402
 from tf2_ros import Buffer, TransformListener  # noqa: E402
 
-from sim_bridge.geo import GroundPlane  # noqa: E402
+from sim_bridge.localization import GroundLocalizer  # noqa: E402
 from sim_bridge.projection import GROUND_VIEW_MAX_DISTANCE_M, intrinsics_ready
 
 # The point layout, as one 16 byte record. Naming it here means point_step,
@@ -173,12 +179,14 @@ class ImageGroundProjector(Node):
         self.grid_for: tuple[int, int] | None = None
         self.us = self.vs = None
         # The rays through the grid, cached with it. They depend only on the
-        # grid and the intrinsics, so a steady stream reuses them.
+        # grid and the intrinsics, so a steady stream reuses them. The norm
+        # rides along: rotation preserves it, so it never needs recomputing.
         self.rays_for: tuple | None = None
-        self.ray_x = self.ray_y = None
-        # Declares use_rel_alt and ground_z, and latches the plane at the
-        # takeoff altitude. See sim_bridge/geo.py.
-        self.ground_plane = GroundPlane(self)
+        self.ray_x = self.ray_y = self.ray_norm = None
+        # Declares localization_mode, surface_file, use_rel_alt and
+        # ground_z, and answers every ray the same way the detection
+        # localizers and the gimbal click answer theirs.
+        self.localizer = GroundLocalizer(self)
         self.min_period = 1.0 / max(float(self.get_parameter("rate_hz").value), 0.1)
 
         self.info: CameraInfo | None = None
@@ -239,10 +247,8 @@ class ImageGroundProjector(Node):
         t, r = tf.transform.translation, tf.transform.rotation
         origin = (t.x, t.y, t.z)
         rot = (r.x, r.y, r.z, r.w)
-        ground_z = self.ground_plane.z(t.z)
 
-        points = self._project(pixels, width, height, step,
-                               origin, rot, ground_z)
+        points = self._project(pixels, width, height, step, origin, rot)
         if points is None or not len(points):
             return
         count = len(points)
@@ -289,12 +295,13 @@ class ImageGroundProjector(Node):
         return self.us, self.vs
 
     def _project(self, pixels, width: int, height: int, step: int,
-                 origin, rot, ground_z):
-        """Sampled pixels that land on the ground within the view limit.
+                 origin, rot):
+        """Sampled pixels that land on the scene within the view limit.
 
-        The same geometry as sim_bridge.projection, written over whole
-        arrays. The mask comes first, so colors are gathered and points
-        packed only for the pixels that will be displayed.
+        The rays go through the shared localizer's batch path, so every
+        pixel lands exactly where a detection through it would. The mask
+        comes first, so colors are gathered and points packed only for
+        the pixels that will be displayed.
         """
         us, vs = self._sample_grid(width, height)
 
@@ -303,15 +310,15 @@ class ImageGroundProjector(Node):
         if fx == 0.0 or fy == 0.0:
             return None
 
-        # Rays through the grid, in the optical frame. Unnormalized: neither
-        # the plane intersection nor the horizontal cut needs unit length.
-        # Rebuilt only when the grid or the intrinsics change.
+        # Rays through the grid, in the optical frame. Rebuilt only when
+        # the grid or the intrinsics change.
         rays_key = (self.grid_for, fx, cx, fy, cy)
         if self.rays_for != rays_key:
             x = (us[None, :].astype(np.float64) - cx) / fx
             y = (vs[:, None].astype(np.float64) - cy) / fy
             self.ray_x = np.broadcast_to(x, (len(vs), len(us)))
             self.ray_y = np.broadcast_to(y, (len(vs), len(us)))
+            self.ray_norm = np.sqrt(self.ray_x ** 2 + self.ray_y ** 2 + 1.0)
             self.rays_for = rays_key
         x, y = self.ray_x, self.ray_y
 
@@ -325,12 +332,21 @@ class ImageGroundProjector(Node):
         wy = y + qw * ty + (qz * tx - qx * tz)
         wz = 1.0 + qw * tz + (qx * ty - qy * tx)
 
-        # Ground intersection and the footprint limit, over the grid.
+        # Unit rays for the localizer; rotation kept the cached norm.
+        ux = wx / self.ray_norm
+        uy = wy / self.ray_norm
+        uz = wz / self.ray_norm
+        # The footprint limit is horizontal, so each ray's slant range
+        # limit stretches with its obliquity; a near-vertical ray is
+        # effectively unlimited and the surface march bounds it instead.
         with np.errstate(divide="ignore", invalid="ignore"):
-            t = (ground_z - origin[2]) / wz
-            horizontal = t * np.hypot(wx, wy)
-        good = ((np.abs(wz) >= 1e-9) & (t > 0.0)
-                & (horizontal <= GROUND_VIEW_MAX_DISTANCE_M))
+            max_range = (GROUND_VIEW_MAX_DISTANCE_M
+                         / np.maximum(np.hypot(ux, uy), 1e-12))
+        t = self.localizer.intersect_batch(
+            origin,
+            np.stack([ux.ravel(), uy.ravel(), uz.ravel()], axis=1),
+            max_range.ravel()).reshape(ux.shape)
+        good = np.isfinite(t)
         if not good.any():
             return None
 
@@ -348,9 +364,9 @@ class ImageGroundProjector(Node):
 
         t = t[good]
         out = np.empty(t.size, dtype=POINT_DTYPE)
-        out["x"] = origin[0] + t * wx[good]
-        out["y"] = origin[1] + t * wy[good]
-        out["z"] = ground_z  # every kept point lies on the ground plane
+        out["x"] = origin[0] + t * ux[good]
+        out["y"] = origin[1] + t * uy[good]
+        out["z"] = origin[2] + t * uz[good]
         out["rgb"] = (red << 16) | (green << 8) | blue
         return out
 
