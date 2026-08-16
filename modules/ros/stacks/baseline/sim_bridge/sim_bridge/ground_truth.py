@@ -22,6 +22,12 @@ messages are built once, and a tick only restamps them and recolors the
 bubbles. The GeoJSON topic is latched, so it goes out only when a status
 or the origin changes, and the Map panel still sees the current state.
 
+The scenario can change while this node runs: px4sim scenario places a
+new layout, and spawn_scenario.py rewrites the resolved file. A timer
+watches both files and reloads on any change, so the published truth
+follows the world with no restart. Every marker message leads with a
+DELETEALL, so targets that left the scenario also leave the display.
+
 Scenario poses are Gazebo world coordinates, x east and y north in meters.
 PX4's local frame starts where the vehicle spawned, so the two line up.
 origin_offset_xyz shifts them when they do not.
@@ -54,7 +60,7 @@ from vision_msgs.msg import (
     Detection3DArray,
     ObjectHypothesisWithPose,
 )
-from visualization_msgs.msg import MarkerArray
+from visualization_msgs.msg import Marker, MarkerArray
 
 from sim_bridge.geo import MapOrigin
 from sim_bridge.verdicts import (GROUND_TRUTH_BUBBLE_RADIUS,
@@ -84,6 +90,10 @@ GATE_CIRCLE_ANGLES = [2.0 * math.pi * k / GATE_CIRCLE_SEGMENTS
 # jitter constantly. Only a move the Map panel could show counts as a
 # change. One millionth of a degree is about 0.1 m.
 ORIGIN_CHANGE_DEG = 1e-6
+# How often to look for a changed scenario or resolved file on disk. Two
+# stat calls a second cost nothing, and a re-placed scenario shows up in
+# the published truth within this long.
+RELOAD_CHECK_S = 1.0
 
 LATCHED = QoSProfile(durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
                      history=QoSHistoryPolicy.KEEP_LAST, depth=1)
@@ -154,8 +164,38 @@ class GroundTruth(Node):
 
         rate = float(self.get_parameter("rate_hz").value)
         self.create_timer(1.0 / max(rate, 0.1), self._publish)
+        self._source_stamps = self._read_source_stamps()
+        self.create_timer(RELOAD_CHECK_S, self._maybe_reload)
 
     # ------------------------------------------------------------------ input
+    def _read_source_stamps(self) -> tuple:
+        stamps = []
+        for name in ("resolved_file", "scenario_file"):
+            path = Path(self.get_parameter(name).value)
+            try:
+                stamps.append(path.stat().st_mtime_ns)
+            except OSError:
+                stamps.append(None)
+        return tuple(stamps)
+
+    def _maybe_reload(self) -> None:
+        """Follow the files: a re-placed scenario rewrites the resolved
+        file, and the published truth must follow it with no restart."""
+        stamps = self._read_source_stamps()
+        if stamps == self._source_stamps:
+            return
+        self._source_stamps = stamps
+        self.targets = self._load()
+        names = ", ".join(t["name"] for t in self.targets) or "none"
+        self.get_logger().info(
+            f"scenario changed on disk; {len(self.targets)} targets now: {names}")
+        self.marker_msg, self.bubbles = self._build_markers()
+        self.truth_msg = self._build_truth()
+        # Clear the change detectors, so the next tick republishes the
+        # GeoJSON and rebuilds the gate circles.
+        self.last_geojson_statuses = None
+        self.last_geojson_origin = None
+
     def _load(self) -> list[dict]:
         resolved = Path(self.get_parameter("resolved_file").value)
         if resolved.is_file():
@@ -239,6 +279,14 @@ class GroundTruth(Node):
         markers = MarkerArray()
         bubbles = []
         stamp = self.get_clock().now().to_msg()
+        # A leading DELETEALL wipes the display before the adds, so a target
+        # that left a reloaded scenario does not linger on screen. Within one
+        # message the actions apply in order, and the wipe-then-add pair is
+        # idempotent on every tick.
+        wipe = Marker()
+        wipe.header.frame_id = self.reference
+        wipe.action = Marker.DELETEALL
+        markers.markers.append(wipe)
         for i, target in enumerate(self.targets):
             # The bubble's equator sits at ground level, so a detection dot
             # inside the visible half is within the gate by construction.

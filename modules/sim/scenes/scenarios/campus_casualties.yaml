@@ -1,0 +1,89 @@
+name: campus_casualties
+description: 8 ground-truth targets from scene campus.
+home_lat: 38.9869
+home_lon: -76.9426
+home_alt: 39.93
+fiducial_lat: 38.9871088
+fiducial_lon: -76.9425504
+fiducial_alt: 39.71
+entities:
+- name: casualty_m1
+  uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Standing person
+  pose:
+  - 12.95
+  - 24.21
+  - -0.986
+  - 0
+  - 0
+  - 5.794
+  static: true
+- name: casualty_m2
+  uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Casual female
+  pose:
+  - 22.05
+  - 46.12
+  - -0.966
+  - 0
+  - 0
+  - 5.812
+  static: true
+- name: casualty_m3
+  uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Standing person
+  pose:
+  - 39.66
+  - 60.15
+  - -1.241
+  - 0
+  - 0
+  - 5.829
+  static: true
+- name: casualty_m4
+  uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Casual female
+  pose:
+  - 8.39
+  - 75.25
+  - 0.71
+  - 0
+  - 0
+  - 5.847
+  static: true
+- name: casualty_m5
+  uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Standing person
+  pose:
+  - 44.14
+  - 73.55
+  - -1.43
+  - 0
+  - 0
+  - 5.864
+  static: true
+- name: casualty_m11
+  uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Casual female
+  pose:
+  - 36.93
+  - 50.64
+  - 10.112
+  - 0
+  - 0
+  - 0.367
+  static: true
+- name: casualty_m12
+  uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Standing person
+  pose:
+  - 35.01
+  - 41.07
+  - 10.112
+  - 0
+  - 0
+  - 0.384
+  static: true
+- name: casualty_m13
+  uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Casual female
+  pose:
+  - 34.15
+  - 27.78
+  - 10.112
+  - 0
+  - 0
+  - 0.401
+  static: true

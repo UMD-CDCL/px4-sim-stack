@@ -13,6 +13,7 @@ computed by hand from those inputs.
 from __future__ import annotations
 
 import math
+import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
@@ -79,7 +80,17 @@ def make_synthetic_scene(data_dir: Path) -> scene_model.SceneSpec:
             width_m=1.9, heading_deg=45.0, source="manual")],
         flatten_zones=[scene_model.FlattenZone(
             id="fz_1", polygon_m=[[-60, 40], [-40, 40], [-40, 60], [-60, 60]],
-            mode="manual", height_m=0.0)])
+            mode="manual", height_m=0.0)],
+        targets=[
+            scene_model.Target(id="t_manual_1", name="person_manual",
+                               east_m=-50.0, north_m=0.0),
+            scene_model.Target(id="t_manual_2", name="casualty_off",
+                               east_m=10.0, north_m=10.0, enabled=False),
+            scene_model.Target(id="t_manual_3", name="casualty_roof",
+                               east_m=30.0, north_m=-20.0, on_building=True),
+            scene_model.Target(id="t_manual_4", name="casualty_offbuilding",
+                               east_m=80.0, north_m=80.0, on_building=True,
+                               agl_m=1.5)])
     scene_model.save_scene(scene, data_dir / "scene.json")
     return scene
 
@@ -90,7 +101,8 @@ def make_casualty_file(path: Path) -> None:
     yaml_text = yaml.safe_dump({"casualties": [
         {"lat": lat_east, "lon": lon_east, "model": "model://casualty_prone",
          "name": "casualty_alpha"},
-        {"lat": CENTER_LAT, "lon": CENTER_LON, "alt": ORIGIN_ALT + 5.0},
+        {"lat": CENTER_LAT, "lon": CENTER_LON, "agl": 5.0},
+        {"lat": CENTER_LAT, "lon": CENTER_LON, "name": "plain"},
     ]})
     path.write_text(yaml_text)
 
@@ -99,10 +111,18 @@ def run_build(tmp: Path) -> tuple[Path, Path]:
     data_dir = tmp / "data" / "synthtest"
     data_dir.mkdir(parents=True)
     scenes_dir = tmp / "scenes"
-    make_synthetic_scene(data_dir)
+    scene = make_synthetic_scene(data_dir)
     casualties = tmp / "casualties.yaml"
     make_casualty_file(casualties)
-    code = build_world.run(data_dir, scenes_dir, casualties, seed=7)
+    # The file imports into the scene; the scene is what the build reads.
+    imported, kept = scene_model.import_casualty_file(scene, casualties)
+    check("import adds file targets and keeps hand-placed ones",
+          imported == 3 and kept == 4, f"imported {imported}, kept {kept}")
+    imported, kept = scene_model.import_casualty_file(scene, casualties)
+    check("a re-import replaces imports, not hand-placed targets",
+          imported == 3 and kept == 4 and len(scene.targets) == 7)
+    scene_model.save_scene(scene, data_dir / "scene.json")
+    code = build_world.run(data_dir, scenes_dir)
     check("build exits 0", code == 0)
     return data_dir, scenes_dir
 
@@ -206,51 +226,102 @@ def test_flatten_modes() -> None:
 
 
 def test_scenario(scenes_dir: Path, tmp: Path) -> None:
-    print("casualty scenario")
+    print("target scenario, projected from the scene")
     scenario_path = scenes_dir / "scenarios" / "synthtest_casualties.yaml"
     data = yaml.safe_load(scenario_path.read_text())
-    entities = data["entities"]
-    check("two casualties placed", len(entities) == 2)
+    entities = {e["name"]: e for e in data["entities"]}
+    check("enabled targets are in, the disabled one is out",
+          len(entities) == 6 and "casualty_off" not in entities,
+          str(sorted(entities)))
+    check("hand-placed target came through", "person_manual" in entities)
 
-    alpha = entities[0]
+    roof = entities.get("casualty_roof")
+    check("snap to building lands on the roof of the 7 m box",
+          roof is not None and abs(roof["pose"][2] - 7.0) < 0.01,
+          str(roof["pose"][2] if roof else None))
+    fallback = entities.get("casualty_offbuilding")
+    check("snap with no building there falls back to terrain plus offset",
+          fallback is not None and abs(fallback["pose"][2] - 1.5) < 0.01,
+          str(fallback["pose"][2] if fallback else None))
+
+    alpha = entities.get("casualty_alpha")
     check("designated name and model survive",
-          alpha["name"] == "casualty_alpha" and alpha["uri"] == "model://casualty_prone")
+          alpha is not None and alpha["uri"] == "model://casualty_prone")
     check("100 m east converts to x=100",
-          abs(alpha["pose"][0] - 100.0) < 0.05 and abs(alpha["pose"][1]) < 0.05,
-          str(alpha["pose"][:3]))
-    check("no alt means ground height", abs(alpha["pose"][2]) < 0.01,
-          str(alpha["pose"][2]))
+          alpha is not None and abs(alpha["pose"][0] - 100.0) < 0.05
+          and abs(alpha["pose"][1]) < 0.05, str(alpha["pose"][:3] if alpha else None))
+    check("no alt means ground height",
+          alpha is not None and abs(alpha["pose"][2]) < 0.01)
 
-    second = entities[1]
-    check("generated name is scoreable",
-          "casualty" in second["name"] or "person" in second["name"], second["name"])
-    check("given AMSL alt becomes scene z", abs(second["pose"][2] - 5.0) < 0.01,
-          str(second["pose"][2]))
-    check("random model comes from the pool",
-          second["uri"] in build_world.CASUALTY_MODEL_POOL, second["uri"])
+    second = entities.get("casualty_02")
+    check("agl height rides on the terrain",
+          second is not None and abs(second["pose"][2] - 5.0) < 0.01)
+    check("a pool model resolves for an undesignated target",
+          second is not None and second["uri"] in scene_model.CASUALTY_MODEL_POOL,
+          second["uri"] if second else "missing")
+    check("a plain name gets a scoreable prefix", "casualty_plain" in entities)
 
-    # Same seed, same draw: rebuild into a second directory and compare.
+    # No randomness at build: a rebuild of the same scene is byte-identical.
     rerun_dir = tmp / "scenes2"
-    build_world.run(tmp / "data" / "synthtest", rerun_dir, tmp / "casualties.yaml", seed=7)
-    again = yaml.safe_load((rerun_dir / "scenarios" / "synthtest_casualties.yaml").read_text())
-    check("seeded assignment is repeatable",
-          again["entities"][1]["uri"] == second["uri"]
-          and again["entities"][1]["pose"] == second["pose"])
+    build_world.run(tmp / "data" / "synthtest", rerun_dir)
+    check("a rebuild writes the same bytes",
+          (rerun_dir / "scenarios" / "synthtest_casualties.yaml").read_bytes()
+          == scenario_path.read_bytes())
+
+
+def test_legacy_alt_key() -> None:
+    print("legacy scene.json compatibility")
+    legacy = json.dumps({
+        "format": scene_model.SCENE_FORMAT, "name": "old", "center_lat": 38.9,
+        "center_lon": -76.9, "side_m": 100, "origin_alt_m": 10.0,
+        "targets": [{"id": "t_import_1", "name": "casualty_01",
+                     "east_m": 1.0, "north_m": 2.0, "alt_m": 3.0}]})
+    scene = scene_model.SceneSpec.from_json(legacy)
+    check("a pre-rename alt_m key loads as agl_m",
+          scene.targets[0].agl_m == 3.0, str(scene.targets[0]))
 
 
 def test_env_snippet(tmp: Path) -> None:
     print("env snippet")
     text = (tmp / "data" / "synthtest" / "env.snippet").read_text()
-    lines = dict(line.split("=", 1) for line in text.strip().splitlines())
-    check("scene and home lines present",
-          lines.get("SCENE") == "synthtest"
-          and abs(float(lines["HOME_ALT"]) - ORIGIN_ALT) < 0.01)
-    check("fiducial surveyed altitude is the ground AMSL",
-          abs(float(lines["FIDUCIAL_SURVEYED_ALT"]) - ORIGIN_ALT) < 0.05,
-          lines.get("FIDUCIAL_SURVEYED_ALT", "missing"))
-    check("fiducial surveyed position is the center",
-          abs(float(lines["FIDUCIAL_SURVEYED_LAT"]) - CENTER_LAT) < 1e-6
-          and abs(float(lines["FIDUCIAL_SURVEYED_LON"]) - CENTER_LON) < 1e-6)
+    lines = [line for line in text.strip().splitlines() if not line.startswith("#")]
+    check("only SCENE and SCENARIO remain to copy",
+          lines == ["SCENE=synthtest", "SCENARIO=synthtest_casualties"], str(lines))
+
+
+def test_scenario_metadata(scenes_dir: Path) -> None:
+    print("home and fiducial ride in the scenario")
+    data = yaml.safe_load(
+        (scenes_dir / "scenarios" / "synthtest_casualties.yaml").read_text())
+    check("home matches the scene origin",
+          abs(data["home_lat"] - CENTER_LAT) < 1e-6
+          and abs(data["home_lon"] - CENTER_LON) < 1e-6
+          and abs(data["home_alt"] - ORIGIN_ALT) < 0.01)
+    check("fiducial sits at the center on the ground",
+          abs(data["fiducial_lat"] - CENTER_LAT) < 1e-6
+          and abs(data["fiducial_lon"] - CENTER_LON) < 1e-6
+          and abs(data["fiducial_alt"] - ORIGIN_ALT) < 0.05)
+
+
+def test_scenario_env_script(scenes_dir: Path, tmp: Path) -> None:
+    print("scenario-env.sh derives the .env values")
+    script = Path(__file__).resolve().parents[3] / "scripts" / "scenario-env.sh"
+    scenario = scenes_dir / "scenarios" / "synthtest_casualties.yaml"
+    reply = subprocess.run(["bash", str(script), str(scenario)],
+                           capture_output=True, text=True)
+    values = dict(line.split("=", 1) for line in reply.stdout.strip().splitlines())
+    check("a generated scenario yields home and fiducial",
+          values.get("FIDUCIAL_ENABLED") == "1"
+          and abs(float(values["HOME_ALT"]) - ORIGIN_ALT) < 0.01
+          and abs(float(values["HOME_LAT"]) - CENTER_LAT) < 1e-6
+          and abs(float(values["FIDUCIAL_SURVEYED_LAT"]) - CENTER_LAT) < 1e-6,
+          reply.stdout)
+    handwritten = tmp / "handwritten.yaml"
+    handwritten.write_text("name: x\nentities: []\n")
+    reply = subprocess.run(["bash", str(script), str(handwritten)],
+                           capture_output=True, text=True)
+    check("a hand-written scenario yields nothing, .env stands",
+          reply.stdout == "", reply.stdout)
 
 
 def main() -> int:
@@ -262,7 +333,10 @@ def main() -> int:
         test_terrain(scenes_dir)
         test_flatten_modes()
         test_scenario(scenes_dir, tmp)
+        test_legacy_alt_key()
         test_env_snippet(tmp)
+        test_scenario_metadata(scenes_dir)
+        test_scenario_env_script(scenes_dir, tmp)
 
     failed = [name for name, ok, _ in CHECKS if not ok]
     print(f"\n{len(CHECKS) - len(failed)} of {len(CHECKS)} checks passed")

@@ -21,6 +21,7 @@ import math
 from geometry_msgs.msg import PoseStamped
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import NavSatFix, NavSatStatus
+from std_msgs.msg import Float64
 
 try:
     from geographic_msgs.msg import GeoPointStamped
@@ -148,3 +149,47 @@ class MapOrigin:
         fix.latitude, fix.longitude = ll
         fix.altitude = float("nan")
         return fix
+
+
+class GroundPlane:
+    """The flat plane localization projects onto, latched at takeoff.
+
+    Every projection node used to recompute pose.z - rel_alt on each frame.
+    That difference is the local height of the home point, so the plane was
+    already anchored to the takeoff location, but it moved with every step
+    of barometer drift between the two altitude sources. This helper takes
+    the same difference once, the first time both values exist, which is on
+    the ground before takeoff in any normal start, and holds it for the
+    flight.
+
+    Attach one to a node and call `z(pose_z)` with the current vehicle
+    height wherever a ground height is needed. The `use_rel_alt` and
+    `ground_z` parameters keep their old names and meanings: use_rel_alt
+    false pins the plane to ground_z and subscribes to nothing. `rel_alt`
+    stays readable for owners that need the raw value.
+    """
+
+    def __init__(self, node) -> None:
+        node.declare_parameter("use_rel_alt", True)
+        node.declare_parameter("ground_z", 0.0)
+        self.node = node
+        self.rel_alt: float | None = None
+        self._pinned = float(node.get_parameter("ground_z").value)
+        self._latched: float | None = None
+        if node.get_parameter("use_rel_alt").value:
+            node.create_subscription(Float64, "/mavros/global_position/rel_alt",
+                                     self._on_rel_alt, qos_profile_sensor_data)
+
+    def _on_rel_alt(self, msg: Float64) -> None:
+        self.rel_alt = float(msg.data)
+
+    def z(self, pose_z: float | None = None) -> float:
+        """The plane height. Latches on the first call that has both the
+        pose and rel_alt; before that, the ground_z parameter answers."""
+        if self._latched is None and self.rel_alt is not None \
+                and pose_z is not None:
+            self._latched = pose_z - self.rel_alt
+            self.node.get_logger().info(
+                f"ground plane latched at z={self._latched:.2f}, "
+                f"the takeoff altitude")
+        return self._latched if self._latched is not None else self._pinned

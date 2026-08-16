@@ -45,8 +45,8 @@ rather than a NavSatFix because a latched NavSatFix cannot be taken
 back: when the hold is released, by a point click or by /gimbal/center,
 an empty feature collection goes out and the marker leaves the map, the
 same clearing the footprints use.
-The ground plane sits rel_alt below the camera, or at ground_z with
-use_rel_alt false, the same convention the ground projector uses. A ray
+The ground plane is latched at the takeoff altitude, or pinned to ground_z
+with use_rel_alt false, the same convention the ground projector uses. A ray
 that meets no ground within the footprint limit drops the click with a
 warning. What happens next depends on the gimbal convention. With
 "gz_sim", roi_tracker.py holds the camera on the point, because PX4
@@ -165,7 +165,7 @@ from rclpy.parameter import Parameter
 from rclpy.qos import (QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile,
                        qos_profile_sensor_data)
 from sensor_msgs.msg import CameraInfo, NavSatFix
-from std_msgs.msg import Float64, String
+from std_msgs.msg import String
 from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformListener
 
@@ -175,7 +175,7 @@ try:
 except ImportError:
     HAVE_FOXGLOVE = False
 
-from sim_bridge.geo import MapOrigin
+from sim_bridge.geo import GroundPlane, MapOrigin
 from sim_bridge.projection import (GROUND_VIEW_MAX_DISTANCE_M,
                                    body_frd_to_flu, intersect_ground,
                                    intrinsics_ready, pointing_rpy_ned,
@@ -236,10 +236,6 @@ class ClickToGimbal(Node):
         self.declare_parameter("optical_frame", "gimbal_camera_optical_frame")
         self.declare_parameter("reference_frame", "map")
         self.declare_parameter("click_mode", "roi")
-        # The ground plane, as in ground_projector: rel_alt below the
-        # camera, or pinned to ground_z with use_rel_alt false.
-        self.declare_parameter("use_rel_alt", True)
-        self.declare_parameter("ground_z", 0.0)
         # Which command convention the gimbal obeys.
         #   gz_sim    PX4's simulated gimbal. Its joints ride on the airframe
         #             and ignore the frame flags, so the node sends a
@@ -257,7 +253,10 @@ class ClickToGimbal(Node):
         # The simulated gimbal ignores flags and runs vehicle relative, so
         # zero labels its setpoints honestly.
         self.setpoint_flags = FOLLOW_LOCK_FLAGS if self.earth_referenced else 0
-        self.ground_z_default = float(self.get_parameter("ground_z").value)
+        # Declares use_rel_alt and ground_z, latches the plane at the takeoff
+        # altitude, and keeps rel_alt readable for the ROI altitude below.
+        # See sim_bridge/geo.py.
+        self.ground_plane = GroundPlane(self)
         # The camera link orientation the joints hold, from the last command
         # this node sent. roi_tracker re-derives it from the TF chain at
         # click time when another controller has moved the gimbal since.
@@ -274,7 +273,6 @@ class ClickToGimbal(Node):
 
         self.info: CameraInfo | None = None
         self.vehicle_q: tuple[float, float, float, float] | None = None
-        self.rel_alt: float | None = None
         self.amsl: float | None = None
         # None until the first manager status arrives. True while these
         # MAVROS_SYSID and MAVROS_COMPID ids hold primary control.
@@ -343,9 +341,6 @@ class ClickToGimbal(Node):
                                  self._on_status, qos_profile_sensor_data)
         self.create_subscription(PoseStamped, "/mavros/local_position/pose",
                                  self._on_pose, qos_profile_sensor_data)
-        if self.get_parameter("use_rel_alt").value:
-            self.create_subscription(Float64, "/mavros/global_position/rel_alt",
-                                     self._on_rel_alt, qos_profile_sensor_data)
         self.create_subscription(NavSatFix, "/mavros/global_position/global",
                                  self._on_fix, qos_profile_sensor_data)
         if self.earth_referenced:
@@ -377,9 +372,6 @@ class ClickToGimbal(Node):
         if self.roi_tracker is not None:
             self.roi_tracker.on_vehicle(msg)
         self.origin.on_local(msg)
-
-    def _on_rel_alt(self, msg: Float64) -> None:
-        self.rel_alt = float(msg.data)
 
     def _on_fix(self, msg: NavSatFix) -> None:
         self.origin.on_fix(msg)
@@ -606,8 +598,7 @@ class ClickToGimbal(Node):
 
     def _roi_click(self, u: float, v: float, position, direction) -> None:
         """Hold the camera on the ground point under the clicked pixel."""
-        ground_z = (self.ground_z_default if self.rel_alt is None
-                    else position[2] - self.rel_alt)
+        ground_z = self.ground_plane.z(position[2])
         hit = intersect_ground(position, direction, ground_z,
                                GROUND_VIEW_MAX_DISTANCE_M)
         if hit is None:
@@ -679,7 +670,7 @@ class ClickToGimbal(Node):
 
     def _send_roi_location(self, hit) -> None:
         latlon = self.origin.to_lla(hit[0], hit[1])
-        if latlon is None or self.amsl is None or self.rel_alt is None:
+        if latlon is None or self.amsl is None or self.ground_plane.rel_alt is None:
             self.get_logger().warn(
                 "DO_SET_ROI_LOCATION not sent: no origin or altitude yet")
             return
@@ -688,7 +679,7 @@ class ClickToGimbal(Node):
         request.command = MAV_CMD_DO_SET_ROI_LOCATION
         request.x = int(latlon[0] * 1e7)
         request.y = int(latlon[1] * 1e7)
-        request.z = self.amsl - self.rel_alt
+        request.z = self.amsl - self.ground_plane.rel_alt
         self._send_roi_command(request)
 
     def _send_roi_none(self) -> None:

@@ -1887,12 +1887,97 @@
       <pose>-250.490 -148.190 3.641 0 0 3.1259</pose>
       <static>true</static>
     </include>
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Hatchback red</uri>
+      <name>v_manual_176</name>
+      <pose>-116.830 76.570 7.991 0 0 0.0000</pose>
+      <static>true</static>
+    </include>
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Hatchback blue</uri>
+      <name>v_manual_177</name>
+      <pose>-96.440 77.850 6.916 0 0 0.0000</pose>
+      <static>true</static>
+    </include>
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/SUV</uri>
+      <name>v_manual_178</name>
+      <pose>-31.870 71.040 3.055 0 0 0.0000</pose>
+      <static>true</static>
+    </include>
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Pickup</uri>
+      <name>v_manual_179</name>
+      <pose>7.940 72.100 0.664 0 0 0.0000</pose>
+      <static>true</static>
+    </include>
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Pickup</uri>
+      <name>v_manual_180</name>
+      <pose>50.100 72.640 -1.833 0 0 0.0000</pose>
+      <static>true</static>
+    </include>
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Hatchback red</uri>
+      <name>v_manual_181</name>
+      <pose>51.170 76.890 -1.690 0 0 0.0000</pose>
+      <static>true</static>
+    </include>
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Hatchback blue</uri>
+      <name>v_manual_182</name>
+      <pose>51.060 81.040 -1.425 0 0 0.0000</pose>
+      <static>true</static>
+    </include>
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/SUV</uri>
+      <name>v_manual_183</name>
+      <pose>72.940 81.780 -2.904 0 0 0.0000</pose>
+      <static>true</static>
+    </include>
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Pickup</uri>
+      <name>v_manual_184</name>
+      <pose>67.820 73.170 -2.885 0 0 0.0000</pose>
+      <static>true</static>
+    </include>
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Hatchback red</uri>
+      <name>v_manual_185</name>
+      <pose>91.190 74.020 -4.374 0 0 0.0000</pose>
+      <static>true</static>
+    </include>
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Hatchback blue</uri>
+      <name>v_manual_186</name>
+      <pose>98.450 74.340 -4.856 0 0 0.0000</pose>
+      <static>true</static>
+    </include>
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/SUV</uri>
+      <name>v_manual_187</name>
+      <pose>116.490 74.550 -5.915 0 0 0.0000</pose>
+      <static>true</static>
+    </include>
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Bus</uri>
+      <name>v_manual_188</name>
+      <pose>63.970 77.310 -2.429 0 0 0.0000</pose>
+      <static>true</static>
+    </include>
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Bus</uri>
+      <name>v_manual_189</name>
+      <pose>108.260 74.120 -5.465 0 0 0.0000</pose>
+      <static>true</static>
+    </include>
 
-    <!-- The survey fiducial. FIDUCIAL_SURVEYED_* in .env holds its
-         coordinate; the drone measures it to align frames. -->
+    <!-- The survey fiducial: a flat orange 0.5 m disk. Its coordinate
+         rides in the scenario as fiducial_*; the drone measures it to
+         align frames. -->
     <model name="fiducial_marker">
       <static>true</static>
-      <pose>4.300 23.180 -0.209 0 0 0.0000</pose>
+      <pose>4.300 23.180 -0.195 0 0 0.0000</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
@@ -1905,6 +1990,8 @@
             <ambient>1 0.45 0.05 1</ambient>
             <diffuse>1 0.45 0.05 1</diffuse>
             <specular>0.1 0.1 0.1 1</specular>
+            <!-- A touch of emissive keeps the marker orange in shadow. -->
+            <emissive>0.35 0.14 0.02 1</emissive>
           </material>
         </visual>
       </link>

@@ -218,8 +218,11 @@ def cmd_spawn(world: str, path: Path) -> int:
     data = yaml.safe_load(path.read_text()) or {}
     entities = data.get("entities", [])
     if not entities:
-        print(f"{path} lists no entities.", file=sys.stderr)
-        return 1
+        # A valid case, not an error: docs/scenarios.md lists the empty
+        # scenario as a test ("a detector that reports objects here is
+        # wrong"), and scenegen writes one for a scene without targets.
+        # The previous targets still clear and the resolved file resets.
+        print(f"{path} lists no entities; clearing what was placed.")
 
     # Replace whatever the previous scenario left behind.
     previous = load_state()

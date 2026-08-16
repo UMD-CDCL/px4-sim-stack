@@ -30,7 +30,6 @@ from rclpy.qos import (QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy,
                        qos_profile_sensor_data)
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo
-from std_msgs.msg import Float64
 from tf2_ros import Buffer, TransformListener
 from vision_msgs.msg import (
     BoundingBox3D,
@@ -40,6 +39,7 @@ from vision_msgs.msg import (
     ObjectHypothesisWithPose,
 )
 
+from sim_bridge.geo import GroundPlane
 from sim_bridge.projection import (intersect_ground, intrinsics_ready,
                                    quat_rotate, ray_in_optical, slant_range)
 
@@ -73,8 +73,6 @@ class DetectionLocalizer(Node):
         self.declare_parameter("camera_info_topic", "/camera/gimbal/camera_info")
         self.declare_parameter("optical_frame", "gimbal_camera_optical_frame")
         self.declare_parameter("reference_frame", "map")
-        self.declare_parameter("use_rel_alt", True)
-        self.declare_parameter("ground_z", 0.0)
         # Which point of the box to project, "bottom" or "center". Looking
         # obliquely, the feet touch the ground, so the bottom edge is right.
         # Looking straight down, the center is.
@@ -89,7 +87,9 @@ class DetectionLocalizer(Node):
         self.reference = self.get_parameter("reference_frame").value
         self.anchor = self.get_parameter("anchor").value
         self.output_frame = self.get_parameter("output_frame").value or self.reference
-        self.ground_z = float(self.get_parameter("ground_z").value)
+        # Declares use_rel_alt and ground_z, and latches the plane at the
+        # takeoff altitude. See sim_bridge/geo.py.
+        self.ground_plane = GroundPlane(self)
         self.warned_output = False
 
         self.tf_buffer = Buffer(cache_time=Duration(seconds=10.0))
@@ -99,7 +99,6 @@ class DetectionLocalizer(Node):
                                              spin_thread=True)
 
         self.info: CameraInfo | None = None
-        self.rel_alt: float | None = None
 
         # Sensor QoS throughout: these topics are best effort, and a reliable
         # subscription to a best effort publisher receives nothing.
@@ -109,9 +108,6 @@ class DetectionLocalizer(Node):
         self.create_subscription(CameraInfo,
                                  self.get_parameter("camera_info_topic").value,
                                  self._on_info, qos_profile_sensor_data)
-        if self.get_parameter("use_rel_alt").value:
-            self.create_subscription(Float64, "/mavros/global_position/rel_alt",
-                                     self._on_rel_alt, qos_profile_sensor_data)
         self.create_subscription(Detection2DArray,
                                  self.get_parameter("detections_topic").value,
                                  self._on_detections, detections_qos)
@@ -126,9 +122,6 @@ class DetectionLocalizer(Node):
 
     def _on_info(self, msg: CameraInfo) -> None:
         self.info = msg
-
-    def _on_rel_alt(self, msg: Float64) -> None:
-        self.rel_alt = float(msg.data)
 
     # ------------------------------------------------------------------- work
     def _on_detections(self, msg: Detection2DArray) -> None:
@@ -152,7 +145,7 @@ class DetectionLocalizer(Node):
         t, r = tf.transform.translation, tf.transform.rotation
         origin = (t.x, t.y, t.z)
         rotation = (r.x, r.y, r.z, r.w)
-        ground_z = self.ground_z if self.rel_alt is None else t.z - self.rel_alt
+        ground_z = self.ground_plane.z(t.z)
 
         # The output transform is static, so one lookup serves every
         # detection in the array.

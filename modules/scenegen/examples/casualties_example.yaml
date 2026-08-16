@@ -1,13 +1,19 @@
-# Casualty ground truth for scenegen build --casualties.
+# Casualty ground-truth import file.
+#
+# scenegen imports this into scene.json: `create --casualties`,
+# `all --casualties`, or the `import-casualties` command. After the
+# import, scene.json owns the targets. The editor shows, places and moves
+# them, and `build` writes the scenario from the scene alone. A re-import
+# replaces imported targets and keeps hand-placed ones.
 #
 # Each entry:
 #   lat, lon   required, WGS84 degrees
-#   alt        optional AMSL meters. Absent or null puts the casualty on
-#              the terrain.
-#   model      optional model URI. Absent draws from the pool in
-#              build_world.py, seeded, so a rebuild repeats the draw.
-#   name       optional. Keep "casualty" or "person" in it; the ROS
-#              ground-truth scorer only counts names that carry one.
+#   agl        optional meters above the terrain. Absent or null puts
+#              the target on the ground.
+#   model      optional model URI. Absent draws from the pool at build,
+#              by a stable hash, so a rebuild never reshuffles.
+#   name       optional. Keep "casualty" or "person" in it; the build
+#              fixes a name the scorer would ignore.
 #
 # These three sit on McKeldin Mall for the umd_campus example scene.
 

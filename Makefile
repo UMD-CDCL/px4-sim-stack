@@ -22,6 +22,20 @@ DS_VERSION := $(patsubst DS_VERSION=%,%,$(filter DS_VERSION=%,$(DS_SELECT)))
 DS_IMAGE   := $(patsubst DS_IMAGE=%,%,$(filter DS_IMAGE=%,$(DS_SELECT)))
 DS_TAG     := $(patsubst DS_TAG=%,%,$(filter DS_TAG=%,$(DS_SELECT)))
 
+# Home and fiducial ride inside a generated scenario, so SCENARIO alone
+# carries them. Empty output, such as for a hand-written scenario, leaves
+# the .env values alone. Same one-$(shell) pattern as ds-select above.
+SCENARIO_ENV := $(shell ./scripts/scenario-env.sh modules/sim/scenes/scenarios/$(SCENARIO).yaml 2>/dev/null)
+ifneq ($(SCENARIO_ENV),)
+HOME_LAT := $(patsubst HOME_LAT=%,%,$(filter HOME_LAT=%,$(SCENARIO_ENV)))
+HOME_LON := $(patsubst HOME_LON=%,%,$(filter HOME_LON=%,$(SCENARIO_ENV)))
+HOME_ALT := $(patsubst HOME_ALT=%,%,$(filter HOME_ALT=%,$(SCENARIO_ENV)))
+FIDUCIAL_ENABLED := 1
+FIDUCIAL_SURVEYED_LAT := $(patsubst FIDUCIAL_SURVEYED_LAT=%,%,$(filter FIDUCIAL_SURVEYED_LAT=%,$(SCENARIO_ENV)))
+FIDUCIAL_SURVEYED_LON := $(patsubst FIDUCIAL_SURVEYED_LON=%,%,$(filter FIDUCIAL_SURVEYED_LON=%,$(SCENARIO_ENV)))
+FIDUCIAL_SURVEYED_ALT := $(patsubst FIDUCIAL_SURVEYED_ALT=%,%,$(filter FIDUCIAL_SURVEYED_ALT=%,$(SCENARIO_ENV)))
+endif
+
 .DEFAULT_GOAL := help
 .PHONY: help preflight bootstrap x11 build build-% up up-core down restart ps logs \
         sim ros qgc perception hub px4-console scenario scene reset genscene \

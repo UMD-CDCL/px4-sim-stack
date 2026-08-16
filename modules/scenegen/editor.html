@@ -53,6 +53,7 @@
   <button data-mode="add_car">+ Car</button>
   <button data-mode="add_bus">+ Bus</button>
   <button data-mode="add_building">+ Building</button>
+  <button data-mode="add_target">+ Target</button>
   <button data-mode="zone">+ Flatten zone</button>
   <button data-mode="fiducial">Fiducial</button>
   <button id="undo" title="undo (Ctrl+Z)" disabled>↶</button>
@@ -71,7 +72,7 @@
 </div>
 <div id="help">
   drag empty = pan · wheel = zoom · handles: round = rotate, square = resize ·
-  shift-click = stamp a copy of the last vehicle · shift-drag = select many ·
+  shift-click = stamp a copy of the last vehicle or target · shift-drag = select many ·
   shift-click an object = add or drop it from the selection ·
   <kbd>Ctrl+Z</kbd> undo · <kbd>Ctrl+Y</kbd> redo ·
   <kbd>F</kbd> flip · <kbd>Del</kbd> delete · <kbd>Esc</kbd> deselect ·
@@ -98,6 +99,7 @@ let zoneDraft = [];
 let dirty = false;
 let vehicleCounter = 1;
 let buildingCounter = 1;
+let targetCounter = 1;
 let multi = [];                // [{kind, index}] when several objects are selected
 let stampRef = null;           // {kind, id} of the object behind shift-click copies
 let undoStack = [];
@@ -208,6 +210,26 @@ function draw() {
     }
     if (single) drawHandles(v.east_m, v.north_m, v.length_m, v.width_m, v.heading_deg,
                             ctx.strokeStyle);
+  });
+
+  scene.targets.forEach((t, index) => {
+    const selected = (selection && selection.kind === "target"
+                      && selection.index === index)
+                     || isMultiMember("target", index);
+    const [tx, ty] = imageFromEnu(t.east_m, t.north_m);
+    const radius = Math.max(metersToImagePx(0.5), lw(4));
+    ctx.strokeStyle = t.enabled ? "#3ddc7f" : "#777";
+    ctx.setLineDash(t.enabled ? [] : [lw(4), lw(3)]);
+    ctx.lineWidth = lw(selected ? 2.6 : 1.6);
+    ctx.beginPath(); ctx.arc(tx, ty, radius, 0, 7); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(tx - radius * 0.6, ty); ctx.lineTo(tx + radius * 0.6, ty);
+    ctx.moveTo(tx, ty - radius * 0.6); ctx.lineTo(tx, ty + radius * 0.6);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = t.enabled ? "#3ddc7f" : "#777";
+    ctx.font = `${12 / view.s}px system-ui, sans-serif`;
+    ctx.fillText(t.name, tx + radius * 1.4, ty - radius * 0.4);
   });
 
   const f = scene.fiducial;
@@ -331,6 +353,11 @@ function hitAt(e, n) {
   const tol = 6 * mpp()[0] / view.s;
   if (nearPoint(e, n, f.east_m, f.north_m, Math.max(f.diameter_m, tol)))
     return { kind: "fiducial" };
+  for (let i = scene.targets.length - 1; i >= 0; i--) {
+    const t = scene.targets[i];
+    if (nearPoint(e, n, t.east_m, t.north_m, Math.max(1.0, tol)))
+      return { kind: "target", index: i };
+  }
   for (let i = scene.vehicles.length - 1; i >= 0; i--) {
     const v = scene.vehicles[i];
     if (v.enabled && inBox(e, n, { x: v.east_m, y: v.north_m, length: v.length_m,
@@ -368,8 +395,9 @@ function isMultiMember(kind, index) {
   return multi.some(m => m.kind === kind && m.index === index);
 }
 function memberObject(member) {
-  return member.kind === "vehicle" ? scene.vehicles[member.index]
-                                   : scene.buildings[member.index];
+  if (member.kind === "vehicle") return scene.vehicles[member.index];
+  if (member.kind === "target") return scene.targets[member.index];
+  return scene.buildings[member.index];
 }
 function multiCentroid() {
   let e = 0, n = 0;
@@ -381,7 +409,8 @@ function groupHandlePoint(centerE, centerN) {
 }
 function headingOf(member) {
   const o = memberObject(member);
-  return member.kind === "vehicle" ? o.heading_deg : o.yaw_deg;
+  if (member.kind === "vehicle") return o.heading_deg;
+  return o.yaw_deg ?? 0;
 }
 function setHeading(member, degrees) {
   const normalized = +((((degrees + 180) % 360) + 360) % 360 - 180).toFixed(1);
@@ -393,6 +422,8 @@ function deleteMembers(members) {
   pushUndo();
   members.filter(m => m.kind === "vehicle").map(m => m.index)
     .sort((a, b) => b - a).forEach(index => scene.vehicles.splice(index, 1));
+  members.filter(m => m.kind === "target").map(m => m.index)
+    .sort((a, b) => b - a).forEach(index => scene.targets.splice(index, 1));
   members.filter(m => m.kind === "building").map(m => m.index)
     .sort((a, b) => b - a).forEach(index => {
       const building = scene.buildings[index];
@@ -427,30 +458,47 @@ function addBuilding(e, n, props) {
     outline_m: [], source: "manual", model_uri: props.model_uri, enabled: true });
   return { kind: "building", index: scene.buildings.length - 1 };
 }
+function addTarget(e, n, props) {
+  scene.targets.push({ id: "t_manual_" + targetCounter,
+    name: "casualty_m" + targetCounter,
+    east_m: +e.toFixed(2), north_m: +n.toFixed(2),
+    agl_m: props.agl_m ?? null, on_building: props.on_building ?? false,
+    yaw_deg: props.yaw_deg ?? null,
+    model_uri: props.model_uri ?? null, enabled: true, source: "manual" });
+  targetCounter++;
+  return { kind: "target", index: scene.targets.length - 1 };
+}
 function rememberStamp(ref) {
-  // Vehicles only: buildings are one-off shapes, so stamping them earns
-  // misplaced boxes faster than it saves clicks. The stamp tracks the
-  // source by id and reads its properties at stamp time, so a rotate or
-  // a panel edit after selection carries into every later copy, and the
-  // link survives undo, which rebuilds the arrays.
-  if (!ref || ref.kind !== "vehicle") return;
-  stampRef = { kind: "vehicle", id: memberObject(ref).id };
+  // Vehicles and targets stamp; buildings are one-off shapes, so copying
+  // them earns misplaced boxes faster than it saves clicks. The stamp
+  // tracks the source by id and reads its properties at stamp time, so a
+  // rotate or a panel edit after selection carries into every later copy,
+  // and the link survives undo, which rebuilds the arrays.
+  if (!ref || (ref.kind !== "vehicle" && ref.kind !== "target")) return;
+  const pool = ref.kind === "vehicle" ? scene.vehicles : scene.targets;
+  stampRef = { kind: ref.kind, id: pool[ref.index].id };
 }
 function stampSourceObject() {
   if (!stampRef) return null;
-  return scene.vehicles.find(o => o.id === stampRef.id) || null;
+  const pool = stampRef.kind === "vehicle" ? scene.vehicles : scene.targets;
+  return pool.find(o => o.id === stampRef.id) || null;
 }
 function stampAt(e, n) {
   const source = stampSourceObject();
   if (!source) {
     statusEl.textContent =
-      "nothing to copy yet: place or select a vehicle first";
+      "nothing to copy yet: place or select a vehicle or target first";
     return;
   }
   pushUndo();
-  const ref = addVehicle(e, n, { cls: source.cls, length_m: source.length_m,
-    width_m: source.width_m, heading_deg: source.heading_deg,
-    model_uri: source.model_uri });
+  const ref = stampRef.kind === "vehicle"
+    ? addVehicle(e, n, { cls: source.cls, length_m: source.length_m,
+        width_m: source.width_m, heading_deg: source.heading_deg,
+        model_uri: source.model_uri })
+    // A target copy keeps model and height but gets a fresh name: the
+    // name is the identity the scorer sees, so two must never share one.
+    : addTarget(e, n, { agl_m: source.agl_m, on_building: source.on_building,
+        yaw_deg: source.yaw_deg, model_uri: source.model_uri });
   select(ref);   // the newest copy leads the next stamp
   markDirty();
 }
@@ -462,17 +510,28 @@ function field(labelText, inputHtml) {
 
 function showMultiPanel() {
   const vehicleMembers = multi.filter(m => m.kind === "vehicle");
-  const buildingCount = multi.length - vehicleMembers.length;
+  const targetCount = multi.filter(m => m.kind === "target").length;
+  const buildingCount = multi.length - vehicleMembers.length - targetCount;
   panelTitle.textContent = `${multi.length} selected`;
   panelBody.innerHTML =
     `<p style="color:var(--dim)">${vehicleMembers.length} vehicles, ` +
-    `${buildingCount} buildings. Drag a selected object to move the group. ` +
-    `The white handle turns every object in place; positions hold. Sizes ` +
-    `stay as they are.</p>` +
+    `${buildingCount} buildings, ${targetCount} targets. Drag a selected ` +
+    `object to move the group. The white handle turns every object in ` +
+    `place; positions hold. Sizes stay as they are.</p>` +
     (vehicleMembers.length ? field("class (vehicles)", `<select id="m-cls">
         <option value="">leave as is</option>
         <option value="car">car</option>
         <option value="bus">bus</option></select>`) : "") +
+    (targetCount ? field("floor (targets)", `<select id="m-floor">
+        <option value="">leave as is</option>
+        <option value="terrain">terrain</option>
+        <option value="building">building under it</option></select>`) +
+      field("offset above the floor m (targets, empty = leave as is)",
+            `<input id="m-agl" placeholder="a number sets all">`) +
+      field("in the scenario (targets)", `<select id="m-en">
+        <option value="">leave as is</option>
+        <option value="yes">include</option>
+        <option value="no">exclude</option></select>`) : "") +
     field("model uri for everything selected",
           `<input id="m-uri" placeholder="URI, or the word none for the pool">`) +
     (vehicleMembers.length ? `<button id="m-flip">Flip vehicles 180°</button>` : "") +
@@ -485,6 +544,32 @@ function showMultiPanel() {
       markDirty(); draw();
     };
     document.getElementById("m-flip").onclick = flipMembers;
+  }
+  if (targetCount) {
+    // Every target field edits in bulk except the name: names are the
+    // identities the scorer keys on, so they stay one at a time.
+    const targetMembers = multi.filter(m => m.kind === "target");
+    document.getElementById("m-floor").onchange = ev => {
+      if (!ev.target.value) return;
+      pushUndo();
+      targetMembers.forEach(m => {
+        memberObject(m).on_building = ev.target.value === "building"; });
+      markDirty();
+    };
+    document.getElementById("m-agl").onchange = ev => {
+      const value = parseFloat(ev.target.value);
+      if (Number.isNaN(value)) return;
+      pushUndo();
+      targetMembers.forEach(m => { memberObject(m).agl_m = value; });
+      markDirty();
+    };
+    document.getElementById("m-en").onchange = ev => {
+      if (!ev.target.value) return;
+      pushUndo();
+      targetMembers.forEach(m => {
+        memberObject(m).enabled = ev.target.value === "yes"; });
+      markDirty(); draw();
+    };
   }
   document.getElementById("m-uri").onchange = ev => {
     const raw = ev.target.value.trim();
@@ -537,6 +622,44 @@ function showPanel() {
     document.getElementById("p-del").onclick = () => {
       pushUndo();
       scene.flatten_zones.splice(selection.index, 1); select(null); markDirty(); };
+    return;
+  }
+  if (selection.kind === "target") {
+    const t = scene.targets[selection.index];
+    panelTitle.textContent = `${t.id} (${t.source})`;
+    panelBody.innerHTML =
+      field("name", `<input id="p-name" value="${t.name}">`) +
+      field("model uri (empty = pool at build)",
+            `<input id="p-uri" value="${t.model_uri ?? ""}"
+                    placeholder="model://casualty_prone, or a Fuel URI">`) +
+      field("", `<label style="display:flex;gap:6px;align-items:center;margin-top:8px">
+        <input id="p-roof" type="checkbox" style="width:auto"${t.on_building ? " checked" : ""}>
+        snap to the building under it</label>`) +
+      field("offset above the floor m (empty = 0)",
+            `<input id="p-alt" value="${t.agl_m ?? ""}">`) +
+      field("", `<label style="display:flex;gap:6px;align-items:center;margin-top:8px">
+        <input id="p-en" type="checkbox" style="width:auto"${t.enabled ? " checked" : ""}>
+        include in the scenario</label>`) +
+      `<p style="color:var(--dim)">Ground truth. The floor is the terrain,
+       or the roof of the building under it when snapped; with no building
+       there it falls back to the terrain. The build writes these into the
+       scenario the sim spawns and the scorer reads. A name needs
+       "casualty" or "person" in it to score; the build fixes one that
+       does not.</p>` +
+      `<button id="p-del" class="danger">Delete target</button>`;
+    document.getElementById("p-name").onchange = ev => {
+      pushUndo(); t.name = ev.target.value.trim() || t.name; markDirty(); draw(); };
+    document.getElementById("p-uri").onchange = ev => {
+      pushUndo(); t.model_uri = ev.target.value.trim() || null; markDirty(); };
+    document.getElementById("p-roof").onchange = ev => {
+      pushUndo(); t.on_building = ev.target.checked; markDirty(); };
+    document.getElementById("p-alt").onchange = ev => {
+      const value = parseFloat(ev.target.value);
+      pushUndo(); t.agl_m = Number.isNaN(value) ? null : value; markDirty(); };
+    document.getElementById("p-en").onchange = ev => {
+      pushUndo(); t.enabled = ev.target.checked; markDirty(); draw(); };
+    document.getElementById("p-del").onclick = () => {
+      pushUndo(); scene.targets.splice(selection.index, 1); select(null); markDirty(); };
     return;
   }
   if (selection.kind === "vehicle") {
@@ -624,7 +747,8 @@ function selectMulti(members) {
 function toggleMember(hit) {
   let members = multi.slice();
   if (members.length === 0 && selection
-      && (selection.kind === "vehicle" || selection.kind === "building"))
+      && (selection.kind === "vehicle" || selection.kind === "building"
+          || selection.kind === "target"))
     members = [selection];
   const at = members.findIndex(m => m.kind === hit.kind && m.index === hit.index);
   if (at >= 0) members.splice(at, 1);
@@ -668,6 +792,14 @@ canvas.addEventListener("mousedown", event => {
     markDirty();
     return;
   }
+  if (mode === "add_target") {
+    pushUndo();
+    const ref = addTarget(e, n, {});
+    if (!event.shiftKey) setMode("select");   // shift keeps placing
+    select(ref);
+    markDirty();
+    return;
+  }
   if (mode === "zone") { zoneDraft.push([+e.toFixed(2), +n.toFixed(2)]); draw(); return; }
   if (mode === "fiducial") {
     pushUndo();
@@ -677,7 +809,8 @@ canvas.addEventListener("mousedown", event => {
   }
   if (event.shiftKey) {
     const hit = hitAt(e, n);
-    if (hit && (hit.kind === "vehicle" || hit.kind === "building")) {
+    if (hit && (hit.kind === "vehicle" || hit.kind === "building"
+                || hit.kind === "target")) {
       toggleMember(hit);
       return;
     }
@@ -727,7 +860,11 @@ canvas.addEventListener("mousedown", event => {
   const hit = hitAt(e, n);
   select(hit);
   if (hit && hit.kind === "fiducial") { pushUndo(); drag = { kind: "fiducial" }; }
-  else if (hit && (hit.kind === "vehicle" || hit.kind === "building")) {
+  else if (hit && hit.kind === "target") {
+    pushUndo();
+    const t = scene.targets[hit.index];
+    drag = { kind: "targetmove", offsetE: t.east_m - e, offsetN: t.north_m - n };
+  } else if (hit && (hit.kind === "vehicle" || hit.kind === "building")) {
     pushUndo();
     const box = boxOf(hit);
     drag = { kind: "move", offsetE: box.x - e, offsetN: box.y - n };
@@ -773,6 +910,11 @@ window.addEventListener("mousemove", event => {
   } else if (drag.kind === "vertex" && selection && selection.kind === "zone") {
     scene.flatten_zones[selection.index].polygon_m[drag.index] = [+e.toFixed(2), +n.toFixed(2)];
     markDirty();
+  } else if (drag.kind === "targetmove" && selection && selection.kind === "target") {
+    const t = scene.targets[selection.index];
+    t.east_m = +(e + drag.offsetE).toFixed(2);
+    t.north_m = +(n + drag.offsetN).toFixed(2);
+    markDirty();
   } else if (drag.kind === "zonemove" && selection && selection.kind === "zone") {
     const de = e - drag.startE, dn = n - drag.startN;
     scene.flatten_zones[selection.index].polygon_m = drag.initial.map(
@@ -813,6 +955,9 @@ window.addEventListener("mouseup", () => {
     });
     scene.buildings.forEach((b, index) => {
       if (b.enabled && inside(b)) members.push({ kind: "building", index });
+    });
+    scene.targets.forEach((t, index) => {
+      if (t.enabled && inside(t)) members.push({ kind: "target", index });
     });
     selectMulti(members);
   }
@@ -874,6 +1019,7 @@ window.addEventListener("keydown", event => {
     if (!selection) return;
     pushUndo();
     if (selection.kind === "vehicle") scene.vehicles.splice(selection.index, 1);
+    else if (selection.kind === "target") scene.targets.splice(selection.index, 1);
     else if (selection.kind === "zone") scene.flatten_zones.splice(selection.index, 1);
     else if (selection.kind === "building") {
       const building = scene.buildings[selection.index];
@@ -921,6 +1067,7 @@ function markDirty() {
 // snapshot; it clears on undo because indices may not survive the jump.
 function editableState() {
   return JSON.stringify({ vehicles: scene.vehicles, buildings: scene.buildings,
+                          targets: scene.targets,
                           flatten_zones: scene.flatten_zones,
                           fiducial: scene.fiducial });
 }
@@ -936,6 +1083,7 @@ function applyState(state) {
   const parsed = JSON.parse(state);
   scene.vehicles = parsed.vehicles;
   scene.buildings = parsed.buildings;
+  scene.targets = parsed.targets;
   scene.flatten_zones = parsed.flatten_zones;
   scene.fiducial = parsed.fiducial;
   selection = null;
@@ -1011,10 +1159,11 @@ function updateStatus(event) {
   const [e, n] = enuFromMouse(event);
   const vehicles = scene.vehicles.filter(v => v.enabled).length;
   const buildings = scene.buildings.filter(b => b.enabled).length;
+  const targets = scene.targets.filter(t => t.enabled).length;
   const selectedNote = multi.length > 1 ? ` · ${multi.length} selected` : "";
   statusEl.textContent =
     `${scene.name} · ${buildings} buildings · ${vehicles} vehicles · ` +
-    `${scene.flatten_zones.length} zones${selectedNote} · ` +
+    `${targets} targets · ${scene.flatten_zones.length} zones${selectedNote} · ` +
     `cursor ${e.toFixed(1)}, ${n.toFixed(1)} m`;
 }
 
@@ -1030,6 +1179,12 @@ function nextIdNumber(items) {
 
 async function init() {
   scene = await (await fetch("/scene.json")).json();
+  if (!scene.targets) scene.targets = [];   // a scene.json from before targets
+  scene.targets.forEach(t => {   // and one from before terrain-relative heights
+    if (t.agl_m === undefined) t.agl_m = t.alt_m ?? null;
+    delete t.alt_m;
+    if (t.on_building === undefined) t.on_building = false;
+  });
   try {
     const config = await (await fetch("/config.json")).json();
     if (config.finish_enabled)
@@ -1037,6 +1192,7 @@ async function init() {
   } catch (error) { /* an older server; the button stays hidden */ }
   vehicleCounter = nextIdNumber(scene.vehicles);
   buildingCounter = nextIdNumber(scene.buildings);
+  targetCounter = nextIdNumber(scene.targets);
   image.onload = () => {
     const fit = Math.min(canvas.clientWidth / image.width,
                          canvas.clientHeight / image.height);

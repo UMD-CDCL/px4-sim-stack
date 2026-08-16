@@ -7,10 +7,18 @@ Outputs, all into modules/sim/scenes/ (SCENES_DIR):
                                         file name; the sim entrypoint
                                         refuses a mismatch.
   models/<name>_terrain/                textured terrain mesh model
-  scenarios/<name>_casualties.yaml      when a casualty list is given;
-                                        spawn_scenario.py places these at
-                                        run time, so they can change with
-                                        no sim restart
+  scenarios/<name>_casualties.yaml      always; spawn_scenario.py places
+                                        the targets at run time, so they
+                                        can change with no sim restart
+
+Ground truth flows one way: a casualty file imports into scene.json, the
+editor adjusts targets there, and this build projects them into the
+scenario. The build draws nothing at random, so a rebuild of an unchanged
+scene is byte-identical.
+
+The scenario also carries home_* and fiducial_* lines. The front doors
+read them (scripts/scenario-env.sh), so SCENE and SCENARIO in .env select
+everything; nothing else is copied by hand.
 
 The world's <spherical_coordinates> ties ENU (0,0,0) to the scene center
 at the terrain's own altitude. The printed .env lines carry the same
@@ -20,7 +28,6 @@ numbers to PX4 and QGC; apply them, or the map and the world disagree.
 from __future__ import annotations
 
 import math
-import random
 import shutil
 import sys
 from pathlib import Path
@@ -41,13 +48,8 @@ VEHICLE_MODEL_POOLS = {
             "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Pickup"],
     "bus": ["https://fuel.gazebosim.org/1.0/OpenRobotics/models/Bus"],
 }
-# Casualties without a designated model draw from this pool. The names the
-# ROS ground-truth node scores must contain "person" or "casualty";
-# generated names do.
-CASUALTY_MODEL_POOL = [
-    "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Standing person",
-    "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Casual female",
-]
+# The pool a target without a model draws from lives in scene_model
+# (CASUALTY_MODEL_POOL), next to the Target type and the import.
 FIDUCIAL_THICKNESS_M = 0.02
 FIDUCIAL_COLOR = "1 0.45 0.05 1"
 # Building faces get a slight per-building tint so adjacent boxes read as
@@ -117,43 +119,68 @@ def _building_base(grid, meta, building: scene_model.Building, origin_alt: float
     return min(samples)
 
 
-def load_casualties(path: Path) -> list[dict]:
-    data = yaml.safe_load(path.read_text())
-    entries = data.get("casualties", data) if isinstance(data, dict) else data
-    if not isinstance(entries, list):
-        raise ValueError(f"{path} holds no casualty list")
-    for index, entry in enumerate(entries):
-        if "lat" not in entry or "lon" not in entry:
-            raise ValueError(f"casualty {index} in {path} has no lat/lon")
-    return entries
+def _building_top_at(scene: scene_model.SceneSpec, grid, meta, east: float,
+                     north: float, origin_alt: float) -> float | None:
+    """The top surface of the highest enabled building whose box covers the
+    point, in scene z. None when no building stands there."""
+    top = None
+    for building in scene.buildings:
+        if not building.enabled:
+            continue
+        yaw = math.radians(building.yaw_deg)
+        dx = east - building.east_m
+        dy = north - building.north_m
+        local_x = dx * math.cos(yaw) + dy * math.sin(yaw)
+        local_y = -dx * math.sin(yaw) + dy * math.cos(yaw)
+        if abs(local_x) > building.length_m / 2 or abs(local_y) > building.width_m / 2:
+            continue
+        roof = _building_base(grid, meta, building, origin_alt) + building.height_m
+        top = roof if top is None else max(top, roof)
+    return top
 
 
-def build_casualty_scenario(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
-                            grid, meta, entries: list[dict], seed: int,
-                            out_path: Path) -> list[str]:
-    rng = random.Random(seed if seed else scene.name)
+def build_target_scenario(scene: scene_model.SceneSpec, grid, meta,
+                          geo_meta: dict, out_path: Path) -> list[str]:
+    """The scene's ground-truth targets, projected into the scenario that
+    spawn_scenario.py places, plus the home_* and fiducial_* lines the
+    front doors read. Pure: every value comes from the scene, and the
+    fallbacks (pool model, yaw) are stable hashes, so a rebuild of an
+    unchanged scene writes the same bytes."""
     lines = []
     entities = []
-    for index, entry in enumerate(entries, start=1):
-        name = entry.get("name") or f"casualty_{index:02d}"
-        if "casualty" not in name and "person" not in name:
-            # The ground-truth scorer only counts names that carry one of
-            # these words. See sim_bridge/ground_truth.py.
-            name = f"casualty_{name}"
-        east, north, _ = frame.latlon_to_enu(entry["lat"], entry["lon"])
-        alt = entry.get("alt")
-        z = (alt - scene.origin_alt_m) if alt is not None \
-            else _ground_at(grid, meta, east, north, scene.origin_alt_m)
-        uri = entry.get("model") or rng.choice(CASUALTY_MODEL_POOL)
-        yaw = round(rng.uniform(0, 2 * math.pi), 3)
+    used_names: set[str] = set()
+    for target in scene.targets:
+        if not target.enabled:
+            continue
+        name = scene_model.scoreable_name(target.name)
+        base, counter = name, 2
+        while name in used_names:
+            name = f"{base}_{counter}"
+            counter += 1
+        used_names.add(name)
+        floor = _ground_at(grid, meta, target.east_m, target.north_m,
+                           scene.origin_alt_m)
+        if target.on_building:
+            roof = _building_top_at(scene, grid, meta, target.east_m,
+                                    target.north_m, scene.origin_alt_m)
+            if roof is not None:
+                floor = roof
+        z = floor + (target.agl_m or 0.0)
+        uri = target.model_uri or _stable_choice(scene_model.CASUALTY_MODEL_POOL,
+                                                 scene.name + name)
+        yaw_deg = target.yaw_deg if target.yaw_deg is not None \
+            else float(sum((scene.name + name).encode()) % 360)
         entities.append({"name": name, "uri": uri,
-                         "pose": [round(east, 3), round(north, 3), round(z, 3),
-                                  0, 0, yaw],
+                         "pose": [round(target.east_m, 3), round(target.north_m, 3),
+                                  round(z, 3), 0, 0,
+                                  round(math.radians(yaw_deg), 3)],
                          "static": True})
-        lines.append(f"{name:24s} ({east:8.1f}, {north:8.1f}, {z:6.2f})  {uri}")
+        lines.append(f"{name:24s} ({target.east_m:8.1f}, {target.north_m:8.1f}, "
+                     f"{z:6.2f})  {uri}")
     scenario = {"name": out_path.stem,
-                "description": f"{len(entities)} casualties placed by scenegen "
-                               f"for scene {scene.name}.",
+                "description": f"{len(entities)} ground-truth targets from "
+                               f"scene {scene.name}.",
+                **geo_meta,
                 "entities": entities}
     out_path.write_text(yaml.safe_dump(scenario, sort_keys=False, allow_unicode=True))
     return lines
@@ -194,10 +221,16 @@ def build_world_sdf(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
         counts["vehicles"] += 1
 
     fiducial = scene.fiducial
-    fiducial_ground = _ground_at(grid, meta, fiducial["east_m"], fiducial["north_m"],
-                                 origin_alt)
+    # The disk floats just over the highest ground under its rim, so a
+    # slope never buries an edge and the whole 0.5 m circle stays visible
+    # from the air.
+    radius = fiducial["diameter_m"] / 2.0
+    rim_ground = max(
+        _ground_at(grid, meta, fiducial["east_m"] + dx, fiducial["north_m"] + dy,
+                   origin_alt)
+        for dx, dy in [(0, 0), (radius, 0), (-radius, 0), (0, radius), (0, -radius)])
     fiducial_pose = _pose(fiducial["east_m"], fiducial["north_m"],
-                          fiducial_ground + FIDUCIAL_THICKNESS_M / 2.0 + 0.001)
+                          rim_ground + FIDUCIAL_THICKNESS_M / 2.0 + 0.005)
 
     buildings_model = ""
     if building_links:
@@ -263,8 +296,9 @@ def build_world_sdf(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
     </include>
 
 {buildings_model}{"".join(building_includes)}{"".join(vehicle_includes)}
-    <!-- The survey fiducial. FIDUCIAL_SURVEYED_* in .env holds its
-         coordinate; the drone measures it to align frames. -->
+    <!-- The survey fiducial: a flat orange 0.5 m disk. Its coordinate
+         rides in the scenario as fiducial_*; the drone measures it to
+         align frames. -->
     <model name="fiducial_marker">
       <static>true</static>
       <pose>{fiducial_pose}</pose>
@@ -280,6 +314,8 @@ def build_world_sdf(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
             <ambient>{FIDUCIAL_COLOR}</ambient>
             <diffuse>{FIDUCIAL_COLOR}</diffuse>
             <specular>0.1 0.1 0.1 1</specular>
+            <!-- A touch of emissive keeps the marker orange in shadow. -->
+            <emissive>0.35 0.14 0.02 1</emissive>
           </material>
         </visual>
       </link>
@@ -331,8 +367,7 @@ def _terrain_model_sdf(name: str) -> str:
 """
 
 
-def run(scene_data_dir: Path, scenes_dir: Path, casualties_path: Path | None,
-        seed: int) -> int:
+def run(scene_data_dir: Path, scenes_dir: Path) -> int:
     scene_path = scene_data_dir / "scene.json"
     if not scene_path.is_file():
         print(f"No scene at {scene_path}. Run create first.", file=sys.stderr)
@@ -364,31 +399,30 @@ def run(scene_data_dir: Path, scenes_dir: Path, casualties_path: Path | None,
     world_path.parent.mkdir(parents=True, exist_ok=True)
     world_path.write_text(world)
 
-    casualty_lines: list[str] = []
-    scenario_path = None
-    if casualties_path:
-        entries = load_casualties(casualties_path)
-        scenario_path = scenes_dir / "scenarios" / f"{scene.name}_casualties.yaml"
-        scenario_path.parent.mkdir(parents=True, exist_ok=True)
-        casualty_lines = build_casualty_scenario(scene, frame, grid, meta, entries,
-                                                 seed, scenario_path)
-
     fiducial_lat, fiducial_lon, fiducial_alt = frame.enu_to_latlon(
         scene.fiducial["east_m"], scene.fiducial["north_m"],
         _ground_at(grid, meta, scene.fiducial["east_m"], scene.fiducial["north_m"],
                    scene.origin_alt_m))
+    geo_meta = {"home_lat": round(scene.center_lat, 7),
+                "home_lon": round(scene.center_lon, 7),
+                "home_alt": round(scene.origin_alt_m, 2),
+                "fiducial_lat": round(fiducial_lat, 7),
+                "fiducial_lon": round(fiducial_lon, 7),
+                "fiducial_alt": round(fiducial_alt, 2)}
 
-    env_lines = [f"SCENE={scene.name}",
-                 f"HOME_LAT={scene.center_lat:.7f}",
-                 f"HOME_LON={scene.center_lon:.7f}",
-                 f"HOME_ALT={scene.origin_alt_m:.2f}"]
-    if scenario_path:
-        env_lines.append(f"SCENARIO={scenario_path.stem}")
-    env_lines += ["FIDUCIAL_ENABLED=1",
-                  f"FIDUCIAL_SURVEYED_LAT={fiducial_lat:.7f}",
-                  f"FIDUCIAL_SURVEYED_LON={fiducial_lon:.7f}",
-                  f"FIDUCIAL_SURVEYED_ALT={fiducial_alt:.2f}"]
-    (scene_data_dir / "env.snippet").write_text("\n".join(env_lines) + "\n")
+    # The scenario always exists, even with zero targets, because it is
+    # what carries home and fiducial: SCENE and SCENARIO in .env select
+    # everything, and nothing else moves by hand.
+    scenario_path = scenes_dir / "scenarios" / f"{scene.name}_casualties.yaml"
+    scenario_path.parent.mkdir(parents=True, exist_ok=True)
+    target_lines = build_target_scenario(scene, grid, meta, geo_meta, scenario_path)
+
+    env_lines = [f"SCENE={scene.name}", f"SCENARIO={scenario_path.stem}"]
+    (scene_data_dir / "env.snippet").write_text(
+        "\n".join(env_lines) + "\n"
+        + "# Home and fiducial ride inside the scenario file; px4sim and\n"
+        + "# make read them from it. For reference:\n"
+        + "".join(f"# {key}={value}\n" for key, value in geo_meta.items()))
 
     report = [f"world      {world_path}",
               f"terrain    {mesh_stats['vertices']} vertices, "
@@ -399,17 +433,19 @@ def run(scene_data_dir: Path, scenes_dir: Path, casualties_path: Path | None,
               f"vehicles   {counts['vehicles']}"]
     if scenario_path:
         report.append(f"scenario   {scenario_path}")
-        report += ["  " + line for line in casualty_lines]
+        report += ["  " + line for line in target_lines]
     report.append("")
-    report.append("Put these in .env (the world and PX4 must agree on the origin):")
+    report.append("Put these two in .env; home and fiducial ride inside the "
+                  "scenario file:")
     report += ["  " + line for line in env_lines]
     if abs(mesh_stats["z_min"]) > 5 or abs(mesh_stats["z_max"]) > 5:
         report.append("")
         report.append(f"NOTE: terrain spans {mesh_stats['z_min']} to "
                       f"{mesh_stats['z_max']} m around the origin. The ROS "
-                      "localization nodes assume flat ground at z=0; expect "
-                      "offsets over high and low areas. Flatten zones can "
-                      "level the areas you fly over.")
+                      "localization nodes project onto a flat plane at the "
+                      "takeoff altitude; expect offsets over ground far above "
+                      "or below the takeoff point. Flatten zones can level "
+                      "the areas you fly over.")
     text = "\n".join(report)
     (scene_data_dir / "build_report.txt").write_text(text + "\n")
     print(text)

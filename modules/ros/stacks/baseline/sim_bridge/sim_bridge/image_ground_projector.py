@@ -50,9 +50,9 @@ from rclpy.node import Node  # noqa: E402
 from rclpy.qos import (HistoryPolicy, QoSProfile, ReliabilityPolicy,  # noqa: E402
                        qos_profile_sensor_data)
 from sensor_msgs.msg import CameraInfo, CompressedImage, PointCloud2, PointField  # noqa: E402
-from std_msgs.msg import Float64  # noqa: E402
 from tf2_ros import Buffer, TransformListener  # noqa: E402
 
+from sim_bridge.geo import GroundPlane  # noqa: E402
 from sim_bridge.projection import GROUND_VIEW_MAX_DISTANCE_M, intrinsics_ready
 
 # The point layout, as one 16 byte record. Naming it here means point_step,
@@ -150,8 +150,6 @@ class ImageGroundProjector(Node):
         self.declare_parameter("camera_info_topic", "camera_info")
         self.declare_parameter("optical_frame", "nadir_camera_optical_frame")
         self.declare_parameter("reference_frame", "map")
-        self.declare_parameter("use_rel_alt", True)
-        self.declare_parameter("ground_z", 0.0)
         self.declare_parameter("size", "640x360")
         self.declare_parameter("rate_hz", 2.0)
 
@@ -178,11 +176,12 @@ class ImageGroundProjector(Node):
         # grid and the intrinsics, so a steady stream reuses them.
         self.rays_for: tuple | None = None
         self.ray_x = self.ray_y = None
-        self.ground_z = float(self.get_parameter("ground_z").value)
+        # Declares use_rel_alt and ground_z, and latches the plane at the
+        # takeoff altitude. See sim_bridge/geo.py.
+        self.ground_plane = GroundPlane(self)
         self.min_period = 1.0 / max(float(self.get_parameter("rate_hz").value), 0.1)
 
         self.info: CameraInfo | None = None
-        self.rel_alt: float | None = None
         self.last_processed = 0.0
 
         self.decoder = JpegDecoder()
@@ -195,18 +194,12 @@ class ImageGroundProjector(Node):
         self.create_subscription(CompressedImage,
                                  self.get_parameter("image_topic").value,
                                  self._on_image, IMAGE_QOS)
-        if self.get_parameter("use_rel_alt").value:
-            self.create_subscription(Float64, "/mavros/global_position/rel_alt",
-                                     self._on_rel_alt, qos_profile_sensor_data)
 
         self.pub = self.create_publisher(PointCloud2, "ground_projection",
                                          qos_profile_sensor_data)
 
     def _on_info(self, msg: CameraInfo) -> None:
         self.info = msg
-
-    def _on_rel_alt(self, msg: Float64) -> None:
-        self.rel_alt = float(msg.data)
 
     def _on_image(self, msg: CompressedImage) -> None:
         now = self.get_clock().now().nanoseconds / 1e9
@@ -246,7 +239,7 @@ class ImageGroundProjector(Node):
         t, r = tf.transform.translation, tf.transform.rotation
         origin = (t.x, t.y, t.z)
         rot = (r.x, r.y, r.z, r.w)
-        ground_z = self.ground_z if self.rel_alt is None else t.z - self.rel_alt
+        ground_z = self.ground_plane.z(t.z)
 
         points = self._project(pixels, width, height, step,
                                origin, rot, ground_z)

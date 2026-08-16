@@ -1540,11 +1540,12 @@
       <static>true</static>
     </include>
 
-    <!-- The survey fiducial. FIDUCIAL_SURVEYED_* in .env holds its
-         coordinate; the drone measures it to align frames. -->
+    <!-- The survey fiducial: a flat orange 0.5 m disk. Its coordinate
+         rides in the scenario as fiducial_*; the drone measures it to
+         align frames. -->
     <model name="fiducial_marker">
       <static>true</static>
-      <pose>0.000 0.000 0.014 0 0 0.0000</pose>
+      <pose>0.000 0.000 0.036 0 0 0.0000</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
@@ -1557,6 +1558,8 @@
             <ambient>1 0.45 0.05 1</ambient>
             <diffuse>1 0.45 0.05 1</diffuse>
             <specular>0.1 0.1 0.1 1</specular>
+            <!-- A touch of emissive keeps the marker orange in shadow. -->
+            <emissive>0.35 0.14 0.02 1</emissive>
           </material>
         </visual>
       </link>

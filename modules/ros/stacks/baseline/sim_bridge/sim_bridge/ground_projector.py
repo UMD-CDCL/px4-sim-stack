@@ -12,10 +12,11 @@ instead of nothing. Only a camera that sees no ground at all publishes
 nothing. The projected imagery stops at the same limit, so the picture
 fills the outline that frames it.
 
-The plane height comes from the drone by default: MAVROS reports altitude
-above the launch point, so the ground is at pose.z minus rel_alt. Set
-use_rel_alt false to pin the plane to ground_z instead. This is a flat-earth
-assumption, and over a slope the footprint is wrong in the way you expect.
+The plane height is latched at the takeoff altitude: MAVROS reports
+altitude above the launch point, so pose.z minus rel_alt is the ground at
+the launch, taken once and held for the flight. Set use_rel_alt false to
+pin the plane to ground_z instead. This is a flat-earth assumption, and
+over a slope the footprint is wrong in the way you expect.
 
 The Map panel gets the same outline as one GeoJSON polygon. The Foxglove
 layout colors it, with the same color it gives the 3D panel line. A camera
@@ -37,10 +38,9 @@ from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo
-from std_msgs.msg import Float64
 from tf2_ros import Buffer, TransformListener
 
-from sim_bridge.geo import MapOrigin
+from sim_bridge.geo import GroundPlane, MapOrigin
 from sim_bridge.projection import (GROUND_VIEW_MAX_DISTANCE_M,
                                    footprint_on_ground, image_boundary,
                                    intrinsics_ready)
@@ -65,13 +65,13 @@ class GroundProjector(Node):
         self.declare_parameter("camera_info_topic", "/camera/gimbal/camera_info")
         self.declare_parameter("optical_frame", "gimbal_camera_optical_frame")
         self.declare_parameter("reference_frame", "map")
-        self.declare_parameter("use_rel_alt", True)
-        self.declare_parameter("ground_z", 0.0)
 
         self.camera = self.get_parameter("camera").value
         self.optical = self.get_parameter("optical_frame").value
         self.reference = self.get_parameter("reference_frame").value
-        self.ground_z = float(self.get_parameter("ground_z").value)
+        # Declares use_rel_alt and ground_z, and latches the plane at the
+        # takeoff altitude. See sim_bridge/geo.py.
+        self.ground_plane = GroundPlane(self)
 
         self.tf_buffer = Buffer()
         # spin_thread=True is required. On this node's executor, a lookup that
@@ -80,16 +80,12 @@ class GroundProjector(Node):
                                              spin_thread=True)
 
         self.info: CameraInfo | None = None
-        self.rel_alt: float | None = None
 
         # Sensor QoS: CameraInfo and the MAVROS topics are best effort, and a
         # reliable subscription to a best effort publisher receives nothing.
         self.create_subscription(CameraInfo,
                                  self.get_parameter("camera_info_topic").value,
                                  self._on_info, qos_profile_sensor_data)
-        if self.get_parameter("use_rel_alt").value:
-            self.create_subscription(Float64, "/mavros/global_position/rel_alt",
-                                     self._on_rel_alt, qos_profile_sensor_data)
 
         self.footprint_pub = self.create_publisher(PolygonStamped, "footprint", 1)
         self.geojson_pub = None
@@ -109,9 +105,6 @@ class GroundProjector(Node):
     def _on_info(self, msg: CameraInfo) -> None:
         self.info = msg
 
-    def _on_rel_alt(self, msg: Float64) -> None:
-        self.rel_alt = float(msg.data)
-
     def _publish_footprint(self) -> None:
         if not intrinsics_ready(self.info):
             return
@@ -127,7 +120,7 @@ class GroundProjector(Node):
 
         t = tf.transform.translation
         r = tf.transform.rotation
-        ground_z = self.ground_z if self.rel_alt is None else t.z - self.rel_alt
+        ground_z = self.ground_plane.z(t.z)
 
         outline = footprint_on_ground(
             image_boundary(self.info.width, self.info.height,

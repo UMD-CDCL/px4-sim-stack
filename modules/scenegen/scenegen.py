@@ -7,11 +7,17 @@ The pipeline is four stages, each resumable, all keyed by --name:
            square around --center, and write data/<name>/scene.json
   detect   find cars and buses in the imagery and add them to scene.json
   edit     serve a browser editor for scene.json: move, add and remove
-           vehicles, adjust buildings, draw terrain flatten zones
-  build    write the Gazebo world, the terrain model and the casualty
+           vehicles, ground-truth targets and terrain flatten zones,
+           adjust buildings
+  build    write the Gazebo world, the terrain model and the target
            scenario into modules/sim/scenes/
 
-`all` runs them in order and waits at the editor: the browser's
+scene.json is the source of truth for ground-truth targets. A casualty
+file only imports into it (--casualties on create or all, or the
+import-casualties command); after that the editor owns them, and build
+reads nothing but the scene.
+
+`all` runs the stages in order and waits at the editor: the browser's
 "Save & build" button lets the build stage run, Ctrl-C stops without
 building.
 
@@ -19,9 +25,10 @@ building.
                     --casualties casualties.yaml
 
     scenegen.py create --name campus --center 38.9869,-76.9426 --side 600
+    scenegen.py import-casualties --name campus --casualties casualties.yaml
     scenegen.py detect --name campus
     scenegen.py edit   --name campus
-    scenegen.py build  --name campus --casualties casualties.yaml
+    scenegen.py build  --name campus
 
 Then: SCENE=campus and the printed HOME_* values in .env, and restart the
 sim. See README.md.
@@ -131,6 +138,9 @@ def cmd_create(args: argparse.Namespace) -> int:
         name=args.name, center_lat=lat, center_lon=lon, side_m=args.side,
         origin_alt_m=round(origin_alt, 2), imagery=imagery_meta,
         elevation=elevation_meta, buildings=buildings)
+    if args.casualties:
+        imported, _ = scene_model.import_casualty_file(scene, Path(args.casualties))
+        print(f"      {imported} ground-truth targets imported from {args.casualties}")
     scene_model.save_scene(scene, scene_path)
     print(f"\nWrote {scene_path}")
     print("Next: detect, then edit, then build. Or edit first and place "
@@ -152,8 +162,21 @@ def cmd_edit(args: argparse.Namespace) -> int:
 
 def cmd_build(args: argparse.Namespace) -> int:
     import build_world
-    casualties = Path(args.casualties) if args.casualties else None
-    return build_world.run(scene_dir(args.name), SCENES_DIR, casualties, args.seed)
+    return build_world.run(scene_dir(args.name), SCENES_DIR)
+
+
+def cmd_import(args: argparse.Namespace) -> int:
+    scene_path = scene_dir(args.name) / "scene.json"
+    if not scene_path.is_file():
+        print(f"No scene at {scene_path}. Run create first.", file=sys.stderr)
+        return 1
+    scene = scene_model.load_scene(scene_path)
+    imported, kept = scene_model.import_casualty_file(scene, Path(args.casualties))
+    scene_model.save_scene(scene, scene_path)
+    print(f"{imported} ground-truth targets imported into {scene_path} "
+          f"({kept} hand-placed targets kept). The editor can adjust them; "
+          f"build writes the scenario from the scene.")
+    return 0
 
 
 def cmd_all(args: argparse.Namespace) -> int:
@@ -165,6 +188,13 @@ def cmd_all(args: argparse.Namespace) -> int:
     if scene_path.exists() and not args.force:
         print(f"[all 1/4] keeping {scene_path} and your edits in it. "
               "--force refetches from scratch.")
+        if args.casualties:
+            reused = scene_model.load_scene(scene_path)
+            imported, kept = scene_model.import_casualty_file(
+                reused, Path(args.casualties))
+            scene_model.save_scene(reused, scene_path)
+            print(f"      {imported} ground-truth targets imported "
+                  f"({kept} hand-placed kept)")
     else:
         if args.center is None or args.side is None:
             print("A new scene needs --center LAT,LON and --side METERS.",
@@ -192,14 +222,12 @@ def cmd_all(args: argparse.Namespace) -> int:
     print("[all 3/4] edit")
     outcome = editor_server.serve(directory, args.port, finish_enabled=True)
     if outcome != "finished":
-        casualties = f" --casualties {args.casualties}" if args.casualties else ""
         print(f"\nStopped before the build. When the scene is ready:\n"
-              f"  scenegen.py build --name {args.name}{casualties}")
+              f"  scenegen.py build --name {args.name}")
         return 1
 
     print("[all 4/4] build")
-    casualties = Path(args.casualties) if args.casualties else None
-    return build_world.run(directory, SCENES_DIR, casualties, args.seed)
+    return build_world.run(directory, SCENES_DIR)
 
 
 def cmd_list(_args: argparse.Namespace) -> int:
@@ -213,8 +241,10 @@ def cmd_list(_args: argparse.Namespace) -> int:
         scene = scene_model.load_scene(scene_path)
         vehicles = sum(1 for v in scene.vehicles if v.enabled)
         buildings = sum(1 for b in scene.buildings if b.enabled)
+        targets = sum(1 for t in scene.targets if t.enabled)
         print(f"  {scene.name:20s} {scene.center_lat:.4f},{scene.center_lon:.4f}  "
-              f"{scene.side_m:.0f} m  {buildings} buildings  {vehicles} vehicles")
+              f"{scene.side_m:.0f} m  {buildings} buildings  {vehicles} vehicles  "
+              f"{targets} targets")
     return 0
 
 
@@ -240,8 +270,9 @@ def main() -> int:
     everything.add_argument("--skip-detect", action="store_true",
                             help="no vehicle detection; place vehicles by hand")
     everything.add_argument("--confidence", type=float, default=0.10)
-    everything.add_argument("--casualties", help="YAML list of lat/lon/alt casualties")
-    everything.add_argument("--seed", type=int, default=0)
+    everything.add_argument("--casualties",
+                            help="YAML casualty list to import as ground-truth "
+                                 "targets; scene.json owns them afterwards")
     everything.add_argument("--port", type=int, default=8090)
     everything.set_defaults(handler=cmd_all)
 
@@ -253,9 +284,21 @@ def main() -> int:
                         choices=sorted(sources.IMAGERY_URL_TEMPLATES))
     create.add_argument("--imagery-zoom", type=int, default=DEFAULT_IMAGERY_ZOOM)
     create.add_argument("--terrain-grid", type=int, default=DEFAULT_TERRAIN_GRID)
+    create.add_argument("--casualties",
+                        help="YAML casualty list to import as ground-truth "
+                             "targets; scene.json owns them afterwards")
     create.add_argument("--force", action="store_true",
                         help="overwrite an existing scene.json")
     create.set_defaults(handler=cmd_create)
+
+    importer = sub.add_parser("import-casualties",
+                              help="load a lat/lon casualty file into the "
+                                   "scene's ground-truth targets")
+    importer.add_argument("--name", required=True)
+    importer.add_argument("--casualties", required=True,
+                          help="YAML list; replaces earlier imported targets, "
+                               "keeps hand-placed ones")
+    importer.set_defaults(handler=cmd_import)
 
     detect = sub.add_parser("detect", help="find vehicles in the imagery")
     detect.add_argument("--name", required=True)
@@ -272,11 +315,10 @@ def main() -> int:
     edit.add_argument("--port", type=int, default=8090)
     edit.set_defaults(handler=cmd_edit)
 
-    build = sub.add_parser("build", help="write the world into modules/sim/scenes")
+    build = sub.add_parser("build",
+                           help="write the world and the target scenario "
+                                "into modules/sim/scenes, all from scene.json")
     build.add_argument("--name", required=True)
-    build.add_argument("--casualties", help="YAML list of lat/lon/alt casualties")
-    build.add_argument("--seed", type=int, default=0,
-                       help="seed for random casualty model assignment")
     build.set_defaults(handler=cmd_build)
 
     scene_list = sub.add_parser("list", help="show the scenes on disk")

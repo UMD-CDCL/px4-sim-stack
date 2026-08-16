@@ -35,6 +35,15 @@ if [ -x ./scripts/ds-select.sh ]; then
 	export DS_VERSION DS_IMAGE DS_TAG DS_REASON
 fi
 
+# Home and fiducial ride inside a generated scenario, so SCENARIO alone
+# carries them. A scenario without those lines, such as a hand-written
+# one, leaves the .env values alone. See scripts/scenario-env.sh.
+if [ -x ./scripts/scenario-env.sh ] && [ -n "${SCENARIO:-}" ]; then
+	eval "$(./scripts/scenario-env.sh "modules/sim/scenes/scenarios/${SCENARIO}.yaml")"
+	export HOME_LAT HOME_LON HOME_ALT
+	export FIDUCIAL_ENABLED FIDUCIAL_SURVEYED_LAT FIDUCIAL_SURVEYED_LON FIDUCIAL_SURVEYED_ALT
+fi
+
 need_sources() {
 	[ -d src/PX4-Autopilot ] || die "No PX4 source. Run: ./px4sim setup"
 }

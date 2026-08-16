@@ -19,12 +19,21 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import shapely
+import yaml
+
+import geo
 
 SCENE_FORMAT = "scenegen-scene/1"
 # Keep buildings whose footprint touches the square grown by this margin,
 # so a wall on the boundary still stands.
 BUILDING_KEEP_MARGIN_M = 5.0
 FIDUCIAL_DIAMETER_M = 0.5
+# A target without a designated model draws from this pool at build time,
+# by a stable hash of its name, so a rebuild never reshuffles the draw.
+CASUALTY_MODEL_POOL = [
+    "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Standing person",
+    "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Casual female",
+]
 
 
 @dataclass
@@ -70,6 +79,24 @@ class FlattenZone:
 
 
 @dataclass
+class Target:
+    """A ground-truth casualty. The scene is the source of truth for these:
+    a lat/lon file only imports into this list, the editor places and moves
+    them, and the build projects them into the scenario that
+    spawn_scenario.py places and the ROS scorer reads."""
+    id: str
+    name: str                     # the world entity name the scorer sees
+    east_m: float
+    north_m: float
+    agl_m: float | None = None    # meters above the floor; None sits on it
+    on_building: bool = False     # floor = the building top under it, else terrain
+    yaw_deg: float | None = None  # None draws a stable pseudo-random yaw at build
+    model_uri: str | None = None  # None draws from the pool at build, stably
+    enabled: bool = True
+    source: str = "manual"        # "import" from a file, "manual" from the editor
+
+
+@dataclass
 class SceneSpec:
     name: str
     center_lat: float
@@ -82,6 +109,7 @@ class SceneSpec:
         "east_m": 0.0, "north_m": 0.0, "diameter_m": FIDUCIAL_DIAMETER_M})
     buildings: list[Building] = field(default_factory=list)
     vehicles: list[Vehicle] = field(default_factory=list)
+    targets: list[Target] = field(default_factory=list)
     flatten_zones: list[FlattenZone] = field(default_factory=list)
     format: str = SCENE_FORMAT
 
@@ -96,8 +124,56 @@ class SceneSpec:
                              f"this code reads {SCENE_FORMAT!r}")
         data["buildings"] = [Building(**b) for b in data.get("buildings", [])]
         data["vehicles"] = [Vehicle(**v) for v in data.get("vehicles", [])]
+        targets = []
+        for entry in data.get("targets", []):
+            # Scenes from before terrain-relative heights carry alt_m. The
+            # key moves over; a non-null value was AMSL and needs a look.
+            if "agl_m" not in entry and "alt_m" in entry:
+                entry["agl_m"] = entry.pop("alt_m")
+            entry.pop("alt_m", None)
+            targets.append(Target(**entry))
+        data["targets"] = targets
         data["flatten_zones"] = [FlattenZone(**z) for z in data.get("flatten_zones", [])]
         return SceneSpec(**data)
+
+
+def scoreable_name(name: str) -> str:
+    """The ROS ground-truth scorer counts only entity names that carry
+    "person" or "casualty" (sim_bridge/ground_truth.py). Fix any other."""
+    return name if ("casualty" in name or "person" in name) else f"casualty_{name}"
+
+
+def import_casualty_file(scene: SceneSpec, path: Path) -> tuple[int, int]:
+    """Load a lat/lon casualty list into the scene's targets.
+
+    The file is an on-ramp, not the source of truth. After the import the
+    targets live in scene.json, the editor moves them, and the build reads
+    only the scene. A re-import replaces earlier imported targets and
+    keeps hand-placed ones. Returns (imported, hand-placed kept).
+
+    Each entry: lat and lon (required, WGS84 degrees), agl (optional
+    meters above the terrain, absent sits on it), model (optional URI,
+    absent draws from the pool at build), name (optional).
+    """
+    data = yaml.safe_load(path.read_text())
+    entries = data.get("casualties", data) if isinstance(data, dict) else data
+    if not isinstance(entries, list):
+        raise ValueError(f"{path} holds no casualty list")
+    frame = geo.GeoFrame(scene.center_lat, scene.center_lon, scene.origin_alt_m)
+    imported: list[Target] = []
+    for index, entry in enumerate(entries, start=1):
+        if "lat" not in entry or "lon" not in entry:
+            raise ValueError(f"casualty {index} in {path} has no lat/lon")
+        east, north, _ = frame.latlon_to_enu(entry["lat"], entry["lon"])
+        imported.append(Target(
+            id=f"t_import_{index}",
+            name=scoreable_name(entry.get("name") or f"casualty_{index:02d}"),
+            east_m=round(east, 2), north_m=round(north, 2),
+            agl_m=entry.get("agl", entry.get("alt")),
+            model_uri=entry.get("model"), source="import"))
+    kept = [t for t in scene.targets if t.source != "import"]
+    scene.targets = kept + imported
+    return len(imported), len(kept)
 
 
 def load_scene(path: Path) -> SceneSpec:

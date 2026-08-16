@@ -92,6 +92,11 @@ and a fiducial marker ties the world to the map frame.
 ./px4sim genscene --help
 ```
 
+A generated scenario carries `home_*` and `fiducial_*` lines. Both front
+doors read them (`scripts/scenario-env.sh`), so `SCENE` and `SCENARIO`
+in `.env` select the world, the targets, the origin and the survey
+marker together.
+
 See [modules/scenegen/README.md](../modules/scenegen/README.md).
 
 ## Vehicles

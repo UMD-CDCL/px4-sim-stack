@@ -12,9 +12,10 @@ The module runs on demand and exits. The sim never depends on it.
 | Stage | What it does | Output |
 |---|---|---|
 | `create` | Fetch imagery, elevation and buildings for the square | `data/<name>/scene.json` |
+| `import-casualties` | Load a lat/lon casualty file into the scene's targets | targets in `scene.json` |
 | `detect` | Find cars and buses in the imagery | vehicles in `scene.json` |
 | `edit` | Serve the browser editor on port 8090 | your corrections in `scene.json` |
-| `build` | Write the world, terrain model and casualty scenario | files in `modules/sim/scenes/` |
+| `build` | Write the world, terrain model and target scenario | files in `modules/sim/scenes/` |
 
 Each stage is resumable. Run `detect` again after an edit and it replaces
 only its own detections; hand-placed vehicles stay.
@@ -38,9 +39,10 @@ and your edits in it, and skips detection once the scene holds vehicles;
 
 ```bash
 ./px4sim genscene create --name campus --center 38.9869,-76.9426 --side 600
+./px4sim genscene import-casualties --name campus --casualties /data/my.yaml
 ./px4sim genscene detect --name campus
 ./px4sim genscene edit   --name campus     # open http://localhost:8090
-./px4sim genscene build  --name campus --casualties /data/my_casualties.yaml
+./px4sim genscene build  --name campus
 ```
 
 The first `genscene` builds the image, which downloads the CPU torch wheel
@@ -48,15 +50,26 @@ and takes a few minutes. Paths you give the container, such as the
 casualty file, must sit under a mounted directory: `/data` is
 `modules/scenegen/data` and `/scenes` is `modules/sim/scenes`.
 
-`build` prints .env lines. Put them in `.env`, then:
+`build` prints the two .env lines that select everything:
+
+```
+SCENE=campus
+SCENARIO=campus_casualties
+```
+
+The scenario file carries the world origin (`home_*`) and the survey
+marker (`fiducial_*`); `px4sim` and `make` read them from it, so no
+`HOME_*` or `FIDUCIAL_*` values move by hand. A hand-written scenario
+without those lines leaves the `.env` values in force. Then:
 
 ```bash
 ./px4sim scene campus          # restart the sim with the new world
-./px4sim scenario              # place the casualties, no restart
+./px4sim scenario              # place the targets, no restart
 ```
 
-The world and PX4 must agree on the origin. If you skip the printed
-`HOME_*` lines, QGC and the map disagree with the terrain.
+The ros service reads the fiducial values when it starts. After you
+switch to a scenario with a different fiducial, restart it:
+`./px4sim restart ros`.
 
 ## The editor
 
@@ -66,20 +79,28 @@ Everything is graphical. You never edit a file to fix the scene.
   resizes, `F` flips it 180 degrees, `Del` removes it.
 - `+ Car`, `+ Bus`, `+ Building`: click the map to place one. Hold shift
   to keep placing.
-- Shift-click on the ground stamps a copy of the last vehicle you placed
-  or selected. A copy takes the source's properties as they are at that
-  moment, edits included. Stamp a parking row in a few clicks; a
-  shift-drag grabs the row afterward when you want to adjust it as a
-  group. Buildings do not stamp.
-- Shift-drag draws a selection rectangle; shift-click adds or drops one
-  object. A selection moves as a group. The white handle turns every
-  selected object in place; positions hold. The group flips and takes
-  class or model changes. Sizes stay as they are.
+- Shift-click on the ground stamps a copy of the last vehicle or target
+  you placed or selected. A copy takes the source's properties as they
+  are at that moment, edits included; a target copy gets a fresh name,
+  because the scorer treats the name as identity. Stamp a parking row or
+  a cluster of casualties in a few clicks; a shift-drag grabs the row
+  afterward as a group. Buildings do not stamp.
+- Shift-drag draws a selection rectangle over vehicles, buildings and
+  targets; shift-click adds or drops one object. A selection moves as a
+  group. The white handle turns every selected object in place; positions
+  hold. The group flips and takes class or model changes, and selected
+  targets take floor, offset and scenario-inclusion changes together.
+  Sizes and target names stay one at a time.
 - Undo and redo cover every edit: `Ctrl+Z` and `Ctrl+Y`, or the arrow
   buttons in the toolbar. One drag is one step.
 - Click a building to set its height, replace its box with a model URI,
   or take it out of the world (`Del` toggles an OSM building, removes a
   hand-placed one).
+- `+ Target`: click to place a ground-truth casualty (green circle with
+  its name). Drag to move it; the panel sets name, model, the floor it
+  stands on (the terrain, or the building under it when snapped), an
+  offset above that floor, and whether it enters the scenario. Imported
+  targets appear the same way.
 - `+ Flatten zone`: click the corners, double-click to close. The zone
   levels the terrain under it. This is the fix for a bridge or an
   overhang that the elevation data recorded as solid ground. On a
@@ -92,23 +113,36 @@ Everything is graphical. You never edit a file to fix the scene.
 Save writes straight back to `scene.json`; the previous version becomes
 `scene.json.bak`. Then run `build` again.
 
-## Casualties
+## Ground-truth targets
 
-Casualties live in a YAML list, not in the world, so a layout change
-needs no sim restart. `build --casualties <file>` converts them to a
-scenario for `spawn_scenario.py`:
+`scene.json` is the source of truth for casualties. A lat/lon file is an
+on-ramp, nothing more: import it once, and from then on the targets live
+in the scene, the editor shows and moves them, and `build` writes the
+scenario from the scene alone. One pipe:
 
-```yaml
-casualties:
-  - lat: 38.98625        # required
-    lon: -76.94330       # required
-    alt: null            # AMSL meters. Absent or null: on the terrain.
-    model: null          # model URI. Absent: drawn from the pool, seeded.
-    name: null           # keep "casualty" or "person" in it; the scorer
-                         # only counts names that carry one
+```
+casualty file --import--> scene.json --build--> scenarios/<name>_casualties.yaml
+                          (the editor edits this)        (spawn + scorer read this)
 ```
 
-See `examples/casualties_example.yaml`.
+```bash
+./px4sim genscene import-casualties --name campus --casualties /data/my.yaml
+```
+
+`create --casualties` and `all --casualties` run the same import at
+creation. A re-import replaces imported targets and keeps hand-placed
+ones. The build draws nothing at random: a target without a model gets
+one from the pool by a stable hash of its name, so a rebuild of an
+unchanged scene writes the same bytes.
+
+File format: `lat`/`lon` required; `agl` (meters above the terrain,
+absent = on it), `model` and `name` optional. See
+`examples/casualties_example.yaml`. Everything downstream is unchanged:
+`spawn_scenario.py` places the scenario, so a target change after a
+rebuild needs `./px4sim scenario`, not a sim restart. The scenario also
+carries the `home_*` and `fiducial_*` lines the front doors read, and it
+exists even for a scene with no targets, so SCENARIO always selects the
+full configuration.
 
 ## Data sources
 
@@ -121,9 +155,11 @@ See `examples/casualties_example.yaml`.
 
 ## Known limits
 
-- The ROS localization nodes assume flat ground at z=0. The build report
-  warns when the terrain spans more than a few meters; flatten zones can
-  level the areas you fly over.
+- The ROS localization nodes project onto a flat plane latched at the
+  altitude the drone took off from. The build report warns when the
+  terrain spans more than a few meters: expect offsets over ground far
+  above or below the takeoff point, and use flatten zones to level the
+  areas you fly over.
 - A detected heading can be off by 180 degrees. Overhead imagery cannot
   tell front from back; the editor's flip button can.
 - Detection favors recall: the default confidence is low because deleting

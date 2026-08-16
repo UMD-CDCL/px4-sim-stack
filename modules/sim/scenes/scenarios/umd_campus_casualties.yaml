@@ -1,33 +1,39 @@
 name: umd_campus_casualties
-description: 3 casualties placed by scenegen for scene umd_campus.
+description: 3 ground-truth targets from scene umd_campus.
+home_lat: 38.9869
+home_lon: -76.9426
+home_alt: 39.93
+fiducial_lat: 38.9869
+fiducial_lon: -76.9426
+fiducial_alt: 39.93
 entities:
 - name: casualty_01
-  uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Casual female
+  uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Standing person
   pose:
-  - -60.651
+  - -60.65
   - -72.16
   - -1.852
   - 0
   - 0
-  - 2.352
+  - 5.794
   static: true
 - name: casualty_02
   uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Casual female
   pose:
-  - 69.315
-  - -99.914
+  - 69.32
+  - -99.91
   - -6.247
   - 0
   - 0
-  - 3.931
+  - 5.812
   static: true
 - name: casualty_mall_east
   uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Casual female
   pose:
-  - 4.332
-  - -33.305
+  - 4.33
+  - -33.3
   - -1.119
   - 0
   - 0
-  - 4.545
+  - 1.763
   static: true
