@@ -58,19 +58,26 @@ import terrain_mesh
 # ------------------------------------------------------------------- tunables
 # Where a detected vehicle's model comes from when the scene does not name
 # one. Chosen per vehicle by a stable hash, so a rebuild keeps its choices.
+# Every real vehicle model OpenRobotics has on Fuel (catalog checked
+# 2026-08-16): cars, vans and light trucks in the car pool, the heavies in
+# the bus pool. Fuel has no school bus, semi or tanker from a credible
+# owner, so those stay absent rather than stand in as toys.
+_FUEL_VEHICLES = "https://fuel.gazebosim.org/1.0/OpenRobotics/models/"
 VEHICLE_MODEL_POOLS = {
-    "car": ["https://fuel.gazebosim.org/1.0/OpenRobotics/models/Hatchback red",
-            "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Hatchback blue",
-            "https://fuel.gazebosim.org/1.0/OpenRobotics/models/SUV",
-            "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Pickup"],
-    "bus": ["https://fuel.gazebosim.org/1.0/OpenRobotics/models/Bus"],
+    "car": [_FUEL_VEHICLES + name for name in (
+        "Hatchback", "Hatchback red", "Hatchback blue", "hatchback_2",
+        "SUV", "Pickup", "TruckDelivery", "Ambulance2")],
+    "bus": [_FUEL_VEHICLES + name for name in (
+        "Bus", "TruckBox", "Fire truck", "Ambulance")],
 }
 # Each Fuel model has its own forward axis, so a model can spawn sideways
 # in a heading that is correct for its bounding box. This offset turns the
 # model, not the box: scene.json and the editor keep the true box heading.
-# The Bus stands 90 degrees off its box without one.
+# Measured in a nadir render of every pool model at yaw 0 (2026-08-16):
+# only the Bus and the Fire truck lie 90 degrees off their boxes.
 VEHICLE_MODEL_YAW_OFFSET_DEG = {
-    "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Bus": 90.0,
+    _FUEL_VEHICLES + "Bus": 90.0,
+    _FUEL_VEHICLES + "Fire truck": 90.0,
 }
 # The pool a target without a model draws from lives in scene_model
 # (CASUALTY_MODEL_POOL), next to the Target type and the import.
@@ -87,6 +94,13 @@ ROOF_SAMPLE_EDGE_M = 8.0
 # and the imagery end there, and the cut part would float in the void
 # with no pixels to wear. A clipped remnant under this area drops whole.
 MIN_CLIPPED_AREA_M2 = 1.0
+# Footprints that overlap by at least this area merge into one building:
+# one wall gray, and the roofs cut to the upper envelope so every point
+# has one roof. Edge-to-edge neighbors stay separate buildings.
+OVERLAP_MIN_AREA_M2 = 1.0
+# Envelope remnants under this area are slivers of numeric noise, not
+# roofs.
+MIN_ROOF_PIECE_M2 = 0.05
 
 
 def _pose(x: float, y: float, z: float, yaw_rad: float = 0.0) -> str:
@@ -106,17 +120,28 @@ def _wall_rgba(building_id: str) -> tuple[float, float, float, float]:
 @dataclass
 class PlacedBuilding:
     """One enabled building grounded in the scene: the placed footprint
-    clipped to the scene square, the base at the lowest ground under it
-    so no wall floats on a slope, and the extruded mesh when the building
-    has no model override. A footprint the square cuts in two carries one
-    ring pair per piece."""
+    clipped to the scene square, and the base at the lowest ground under
+    it so no wall floats on a slope. A footprint the square cuts in two
+    carries one ring pair per piece. Meshes live in BuildingCluster."""
     building: scene_model.Building
     polygon: shapely.Geometry
     pieces: list                      # [(outer ring, holes), ...], rings open
     base_z: float
     roof_z: float
-    roof: np.ndarray | None = None    # (n, 3, 3) triangles
-    walls: np.ndarray | None = None
+
+
+@dataclass
+class BuildingCluster:
+    """Overlapping extruded buildings merged into one visual building:
+    one wall gray, and the roofs cut to the upper envelope, so a typical
+    building mapped as several overlapping parts shows exactly one roof
+    surface over every point, at the height of its tallest part there."""
+    id: str
+    name: str
+    wall_rgba: tuple
+    roof: np.ndarray                  # (n, 3, 3) triangles, per-part heights
+    walls: np.ndarray
+    holes: int
 
 
 def _polygon_parts(geometry) -> list:
@@ -165,16 +190,67 @@ def place_buildings(scene: scene_model.SceneSpec, grid,
         samples += [[part.centroid.x, part.centroid.y] for part in parts]
         base = min(_ground_at(grid, meta, east, north, origin_alt)
                    for east, north in samples)
-        entry = PlacedBuilding(building, polygon, pieces, base,
-                               base + building.height_m)
-        if not building.model_uri:
-            meshes = [building_mesh.extrude(piece_outer, piece_holes,
-                                            entry.base_z, entry.roof_z)
-                      for piece_outer, piece_holes in pieces]
-            entry.roof = np.concatenate([roof for roof, _ in meshes])
-            entry.walls = np.concatenate([walls for _, walls in meshes])
-        placed.append(entry)
+        placed.append(PlacedBuilding(building, polygon, pieces, base,
+                                     base + building.height_m))
     return placed, dropped
+
+
+def cluster_buildings(placed: list[PlacedBuilding]) -> list[BuildingCluster]:
+    """Group the extruded buildings into overlap clusters and mesh each.
+
+    Members sort by (roof height, id), and each roof keeps only the part
+    no later member's footprint covers: the upper envelope, with equal
+    heights broken deterministically by id. Walls stay full height; a
+    wall segment inside a taller neighbor is enclosed by it and never
+    seen. Model-override buildings stand outside the clustering."""
+    meshed = [entry for entry in placed if not entry.building.model_uri]
+    parent = list(range(len(meshed)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(len(meshed)):
+        for j in range(i + 1, len(meshed)):
+            if meshed[i].polygon.intersection(meshed[j].polygon).area \
+                    > OVERLAP_MIN_AREA_M2:
+                parent[find(i)] = find(j)
+
+    groups: dict[int, list[PlacedBuilding]] = {}
+    for index, entry in enumerate(meshed):
+        groups.setdefault(find(index), []).append(entry)
+
+    clusters = []
+    for members in groups.values():
+        members.sort(key=lambda entry: (entry.roof_z, entry.building.id))
+        cluster_id = min(entry.building.id for entry in members)
+        name = next((entry.building.name for entry in members
+                     if entry.building.name), "")
+        roofs, walls = [], []
+        holes = 0
+        for index, entry in enumerate(members):
+            covering = [m.polygon for m in members[index + 1:]
+                        if m.polygon.intersects(entry.polygon)]
+            exposed = entry.polygon.difference(shapely.union_all(covering)) \
+                if covering else entry.polygon
+            for part in _polygon_parts(exposed):
+                if part.area < MIN_ROOF_PIECE_M2:
+                    continue
+                outer, hole_rings = _oriented_rings(part)
+                roofs.append(building_mesh.roof_at(outer, hole_rings,
+                                                   entry.roof_z))
+            for outer, hole_rings in entry.pieces:
+                walls.append(building_mesh.extrude_walls(
+                    outer, hole_rings, entry.base_z, entry.roof_z))
+                holes += len(hole_rings)
+        empty = np.zeros((0, 3, 3))
+        clusters.append(BuildingCluster(
+            cluster_id, name, _wall_rgba(cluster_id),
+            np.concatenate(roofs) if roofs else empty,
+            np.concatenate(walls) if walls else empty, holes))
+    return sorted(clusters, key=lambda cluster: cluster.id)
 
 
 def _include(name: str, uri: str, pose: str) -> str:
@@ -321,13 +397,14 @@ def build_world_sdf(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
         counts["vehicles"] += 1
 
     fiducial = scene.fiducial
-    # The disk floats just over the highest ground under its rim, so a
-    # slope never buries an edge and the whole 0.5 m circle stays visible
-    # from the air.
+    # The disk floats just over the highest surface under its rim, a roof
+    # included, so a slope never buries an edge, the whole 0.5 m circle
+    # stays visible from the air, and a fiducial placed on a building
+    # sits on that building.
     radius = fiducial["diameter_m"] / 2.0
     rim_ground = max(
-        _ground_at(grid, meta, fiducial["east_m"] + dx, fiducial["north_m"] + dy,
-                   origin_alt)
+        _floor_z(placed, grid, meta, origin_alt, fiducial["east_m"] + dx,
+                 fiducial["north_m"] + dy, True)
         for dx, dy in [(0, 0), (radius, 0), (-radius, 0), (0, radius), (0, -radius)])
     fiducial_pose = _pose(fiducial["east_m"], fiducial["north_m"],
                           rim_ground + FIDUCIAL_THICKNESS_M / 2.0 + 0.005)
@@ -466,11 +543,11 @@ def _model_sdf(model_name: str, mesh_file: str) -> str:
 
 
 def write_buildings_model(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
-                          meshed: list[PlacedBuilding], scene_data_dir: Path,
+                          clusters: list[BuildingCluster], scene_data_dir: Path,
                           scenes_dir: Path) -> dict:
-    """The extruded buildings as one static model: satellite-textured
-    roofs, one flat wall gray per building. Returns numbers for the
-    build report."""
+    """The merged buildings as one static model: satellite-textured
+    envelope roofs, one flat wall gray per cluster. Returns numbers for
+    the build report."""
     model_name = f"{scene.name}_buildings"
     model_dir = scenes_dir / "models" / model_name
     (model_dir / "materials" / "textures").mkdir(parents=True, exist_ok=True)
@@ -481,16 +558,14 @@ def write_buildings_model(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
                                   texture="../materials/textures/satellite.jpg")]
     geometries = []
     triangles = 0
-    holes = 0
-    for entry in meshed:
-        wall_id = f"{entry.building.id}-wall"
-        materials.append(collada.Material(id=wall_id,
-                                          rgba=_wall_rgba(entry.building.id)))
-        roof_points = entry.roof.reshape(-1, 3)
-        wall_points = entry.walls.reshape(-1, 3)
+    for cluster in clusters:
+        wall_id = f"{cluster.id}-wall"
+        materials.append(collada.Material(id=wall_id, rgba=cluster.wall_rgba))
+        roof_points = cluster.roof.reshape(-1, 3)
+        wall_points = cluster.walls.reshape(-1, 3)
         positions = np.concatenate([roof_points, wall_points])
-        normals = np.concatenate([building_mesh.face_normals(entry.roof),
-                                  building_mesh.face_normals(entry.walls)])
+        normals = np.concatenate([building_mesh.face_normals(cluster.roof),
+                                  building_mesh.face_normals(cluster.walls)])
         # A footprint on the fetch margin can poke past the imagery crop.
         # Clamped coordinates smear the edge pixel over the overhang;
         # wrapped ones would paint the far side of the image onto the roof.
@@ -499,13 +574,12 @@ def write_buildings_model(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
             0.0, 1.0)
         uvs = np.concatenate([roof_uvs, np.zeros((wall_points.shape[0], 2))])
         indices = np.arange(positions.shape[0]).reshape(-1, 3)
-        roof_count = entry.roof.shape[0]
+        roof_count = cluster.roof.shape[0]
         geometries.append(collada.Geometry(
-            id=entry.building.id, positions=positions, normals=normals, uvs=uvs,
+            id=cluster.id, positions=positions, normals=normals, uvs=uvs,
             groups=[("satellite", indices[:roof_count]),
                     (wall_id, indices[roof_count:])]))
         triangles += int(indices.shape[0])
-        holes += sum(len(piece_holes) for _, piece_holes in entry.pieces)
 
     collada.write_dae(model_dir / "meshes" / "buildings.dae", materials, geometries)
     (model_dir / "model.config").write_text(_model_config(
@@ -513,11 +587,12 @@ def write_buildings_model(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
                     f"map footprints with the satellite image over the "
                     f"roofs. Generated by modules/scenegen."))
     (model_dir / "model.sdf").write_text(_model_sdf(model_name, "buildings.dae"))
-    return {"count": len(meshed), "holes": holes, "triangles": triangles}
+    return {"holes": sum(cluster.holes for cluster in clusters),
+            "triangles": triangles}
 
 
 def buildings_viz_json(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
-                       meshed: list[PlacedBuilding],
+                       clusters: list[BuildingCluster],
                        scene_data_dir: Path) -> str:
     """The Foxglove payload: building triangles in the map frame, roofs
     with a satellite color per vertex, walls in their flat gray.
@@ -527,26 +602,25 @@ def buildings_viz_json(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
     image = np.asarray(
         Image.open(scene_data_dir / scene.imagery["file"]).convert("RGB"))
     entries = []
-    for entry in meshed:
+    for cluster in clusters:
         roof_points = building_mesh.subdivide(
-            entry.roof, ROOF_SAMPLE_EDGE_M).reshape(-1, 3)
+            cluster.roof, ROOF_SAMPLE_EDGE_M).reshape(-1, 3)
         pixels = terrain_mesh.imagery_pixels(frame, scene.imagery,
                                              roof_points[:, :2])
         columns = np.clip(pixels[:, 0].astype(int), 0, image.shape[1] - 1)
         rows = np.clip(pixels[:, 1].astype(int), 0, image.shape[0] - 1)
         roof_colors = image[rows, columns] / 255.0
-        wall_points = entry.walls.reshape(-1, 3)
+        wall_points = cluster.walls.reshape(-1, 3)
         entries.append({
-            "id": entry.building.id,
-            "name": entry.building.name,
+            "id": cluster.id,
+            "name": cluster.name,
             "roof": {"points": [[round(float(v), 2) for v in p]
                                 for p in roof_points],
                      "colors": [[round(float(c), 3) for c in color]
                                 for color in roof_colors]},
             "walls": {"points": [[round(float(v), 2) for v in p]
                                  for p in wall_points],
-                      "color": [round(c, 3) for c in
-                                _wall_rgba(entry.building.id)[:3]]}})
+                      "color": [round(c, 3) for c in cluster.wall_rgba[:3]]}})
     return json.dumps({"format": "scenegen-buildings/1", "frame": "map",
                        "buildings": entries})
 
@@ -583,10 +657,10 @@ def run(scene_data_dir: Path, scenes_dir: Path) -> int:
                                                     "terrain.dae"))
 
     placed, dropped_outside = place_buildings(scene, grid, meta)
-    meshed = [entry for entry in placed if entry.roof is not None]
-    building_stats = {"count": 0, "holes": 0, "triangles": 0}
-    if meshed:
-        building_stats = write_buildings_model(scene, frame, meshed,
+    clusters = cluster_buildings(placed)
+    building_stats = {"holes": 0, "triangles": 0}
+    if clusters:
+        building_stats = write_buildings_model(scene, frame, clusters,
                                                scene_data_dir, scenes_dir)
 
     world, counts = build_world_sdf(scene, frame, placed, grid, meta)
@@ -597,12 +671,12 @@ def run(scene_data_dir: Path, scenes_dir: Path) -> int:
     surface_path.write_text(surface_json(scene, placed, grid, meta))
     buildings_viz_path = world_path.with_name(f"{scene.name}_buildings.json")
     buildings_viz_path.write_text(
-        buildings_viz_json(scene, frame, meshed, scene_data_dir))
+        buildings_viz_json(scene, frame, clusters, scene_data_dir))
 
     fiducial_lat, fiducial_lon, fiducial_alt = frame.enu_to_latlon(
         scene.fiducial["east_m"], scene.fiducial["north_m"],
-        _ground_at(grid, meta, scene.fiducial["east_m"], scene.fiducial["north_m"],
-                   scene.origin_alt_m))
+        _floor_z(placed, grid, meta, scene.origin_alt_m,
+                 scene.fiducial["east_m"], scene.fiducial["north_m"], True))
     geo_meta = {"home_lat": round(scene.center_lat, 7),
                 "home_lon": round(scene.center_lon, 7),
                 "home_alt": round(scene.origin_alt_m, 2),
@@ -630,7 +704,8 @@ def run(scene_data_dir: Path, scenes_dir: Path) -> int:
               f"terrain    {mesh_stats['vertices']} vertices, "
               f"{mesh_stats['triangles']} triangles, "
               f"z {mesh_stats['z_min']} to {mesh_stats['z_max']} m",
-              f"buildings  {building_stats['count']} extruded "
+              f"buildings  {counts['buildings']} extruded into "
+              f"{len(clusters)} merged buildings "
               f"({building_stats['holes']} courtyard holes, "
               f"{building_stats['triangles']} triangles), "
               f"{counts['building_overrides']} model overrides, "

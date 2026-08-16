@@ -119,14 +119,17 @@ def triangulate(outer: list, holes: list) -> list[tuple]:
     return triangles
 
 
-def extrude(outer: list, holes: list, base_z: float,
-            top_z: float) -> tuple[np.ndarray, np.ndarray]:
-    """(roof, walls) of the extruded footprint, each (n, 3, 3): triangles
-    of 3D points. The roof faces up. Walls face out of the solid, into a
-    courtyard for a hole ring. No floor: nothing ever sees one."""
-    roof = np.array([[(x, y, top_z) for x, y in triangle]
+def roof_at(outer: list, holes: list, top_z: float) -> np.ndarray:
+    """The footprint triangulated at one height, (n, 3, 3), facing up."""
+    return np.array([[(x, y, top_z) for x, y in triangle]
                      for triangle in triangulate(outer, holes)]
                     ).reshape(-1, 3, 3)
+
+
+def extrude_walls(outer: list, holes: list, base_z: float,
+                  top_z: float) -> np.ndarray:
+    """The footprint's walls, (n, 3, 3). Walls face out of the solid,
+    into a courtyard for a hole ring. No floor: nothing ever sees one."""
     walls = []
     for ring in [outer] + holes:
         for i, (ax, ay) in enumerate(ring):
@@ -135,7 +138,15 @@ def extrude(outer: list, holes: list, base_z: float,
                 continue
             walls.append([(ax, ay, base_z), (bx, by, base_z), (bx, by, top_z)])
             walls.append([(ax, ay, base_z), (bx, by, top_z), (ax, ay, top_z)])
-    return roof, np.array(walls).reshape(-1, 3, 3)
+    return np.array(walls).reshape(-1, 3, 3)
+
+
+def extrude(outer: list, holes: list, base_z: float,
+            top_z: float) -> tuple[np.ndarray, np.ndarray]:
+    """(roof, walls) of the extruded footprint, each (n, 3, 3): triangles
+    of 3D points."""
+    return (roof_at(outer, holes, top_z),
+            extrude_walls(outer, holes, base_z, top_z))
 
 
 def face_normals(triangles: np.ndarray) -> np.ndarray:

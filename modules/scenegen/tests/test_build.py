@@ -112,7 +112,25 @@ def make_synthetic_scene(data_dir: Path) -> scene_model.SceneSpec:
                 width_m=10.0, yaw_deg=0.0, height_m=6.0),
             scene_model.Building(
                 id="b_outside", east_m=140.0, north_m=140.0, length_m=10.0,
-                width_m=10.0, yaw_deg=0.0, height_m=6.0)],
+                width_m=10.0, yaw_deg=0.0, height_m=6.0),
+            # A 20 m tower inside a 6 m podium: they merge into one
+            # building whose roof is the upper envelope, 100 m2 at 20 m
+            # and 320 m2 at 6 m, 420 m2 in total, the union footprint.
+            scene_model.Building(
+                id="b_tower", east_m=-70.0, north_m=-20.0, length_m=10.0,
+                width_m=10.0, yaw_deg=0.0, height_m=20.0),
+            scene_model.Building(
+                id="b_podium", east_m=-70.0, north_m=-20.0, length_m=30.0,
+                width_m=14.0, yaw_deg=0.0, height_m=6.0),
+            # Two equal 5 m boxes overlapping by 32 m2: the envelope
+            # assigns the overlap to one of them, 96 m2 in total, no
+            # doubled roof to z-fight.
+            scene_model.Building(
+                id="b_eq1", east_m=78.0, north_m=70.0, length_m=8.0,
+                width_m=8.0, yaw_deg=0.0, height_m=5.0),
+            scene_model.Building(
+                id="b_eq2", east_m=82.0, north_m=70.0, length_m=8.0,
+                width_m=8.0, yaw_deg=0.0, height_m=5.0)],
         vehicles=[scene_model.Vehicle(
             id="v_1", cls="car", east_m=10.0, north_m=5.0, length_m=4.5,
             width_m=1.9, heading_deg=45.0, source="manual"),
@@ -124,7 +142,16 @@ def make_synthetic_scene(data_dir: Path) -> scene_model.SceneSpec:
                 width_m=1.9, heading_deg=0.0, source="manual", on_building=True),
             scene_model.Vehicle(
                 id="v_4", cls="car", east_m=60.0, north_m=-60.0, length_m=4.5,
-                width_m=1.9, heading_deg=0.0, source="manual", agl_m=2.0)],
+                width_m=1.9, heading_deg=0.0, source="manual", agl_m=2.0),
+            # No on_building given: snapping is the default, and the
+            # courtyard ring under it is 10 m tall.
+            scene_model.Vehicle(
+                id="v_5", cls="car", east_m=55.0, north_m=44.0, length_m=4.5,
+                width_m=1.9, heading_deg=0.0, source="manual"),
+            scene_model.Vehicle(
+                id="v_6", cls="bus", east_m=-60.0, north_m=60.0, length_m=12.0,
+                width_m=2.5, heading_deg=10.0, source="manual",
+                model_uri=build_world.VEHICLE_MODEL_POOLS["bus"][0])],
         flatten_zones=[scene_model.FlattenZone(
             id="fz_1", polygon_m=[[-60, 40], [-40, 40], [-40, 60], [-60, 60]],
             mode="manual", height_m=0.0)],
@@ -211,17 +238,25 @@ def test_world(scenes_dir: Path) -> None:
         check("vehicle model drawn from the car pool",
               vehicle.find("uri").text in build_world.VEHICLE_MODEL_POOLS["car"])
     bus = includes.get("v_2")
-    check("bus include present", bus is not None)
-    if bus is not None:
-        bus_pose = [float(v) for v in bus.find("pose").text.split()]
-        check("the Bus model turns 90 degrees onto its box heading",
-              abs(bus_pose[5] - math.radians(10.0 + 90.0)) < 1e-3,
-              f"{bus_pose[5]:.4f}")
+    check("bus include present and drawn from the bus pool",
+          bus is not None
+          and bus.find("uri").text in build_world.VEHICLE_MODEL_POOLS["bus"])
+    pinned = includes.get("v_6")
+    check("the Bus model turns its measured 90 degrees onto the box heading",
+          pinned is not None
+          and abs(float(pinned.find("pose").text.split()[5])
+                  - math.radians(10.0 + 90.0)) < 1e-3,
+          pinned.find("pose").text if pinned is not None else "missing")
     roof_car = includes.get("v_3")
     check("a vehicle snapped to the building rides on its 7 m roof",
           roof_car is not None
           and abs(float(roof_car.find("pose").text.split()[2]) - 7.0) < 0.01,
           roof_car.find("pose").text if roof_car is not None else "missing")
+    default_car = includes.get("v_5")
+    check("snapping is the default: an unmarked vehicle rides the 10 m ring",
+          default_car is not None
+          and abs(float(default_car.find("pose").text.split()[2]) - 10.0) < 0.01,
+          default_car.find("pose").text if default_car is not None else "missing")
     raised_car = includes.get("v_4")
     check("a vehicle offset rides that far above the terrain",
           raised_car is not None
@@ -285,10 +320,14 @@ def test_buildings(scenes_dir: Path) -> None:
     check("buildings mesh states Z_UP",
           root.find("c:asset/c:up_axis", ns).text == "Z_UP")
     geometries = root.findall("c:library_geometries/c:geometry", ns)
-    check("one geometry per extruded building, the outside one dropped",
-          len(geometries) == 4
-          and "b_outside-geometry" not in [g.get("id") for g in geometries],
-          str([g.get("id") for g in geometries]))
+    geometry_ids = [g.get("id") for g in geometries]
+    check("one geometry per merged building, the outside one dropped",
+          len(geometries) == 6
+          and "b_outside-geometry" not in geometry_ids
+          and "b_tower-geometry" not in geometry_ids
+          and "b_eq2-geometry" not in geometry_ids
+          and "b_podium-geometry" in geometry_ids,
+          str(geometry_ids))
     for geometry in geometries:
         groups = geometry.findall("c:mesh/c:triangles", ns)
         symbols = [g.get("material") for g in groups]
@@ -318,8 +357,9 @@ def test_buildings(scenes_dir: Path) -> None:
     check("viz payload format", viz["format"] == "scenegen-buildings/1"
           and viz["frame"] == "map")
     entries = {b["id"]: b for b in viz["buildings"]}
-    check("viz carries the extruded buildings, not the outside one",
-          sorted(entries) == ["b_court", "b_edge", "b_lshape", "b_test"],
+    check("viz carries one entry per merged building",
+          sorted(entries) == ["b_court", "b_edge", "b_eq1", "b_lshape",
+                              "b_podium", "b_test"],
           str(sorted(entries)))
 
     def roof_area(entry: dict) -> float:
@@ -335,6 +375,17 @@ def test_buildings(scenes_dir: Path) -> None:
     check("the straddling building keeps only its inside half",
           abs(roof_area(entries["b_edge"]) - 100.0) < 0.5,
           f"{roof_area(entries['b_edge']):.1f}")
+    merged = np.array(entries["b_podium"]["roof"]["points"]).reshape(-1, 3, 3)
+    check("the merged building's roof is the union footprint",
+          abs(roof_area(entries["b_podium"]) - 420.0) < 1.0,
+          f"{roof_area(entries['b_podium']):.1f}")
+    tower_part = merged[np.isclose(merged[:, :, 2], 20.0).all(axis=1)]
+    check("the tower part of the envelope rides at its own 20 m",
+          abs(building_mesh.triangle_area_m2(tower_part[:, :, :2]) - 100.0) < 0.5,
+          f"{building_mesh.triangle_area_m2(tower_part[:, :, :2]):.1f}")
+    check("equal-height overlap yields one roof, not two",
+          abs(roof_area(entries["b_eq1"]) - 96.0) < 0.5,
+          f"{roof_area(entries['b_eq1']):.1f}")
     edge_points = np.array(entries["b_edge"]["roof"]["points"]
                            + entries["b_edge"]["walls"]["points"])
     check("no clipped vertex pokes past the square",

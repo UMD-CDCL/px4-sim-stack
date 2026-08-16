@@ -38,17 +38,21 @@ ahead, pitch and yaw zero, the same center command the recovery path
 uses. The mode does not change.
 
 In roi mode the node casts the pixel ray with the camera intrinsics,
-meets the ground plane, and records the region of interest: a latched
+intersects the scene, and records the region of interest: a latched
 reference-frame PointStamped on /gimbal/roi_local, and one latched
 GeoJSON point feature on /gimbal/roi_geojson for the Map panel. GeoJSON
 rather than a NavSatFix because a latched NavSatFix cannot be taken
 back: when the hold is released, by a point click or by /gimbal/center,
 an empty feature collection goes out and the marker leaves the map, the
 same clearing the footprints use.
-The ground plane is latched at the takeoff altitude, or pinned to ground_z
-with use_rel_alt false, the same convention the ground projector uses. A ray
-that meets no ground within the footprint limit drops the click with a
-warning. What happens next depends on the gimbal convention. With
+The intersection comes from sim_bridge/localization.py, the same
+localizer the detection localizers use, so a click on a detection's
+pixel holds the gimbal on the point the detection was localized to.
+Its localization_mode parameter selects the flat plane latched at the
+takeoff altitude or the scene surface scenegen build writes, terrain
+and roofs: a click on a roof holds the roof, not the ground under it.
+A ray that meets no ground within the footprint limit drops the click
+with a warning. What happens next depends on the gimbal convention. With
 "gz_sim", roi_tracker.py holds the camera on the point, because PX4
 cannot: its v2 gimbal output computes the ROI attitude once per command,
 and the simulated gimbal ignores the frame flags. With "mavlink" the
@@ -175,11 +179,12 @@ try:
 except ImportError:
     HAVE_FOXGLOVE = False
 
-from sim_bridge.geo import GroundPlane, MapOrigin
+from sim_bridge.geo import MapOrigin
+from sim_bridge.localization import GroundLocalizer
 from sim_bridge.projection import (GROUND_VIEW_MAX_DISTANCE_M,
-                                   body_frd_to_flu, intersect_ground,
-                                   intrinsics_ready, pointing_rpy_ned,
-                                   quat_from_rpy, quat_rotate, ray_in_optical,
+                                   body_frd_to_flu, intrinsics_ready,
+                                   pointing_rpy_ned, quat_from_rpy,
+                                   quat_rotate, ray_in_optical,
                                    ros_to_aerospace, rpy_from_quat, wrap_pi)
 from sim_bridge.roi_tracker import RoiTracker
 
@@ -253,10 +258,11 @@ class ClickToGimbal(Node):
         # The simulated gimbal ignores flags and runs vehicle relative, so
         # zero labels its setpoints honestly.
         self.setpoint_flags = FOLLOW_LOCK_FLAGS if self.earth_referenced else 0
-        # Declares use_rel_alt and ground_z, latches the plane at the takeoff
-        # altitude, and keeps rel_alt readable for the ROI altitude below.
-        # See sim_bridge/geo.py.
-        self.ground_plane = GroundPlane(self)
+        # Declares localization_mode, surface_file, use_rel_alt and
+        # ground_z, and answers every click ray the same way the detection
+        # localizers answer theirs. Its ground_plane keeps rel_alt readable
+        # for the ROI altitude below. See sim_bridge/localization.py.
+        self.localizer = GroundLocalizer(self)
         # The camera link orientation the joints hold, from the last command
         # this node sent. roi_tracker re-derives it from the TF chain at
         # click time when another controller has moved the gimbal since.
@@ -597,10 +603,9 @@ class ClickToGimbal(Node):
             f"{math.degrees(yaw):+.1f} deg now, following the heading")
 
     def _roi_click(self, u: float, v: float, position, direction) -> None:
-        """Hold the camera on the ground point under the clicked pixel."""
-        ground_z = self.ground_plane.z(position[2])
-        hit = intersect_ground(position, direction, ground_z,
-                               GROUND_VIEW_MAX_DISTANCE_M)
+        """Hold the camera on the scene point under the clicked pixel."""
+        hit = self.localizer.intersect(position, direction,
+                                       GROUND_VIEW_MAX_DISTANCE_M)
         if hit is None:
             self.get_logger().warn(
                 f"click dropped: pixel ({u:.0f}, {v:.0f}) meets no ground "
@@ -669,8 +674,9 @@ class ClickToGimbal(Node):
         self.roi_geojson_pub.publish(msg)
 
     def _send_roi_location(self, hit) -> None:
+        rel_alt = self.localizer.ground_plane.rel_alt
         latlon = self.origin.to_lla(hit[0], hit[1])
-        if latlon is None or self.amsl is None or self.ground_plane.rel_alt is None:
+        if latlon is None or self.amsl is None or rel_alt is None:
             self.get_logger().warn(
                 "DO_SET_ROI_LOCATION not sent: no origin or altitude yet")
             return
@@ -679,7 +685,11 @@ class ClickToGimbal(Node):
         request.command = MAV_CMD_DO_SET_ROI_LOCATION
         request.x = int(latlon[0] * 1e7)
         request.y = int(latlon[1] * 1e7)
-        request.z = self.amsl - self.ground_plane.rel_alt
+        # amsl - rel_alt is the AMSL of the latched plane; the hit's height
+        # above that plane carries a roof or a slope into the ROI altitude.
+        # On the plane itself the correction is exactly zero.
+        request.z = (self.amsl - rel_alt
+                     + (hit[2] - self.localizer.ground_plane.z()))
         self._send_roi_command(request)
 
     def _send_roi_none(self) -> None:

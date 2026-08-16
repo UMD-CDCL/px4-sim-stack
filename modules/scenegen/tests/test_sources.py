@@ -159,6 +159,19 @@ def test_multipolygon_assembly() -> None:
           report["skipped_open_rings"] == 1 and report["relation_rings"] == 0,
           str(report))
 
+    frame = geo.GeoFrame(10.0, 10.0)
+    tiny = 0.00005
+    raw = [{"id": "way/9", "name": "", "height_m": 12.5,
+            "height_source": "height tag", "holes": [],
+            "outline": [[10.0, 10.0], [10.0, 10.0 + tiny],
+                        [10.0 + tiny, 10.0 + tiny], [10.0 + tiny, 10.0],
+                        [10.0, 10.0]]}]
+    entries, _ = scene_model.buildings_from_osm(raw, frame, 200)
+    check("the map height freezes on the building, for the reset button",
+          bool(entries) and entries[0].map_height_m == 12.5
+          and entries[0].map_height_source == "height tag",
+          str(entries[0]) if entries else "no building kept")
+
 
 def main() -> int:
     ap = argparse.ArgumentParser()

@@ -279,8 +279,10 @@ The baseline stack publishes:
 One topic goes the other way. `click_to_gimbal` subscribes to
 `/foxglove/cursor/click` (`geometry_msgs/PointStamped`, x and y in gimbal
 image pixels). Its `click_mode` parameter decides what one click does, and
-one parameter means the modes cannot overlap. `roi`, the default, projects
-the pixel onto the ground plane and holds the camera on that world point:
+one parameter means the modes cannot overlap. `roi`, the default, localizes
+the pixel with the same localizer the detections use
+(`sim_bridge/localization.py`, following `LOCALIZATION_MODE`) and holds the
+camera on that world point, a roof included when the mode is `scene`:
 the point is published latched on `/gimbal/roi_geojson` and `/gimbal/roi_local`,
 and the hold survives vehicle motion. `point` turns the camera onto the
 pixel, holds pitch and roll against the horizon, and lets yaw follow the
@@ -385,10 +387,13 @@ Using the wrong one shifts every estimate by a constant.
 
 ### Localization mode
 
-`LOCALIZATION_MODE` selects what the detection ray intersects. `plane`, the
-default, uses a flat plane latched at the takeoff altitude. `scene` uses the
-terrain grid and the building roofs from `worlds/<SCENE>_surface.json`, which
-`scenegen build` writes next to the world. A roof is the building's own
+`LOCALIZATION_MODE` selects what a localization ray intersects, for the
+detection localizers and for the gimbal ROI click alike: one localizer class
+(`sim_bridge/localization.py`) serves both, so a click on a detection's
+pixel holds the gimbal on the point the detection was localized to. `plane`,
+the default, uses a flat plane latched at the takeoff altitude. `scene` uses
+the terrain grid and the building roofs from `worlds/<SCENE>_surface.json`,
+which `scenegen build` writes next to the world. A roof is the building's own
 footprint polygon, courtyard holes cut out, so a ray into a courtyard lands
 on the ground inside it. Walls are not in the surface on
 purpose: a detection on a wall lands on the terrain behind it. Over sloped

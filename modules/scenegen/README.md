@@ -111,9 +111,9 @@ Everything is graphical. You never edit a file to fix the scene.
   of the selection has stays hidden, and target names stay one at a time.
 - Undo and redo cover every edit: `Ctrl+Z` and `Ctrl+Y`, or the arrow
   buttons in the toolbar. One drag is one step.
-- Click a building to set its height, replace its mesh with a model URI,
-  or take it out of the world (`Del` toggles an OSM building, removes a
-  hand-placed one).
+- Click a building to set its height, reset it to the map's value,
+  replace its mesh with a model URI, or take it out of the world (`Del`
+  toggles an OSM building, removes a hand-placed one).
 - `+ Target`: click to place a ground-truth casualty (green circle with
   its name). Drag to move it; the panel sets name, model, the floor it
   stands on (the terrain, or the building under it when snapped), an
@@ -158,6 +158,16 @@ it as one latched MarkerArray on `/scene/buildings`, with the roofs in
 their satellite colors. Buildings only: vehicle props stay out of the
 panel on purpose.
 
+Footprints that overlap merge into one building. The map often draws a
+tower and its podium as separate overlapping outlines; merged, they get
+one wall gray, and the roofs become the upper envelope: every point has
+exactly one roof, at the height of the tallest part there. Two equal
+overlapping outlines resolve to one roof too, so nothing z-fights.
+
+Every building keeps the height the map gave it, and the panel has a
+button that resets an edited height back to that value. A hand-placed
+building has no map height and no button.
+
 A scene fetched before courtyard support holds no holes in `scene.json`.
 `create --force` refetches the footprints, but it also discards your
 edits, so keep the scene as it is unless a courtyard matters.
@@ -181,8 +191,12 @@ casualty file --import--> scene.json --build--> scenarios/<name>_casualties.yaml
 `create --casualties` and `all --casualties` run the same import at
 creation. A re-import replaces imported targets and keeps hand-placed
 ones. The build draws nothing at random: a target without a model gets
-one from the pool by a stable hash of its name, so a rebuild of an
-unchanged scene writes the same bytes.
+one from the pool by a stable hash of its name, and one without a yaw
+gets a stable pseudo-random heading the same way, so a rebuild of an
+unchanged scene writes the same bytes. The pool holds every free-standing
+person model OpenRobotics has on Fuel, about twenty poses: standing,
+walking, seated and lying down. Targets and vehicles snap to the
+building under them by default; the panel turns it off per object.
 
 File format: `lat`/`lon` required; `agl` (meters above the terrain,
 absent = on it), `model` and `name` optional. See
@@ -200,7 +214,7 @@ full configuration.
 | Imagery | Google satellite tiles (default) or Esri | Check the imagery terms for your use. `--imagery esri` switches. |
 | Elevation | AWS terrain tiles, terrarium encoding | Public, no key. About 4 m per pixel. |
 | Buildings | OSM Overpass | Ways and multipolygon relations, courtyard holes included. Height from the `height` tag, else levels x 3.2 m, else 6 m. |
-| Vehicle models | Gazebo Fuel | Downloaded by the sim on first world load. |
+| Vehicle models | Gazebo Fuel | Downloaded by the sim on first world load. Cars, vans and light trucks in the car pool; buses and heavy trucks in the bus pool. Fuel has no school bus, semi or tanker, so those stay absent. |
 
 ## Known limits
 

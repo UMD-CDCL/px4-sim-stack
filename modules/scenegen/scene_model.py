@@ -33,10 +33,17 @@ MIN_FOOTPRINT_EXTENT_M = 0.5
 FIDUCIAL_DIAMETER_M = 0.5
 # A target without a designated model draws from this pool at build time,
 # by a stable hash of its name, so a rebuild never reshuffles the draw.
-CASUALTY_MODEL_POOL = [
-    "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Standing person",
-    "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Casual female",
-]
+# Every OpenRobotics person model on Fuel that stands free of furniture,
+# verified against the catalog on 2026-08-16: standing, walking, seated
+# and lying poses. Yaw is also drawn at build when the target has none,
+# so a default target gets a random pose and a random heading.
+_FUEL_PEOPLE = "https://fuel.gazebosim.org/1.0/OpenRobotics/models/"
+CASUALTY_MODEL_POOL = [_FUEL_PEOPLE + name for name in (
+    "Standing person", "Walking person", "Casual female", "Male visitor",
+    "FemaleVisitor", "MaleVisitorPhone", "MaleVisitorOnPhone", "Nurse",
+    "Scrubs", "OpScrubs", "MaleVisitorSit", "FemaleVisitorSit",
+    "VisitorKidSit", "PatientFSit", "PatientWheelChair", "Rescue Randy",
+    "Rescue Randy Sitting", "Survivor Female", "Survivor Male")]
 
 
 @dataclass
@@ -52,7 +59,7 @@ class Vehicle:
     source: str = "manual"        # "auto" from the detector, "manual" from a person
     model_uri: str | None = None  # None picks from the class pool at build time
     agl_m: float | None = None    # meters above the floor; None sits on it
-    on_building: bool = False     # floor = the building top under it, else terrain
+    on_building: bool = True      # floor = the building top under it, else terrain
     enabled: bool = True
 
 
@@ -66,6 +73,10 @@ class Building:
     yaw_deg: float
     height_m: float
     height_source: str = "default"
+    # The height the map gave, frozen at create, so an edited height can
+    # go back to it. None on a hand-placed building.
+    map_height_m: float | None = None
+    map_height_source: str = ""
     name: str = ""
     outline_m: list = field(default_factory=list)   # [[east, north], ...] closed
     holes_m: list = field(default_factory=list)     # inner rings, same shape
@@ -95,7 +106,7 @@ class Target:
     east_m: float
     north_m: float
     agl_m: float | None = None    # meters above the floor; None sits on it
-    on_building: bool = False     # floor = the building top under it, else terrain
+    on_building: bool = True      # floor = the building top under it, else terrain
     yaw_deg: float | None = None  # None draws a stable pseudo-random yaw at build
     model_uri: str | None = None  # None draws from the pool at build, stably
     enabled: bool = True
@@ -311,7 +322,9 @@ def buildings_from_osm(raw_buildings: list[dict], frame, side_m: float) -> tuple
             east_m=round(east, 2), north_m=round(north, 2),
             length_m=round(length, 2), width_m=round(width, 2),
             yaw_deg=round(yaw, 2), height_m=raw["height_m"],
-            height_source=raw["height_source"], name=raw["name"],
+            height_source=raw["height_source"],
+            map_height_m=raw["height_m"], map_height_source=raw["height_source"],
+            name=raw["name"],
             outline_m=[[round(e, 2), round(n, 2)] for e, n in outline_en],
             holes_m=[[[round(e, 2), round(n, 2)] for e, n in ring]
                      for ring in holes_en]))

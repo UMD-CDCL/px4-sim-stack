@@ -72,8 +72,8 @@
 </div>
 <div id="help">
   drag empty = pan · wheel = zoom · handles: round = rotate, square = resize ·
-  shift-click = stamp a copy of the last vehicle or target · shift-drag = select many ·
-  shift-click an object = add or drop it from the selection ·
+  shift-click = stamp a copy of the last vehicle or target · ctrl-drag = select many ·
+  ctrl-click an object = add or drop it from the selection ·
   <kbd>Ctrl+Z</kbd> undo · <kbd>Ctrl+Y</kbd> redo ·
   <kbd>F</kbd> flip · <kbd>Del</kbd> delete · <kbd>Esc</kbd> deselect ·
   zones: double-click closes a draft, removes a corner, or adds one on an edge
@@ -493,7 +493,7 @@ function addVehicle(e, n, props) {
     length_m: props.length_m, width_m: props.width_m,
     heading_deg: props.heading_deg, confidence: 1.0, source: "manual",
     model_uri: props.model_uri, agl_m: props.agl_m ?? null,
-    on_building: props.on_building ?? false, enabled: true });
+    on_building: props.on_building ?? true, enabled: true });
   return { kind: "vehicle", index: scene.vehicles.length - 1 };
 }
 function addBuilding(e, n, props) {
@@ -501,6 +501,7 @@ function addBuilding(e, n, props) {
     east_m: +e.toFixed(2), north_m: +n.toFixed(2),
     length_m: props.length_m, width_m: props.width_m, yaw_deg: props.yaw_deg,
     height_m: props.height_m, height_source: "manual", name: "",
+    map_height_m: null, map_height_source: "",
     outline_m: [], holes_m: [], source: "manual", model_uri: props.model_uri,
     enabled: true });
   return { kind: "building", index: scene.buildings.length - 1 };
@@ -509,7 +510,7 @@ function addTarget(e, n, props) {
   scene.targets.push({ id: "t_manual_" + targetCounter,
     name: "casualty_m" + targetCounter,
     east_m: +e.toFixed(2), north_m: +n.toFixed(2),
-    agl_m: props.agl_m ?? null, on_building: props.on_building ?? false,
+    agl_m: props.agl_m ?? null, on_building: props.on_building ?? true,
     yaw_deg: props.yaw_deg ?? null,
     model_uri: props.model_uri ?? null, enabled: true, source: "manual" });
   targetCounter++;
@@ -802,8 +803,18 @@ function showPanel() {
           `<input id="p-uri" value="${b.model_uri ?? ""}" placeholder="model://… replaces the mesh">`) +
     field("", `<label style="display:flex;gap:6px;align-items:center;margin-top:8px">
       <input id="p-en" type="checkbox" style="width:auto"${b.enabled ? " checked" : ""}>
-      include in the world</label>`);
+      include in the world</label>`) +
+    (b.map_height_m != null
+      ? `<button id="p-mheight">Reset height to map (${b.map_height_m} m)</button>`
+      : "");
   bind("p-h", v => { b.height_m = v; b.height_source = "manual"; });
+  if (b.map_height_m != null)
+    document.getElementById("p-mheight").onclick = () => {
+      pushUndo();
+      b.height_m = b.map_height_m;
+      b.height_source = b.map_height_source || "map";
+      markDirty(); showPanel(); draw();
+    };
   const boxWith = patch => applyBuildingBox(b, {
     x: b.east_m, y: b.north_m, length: b.length_m, width: b.width_m,
     heading: b.yaw_deg, ...patch });

@@ -92,11 +92,12 @@ SCORING_GATE_M = float(os.environ.get("SCORING_GATE_M", "2.0"))
 SCORING_DETECTION_RADIUS_M = float(
     os.environ.get("SCORING_DETECTION_RADIUS_M", "10.0"))
 
-# How a detection ray becomes a ground position. "plane" intersects the
-# flat plane latched at the takeoff altitude. "scene" intersects the
-# terrain and the roofs from the surface file scenegen build writes next
-# to the world; walls are not in it on purpose. A missing surface file
-# falls back to the plane, with an error in the log.
+# How a localization ray becomes a ground position, for the detection
+# localizers and the gimbal ROI click alike. "plane" intersects the flat
+# plane latched at the takeoff altitude. "scene" intersects the terrain
+# and the roofs from the surface file scenegen build writes next to the
+# world; walls are not in it on purpose. A missing surface file falls
+# back to the plane, with an error in the log.
 LOCALIZATION_MODE = os.environ.get("LOCALIZATION_MODE", "plane")
 SCENE = os.environ.get("SCENE", "")
 SURFACE_FILE = f"/scenes/worlds/{SCENE}_surface.json" if SCENE else ""
@@ -486,6 +487,10 @@ def generate_launch_description() -> LaunchDescription:
                     # Parameters panel.
                     "click_mode": os.environ.get("CLICK_MODE", "roi"),
                     "use_rel_alt": True,
+                    # A click localizes exactly like a detection: the same
+                    # mode, the same surface file, one localizer class.
+                    "localization_mode": LOCALIZATION_MODE,
+                    "surface_file": SURFACE_FILE,
                     # "gz_sim" matches the simulated gimbal, whose joints
                     # ride on the airframe: the node commands vehicle
                     # relative. Set "mavlink" for a gimbal that obeys the
