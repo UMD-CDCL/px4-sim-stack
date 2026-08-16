@@ -37,13 +37,25 @@ FIDUCIAL_DIAMETER_M = 0.5
 # verified against the catalog on 2026-08-16: standing, walking, seated
 # and lying poses. Yaw is also drawn at build when the target has none,
 # so a default target gets a random pose and a random heading.
-_FUEL_PEOPLE = "https://fuel.gazebosim.org/1.0/OpenRobotics/models/"
-CASUALTY_MODEL_POOL = [_FUEL_PEOPLE + name for name in (
+_FUEL_OPENROBOTICS = "https://fuel.gazebosim.org/1.0/OpenRobotics/models/"
+CASUALTY_MODEL_POOL = [_FUEL_OPENROBOTICS + name for name in (
     "Standing person", "Walking person", "Casual female", "Male visitor",
     "FemaleVisitor", "MaleVisitorPhone", "MaleVisitorOnPhone", "Nurse",
     "Scrubs", "OpScrubs", "MaleVisitorSit", "FemaleVisitorSit",
     "VisitorKidSit", "PatientFSit", "PatientWheelChair", "Rescue Randy",
     "Rescue Randy Sitting", "Survivor Female", "Survivor Male")]
+# Every working tree model on Fuel, with its natural height and canopy
+# diameter measured in-sim against reference poles (2026-08-16). Nothing
+# rescales a tree: a height range selects among these as they are. The
+# editor shows the same table through /tree_models.json.
+TREE_MODEL_POOL = [
+    {"name": "Juniper Tree", "height_m": 1.8, "canopy_m": 0.8,
+     "uri": "https://fuel.gazebosim.org/1.0/shrijitsingh99/models/Juniper Tree"},
+    {"name": "Pine Tree", "height_m": 5.0, "canopy_m": 2.2,
+     "uri": _FUEL_OPENROBOTICS + "Pine Tree"},
+    {"name": "Oak tree", "height_m": 6.3, "canopy_m": 10.4,
+     "uri": _FUEL_OPENROBOTICS + "Oak tree"},
+]
 
 
 @dataclass
@@ -82,6 +94,33 @@ class Building:
     holes_m: list = field(default_factory=list)     # inner rings, same shape
     source: str = "osm"
     model_uri: str | None = None  # a higher-detail stand-in replaces the box
+    enabled: bool = True
+
+
+@dataclass
+class Tree:
+    """One tree, placed exactly. model_uri None draws from the pool by a
+    stable hash of the id, so a rebuild keeps the species."""
+    id: str
+    east_m: float
+    north_m: float
+    model_uri: str | None = None
+    source: str = "manual"        # "osm" from a natural=tree node
+    enabled: bool = True
+
+
+@dataclass
+class TreeArea:
+    """A polygon the build fills with trees: a jittered grid at the given
+    density, each position drawn from the pool inside the height range.
+    Everything derives from stable hashes of the id and the grid cell, so
+    the spacing looks random and a rebuild is byte-identical."""
+    id: str
+    polygon_m: list               # [[east, north], ...]
+    density_per_ha: float = 150.0
+    min_height_m: float = 1.0
+    max_height_m: float = 10.0
+    source: str = "manual"        # "osm" from a wood or forest polygon
     enabled: bool = True
 
 
@@ -127,6 +166,8 @@ class SceneSpec:
     buildings: list[Building] = field(default_factory=list)
     vehicles: list[Vehicle] = field(default_factory=list)
     targets: list[Target] = field(default_factory=list)
+    trees: list[Tree] = field(default_factory=list)
+    tree_areas: list[TreeArea] = field(default_factory=list)
     flatten_zones: list[FlattenZone] = field(default_factory=list)
     format: str = SCENE_FORMAT
 
@@ -150,8 +191,85 @@ class SceneSpec:
             entry.pop("alt_m", None)
             targets.append(Target(**entry))
         data["targets"] = targets
+        data["trees"] = [Tree(**t) for t in data.get("trees", [])]
+        data["tree_areas"] = [TreeArea(**a) for a in data.get("tree_areas", [])]
         data["flatten_zones"] = [FlattenZone(**z) for z in data.get("flatten_zones", [])]
         return SceneSpec(**data)
+
+
+def fnv1a(text: str) -> int:
+    """32-bit FNV-1a. The stable randomness behind tree placement. The
+    editor mirrors it in JS with Math.imul, so both sides draw the same
+    positions from the same keys; change one only with the other."""
+    value = 2166136261
+    for byte in text.encode():
+        value = ((value ^ byte) * 16777619) & 0xFFFFFFFF
+    return value
+
+
+def unit_hash(key: str) -> float:
+    """A stable draw in [0, 1) from a string key."""
+    return fnv1a(key) / 4294967296.0
+
+
+def polygon_contains(points: list, east: float, north: float) -> bool:
+    """Even-odd test, arithmetic identical to the editor's inPolygon, so
+    a generated tree sits inside on both sides or on neither."""
+    inside = False
+    j = len(points) - 1
+    for i in range(len(points)):
+        xi, yi = points[i]
+        xj, yj = points[j]
+        if (yi > north) != (yj > north) \
+                and east < (xj - xi) * (north - yi) / (yj - yi) + xi:
+            inside = not inside
+        j = i
+    return inside
+
+
+def tree_models_in_range(min_height_m: float, max_height_m: float) -> list:
+    """The pool entries whose natural height fits the range. An empty
+    match falls back to the model nearest the range, so an area never
+    silently loses all its trees to a narrow range."""
+    fits = [m for m in TREE_MODEL_POOL
+            if min_height_m <= m["height_m"] <= max_height_m]
+    if fits:
+        return fits
+    middle = (min_height_m + max_height_m) / 2.0
+    return [min(TREE_MODEL_POOL, key=lambda m: abs(m["height_m"] - middle))]
+
+
+def tree_model_for(key: str, min_height_m: float, max_height_m: float) -> dict:
+    candidates = tree_models_in_range(min_height_m, max_height_m)
+    return candidates[fnv1a(key + ":model") % len(candidates)]
+
+
+def area_tree_points(area: TreeArea) -> list:
+    """The tree positions an area generates: a grid at the requested
+    density, each point jittered inside its cell by stable hashes, kept
+    when it lands inside the polygon. Somewhat random spacing, no order,
+    and the same answer in the editor preview and the build."""
+    if len(area.polygon_m) < 3 or area.density_per_ha <= 0:
+        return []
+    cell = math.sqrt(10000.0 / area.density_per_ha)
+    xs = [p[0] for p in area.polygon_m]
+    ys = [p[1] for p in area.polygon_m]
+    columns = int((max(xs) - min(xs)) / cell) + 1
+    rows = int((max(ys) - min(ys)) / cell) + 1
+    # The editor carries the same bound: past it an area generates
+    # nothing on both sides, instead of freezing one of them.
+    if columns * rows > 262144:
+        return []
+    points = []
+    for j in range(rows):
+        for i in range(columns):
+            east = min(xs) + (i + 0.15 + 0.7
+                              * unit_hash(f"{area.id}:{i}:{j}:x")) * cell
+            north = min(ys) + (j + 0.15 + 0.7
+                               * unit_hash(f"{area.id}:{i}:{j}:y")) * cell
+            if polygon_contains(area.polygon_m, east, north):
+                points.append((east, north, f"{area.id}:{i}:{j}"))
+    return points
 
 
 def scoreable_name(name: str) -> str:
@@ -296,6 +414,38 @@ def placed_footprint(building: Building) -> tuple[list, list]:
             placed_hole.reverse()
         holes.append(placed_hole)
     return outer, holes
+
+
+def vegetation_from_osm(raw_trees: list, raw_areas: list, frame,
+                        side_m: float) -> tuple[list[Tree], list[TreeArea]]:
+    """Fetched vegetation to scene entries in ENU. Individual trees
+    outside the square drop; an area stays when it reaches into the
+    square, and the build clips its fill there anyway."""
+    half = side_m / 2.0
+    trees = []
+    for index, (lat, lon) in enumerate(raw_trees, start=1):
+        east, north, _ = frame.latlon_to_enu(lat, lon)
+        if abs(east) > half or abs(north) > half:
+            continue
+        trees.append(Tree(id=f"tr_osm_{index}", east_m=round(east, 2),
+                          north_m=round(north, 2), source="osm"))
+    square = shapely.box(-half, -half, half, half)
+    areas = []
+    for index, ring in enumerate(raw_areas, start=1):
+        points = [tuple(frame.latlon_to_enu(lat, lon)[:2])
+                  for lat, lon in ring[:-1]]
+        if len(points) < 3:
+            continue
+        polygon = shapely.Polygon(points)
+        if not polygon.is_valid:
+            polygon = polygon.buffer(0)
+        if polygon.is_empty or not polygon.intersects(square):
+            continue
+        areas.append(TreeArea(
+            id=f"ta_osm_{index}",
+            polygon_m=[[round(e, 2), round(n, 2)] for e, n in points],
+            source="osm"))
+    return trees, areas
 
 
 def buildings_from_osm(raw_buildings: list[dict], frame, side_m: float) -> tuple[list[Building], int]:

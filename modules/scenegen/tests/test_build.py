@@ -152,6 +152,17 @@ def make_synthetic_scene(data_dir: Path) -> scene_model.SceneSpec:
                 id="v_6", cls="bus", east_m=-60.0, north_m=60.0, length_m=12.0,
                 width_m=2.5, heading_deg=10.0, source="manual",
                 model_uri=build_world.VEHICLE_MODEL_POOLS["bus"][0])],
+        trees=[
+            scene_model.Tree(id="tr_1", east_m=-90.0, north_m=-90.0),
+            scene_model.Tree(id="tr_oak", east_m=-80.0, north_m=-90.0,
+                             model_uri=scene_model.TREE_MODEL_POOL[-1]["uri"]),
+            scene_model.Tree(id="tr_under", east_m=30.0, north_m=-20.0),
+            scene_model.Tree(id="tr_out", east_m=150.0, north_m=0.0)],
+        # 35 x 35 m at 300 per hectare, heights 4 to 7: pine and oak only.
+        tree_areas=[scene_model.TreeArea(
+            id="ta_1", polygon_m=[[-95.0, 60.0], [-60.0, 60.0],
+                                  [-60.0, 95.0], [-95.0, 95.0]],
+            density_per_ha=300.0, min_height_m=4.0, max_height_m=7.0)],
         flatten_zones=[scene_model.FlattenZone(
             id="fz_1", polygon_m=[[-60, 40], [-40, 40], [-40, 60], [-60, 60]],
             mode="manual", height_m=0.0)],
@@ -307,6 +318,53 @@ def test_terrain(scenes_dir: Path) -> None:
 
     texture = scenes_dir / "models" / "synthtest_terrain" / "materials" / "textures" / "satellite.jpg"
     check("texture copied into the model", texture.is_file())
+
+
+def test_trees(scenes_dir: Path) -> None:
+    print("trees: placement, height range, drops")
+    check("the placement hash is frozen across languages",
+          scene_model.fnv1a("") == 2166136261
+          and scene_model.fnv1a("a") == 3826002220,
+          str(scene_model.fnv1a("a")))
+
+    root = ET.parse(scenes_dir / "worlds" / "synthtest.sdf").getroot()
+    includes = {inc.find("name").text: inc
+                for inc in root.find("world").findall("include")}
+    pool_uris = {m["uri"] for m in scene_model.TREE_MODEL_POOL}
+
+    tree = includes.get("tr_1")
+    check("an individual tree stands on the terrain, model from the pool",
+          tree is not None
+          and abs(float(tree.find("pose").text.split()[2])) < 0.01
+          and tree.find("uri").text in pool_uris,
+          tree.find("uri").text if tree is not None else "missing")
+    oak = includes.get("tr_oak")
+    check("a designated tree model survives",
+          oak is not None
+          and oak.find("uri").text == scene_model.TREE_MODEL_POOL[-1]["uri"])
+    check("a tree under a building is dropped", "tr_under" not in includes)
+    check("a tree outside the square is dropped", "tr_out" not in includes)
+
+    area = scene_model.TreeArea(
+        id="ta_1", polygon_m=[[-95.0, 60.0], [-60.0, 60.0],
+                              [-60.0, 95.0], [-95.0, 95.0]],
+        density_per_ha=300.0, min_height_m=4.0, max_height_m=7.0)
+    expected = scene_model.area_tree_points(area)
+    filled = [name for name in includes if name.startswith("tr_ta_1_")]
+    check("the area fills with exactly the generated trees",
+          len(filled) == len(expected) > 10,
+          f"{len(filled)} placed, {len(expected)} generated")
+    inside = all(scene_model.polygon_contains(
+        area.polygon_m, *[float(v) for v in
+                          includes[name].find("pose").text.split()[:2]])
+        for name in filled)
+    check("every generated tree stands inside its area", inside)
+    in_range = {m["uri"] for m in scene_model.TREE_MODEL_POOL
+                if 4.0 <= m["height_m"] <= 7.0}
+    species = {includes[name].find("uri").text for name in filled}
+    check("the height range selects models, no rescaling",
+          species and species <= in_range and len(in_range) == 2,
+          str(sorted(u.rsplit("/", 1)[-1] for u in species)))
 
 
 def test_buildings(scenes_dir: Path) -> None:
@@ -564,6 +622,7 @@ def main() -> int:
         test_world(scenes_dir)
         test_terrain(scenes_dir)
         test_buildings(scenes_dir)
+        test_trees(scenes_dir)
         test_flatten_modes()
         test_scenario(scenes_dir, tmp)
         test_legacy_alt_key()

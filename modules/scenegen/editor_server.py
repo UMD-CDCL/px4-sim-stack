@@ -7,6 +7,8 @@ A plain HTTP server, no framework:
   GET  /scene.json    the current scene description
   GET  /satellite.jpg the imagery the editor draws under everything
   GET  /config.json   what this serve run allows, e.g. the finish button
+  GET  /tree_models.json  the tree pool with measured heights and canopy
+                      diameters, so the editor draws true footprints
   POST /save          the edited scene.json. The previous version moves
                       to scene.json.bak first, so one bad save loses
                       nothing.
@@ -64,6 +66,9 @@ def serve(scene_data_dir: Path, port: int, finish_enabled: bool = False) -> str:
                 self._send((scene_data_dir / imagery_file).read_bytes(), "image/jpeg")
             elif self.path == "/config.json":
                 self._send(json.dumps({"finish_enabled": finish_enabled}).encode(),
+                           "application/json")
+            elif self.path == "/tree_models.json":
+                self._send(json.dumps(scene_model.TREE_MODEL_POOL).encode(),
                            "application/json")
             else:
                 self.send_error(404)

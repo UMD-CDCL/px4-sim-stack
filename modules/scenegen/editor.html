@@ -8,6 +8,8 @@
     vehicles       move, rotate, resize, add, delete, flip, class, model
     buildings      select, change height, disable, name a model override,
                    move/rotate/resize the box
+    trees          place one, or draw an area that fills at a density,
+                   with true canopy footprints drawn
     flatten zones  draw polygons that level the terrain (overhang fix)
     fiducial       drag the orange survey marker
 -->
@@ -54,6 +56,8 @@
   <button data-mode="add_bus">+ Bus</button>
   <button data-mode="add_building">+ Building</button>
   <button data-mode="add_target">+ Target</button>
+  <button data-mode="add_tree">+ Tree</button>
+  <button data-mode="treearea">+ Tree area</button>
   <button data-mode="zone">+ Flatten zone</button>
   <button data-mode="fiducial">Fiducial</button>
   <button id="undo" title="undo (Ctrl+Z)" disabled>↶</button>
@@ -67,16 +71,16 @@
 <div id="main">
   <div id="canvas-wrap"><canvas id="canvas"></canvas></div>
   <div id="panel"><h3>Nothing selected</h3>
-    <div id="panel-body">Click a vehicle, a building outline, a zone or the
+    <div id="panel-body">Click a vehicle, a building outline, a tree, a zone or the
     orange fiducial. Drag empty ground to pan, wheel to zoom.</div></div>
 </div>
 <div id="help">
   drag empty = pan · wheel = zoom · handles: round = rotate, square = resize ·
-  shift-click = stamp a copy of the last vehicle or target · ctrl-drag = select many ·
+  shift-click = stamp a copy of the last vehicle, target or tree · ctrl-drag = select many ·
   ctrl-click an object = add or drop it from the selection ·
   <kbd>Ctrl+Z</kbd> undo · <kbd>Ctrl+Y</kbd> redo ·
   <kbd>F</kbd> flip · <kbd>Del</kbd> delete · <kbd>Esc</kbd> deselect ·
-  zones: double-click closes a draft, removes a corner, or adds one on an edge
+  zones and tree areas: double-click closes a draft, removes a corner, or adds one on an edge
 </div>
 
 <script>
@@ -100,6 +104,10 @@ let dirty = false;
 let vehicleCounter = 1;
 let buildingCounter = 1;
 let targetCounter = 1;
+let treeCounter = 1;
+let treeAreaCounter = 1;
+let TREE_MODELS = [];          // /tree_models.json: uri, height_m, canopy_m
+let treeFillCache = {};        // generated points per area, keyed by params
 let multi = [];                // [{kind, index}] when several objects are selected
 let stampRef = null;           // {kind, id} of the object behind shift-click copies
 let undoStack = [];
@@ -189,11 +197,46 @@ function draw() {
     if (selected) z.polygon_m.forEach(([e, n]) => squareHandle(e, n, "#ff5ce1"));
   });
 
+  scene.tree_areas.forEach((a, index) => {
+    const selected = selection && selection.kind === "treearea" && selection.index === index;
+    const color = a.enabled ? "#4ade80" : "#777";
+    ctx.fillStyle = a.enabled ? "rgba(74,222,128,0.10)" : "rgba(120,120,120,0.10)";
+    ctx.strokeStyle = color;
+    ctx.setLineDash(a.enabled ? [] : [lw(6), lw(5)]);
+    ctx.lineWidth = lw(selected ? 2.4 : 1.3);
+    polyPath(a.polygon_m); ctx.fill(); ctx.stroke();
+    ctx.setLineDash([]);
+    if (selected) a.polygon_m.forEach(([e, n]) => squareHandle(e, n, color));
+    // The exact fill the build places: every canopy footprint, true size.
+    ctx.lineWidth = lw(1.0);
+    areaTreePoints(a).forEach(([e, n, key]) => {
+      const model = treeModelFor(key, a.min_height_m, a.max_height_m);
+      if (!model) return;
+      const [px, py] = imageFromEnu(e, n);
+      ctx.beginPath();
+      ctx.arc(px, py, Math.max(metersToImagePx(model.canopy_m / 2), lw(1.5)), 0, 7);
+      ctx.stroke();
+    });
+  });
+
+  scene.trees.forEach((t, index) => {
+    const selected = selection && selection.kind === "tree" && selection.index === index;
+    const [px, py] = imageFromEnu(t.east_m, t.north_m);
+    ctx.strokeStyle = t.enabled ? "#4ade80" : "#777";
+    ctx.lineWidth = lw(selected ? 2.6 : 1.4);
+    ctx.beginPath();
+    ctx.arc(px, py, Math.max(metersToImagePx(treeCanopyOf(t)), lw(3)), 0, 7);
+    ctx.stroke();
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.beginPath(); ctx.arc(px, py, lw(2), 0, 7); ctx.fill();
+  });
+
   if (zoneDraft.length) {
-    ctx.strokeStyle = "#ff5ce1"; ctx.lineWidth = lw(1.6);
+    ctx.strokeStyle = mode === "treearea" ? "#4ade80" : "#ff5ce1";
+    ctx.lineWidth = lw(1.6);
     ctx.setLineDash([lw(4), lw(4)]);
     polyPath(zoneDraft); ctx.stroke(); ctx.setLineDash([]);
-    zoneDraft.forEach(([e, n]) => squareHandle(e, n, "#ff5ce1"));
+    zoneDraft.forEach(([e, n]) => squareHandle(e, n, ctx.strokeStyle));
   }
 
   scene.vehicles.forEach((v, index) => {
@@ -338,6 +381,61 @@ function nearestZoneEdge(zone, e, n) {
   return null;
 }
 
+// ------------------------------------------------------------------- trees
+// Mirrors scene_model.py exactly (fnv1a, unit_hash, area_tree_points),
+// so the footprints drawn here are the trees the build places. Change
+// either side only with the other.
+function fnv1a(text) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < text.length; i++)
+    h = Math.imul(h ^ text.charCodeAt(i), 16777619) >>> 0;
+  return h;
+}
+function unitHash(key) { return fnv1a(key) / 4294967296; }
+
+function treeModelsInRange(minH, maxH) {
+  const fits = TREE_MODELS.filter(m => minH <= m.height_m && m.height_m <= maxH);
+  if (fits.length || !TREE_MODELS.length) return fits;
+  const middle = (minH + maxH) / 2;
+  return [TREE_MODELS.reduce((best, m) =>
+    Math.abs(m.height_m - middle) < Math.abs(best.height_m - middle) ? m : best)];
+}
+function treeModelFor(key, minH, maxH) {
+  const candidates = treeModelsInRange(minH, maxH);
+  return candidates.length
+    ? candidates[fnv1a(key + ":model") % candidates.length] : null;
+}
+function areaTreePoints(area) {
+  const cacheKey = JSON.stringify([area.polygon_m, area.density_per_ha]);
+  const cached = treeFillCache[area.id];
+  if (cached && cached.key === cacheKey) return cached.points;
+  const points = [];
+  if (area.polygon_m.length >= 3 && area.density_per_ha > 0) {
+    const cell = Math.sqrt(10000 / area.density_per_ha);
+    const xs = area.polygon_m.map(p => p[0]);
+    const ys = area.polygon_m.map(p => p[1]);
+    const minX = Math.min(...xs), minY = Math.min(...ys);
+    const columns = Math.floor((Math.max(...xs) - minX) / cell) + 1;
+    const rows = Math.floor((Math.max(...ys) - minY) / cell) + 1;
+    if (columns * rows <= 262144)
+      for (let j = 0; j < rows; j++)
+        for (let i = 0; i < columns; i++) {
+          const e = minX + (i + 0.15 + 0.7 * unitHash(`${area.id}:${i}:${j}:x`)) * cell;
+          const n = minY + (j + 0.15 + 0.7 * unitHash(`${area.id}:${i}:${j}:y`)) * cell;
+          if (inPolygon(e, n, area.polygon_m))
+            points.push([e, n, `${area.id}:${i}:${j}`]);
+        }
+  }
+  treeFillCache[area.id] = { key: cacheKey, points };
+  return points;
+}
+function treeCanopyOf(tree) {
+  const model = tree.model_uri
+    ? TREE_MODELS.find(m => m.uri === tree.model_uri)
+    : treeModelFor(tree.id, 0, 1000);
+  return model ? model.canopy_m / 2 : 1.5;
+}
+
 // The outline is what the build extrudes, so every rectangle edit
 // carries it along: into the old box frame, scale, and back out at the
 // new center and heading. Holes ride the same transform.
@@ -385,6 +483,12 @@ function hitAt(e, n) {
     if (nearPoint(e, n, t.east_m, t.north_m, Math.max(1.0, tol)))
       return { kind: "target", index: i };
   }
+  for (let i = scene.trees.length - 1; i >= 0; i--) {
+    const t = scene.trees[i];
+    if (nearPoint(e, n, t.east_m, t.north_m,
+                  Math.max(treeCanopyOf(t), tol)))
+      return { kind: "tree", index: i };
+  }
   for (let i = scene.vehicles.length - 1; i >= 0; i--) {
     const v = scene.vehicles[i];
     if (v.enabled && inBox(e, n, { x: v.east_m, y: v.north_m, length: v.length_m,
@@ -403,7 +507,19 @@ function hitAt(e, n) {
     if (inPolygon(e, n, outline) && !inHole)
       return { kind: "building", index: i };
   }
+  for (let i = 0; i < scene.tree_areas.length; i++)
+    if (inPolygon(e, n, scene.tree_areas[i].polygon_m))
+      return { kind: "treearea", index: i };
   return null;
+}
+
+// Zones and tree areas share every polygon interaction: move, corner
+// drag, corner add and remove. This resolves which list a selection or
+// hit lives in.
+function isPolyKind(kind) { return kind === "zone" || kind === "treearea"; }
+function polygonObjOf(ref) {
+  return ref.kind === "treearea" ? scene.tree_areas[ref.index]
+                                 : scene.flatten_zones[ref.index];
 }
 
 function handleAt(e, n) {
@@ -506,6 +622,13 @@ function addBuilding(e, n, props) {
     enabled: true });
   return { kind: "building", index: scene.buildings.length - 1 };
 }
+function addTree(e, n, props) {
+  scene.trees.push({ id: "tr_manual_" + treeCounter++,
+    east_m: +e.toFixed(2), north_m: +n.toFixed(2),
+    model_uri: props?.model_uri ?? null,
+    source: "manual", enabled: true });
+  return { kind: "tree", index: scene.trees.length - 1 };
+}
 function addTarget(e, n, props) {
   scene.targets.push({ id: "t_manual_" + targetCounter,
     name: "casualty_m" + targetCounter,
@@ -516,37 +639,47 @@ function addTarget(e, n, props) {
   targetCounter++;
   return { kind: "target", index: scene.targets.length - 1 };
 }
+const STAMP_POOLS = {
+  vehicle: () => scene.vehicles,
+  target: () => scene.targets,
+  tree: () => scene.trees,
+};
 function rememberStamp(ref) {
-  // Vehicles and targets stamp; buildings are one-off shapes, so copying
-  // them earns misplaced boxes faster than it saves clicks. The stamp
-  // tracks the source by id and reads its properties at stamp time, so a
-  // rotate or a panel edit after selection carries into every later copy,
-  // and the link survives undo, which rebuilds the arrays.
-  if (!ref || (ref.kind !== "vehicle" && ref.kind !== "target")) return;
-  const pool = ref.kind === "vehicle" ? scene.vehicles : scene.targets;
-  stampRef = { kind: ref.kind, id: pool[ref.index].id };
+  // Vehicles, targets and trees stamp; buildings are one-off shapes, so
+  // copying them earns misplaced boxes faster than it saves clicks, and
+  // there is only one fiducial. The stamp tracks the source by id and
+  // reads its properties at stamp time, so a rotate or a panel edit
+  // after selection carries into every later copy, and the link survives
+  // undo, which rebuilds the arrays.
+  if (!ref || !STAMP_POOLS[ref.kind]) return;
+  stampRef = { kind: ref.kind, id: STAMP_POOLS[ref.kind]()[ref.index].id };
 }
 function stampSourceObject() {
   if (!stampRef) return null;
-  const pool = stampRef.kind === "vehicle" ? scene.vehicles : scene.targets;
-  return pool.find(o => o.id === stampRef.id) || null;
+  return STAMP_POOLS[stampRef.kind]().find(o => o.id === stampRef.id) || null;
 }
 function stampAt(e, n) {
   const source = stampSourceObject();
   if (!source) {
     statusEl.textContent =
-      "nothing to copy yet: place or select a vehicle or target first";
+      "nothing to copy yet: place or select a vehicle, target or tree first";
     return;
   }
   pushUndo();
-  const ref = stampRef.kind === "vehicle"
-    ? addVehicle(e, n, { cls: source.cls, length_m: source.length_m,
+  let ref;
+  if (stampRef.kind === "vehicle")
+    ref = addVehicle(e, n, { cls: source.cls, length_m: source.length_m,
         width_m: source.width_m, heading_deg: source.heading_deg,
         model_uri: source.model_uri, agl_m: source.agl_m,
-        on_building: source.on_building })
+        on_building: source.on_building });
+  else if (stampRef.kind === "tree")
+    // A pool-draw source copies as a pool draw: each copy's own id draws
+    // its own species, so a stamped grove varies like an area fill.
+    ref = addTree(e, n, { model_uri: source.model_uri });
+  else
     // A target copy keeps model and height but gets a fresh name: the
     // name is the identity the scorer sees, so two must never share one.
-    : addTarget(e, n, { agl_m: source.agl_m, on_building: source.on_building,
+    ref = addTarget(e, n, { agl_m: source.agl_m, on_building: source.on_building,
         yaw_deg: source.yaw_deg, model_uri: source.model_uri });
   select(ref);   // the newest copy leads the next stamp
   markDirty();
@@ -669,7 +802,7 @@ function showPanel() {
   if (multi.length > 1) { showMultiPanel(); return; }
   if (!selection) {
     panelTitle.textContent = "Nothing selected";
-    panelBody.innerHTML = "Click a vehicle, a building outline, a zone or the " +
+    panelBody.innerHTML = "Click a vehicle, a building outline, a tree, a zone or the " +
       "orange fiducial. Drag empty ground to pan, wheel to zoom.";
     return;
   }
@@ -705,6 +838,61 @@ function showPanel() {
     document.getElementById("p-del").onclick = () => {
       pushUndo();
       scene.flatten_zones.splice(selection.index, 1); select(null); markDirty(); };
+    return;
+  }
+  if (selection.kind === "tree") {
+    const t = scene.trees[selection.index];
+    const drawn = treeModelFor(t.id, 0, 1000);
+    panelTitle.textContent = `${t.id} (${t.source})`;
+    const options = [`<option value="">pool draw${drawn
+      ? ` (now ${drawn.name}, ${drawn.height_m} m)` : ""}</option>`]
+      .concat(TREE_MODELS.map(m =>
+        `<option value="${m.uri}"${m.uri === t.model_uri ? " selected" : ""}>
+         ${m.name} (${m.height_m} m)</option>`));
+    panelBody.innerHTML =
+      field("model (heights are the models' own)",
+            `<select id="p-model">${options.join("")}</select>`) +
+      `<p style="color:var(--dim)">The circle is the canopy footprint at
+       its true size. The tree stands on the terrain; one under a
+       building is dropped at build.</p>` +
+      `<button id="p-del" class="danger">Delete tree</button>`;
+    document.getElementById("p-model").onchange = ev => {
+      pushUndo(); t.model_uri = ev.target.value || null; markDirty(); draw(); };
+    document.getElementById("p-del").onclick = () => {
+      pushUndo(); scene.trees.splice(selection.index, 1); select(null); markDirty(); };
+    return;
+  }
+  if (selection.kind === "treearea") {
+    const a = scene.tree_areas[selection.index];
+    const count = areaTreePoints(a).length;
+    const species = treeModelsInRange(a.min_height_m, a.max_height_m)
+      .map(m => `${m.name} (${m.height_m} m)`).join(", ") || "none";
+    panelTitle.textContent = `${a.id} (${a.source})`;
+    panelBody.innerHTML =
+      field("density, trees per hectare",
+            `<input id="p-dens" type="number" step="10" value="${a.density_per_ha}">`) +
+      `<div class="row"><div>` +
+      field("min height m", `<input id="p-hmin" type="number" step="0.5" value="${a.min_height_m}">`) +
+      `</div><div>` +
+      field("max height m", `<input id="p-hmax" type="number" step="0.5" value="${a.max_height_m}">`) +
+      `</div></div>` +
+      field("", `<label style="display:flex;gap:6px;align-items:center;margin-top:8px">
+        <input id="p-en" type="checkbox" style="width:auto"${a.enabled ? " checked" : ""}>
+        include in the world</label>`) +
+      `<p style="color:var(--dim)">${count} trees at this density, drawn
+       from: ${species}. Heights are the models' own; the range picks
+       among them, and the circles are the exact canopies the build
+       places. Drag the area to move it, a corner to reshape it;
+       double-click a corner to remove it, an edge to add one.</p>` +
+      `<button id="p-del" class="danger">Delete tree area</button>`;
+    bind("p-dens", v => { if (v > 0) a.density_per_ha = v; draw(); showPanel(); });
+    bind("p-hmin", v => { a.min_height_m = v; draw(); showPanel(); });
+    bind("p-hmax", v => { a.max_height_m = v; draw(); showPanel(); });
+    document.getElementById("p-en").onchange = ev => {
+      pushUndo(); a.enabled = ev.target.checked; markDirty(); draw(); };
+    document.getElementById("p-del").onclick = () => {
+      pushUndo();
+      scene.tree_areas.splice(selection.index, 1); select(null); markDirty(); };
     return;
   }
   if (selection.kind === "target") {
@@ -907,7 +1095,17 @@ canvas.addEventListener("mousedown", event => {
     markDirty();
     return;
   }
-  if (mode === "zone") { zoneDraft.push([+e.toFixed(2), +n.toFixed(2)]); draw(); return; }
+  if (mode === "add_tree") {
+    pushUndo();
+    const ref = addTree(e, n);
+    if (!event.shiftKey) setMode("select");   // shift keeps placing
+    select(ref);
+    markDirty();
+    return;
+  }
+  if (mode === "zone" || mode === "treearea") {
+    zoneDraft.push([+e.toFixed(2), +n.toFixed(2)]); draw(); return;
+  }
   if (mode === "fiducial") {
     pushUndo();
     drag = { kind: "fiducial" };
@@ -960,16 +1158,16 @@ canvas.addEventListener("mousedown", event => {
 
   const handle = handleAt(e, n);
   if (handle) { pushUndo(); drag = { kind: handle.kind }; return; }
-  if (selection && selection.kind === "zone") {
-    const zone = scene.flatten_zones[selection.index];
+  if (selection && isPolyKind(selection.kind)) {
+    const zone = polygonObjOf(selection);
     const vertexIndex = nearestZoneVertex(zone, e, n);
     if (vertexIndex >= 0) {
       pushUndo();
       drag = { kind: "vertex", index: vertexIndex };
       return;
     }
-    // A click on the selected zone's edge keeps the selection, so the
-    // double-click that adds a corner there still finds the zone selected.
+    // A click on the selected polygon's edge keeps the selection, so the
+    // double-click that adds a corner there still finds it selected.
     if (nearestZoneEdge(zone, e, n)) return;
   }
   const hit = hitAt(e, n);
@@ -983,12 +1181,16 @@ canvas.addEventListener("mousedown", event => {
     pushUndo();
     const box = boxOf(hit);
     drag = { kind: "move", offsetE: box.x - e, offsetN: box.y - n };
-  } else if (hit && hit.kind === "zone") {
+  } else if (hit && hit.kind === "tree") {
+    pushUndo();
+    const t = scene.trees[hit.index];
+    drag = { kind: "treemove", offsetE: t.east_m - e, offsetN: t.north_m - n };
+  } else if (hit && isPolyKind(hit.kind)) {
     pushUndo();
     // The whole polygon rides the drag, offset from a frozen copy so
     // rounding never accumulates across the corners.
     drag = { kind: "zonemove", startE: e, startN: n,
-             initial: scene.flatten_zones[hit.index].polygon_m.map(p => p.slice()) };
+             initial: polygonObjOf(hit).polygon_m.map(p => p.slice()) };
   } else if (!hit) {
     drag = { kind: "pan", startX: event.clientX, startY: event.clientY,
              panX: view.panX, panY: view.panY };
@@ -1030,17 +1232,22 @@ window.addEventListener("mousemove", event => {
   } else if (drag.kind === "fiducial") {
     scene.fiducial.east_m = +e.toFixed(2); scene.fiducial.north_m = +n.toFixed(2);
     markDirty();
-  } else if (drag.kind === "vertex" && selection && selection.kind === "zone") {
-    scene.flatten_zones[selection.index].polygon_m[drag.index] = [+e.toFixed(2), +n.toFixed(2)];
+  } else if (drag.kind === "vertex" && selection && isPolyKind(selection.kind)) {
+    polygonObjOf(selection).polygon_m[drag.index] = [+e.toFixed(2), +n.toFixed(2)];
     markDirty();
   } else if (drag.kind === "targetmove" && selection && selection.kind === "target") {
     const t = scene.targets[selection.index];
     t.east_m = +(e + drag.offsetE).toFixed(2);
     t.north_m = +(n + drag.offsetN).toFixed(2);
     markDirty();
-  } else if (drag.kind === "zonemove" && selection && selection.kind === "zone") {
+  } else if (drag.kind === "treemove" && selection && selection.kind === "tree") {
+    const t = scene.trees[selection.index];
+    t.east_m = +(e + drag.offsetE).toFixed(2);
+    t.north_m = +(n + drag.offsetN).toFixed(2);
+    markDirty();
+  } else if (drag.kind === "zonemove" && selection && isPolyKind(selection.kind)) {
     const de = e - drag.startE, dn = n - drag.startN;
-    scene.flatten_zones[selection.index].polygon_m = drag.initial.map(
+    polygonObjOf(selection).polygon_m = drag.initial.map(
       ([pe, pn]) => [+(pe + de).toFixed(2), +(pn + dn).toFixed(2)]);
     markDirty();
   } else if (selection && (selection.kind === "vehicle" || selection.kind === "building")) {
@@ -1089,25 +1296,35 @@ window.addEventListener("mouseup", () => {
 });
 
 canvas.addEventListener("dblclick", event => {
-  if (mode === "zone" && zoneDraft.length >= 3) {
+  if ((mode === "zone" || mode === "treearea") && zoneDraft.length >= 3) {
     pushUndo();
-    scene.flatten_zones.push({ id: "fz_" + (scene.flatten_zones.length + 1),
-      polygon_m: zoneDraft.slice(0, -1), mode: "min", height_m: null });
+    const polygon = zoneDraft.slice(0, -1);
+    let ref;
+    if (mode === "zone") {
+      scene.flatten_zones.push({ id: "fz_" + (scene.flatten_zones.length + 1),
+        polygon_m: polygon, mode: "min", height_m: null });
+      ref = { kind: "zone", index: scene.flatten_zones.length - 1 };
+    } else {
+      scene.tree_areas.push({ id: "ta_manual_" + treeAreaCounter++,
+        polygon_m: polygon, density_per_ha: 150.0, min_height_m: 1.0,
+        max_height_m: 10.0, source: "manual", enabled: true });
+      ref = { kind: "treearea", index: scene.tree_areas.length - 1 };
+    }
     zoneDraft = [];
     setMode("select");
-    select({ kind: "zone", index: scene.flatten_zones.length - 1 });
+    select(ref);
     markDirty();
     return;
   }
-  // On a selected zone: double-click a corner to remove it, an edge to
-  // add one. The zone never needs a delete-and-redraw.
-  if (mode === "select" && selection && selection.kind === "zone") {
+  // On a selected zone or tree area: double-click a corner to remove it,
+  // an edge to add one. The polygon never needs a delete-and-redraw.
+  if (mode === "select" && selection && isPolyKind(selection.kind)) {
     const [e, n] = enuFromMouse(event);
-    const zone = scene.flatten_zones[selection.index];
+    const zone = polygonObjOf(selection);
     const vertexIndex = nearestZoneVertex(zone, e, n);
     if (vertexIndex >= 0) {
       if (zone.polygon_m.length <= 3) {
-        statusEl.textContent = "a zone keeps at least 3 corners - delete the zone instead";
+        statusEl.textContent = "a polygon keeps at least 3 corners - delete it instead";
         return;
       }
       pushUndo();
@@ -1144,6 +1361,8 @@ window.addEventListener("keydown", event => {
     if (selection.kind === "vehicle") scene.vehicles.splice(selection.index, 1);
     else if (selection.kind === "target") scene.targets.splice(selection.index, 1);
     else if (selection.kind === "zone") scene.flatten_zones.splice(selection.index, 1);
+    else if (selection.kind === "tree") scene.trees.splice(selection.index, 1);
+    else if (selection.kind === "treearea") scene.tree_areas.splice(selection.index, 1);
     else if (selection.kind === "building") {
       const building = scene.buildings[selection.index];
       if (building.source !== "manual") {
@@ -1172,7 +1391,7 @@ document.querySelectorAll("#toolbar button[data-mode]").forEach(button => {
 });
 function setMode(next) {
   mode = next;
-  if (next !== "zone") zoneDraft = [];
+  if (next !== "zone" && next !== "treearea") zoneDraft = [];
   document.querySelectorAll("#toolbar button[data-mode]").forEach(button =>
     button.classList.toggle("active", button.dataset.mode === next));
   draw();
@@ -1284,9 +1503,11 @@ function updateStatus(event) {
   const buildings = scene.buildings.filter(b => b.enabled).length;
   const targets = scene.targets.filter(t => t.enabled).length;
   const selectedNote = multi.length > 1 ? ` · ${multi.length} selected` : "";
+  const trees = scene.trees.filter(t => t.enabled).length;
   statusEl.textContent =
     `${scene.name} · ${buildings} buildings · ${vehicles} vehicles · ` +
-    `${targets} targets · ${scene.flatten_zones.length} zones${selectedNote} · ` +
+    `${targets} targets · ${trees} trees + ${scene.tree_areas.length} areas · ` +
+    `${scene.flatten_zones.length} zones${selectedNote} · ` +
     `cursor ${e.toFixed(1)}, ${n.toFixed(1)} m`;
 }
 
@@ -1308,14 +1529,21 @@ async function init() {
     delete t.alt_m;
     if (t.on_building === undefined) t.on_building = false;
   });
+  if (!scene.trees) scene.trees = [];       // a scene.json from before trees
+  if (!scene.tree_areas) scene.tree_areas = [];
   try {
     const config = await (await fetch("/config.json")).json();
     if (config.finish_enabled)
       document.getElementById("finish").style.display = "";
   } catch (error) { /* an older server; the button stays hidden */ }
+  try {
+    TREE_MODELS = await (await fetch("/tree_models.json")).json();
+  } catch (error) { /* an older server; footprints draw a default size */ }
   vehicleCounter = nextIdNumber(scene.vehicles);
   buildingCounter = nextIdNumber(scene.buildings);
   targetCounter = nextIdNumber(scene.targets);
+  treeCounter = nextIdNumber(scene.trees);
+  treeAreaCounter = nextIdNumber(scene.tree_areas);
   image.onload = () => {
     const fit = Math.min(canvas.clientWidth / image.width,
                          canvas.clientHeight / image.height);

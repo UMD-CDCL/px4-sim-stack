@@ -12,7 +12,8 @@ back in. An entry here is a decision, not an omission.
 | Vehicle front against back | Overhead imagery fixes the axis, not the direction. A heading can sit 180 degrees off. The editor has a flip button. | `detect_vehicles.py` |
 | Collision mesh decimation | Visual and collision share one terrain mesh. That is fine for one drone. Decimate when a scene hosts many contacts. | `terrain_mesh.py` |
 | Flatten zone edge blending | A zone steps sharply at its border. A blend band would look better. | `terrain_mesh.py` |
-| Trees from OSM | `natural=tree` and `landuse=forest` sit one Overpass query away. | `sources.py`, then a pool of Fuel tree models |
+| Tree species beyond three | Fuel has three working tree models (juniper, pine, oak); everything else is broken or toy-scale. More species widen the height range usefully. | `scene_model.py: TREE_MODEL_POOL` |
+| Trees in the multi-selection | Ctrl-drag skips trees and tree areas; they move and edit one at a time. | `editor.html: marquee and memberObject` |
 | Lean of tall buildings | Satellite tiles lean tall roofs away from nadir. A roof-drawn footprint lands a few meters off at ground level. Nudge it in the editor. | documentation only |
 
 ## Found while testing

@@ -7,8 +7,8 @@ The pipeline is four stages, each resumable, all keyed by --name:
            square around --center, and write data/<name>/scene.json
   detect   find cars and buses in the imagery and add them to scene.json
   edit     serve a browser editor for scene.json: move, add and remove
-           vehicles, ground-truth targets and terrain flatten zones,
-           adjust buildings
+           vehicles, ground-truth targets, trees, tree areas and terrain
+           flatten zones, adjust buildings
   build    write the Gazebo world, the terrain model and the target
            scenario into modules/sim/scenes/
 
@@ -100,7 +100,7 @@ def cmd_create(args: argparse.Namespace) -> int:
     # frame samples the same points.
     flat_frame = geo.GeoFrame(lat, lon, 0.0)
 
-    print(f"[1/3] elevation, zoom {sources.ELEVATION_ZOOM}, "
+    print(f"[1/4] elevation, zoom {sources.ELEVATION_ZOOM}, "
           f"grid {args.terrain_grid}x{args.terrain_grid}")
     elevation = sources.fetch_elevation_grid(flat_frame, args.side, args.terrain_grid,
                                              cache_dir)
@@ -118,7 +118,7 @@ def cmd_create(args: argparse.Namespace) -> int:
 
     frame = geo.GeoFrame(lat, lon, origin_alt)
 
-    print(f"[2/3] satellite imagery from {args.imagery}, zoom {args.imagery_zoom}")
+    print(f"[2/4] satellite imagery from {args.imagery}, zoom {args.imagery_zoom}")
     image, georef = sources.fetch_satellite_image(frame, args.side, args.imagery_zoom,
                                                   args.imagery, cache_dir)
     image.save(directory / "satellite.jpg", quality=SATELLITE_JPEG_QUALITY)
@@ -130,7 +130,7 @@ def cmd_create(args: argparse.Namespace) -> int:
                     "origin_px": georef.origin_px, "origin_py": georef.origin_py}
     print(f"      {image.width}x{image.height} px, {resolution:.2f} m/px")
 
-    print("[3/3] OSM buildings")
+    print("[3/4] OSM buildings")
     raw_buildings, report = sources.fetch_osm_buildings(frame, args.side)
     sources.write_buildings_geojson(raw_buildings, directory / "buildings.geojson")
     buildings, dropped = scene_model.buildings_from_osm(raw_buildings, frame, args.side)
@@ -138,10 +138,18 @@ def cmd_create(args: argparse.Namespace) -> int:
           f"{report['relation_rings']} relation rings with {report['holes']} holes, "
           f"{dropped} outside the square)")
 
+    print("[4/4] OSM trees and woods")
+    raw_trees, raw_areas, veg_report = sources.fetch_osm_vegetation(frame, args.side)
+    trees, tree_areas = scene_model.vegetation_from_osm(
+        raw_trees, raw_areas, frame, args.side)
+    print(f"      {len(trees)} trees, {len(tree_areas)} wooded areas kept "
+          f"(of {veg_report['trees']} and {veg_report['areas']} fetched)")
+
     scene = scene_model.SceneSpec(
         name=args.name, center_lat=lat, center_lon=lon, side_m=args.side,
         origin_alt_m=round(origin_alt, 2), imagery=imagery_meta,
-        elevation=elevation_meta, buildings=buildings)
+        elevation=elevation_meta, buildings=buildings, trees=trees,
+        tree_areas=tree_areas)
     if args.casualties:
         imported, _ = scene_model.import_casualty_file(scene, Path(args.casualties))
         print(f"      {imported} ground-truth targets imported from {args.casualties}")

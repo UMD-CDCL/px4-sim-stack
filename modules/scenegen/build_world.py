@@ -364,6 +364,31 @@ def build_target_scenario(scene: scene_model.SceneSpec,
     return lines
 
 
+def tree_instances(scene: scene_model.SceneSpec) -> list[dict]:
+    """Every tree the scene asks for: the individual ones, then each
+    area's fill. Species draw from the pool by stable hashes of the id or
+    the grid cell; an area filters the pool to its height range first,
+    and nothing rescales a model."""
+    instances = []
+    for tree in scene.trees:
+        if not tree.enabled:
+            continue
+        uri = tree.model_uri or scene_model.tree_model_for(
+            tree.id, 0.0, 1000.0)["uri"]
+        instances.append({"id": tree.id, "east": tree.east_m,
+                          "north": tree.north_m, "uri": uri, "key": tree.id})
+    for area in scene.tree_areas:
+        if not area.enabled:
+            continue
+        for east, north, key in scene_model.area_tree_points(area):
+            model = scene_model.tree_model_for(key, area.min_height_m,
+                                               area.max_height_m)
+            instances.append({"id": "tr_" + key.replace(":", "_"),
+                              "east": east, "north": north,
+                              "uri": model["uri"], "key": key})
+    return instances
+
+
 def build_world_sdf(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
                     placed: list[PlacedBuilding], grid, meta) -> tuple[str, dict]:
     origin_alt = scene.origin_alt_m
@@ -395,6 +420,29 @@ def build_world_sdf(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
                   floor + (vehicle.agl_m or 0.0),
                   math.radians(model_yaw))))
         counts["vehicles"] += 1
+
+    # Trees stand on the terrain. One under a building or outside the
+    # square would poke through a roof or float in the void, so it drops.
+    tree_includes = []
+    counts["trees"] = counts["trees_skipped"] = 0
+    half = scene.side_m / 2.0
+    building_union = shapely.union_all(
+        [entry.polygon for entry in placed]) if placed else None
+    if building_union is not None and not building_union.is_empty:
+        shapely.prepare(building_union)
+    for instance in tree_instances(scene):
+        east, north = instance["east"], instance["north"]
+        blocked = abs(east) > half or abs(north) > half or (
+            building_union is not None
+            and building_union.covers(shapely.Point(east, north)))
+        if blocked:
+            counts["trees_skipped"] += 1
+            continue
+        ground = _ground_at(grid, meta, east, north, origin_alt)
+        yaw = scene_model.unit_hash(instance["key"] + ":yaw") * 2.0 * math.pi
+        tree_includes.append(_include(instance["id"], instance["uri"],
+                                      _pose(east, north, ground, yaw)))
+        counts["trees"] += 1
 
     fiducial = scene.fiducial
     # The disk floats just over the highest surface under its rim, a roof
@@ -471,7 +519,7 @@ def build_world_sdf(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
       <pose>0 0 0 0 0 0</pose>
     </include>
 
-{buildings_model}{"".join(building_includes)}{"".join(vehicle_includes)}
+{buildings_model}{"".join(building_includes)}{"".join(vehicle_includes)}{"".join(tree_includes)}
     <!-- The survey fiducial: a flat orange 0.5 m disk. Its coordinate
          rides in the scenario as fiducial_*; the drone measures it to
          align frames. -->
@@ -710,7 +758,9 @@ def run(scene_data_dir: Path, scenes_dir: Path) -> int:
               f"{building_stats['triangles']} triangles), "
               f"{counts['building_overrides']} model overrides, "
               f"{dropped_outside} outside the square dropped",
-              f"vehicles   {counts['vehicles']}"]
+              f"vehicles   {counts['vehicles']}",
+              f"trees      {counts['trees']} placed, {counts['trees_skipped']} "
+              f"under buildings or outside the square dropped"]
     if scenario_path:
         report.append(f"scenario   {scenario_path}")
         report += ["  " + line for line in target_lines]

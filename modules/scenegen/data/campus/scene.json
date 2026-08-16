@@ -2270,8 +2270,8 @@
   },
   {
    "id": "b_way_23580263",
-   "east_m": 90.74,
-   "north_m": 141.27,
+   "east_m": 88.69,
+   "north_m": 142.01,
    "length_m": 83,
    "width_m": 54.32,
    "yaw_deg": -89.68,
@@ -2280,97 +2280,98 @@
    "name": "Hornbake Library",
    "outline_m": [
     [
-     66.66,
-     99.64
+     64.61,
+     100.38
     ],
     [
-     90.78,
-     99.77
+     88.73,
+     100.51
     ],
     [
-     115.74,
-     99.92
+     113.69,
+     100.66
     ],
     [
-     115.66,
-     114.62
+     113.61,
+     115.36
     ],
     [
-     115.62,
-     121.29
+     113.57,
+     122.03
     ],
     [
-     116.72,
-     121.3
+     114.67,
+     122.04
     ],
     [
-     118.01,
-     121.31
+     115.96,
+     122.05
     ],
     [
-     117.81,
-     156.86
+     115.76,
+     157.6
     ],
     [
-     114.99,
-     156.83
+     112.94,
+     157.57
     ],
     [
-     114.89,
-     176.86
+     112.84,
+     177.6
     ],
     [
-     107.51,
-     176.82
+     105.46,
+     177.56
     ],
     [
-     107.48,
-     182.87
+     105.43,
+     183.61
     ],
     [
-     73.27,
-     182.67
+     71.22,
+     183.41
     ],
     [
-     73.31,
-     176.86
+     71.26,
+     177.6
     ],
     [
-     65.8,
-     176.82
+     63.75,
+     177.56
     ],
     [
-     65.92,
-     153.89
+     63.87,
+     154.63
     ],
     [
-     63.51,
-     153.87
+     61.46,
+     154.61
     ],
     [
-     63.59,
-     138.63
+     61.54,
+     139.37
     ],
     [
-     63.7,
-     119.8
+     61.65,
+     120.54
     ],
     [
-     66.55,
-     119.82
+     64.5,
+     120.56
     ],
     [
-     66.58,
-     113.15
+     64.53,
+     113.89
     ],
     [
-     66.66,
-     99.64
+     64.61,
+     100.38
     ]
    ],
    "source": "osm",
    "model_uri": null,
-   "enabled": true
+   "enabled": true,
+   "holes_m": []
   },
   {
    "id": "b_way_23585307",
@@ -2903,226 +2904,226 @@
   },
   {
    "id": "b_way_23888747",
-   "east_m": 219.95,
-   "north_m": 201.67,
-   "length_m": 119.48,
-   "width_m": 71.1,
+   "east_m": 220.2,
+   "north_m": 201.43,
+   "length_m": 118.94,
+   "width_m": 71.21,
    "yaw_deg": -89.53,
    "height_m": 12,
    "height_source": "manual",
    "name": "John S. Toll Physics",
    "outline_m": [
     [
-     208.71,
-     261.1
+     208.9454,
+     260.5908
     ],
     [
-     208.64,
-     258.77
+     208.8754,
+     258.2713
     ],
     [
-     206.29,
-     258.74
+     206.5217,
+     258.2415
     ],
     [
-     189.64,
-     255.31
+     189.8457,
+     254.8261
     ],
     [
-     188.39,
-     254.48
+     188.5938,
+     253.9998
     ],
     [
-     188.08,
-     253.47
+     188.2834,
+     252.9943
     ],
     [
-     187.93,
-     237.62
+     188.1323,
+     237.216
     ],
     [
-     193.71,
-     237.38
+     193.9212,
+     236.9773
     ],
     [
-     195.82,
-     235.32
+     196.0344,
+     234.9267
     ],
     [
-     200.1,
-     231.56
+     200.3208,
+     231.1839
     ],
     [
-     200.14,
-     228.23
+     200.3607,
+     227.869
     ],
     [
-     199.97,
-     224.87
+     200.1902,
+     224.5242
     ],
     [
-     184.21,
-     224.4
+     184.4058,
+     224.0555
     ],
     [
-     184.32,
-     212.21
+     184.5153,
+     211.9206
     ],
     [
-     184.45,
-     200.18
+     184.6451,
+     199.945
     ],
     [
-     201.56,
-     200.34
+     201.7815,
+     200.1051
     ],
     [
-     201.85,
-     158.87
+     202.0698,
+     158.8226
     ],
     [
-     184.82,
-     158.77
+     185.0134,
+     158.7221
     ],
     [
-     185.12,
-     151.97
+     185.3137,
+     151.9529
     ],
     [
-     184.88,
-     142.01
+     185.0729,
+     142.0379
     ],
     [
-     212.87,
-     141.89
+     213.106,
+     141.9197
     ],
     [
-     238.19,
-     142.07
+     238.4652,
+     142.1002
     ],
     [
-     238.19,
-     148.89
+     238.4656,
+     148.8898
     ],
     [
-     237.79,
-     159.11
+     238.0654,
+     159.0632
     ],
     [
-     220.36,
-     158.76
+     220.6085,
+     158.7139
     ],
     [
-     220.6,
-     169.49
+     220.8494,
+     169.3955
     ],
     [
-     232.77,
-     169.44
+     233.0383,
+     169.3462
     ],
     [
-     237.67,
-     169.17
+     237.9458,
+     169.0778
     ],
     [
-     237.71,
-     166.82
+     237.9858,
+     166.7385
     ],
     [
-     243.47,
-     166.51
+     243.7546,
+     166.4301
     ],
     [
-     243.48,
-     176.3
+     243.7651,
+     176.1758
     ],
     [
-     243.53,
-     183.35
+     243.8156,
+     183.194
     ],
     [
-     249,
-     182.73
+     249.294,
+     182.5771
     ],
     [
-     248.84,
-     187.34
+     249.134,
+     187.1662
     ],
     [
-     253.3,
-     189.57
+     253.601,
+     189.3863
     ],
     [
-     254.57,
-     191.4
+     254.873,
+     191.2081
     ],
     [
-     255.37,
-     193.33
+     255.6744,
+     193.1294
     ],
     [
-     255.54,
-     196.98
+     255.8448,
+     196.763
     ],
     [
-     254.05,
-     201.42
+     254.3527,
+     201.1829
     ],
     [
-     250.2,
-     204.21
+     250.4969,
+     203.9601
     ],
     [
-     250.1,
-     213.14
+     250.3972,
+     212.8496
     ],
     [
-     255.21,
-     213.03
+     255.5151,
+     212.7404
     ],
     [
-     255.21,
-     217.61
+     255.5154,
+     217.2998
     ],
     [
-     250.38,
-     217.66
+     250.6779,
+     217.3493
     ],
     [
-     250.2,
-     236.46
+     250.4986,
+     236.0643
     ],
     [
-     225.8,
-     236.87
+     226.0609,
+     236.4712
     ],
     [
-     221.76,
-     236.98
+     222.0146,
+     236.5804
     ],
     [
-     221.34,
-     247.17
+     221.5944,
+     246.7245
     ],
     [
-     221.37,
-     257.49
+     221.625,
+     256.9979
     ],
     [
-     216.24,
-     257.52
+     216.4871,
+     257.0275
     ],
     [
-     212.39,
-     257.53
+     212.6311,
+     257.0372
     ],
     [
-     212.22,
-     261.35
+     212.461,
+     260.8399
     ],
     [
-     208.71,
-     261.1
+     208.9454,
+     260.5908
     ]
    ],
    "source": "osm",
@@ -4341,8 +4342,8 @@
   },
   {
    "id": "b_way_476961971",
-   "east_m": 73.15,
-   "north_m": 18.65,
+   "east_m": 73.43,
+   "north_m": 18.51,
    "length_m": 87.53,
    "width_m": 79.55,
    "yaw_deg": 1.72,
@@ -4351,165 +4352,165 @@
    "name": "Edward St. John Learning and Teaching Center",
    "outline_m": [
     [
-     29.37,
-     51.58
+     29.65,
+     51.44
     ],
     [
-     30.1,
-     21.4
-    ],
-    [
-     30.16,
-     18.96
-    ],
-    [
-     37.08,
-     19.16
-    ],
-    [
-     37.19,
-     15.33
-    ],
-    [
-     37.32,
-     10.87
-    ],
-    [
-     29.61,
-     10.65
+     30.38,
+     21.26
     ],
     [
      30.44,
-     -17.14
+     18.82
     ],
     [
-     45.54,
-     -16.69
+     37.36,
+     19.02
     ],
     [
-     45.62,
-     -19.43
+     37.47,
+     15.19
     ],
     [
-     53.15,
-     -19.21
+     37.6,
+     10.73
     ],
     [
-     53.23,
-     -21.74
+     29.89,
+     10.51
     ],
     [
-     59.7,
-     -21.55
+     30.72,
+     -17.28
     ],
     [
-     66.22,
-     -21.35
+     45.82,
+     -16.83
     ],
     [
-     66.14,
-     -18.76
+     45.9,
+     -19.57
     ],
     [
-     73.5,
-     -18.54
+     53.43,
+     -19.35
     ],
     [
-     73.43,
-     -16.05
+     53.51,
+     -21.88
     ],
     [
-     88.03,
-     -15.62
+     59.98,
+     -21.69
     ],
     [
-     88,
-     -14.49
+     66.5,
+     -21.49
     ],
     [
-     87.19,
-     12.28
+     66.42,
+     -18.9
     ],
     [
-     78.99,
-     12.03
+     73.78,
+     -18.68
     ],
     [
-     78.74,
-     20.18
+     73.71,
+     -16.19
     ],
     [
-     90.68,
-     20.54
+     88.31,
+     -15.76
     ],
     [
-     95.95,
-     20.69
+     88.28,
+     -14.63
     ],
     [
-     96.14,
-     14.37
+     87.47,
+     12.14
     ],
     [
-     96.58,
-     0.09
+     79.27,
+     11.89
     ],
     [
-     101.04,
-     0.21
+     79.02,
+     20.04
     ],
     [
-     101.4,
-     -12.43
+     90.96,
+     20.4
     ],
     [
-     101.97,
-     -12.36
+     96.23,
+     20.55
     ],
     [
-     115.67,
-     -12.07
+     96.42,
+     14.23
     ],
     [
-     117.86,
-     -11.94
+     96.86,
+     -0.05
     ],
     [
-     115.71,
-     59.71
+     101.32,
+     0.07
     ],
     [
-     95.64,
-     59.12
+     101.68,
+     -12.57
     ],
     [
-     95.76,
-     55.32
+     102.25,
+     -12.5
     ],
     [
-     89.63,
-     55.13
+     115.95,
+     -12.21
     ],
     [
-     86.33,
-     55.04
+     118.14,
+     -12.08
     ],
     [
-     86.25,
-     57.47
+     115.99,
+     59.57
     ],
     [
-     29.24,
-     55.77
+     95.92,
+     58.98
     ],
     [
-     29.37,
-     51.58
+     96.04,
+     55.18
+    ],
+    [
+     89.91,
+     54.99
+    ],
+    [
+     86.61,
+     54.9
+    ],
+    [
+     86.53,
+     57.33
+    ],
+    [
+     29.52,
+     55.63
+    ],
+    [
+     29.65,
+     51.44
     ]
    ],
    "source": "osm",
    "model_uri": null,
-   "enabled": true,
+   "enabled": false,
    "holes_m": []
   },
   {
@@ -4952,7 +4953,7 @@
   {
    "id": "b_way_697457105",
    "east_m": 72.99,
-   "north_m": 18.65,
+   "north_m": 18.51,
    "length_m": 87.53,
    "width_m": 79.55,
    "yaw_deg": 1.72,
@@ -4962,156 +4963,157 @@
    "outline_m": [
     [
      29.08,
-     55.77
+     55.63
     ],
     [
      29.21,
-     51.58
+     51.44
     ],
     [
      29.94,
-     21.4
+     21.26
     ],
     [
      30,
-     18.96
+     18.82
     ],
     [
      36.92,
-     19.16
+     19.02
     ],
     [
      37.16,
-     10.87
+     10.73
     ],
     [
      29.45,
-     10.65
+     10.51
     ],
     [
      30.28,
-     -17.14
+     -17.28
     ],
     [
      45.38,
-     -16.69
+     -16.83
     ],
     [
      45.46,
-     -19.43
+     -19.57
     ],
     [
      52.99,
-     -19.21
+     -19.35
     ],
     [
      53.07,
-     -21.74
+     -21.88
     ],
     [
      59.54,
-     -21.55
+     -21.69
     ],
     [
      66.06,
-     -21.35
+     -21.49
     ],
     [
      65.98,
-     -18.76
+     -18.9
     ],
     [
      73.34,
-     -18.54
+     -18.68
     ],
     [
      73.27,
-     -16.05
+     -16.19
     ],
     [
      87.87,
-     -15.62
+     -15.76
     ],
     [
      87.84,
-     -14.49
+     -14.63
     ],
     [
      87.03,
-     12.28
+     12.14
     ],
     [
      78.83,
-     12.03
+     11.89
     ],
     [
      78.58,
-     20.18
+     20.04
     ],
     [
      90.52,
-     20.54
+     20.4
     ],
     [
      95.79,
-     20.69
+     20.55
     ],
     [
      95.98,
-     14.37
+     14.23
     ],
     [
      96.42,
-     0.09
+     -0.05
     ],
     [
      100.88,
-     0.21
+     0.07
     ],
     [
      101.24,
-     -12.43
+     -12.57
     ],
     [
      101.81,
-     -12.36
+     -12.5
     ],
     [
      115.51,
-     -12.07
+     -12.21
     ],
     [
      117.7,
-     -11.94
+     -12.08
     ],
     [
      115.55,
-     59.71
+     59.57
     ],
     [
      95.48,
-     59.12
+     58.98
     ],
     [
      95.6,
-     55.32
+     55.18
     ],
     [
      86.17,
-     55.04
+     54.9
     ],
     [
      86.09,
-     57.47
+     57.33
     ],
     [
      29.08,
-     55.77
+     55.63
     ]
    ],
    "source": "osm",
    "model_uri": null,
-   "enabled": true
+   "enabled": true,
+   "holes_m": []
   },
   {
    "id": "b_way_958049551",
@@ -9766,7 +9768,7 @@
    "source": "manual",
    "model_uri": null,
    "agl_m": null,
-   "on_building": false,
+   "on_building": true,
    "enabled": true
   },
   {
@@ -14480,7 +14482,7 @@
    "east_m": 210.35,
    "north_m": 177.07,
    "agl_m": null,
-   "on_building": false,
+   "on_building": true,
    "yaw_deg": null,
    "model_uri": null,
    "enabled": true,
@@ -14492,7 +14494,7 @@
    "east_m": 207.98,
    "north_m": 172.37,
    "agl_m": null,
-   "on_building": false,
+   "on_building": true,
    "yaw_deg": null,
    "model_uri": null,
    "enabled": true,
@@ -14504,7 +14506,7 @@
    "east_m": 213.57,
    "north_m": 172.79,
    "agl_m": null,
-   "on_building": false,
+   "on_building": true,
    "yaw_deg": null,
    "model_uri": null,
    "enabled": true,
@@ -14516,7 +14518,7 @@
    "east_m": 31.61,
    "north_m": 21.33,
    "agl_m": null,
-   "on_building": false,
+   "on_building": true,
    "yaw_deg": null,
    "model_uri": null,
    "enabled": true,
@@ -14528,7 +14530,7 @@
    "east_m": 31.42,
    "north_m": 25.42,
    "agl_m": null,
-   "on_building": false,
+   "on_building": true,
    "yaw_deg": null,
    "model_uri": null,
    "enabled": true,
@@ -14540,7 +14542,7 @@
    "east_m": 34.97,
    "north_m": 23.56,
    "agl_m": null,
-   "on_building": false,
+   "on_building": true,
    "yaw_deg": null,
    "model_uri": null,
    "enabled": true,
@@ -14552,7 +14554,7 @@
    "east_m": 30.86,
    "north_m": 35.84,
    "agl_m": null,
-   "on_building": false,
+   "on_building": true,
    "yaw_deg": null,
    "model_uri": null,
    "enabled": true,
@@ -14564,7 +14566,7 @@
    "east_m": 30.11,
    "north_m": 54.25,
    "agl_m": null,
-   "on_building": false,
+   "on_building": true,
    "yaw_deg": null,
    "model_uri": null,
    "enabled": true,
@@ -14576,11 +14578,1925 @@
    "east_m": 53.08,
    "north_m": 30.26,
    "agl_m": null,
-   "on_building": false,
+   "on_building": true,
    "yaw_deg": null,
    "model_uri": null,
    "enabled": true,
    "source": "manual"
+  },
+  {
+   "id": "t_manual_327",
+   "name": "casualty_m327",
+   "east_m": -193.79,
+   "north_m": 80.68,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_328",
+   "name": "casualty_m328",
+   "east_m": -148.49,
+   "north_m": -43.52,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_329",
+   "name": "casualty_m329",
+   "east_m": -89.5,
+   "north_m": -41.29,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_330",
+   "name": "casualty_m330",
+   "east_m": -19.87,
+   "north_m": -39.61,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_331",
+   "name": "casualty_m331",
+   "east_m": 32.96,
+   "north_m": -40.73,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_332",
+   "name": "casualty_m332",
+   "east_m": 78.88,
+   "north_m": -39.05,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_333",
+   "name": "casualty_m333",
+   "east_m": 161.35,
+   "north_m": -38.39,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_334",
+   "name": "casualty_m334",
+   "east_m": 122.94,
+   "north_m": -158.32,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_335",
+   "name": "casualty_m335",
+   "east_m": -88.88,
+   "north_m": -160.04,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_336",
+   "name": "casualty_m336",
+   "east_m": -140.72,
+   "north_m": -160.78,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  }
+ ],
+ "trees": [
+  {
+   "id": "tr_manual_1",
+   "east_m": -158.16,
+   "north_m": -147.26,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_2",
+   "east_m": -142.64,
+   "north_m": -151.76,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_3",
+   "east_m": -133.6,
+   "north_m": -154.43,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_4",
+   "east_m": -118.22,
+   "north_m": -154.71,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_5",
+   "east_m": -106.78,
+   "north_m": -153.87,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_6",
+   "east_m": -97.61,
+   "north_m": -155.13,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_7",
+   "east_m": -134.87,
+   "north_m": -165.54,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_8",
+   "east_m": -120.33,
+   "north_m": -165.11,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_9",
+   "east_m": -106.5,
+   "north_m": -166.8,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_10",
+   "east_m": -96.48,
+   "north_m": -166.38,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_11",
+   "east_m": -83.35,
+   "north_m": -166.24,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_12",
+   "east_m": -77,
+   "north_m": -153.58,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_13",
+   "east_m": -73.47,
+   "north_m": -166.38,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_14",
+   "east_m": -68.25,
+   "north_m": -152.04,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_15",
+   "east_m": -60.2,
+   "north_m": -163.15,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_16",
+   "east_m": -55.54,
+   "north_m": -154.99,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_17",
+   "east_m": -46.37,
+   "north_m": -154.29,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_18",
+   "east_m": -38.61,
+   "north_m": -166.66,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_19",
+   "east_m": -36.77,
+   "north_m": -153.3,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_20",
+   "east_m": -18.14,
+   "north_m": -153.02,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_21",
+   "east_m": -25.9,
+   "north_m": -165.11,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_22",
+   "east_m": -12.63,
+   "north_m": -179.6,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_23",
+   "east_m": -1.2,
+   "north_m": -179.6,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_24",
+   "east_m": 10.23,
+   "north_m": -181.71,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_25",
+   "east_m": 27.45,
+   "north_m": -149.93,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_26",
+   "east_m": 20.96,
+   "north_m": -152.74,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_27",
+   "east_m": 27.17,
+   "north_m": -163.43,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_28",
+   "east_m": 50.07,
+   "north_m": -155.49,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_29",
+   "east_m": 53.72,
+   "north_m": -164.9,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_30",
+   "east_m": 68.32,
+   "north_m": -155.07,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_31",
+   "east_m": 71.97,
+   "north_m": -167.68,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_32",
+   "east_m": 83.34,
+   "north_m": -152.07,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_33",
+   "east_m": 82.91,
+   "north_m": -164.05,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_34",
+   "east_m": 96.44,
+   "north_m": -164.26,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_35",
+   "east_m": 109.31,
+   "north_m": -164.69,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_36",
+   "east_m": 109.53,
+   "north_m": -149.51,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_37",
+   "east_m": 122.2,
+   "north_m": -150.58,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_38",
+   "east_m": 96.87,
+   "north_m": -151.64,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_39",
+   "east_m": 135.29,
+   "north_m": -149.29,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_40",
+   "east_m": 132.72,
+   "north_m": -164.48,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_41",
+   "east_m": 144.74,
+   "north_m": -149.51,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_42",
+   "east_m": 164.49,
+   "north_m": -160.63,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_43",
+   "east_m": 159.34,
+   "north_m": -148.65,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_44",
+   "east_m": -157.39,
+   "north_m": -36.09,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_45",
+   "east_m": -158.04,
+   "north_m": -47.8,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_46",
+   "east_m": -142.7,
+   "north_m": -47.47,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_47",
+   "east_m": -142.7,
+   "north_m": -37.72,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_48",
+   "east_m": -134.53,
+   "north_m": -47.47,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_49",
+   "east_m": -129.64,
+   "north_m": -36.74,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_50",
+   "east_m": -123.43,
+   "north_m": -50.4,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_51",
+   "east_m": -114.62,
+   "north_m": -36.41,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_52",
+   "east_m": -110.05,
+   "north_m": -47.8,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_53",
+   "east_m": -98.95,
+   "north_m": -32.19,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_54",
+   "east_m": -96.66,
+   "north_m": -48.45,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_55",
+   "east_m": -82.95,
+   "north_m": -34.79,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_56",
+   "east_m": -68.26,
+   "north_m": -33.81,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_57",
+   "east_m": -64.66,
+   "north_m": -50.07,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_58",
+   "east_m": -78.38,
+   "north_m": -48.77,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_59",
+   "east_m": -55.2,
+   "north_m": -46.82,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_60",
+   "east_m": -57.16,
+   "north_m": -31.54,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_61",
+   "east_m": -44.75,
+   "north_m": -48.12,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_62",
+   "east_m": -48.34,
+   "north_m": -32.84,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_63",
+   "east_m": -32.67,
+   "north_m": -47.8,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_64",
+   "east_m": -38.55,
+   "north_m": -25.36,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_65",
+   "east_m": -28.75,
+   "north_m": -40.32,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_66",
+   "east_m": -35.61,
+   "north_m": -20.8,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_67",
+   "east_m": -15.36,
+   "north_m": -27.31,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_68",
+   "east_m": -8.18,
+   "north_m": -9.75,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_69",
+   "east_m": -4.92,
+   "north_m": -45.85,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_70",
+   "east_m": 8.14,
+   "north_m": -29.91,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_71",
+   "east_m": 13.69,
+   "north_m": -43.24,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_72",
+   "east_m": 22.84,
+   "north_m": -33.49,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_73",
+   "east_m": 26.1,
+   "north_m": -42.59,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_74",
+   "east_m": 37.2,
+   "north_m": -35.11,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_75",
+   "east_m": 39.81,
+   "north_m": -44.87,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_76",
+   "east_m": 47.65,
+   "north_m": -33.49,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_77",
+   "east_m": 49.28,
+   "north_m": -45.2,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_78",
+   "east_m": 62.99,
+   "north_m": -32.84,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_79",
+   "east_m": 65.93,
+   "north_m": -44.87,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_80",
+   "east_m": 77.03,
+   "north_m": -32.51,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_81",
+   "east_m": 80.3,
+   "north_m": -46.5,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_82",
+   "east_m": 106.74,
+   "north_m": -31.54,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_83",
+   "east_m": 118.82,
+   "north_m": -43.57,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_84",
+   "east_m": 117.85,
+   "north_m": -34.46,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_85",
+   "east_m": 132.21,
+   "north_m": -45.85,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_86",
+   "east_m": 127.64,
+   "north_m": -34.14,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_87",
+   "east_m": 140.37,
+   "north_m": -37.39,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_88",
+   "east_m": 143.64,
+   "north_m": -43.9,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_89",
+   "east_m": 174.66,
+   "north_m": -43.9,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_90",
+   "east_m": 178.9,
+   "north_m": -31.86,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_91",
+   "east_m": 185.1,
+   "north_m": -43.57,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_92",
+   "east_m": 198.16,
+   "north_m": -30.56,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_93",
+   "east_m": 188.04,
+   "north_m": -9.75,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_94",
+   "east_m": 229.83,
+   "north_m": 12.05,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_95",
+   "east_m": 235.38,
+   "north_m": 24.73,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_96",
+   "east_m": 242.89,
+   "north_m": 22.78,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_97",
+   "east_m": 240.28,
+   "north_m": 9.12,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_98",
+   "east_m": 234.08,
+   "north_m": 8.47,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_99",
+   "east_m": 219.06,
+   "north_m": -56.25,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_100",
+   "east_m": 221.34,
+   "north_m": -48.45,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_101",
+   "east_m": 233.75,
+   "north_m": -52.35,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_102",
+   "east_m": 241.59,
+   "north_m": -45.85,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_103",
+   "east_m": 197.51,
+   "north_m": -79.02,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_104",
+   "east_m": 198.49,
+   "north_m": -105.36,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_105",
+   "east_m": 197.84,
+   "north_m": -126.18,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_106",
+   "east_m": 202.41,
+   "north_m": -144.07,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_107",
+   "east_m": 187.06,
+   "north_m": -152.85,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_108",
+   "east_m": 166.17,
+   "north_m": -145.37,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_109",
+   "east_m": 197.51,
+   "north_m": -162.93,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_110",
+   "east_m": 203.06,
+   "north_m": -184.4,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_111",
+   "east_m": 203.39,
+   "north_m": -192.85,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_112",
+   "east_m": 204.37,
+   "north_m": -206.84,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_113",
+   "east_m": 203.39,
+   "north_m": -216.6,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_114",
+   "east_m": -116.16,
+   "north_m": -264.25,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_115",
+   "east_m": -112.09,
+   "north_m": -276.01,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_116",
+   "east_m": -100.71,
+   "north_m": -274.94,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_117",
+   "east_m": -96.63,
+   "north_m": -266.18,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_118",
+   "east_m": -74.95,
+   "north_m": -273.66,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_119",
+   "east_m": -54.55,
+   "north_m": -266.18,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_120",
+   "east_m": -48.54,
+   "north_m": -272.59,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_121",
+   "east_m": -56.48,
+   "north_m": -278.37,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_122",
+   "east_m": -68.94,
+   "north_m": -292.69,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_123",
+   "east_m": -93.84,
+   "north_m": -298.25,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_124",
+   "east_m": -97.92,
+   "north_m": -295.05,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_125",
+   "east_m": -108.22,
+   "north_m": -295.47,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_126",
+   "east_m": -108.44,
+   "north_m": -298.47,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_127",
+   "east_m": -118.53,
+   "north_m": -297.18,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_128",
+   "east_m": -117.24,
+   "north_m": -292.05,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_129",
+   "east_m": -35.02,
+   "north_m": -276.87,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_130",
+   "east_m": -33.3,
+   "north_m": -291.41,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_131",
+   "east_m": -24.71,
+   "north_m": -270.24,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_132",
+   "east_m": -31.37,
+   "north_m": -255.91,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_133",
+   "east_m": -24.71,
+   "north_m": -250.99,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_134",
+   "east_m": -8.18,
+   "north_m": -257.84,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_135",
+   "east_m": -16.77,
+   "north_m": -264.25,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_136",
+   "east_m": -195.22,
+   "north_m": -226.83,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_137",
+   "east_m": -189.81,
+   "north_m": -237.43,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_138",
+   "east_m": -185.33,
+   "north_m": -246.72,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_139",
+   "east_m": -182.72,
+   "north_m": -253.42,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_140",
+   "east_m": -183.46,
+   "north_m": -258.44,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_141",
+   "east_m": -176.56,
+   "north_m": -218.64,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_142",
+   "east_m": -180.29,
+   "north_m": -210.83,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_143",
+   "east_m": -174.5,
+   "north_m": -208.6,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_144",
+   "east_m": -169.09,
+   "north_m": -217.53,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_145",
+   "east_m": -156.77,
+   "north_m": -203.02,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_146",
+   "east_m": -246.19,
+   "north_m": -233.89,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_147",
+   "east_m": -248.43,
+   "north_m": -237.43,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_148",
+   "east_m": -247.68,
+   "north_m": -243.56,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_149",
+   "east_m": -245.07,
+   "north_m": -250.44,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_150",
+   "east_m": -258.88,
+   "north_m": -235.57,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_151",
+   "east_m": -278.29,
+   "north_m": -251,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_152",
+   "east_m": -257.01,
+   "north_m": -282.98,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_153",
+   "east_m": -279.23,
+   "north_m": -290.79,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_154",
+   "east_m": -276.8,
+   "north_m": -297.12,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_155",
+   "east_m": -291.17,
+   "north_m": -212.14,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_156",
+   "east_m": -274.37,
+   "north_m": -194.47,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_157",
+   "east_m": -275.87,
+   "north_m": -184.06,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_158",
+   "east_m": -256.77,
+   "north_m": -14.13,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_159",
+   "east_m": -240.44,
+   "north_m": -20.96,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_160",
+   "east_m": -227.71,
+   "north_m": -28.12,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_161",
+   "east_m": -231.95,
+   "north_m": -33.64,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_162",
+   "east_m": -243.05,
+   "north_m": -31.37,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_163",
+   "east_m": -254.48,
+   "north_m": -33.32,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_164",
+   "east_m": -269.83,
+   "north_m": -34.95,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_165",
+   "east_m": -275.38,
+   "north_m": -25.51,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_166",
+   "east_m": -263.62,
+   "north_m": -37.22,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_167",
+   "east_m": -30.03,
+   "north_m": 137.9,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_168",
+   "east_m": -33.73,
+   "north_m": 144.54,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_169",
+   "east_m": -33.73,
+   "north_m": 156.59,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_170",
+   "east_m": -25.59,
+   "north_m": 149.95,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_171",
+   "east_m": -11.76,
+   "north_m": 161.26,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_172",
+   "east_m": -7.56,
+   "north_m": 152.16,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_173",
+   "east_m": -5.09,
+   "north_m": 166.18,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_174",
+   "east_m": -9.54,
+   "north_m": 173.07,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_175",
+   "east_m": -13.98,
+   "north_m": 167.9,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_176",
+   "east_m": -25.09,
+   "north_m": 170.36,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_177",
+   "east_m": 46.14,
+   "north_m": 214.04,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_178",
+   "east_m": 40.71,
+   "north_m": 223.63,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_179",
+   "east_m": 40.96,
+   "north_m": 236.42,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_180",
+   "east_m": 37.75,
+   "north_m": 212.07,
+   "model_uri": "https://fuel.gazebosim.org/1.0/shrijitsingh99/models/Juniper Tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_181",
+   "east_m": 43.69,
+   "north_m": 92.23,
+   "model_uri": "https://fuel.gazebosim.org/1.0/shrijitsingh99/models/Juniper Tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_182",
+   "east_m": 35.96,
+   "north_m": 93.09,
+   "model_uri": "https://fuel.gazebosim.org/1.0/shrijitsingh99/models/Juniper Tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_183",
+   "east_m": 20.72,
+   "north_m": 102.93,
+   "model_uri": "https://fuel.gazebosim.org/1.0/shrijitsingh99/models/Juniper Tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_184",
+   "east_m": 14.71,
+   "north_m": 105.92,
+   "model_uri": "https://fuel.gazebosim.org/1.0/shrijitsingh99/models/Juniper Tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_185",
+   "east_m": 15.57,
+   "north_m": 97.58,
+   "model_uri": "https://fuel.gazebosim.org/1.0/shrijitsingh99/models/Juniper Tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_186",
+   "east_m": 8.27,
+   "north_m": 93.3,
+   "model_uri": "https://fuel.gazebosim.org/1.0/shrijitsingh99/models/Juniper Tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_187",
+   "east_m": -10.41,
+   "north_m": 91.38,
+   "model_uri": "https://fuel.gazebosim.org/1.0/shrijitsingh99/models/Juniper Tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_188",
+   "east_m": -17.28,
+   "north_m": 91.16,
+   "model_uri": "https://fuel.gazebosim.org/1.0/shrijitsingh99/models/Juniper Tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_189",
+   "east_m": -21.57,
+   "north_m": 91.16,
+   "model_uri": "https://fuel.gazebosim.org/1.0/shrijitsingh99/models/Juniper Tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_190",
+   "east_m": -47.98,
+   "north_m": 95.44,
+   "model_uri": "https://fuel.gazebosim.org/1.0/shrijitsingh99/models/Juniper Tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_191",
+   "east_m": -50.55,
+   "north_m": 98.65,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Pine Tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_192",
+   "east_m": -45.19,
+   "north_m": 122.17,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Pine Tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_193",
+   "east_m": -45.83,
+   "north_m": 127.73,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Pine Tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_194",
+   "east_m": -48.19,
+   "north_m": 145.27,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Pine Tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_195",
+   "east_m": -46.69,
+   "north_m": 150.19,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Pine Tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_196",
+   "east_m": -48.41,
+   "north_m": 153.61,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Pine Tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_197",
+   "east_m": -47.98,
+   "north_m": 157.88,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Pine Tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_198",
+   "east_m": -48.41,
+   "north_m": 166.01,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_199",
+   "east_m": -218.25,
+   "north_m": 222.02,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_200",
+   "east_m": -229.63,
+   "north_m": 230.57,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_201",
+   "east_m": -234.13,
+   "north_m": 238.49,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_202",
+   "east_m": -241.86,
+   "north_m": 238.91,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_203",
+   "east_m": -242.51,
+   "north_m": 230.36,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_204",
+   "east_m": -243.15,
+   "north_m": 222.88,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_205",
+   "east_m": -232.63,
+   "north_m": 271.85,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_206",
+   "east_m": -239.5,
+   "north_m": 282.54,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_207",
+   "east_m": -281.68,
+   "north_m": 75.76,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_208",
+   "east_m": -268.59,
+   "north_m": 79.7,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_209",
+   "east_m": -209.59,
+   "north_m": 81.42,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_210",
+   "east_m": -180.7,
+   "north_m": 81.17,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_211",
+   "east_m": 127.75,
+   "north_m": -259.01,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_212",
+   "east_m": 117.96,
+   "north_m": -257.06,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_213",
+   "east_m": 138.85,
+   "north_m": -258.04,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_214",
+   "east_m": 147.02,
+   "north_m": -257.06,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_215",
+   "east_m": 164.97,
+   "north_m": -256.74,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_216",
+   "east_m": 176.07,
+   "north_m": -255.76,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_217",
+   "east_m": 186.85,
+   "north_m": -257.06,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_218",
+   "east_m": 188.81,
+   "north_m": -284.38,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_219",
+   "east_m": 100,
+   "north_m": -293.16,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "tr_manual_220",
+   "east_m": 123.84,
+   "north_m": -294.79,
+   "model_uri": "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Oak tree",
+   "source": "manual",
+   "enabled": true
+  }
+ ],
+ "tree_areas": [
+  {
+   "id": "ta_manual_2",
+   "polygon_m": [
+    [
+     259.15,
+     -201.66
+    ],
+    [
+     298.9,
+     -235.35
+    ],
+    [
+     298.41,
+     -299.05
+    ],
+    [
+     227.8,
+     -297.08
+    ],
+    [
+     225.33,
+     -190.1
+    ]
+   ],
+   "density_per_ha": 150,
+   "min_height_m": 1,
+   "max_height_m": 5,
+   "source": "manual",
+   "enabled": true
   }
  ]
 }

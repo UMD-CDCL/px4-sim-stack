@@ -301,6 +301,28 @@ def _ring_contains(ring: list[list[float]], lat: float, lon: float) -> bool:
     return inside
 
 
+def _overpass_elements(frame: geo.GeoFrame, half_m: float, body: str) -> list:
+    """POST one Overpass query over the square grown to half_m, walking
+    the mirror list, and return its elements. {bbox} in the body expands
+    to south,west,north,east."""
+    south, west, _ = frame.enu_to_latlon(-half_m, -half_m)
+    north, east, _ = frame.enu_to_latlon(half_m, half_m)
+    query = (f"[out:json][timeout:{OVERPASS_TIMEOUT_S}];"
+             + body.format(bbox=f"{south},{west},{north},{east}")
+             + "out tags geom;")
+    session = _session()
+    last_error: Exception | None = None
+    for url in OVERPASS_URLS:
+        try:
+            reply = session.post(url, data={"data": query},
+                                 timeout=OVERPASS_TIMEOUT_S + 15)
+            reply.raise_for_status()
+            return reply.json().get("elements", [])
+        except Exception as error:  # noqa: BLE001 - try the next mirror
+            last_error = error
+    raise RuntimeError(f"every Overpass mirror failed: {last_error}")
+
+
 def fetch_osm_buildings(frame: geo.GeoFrame, side_m: float) -> tuple[list[dict], dict]:
     """Building outlines inside the square, from Overpass.
 
@@ -314,29 +336,41 @@ def fetch_osm_buildings(frame: geo.GeoFrame, side_m: float) -> tuple[list[dict],
     A relation contributes one building per assembled outer ring, and each
     inner ring becomes a hole of the outer ring that contains it.
     """
-    half = side_m / 2.0 + BUILDING_FETCH_MARGIN_M
-    south, west, _ = frame.enu_to_latlon(-half, -half)
-    north, east, _ = frame.enu_to_latlon(half, half)
-    query = (f"[out:json][timeout:{OVERPASS_TIMEOUT_S}];"
-             f'(way["building"]({south},{west},{north},{east});'
-             f'relation["building"]({south},{west},{north},{east}););'
-             "out tags geom;")
+    elements = _overpass_elements(
+        frame, side_m / 2.0 + BUILDING_FETCH_MARGIN_M,
+        '(way["building"]({bbox});relation["building"]({bbox}););')
+    return buildings_from_overpass(elements)
 
-    session = _session()
-    reply = None
-    last_error: Exception | None = None
-    for url in OVERPASS_URLS:
-        try:
-            reply = session.post(url, data={"data": query}, timeout=OVERPASS_TIMEOUT_S + 15)
-            reply.raise_for_status()
-            break
-        except Exception as error:  # noqa: BLE001 - try the next mirror
-            last_error = error
-            reply = None
-    if reply is None:
-        raise RuntimeError(f"every Overpass mirror failed: {last_error}")
 
-    return buildings_from_overpass(reply.json().get("elements", []))
+def fetch_osm_vegetation(frame: geo.GeoFrame,
+                         side_m: float) -> tuple[list, list, dict]:
+    """Individual trees and wooded areas inside the square, from Overpass.
+
+    Returns (tree points, area rings, report): points as [lat, lon], area
+    rings as closed [[lat, lon], ...] lists from natural=wood and
+    landuse=forest ways.
+    """
+    elements = _overpass_elements(
+        frame, side_m / 2.0,
+        '(node["natural"="tree"]({bbox});way["natural"="wood"]({bbox});'
+        'way["landuse"="forest"]({bbox}););')
+    trees: list = []
+    areas: list = []
+    report = {"trees": 0, "areas": 0, "skipped_open_rings": 0}
+    for element in elements:
+        if element["type"] == "node":
+            trees.append([element["lat"], element["lon"]])
+            report["trees"] += 1
+        elif element["type"] == "way" and "geometry" in element:
+            ring = [[p["lat"], p["lon"]] for p in element["geometry"]]
+            if len(ring) >= 3 and ring[0] != ring[-1]:
+                ring.append(ring[0])
+            if len(ring) < 4:
+                report["skipped_open_rings"] += 1
+                continue
+            areas.append(ring)
+            report["areas"] += 1
+    return trees, areas, report
 
 
 def buildings_from_overpass(elements: list[dict]) -> tuple[list[dict], dict]:

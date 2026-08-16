@@ -12,7 +12,7 @@ The module runs on demand and exits. The sim never depends on it.
 
 | Stage | What it does | Output |
 |---|---|---|
-| `create` | Fetch imagery, elevation and buildings for the square | `data/<name>/scene.json` |
+| `create` | Fetch imagery, elevation, buildings, trees and woods for the square | `data/<name>/scene.json` |
 | `import-casualties` | Load a lat/lon casualty file into the scene's targets | targets in `scene.json` |
 | `detect` | Find cars and buses in the imagery | vehicles in `scene.json` |
 | `edit` | Serve the browser editor on port 8090 | your corrections in `scene.json` |
@@ -93,13 +93,14 @@ Everything is graphical. You never edit a file to fix the scene.
   under it, and an offset above that floor.
 - `+ Car`, `+ Bus`, `+ Building`: click the map to place one. Hold shift
   to keep placing.
-- Shift-click stamps a copy of the last vehicle or target you placed or
-  selected, at the click point. Buildings and the fiducial do not stamp:
-  selecting one leaves the stamp source on the last vehicle or target. A
-  copy takes the source's properties as they are at that moment, edits
+- Shift-click stamps a copy of the last vehicle, target or tree you
+  placed or selected, at the click point. Buildings and the fiducial do
+  not stamp: selecting one leaves the stamp source where it was. A copy
+  takes the source's properties as they are at that moment, edits
   included; a target copy gets a fresh name, because the scorer treats
-  the name as identity. Stamp a parking row or a cluster of casualties
-  in a few clicks; a ctrl-drag grabs the row afterward as a group.
+  the name as identity, and a pool-draw tree copy draws its own species.
+  Stamp a parking row, a cluster of casualties or a grove in a few
+  clicks; a ctrl-drag grabs the row afterward as a group.
 - Ctrl-drag (Cmd on macOS) draws a selection rectangle over vehicles,
   buildings and targets; ctrl-click adds or drops one object. A selection
   moves as a group. The white handle turns every selected object in
@@ -172,6 +173,25 @@ A scene fetched before courtyard support holds no holes in `scene.json`.
 `create --force` refetches the footprints, but it also discards your
 edits, so keep the scene as it is unless a courtyard matters.
 
+## Trees
+
+Trees come in one at a time or by the area. `+ Tree` places one; `+ Tree
+area` draws a polygon that fills at an adjustable density (trees per
+hectare), with somewhat random spacing from stable hashes: the same area
+always fills the same way, and a rebuild is byte-identical. OSM seeds
+both at create, from `natural=tree` points and `natural=wood` and
+`landuse=forest` polygons.
+
+Heights are the models' own; nothing rescales a tree. An area's min and
+max height select which pool models fill it, and an individual tree
+takes a chosen model or a stable draw from the pool. The editor draws
+every canopy footprint at its true size, inside the area outline and
+around individual trees, and the fill it shows is exactly the fill the
+build places. Trees stand on the terrain; one under a building or
+outside the square drops at build, and the report counts them. The pool
+holds every working Fuel tree, measured in-sim: Juniper 1.8 m, Pine
+5 m, Oak 6.3 m.
+
 ## Ground-truth targets
 
 `scene.json` is the source of truth for casualties. A lat/lon file is an
@@ -214,6 +234,7 @@ full configuration.
 | Imagery | Google satellite tiles (default) or Esri | Check the imagery terms for your use. `--imagery esri` switches. |
 | Elevation | AWS terrain tiles, terrarium encoding | Public, no key. About 4 m per pixel. |
 | Buildings | OSM Overpass | Ways and multipolygon relations, courtyard holes included. Height from the `height` tag, else levels x 3.2 m, else 6 m. |
+| Trees | OSM Overpass | `natural=tree` points and `natural=wood` / `landuse=forest` polygons. Models from Fuel, heights their own. |
 | Vehicle models | Gazebo Fuel | Downloaded by the sim on first world load. Cars, vans and light trucks in the car pool; buses and heavy trucks in the bus pool. Fuel has no school bus, semi or tanker, so those stay absent. |
 
 ## Known limits
