@@ -420,20 +420,20 @@
           "pointSize": 6
         },
         "/scoring/nadir/true_positives": {
-          "historyMode": "previous",
+          "historyMode": "none",
           "pointSize": 6
         },
         "/scoring/nadir/false_positives": {
-          "historyMode": "previous",
+          "historyMode": "none",
           "pointSize": 6,
           "pointDisplayMode": "cross"
         },
         "/scoring/gimbal/true_positives": {
-          "historyMode": "previous",
+          "historyMode": "none",
           "pointSize": 6
         },
         "/scoring/gimbal/false_positives": {
-          "historyMode": "previous",
+          "historyMode": "none",
           "pointSize": 6,
           "pointDisplayMode": "cross"
         },
@@ -451,12 +451,12 @@
           "pointDisplayMode": "pin"
         },
         "/scoring/gimbal/missed_localizations": {
-          "historyMode": "previous",
+          "historyMode": "none",
           "pointSize": 6,
           "pointDisplayMode": "cross"
         },
         "/scoring/nadir/missed_localizations": {
-          "historyMode": "previous",
+          "historyMode": "none",
           "pointSize": 6,
           "pointDisplayMode": "cross"
         },

@@ -19,7 +19,7 @@ from rclpy.node import Node
 from vision_msgs.msg import Detection2DArray, Detection3DArray
 
 from sim_bridge.runtime import BEST_EFFORT, HAVE_FOXGLOVE, require_foxglove, spin
-from sim_bridge.verdicts import UNJUDGED_COLOR, VERDICT_COLOR
+from sim_bridge.verdicts import UNJUDGED_COLOR, VERDICT_COLOR, annotation_text
 
 if HAVE_FOXGLOVE:
     from foxglove_msgs.msg import (
@@ -109,7 +109,7 @@ class DetectionAnnotator(Node):
             # Just above the box, kept inside the frame.
             label.position = Point2(x=center_x - half_w,
                                     y=max(center_y - half_h - 4.0, LABEL_FONT_SIZE))
-            label.text = f"{class_name} {det.id}".strip()
+            label.text = annotation_text(class_name, det.id)
             label.font_size = LABEL_FONT_SIZE
             label.text_color = color(LABEL_TEXT_COLOR)
             label.background_color = color(LABEL_BACKGROUND)

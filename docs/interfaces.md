@@ -460,7 +460,7 @@ recall figure would describe neither.
 | `/camera/<camera>/footprint_geojson` | `foxglove_msgs/GeoJSON`, the same outline vertices for the Map panel, so both panels carry one shape. The Foxglove layout colors it to match the 3D panel line |
 | `/scoring/<camera>/verdicts` | `vision_msgs/Detection3DArray`, each labelled TP, MISLOCALIZED, FP or FN |
 | `/scoring/<camera>/markers` | `visualization_msgs/MarkerArray`, a TP as a green dot, a MISLOCALIZED estimate as a yellow cross, an FP as a red cross |
-| `/scoring/<camera>/true_positives`, `missed_localizations`, `false_positives` | `sensor_msgs/NavSatFix`, one per verdict, for the Map panel and recordings |
+| `/scoring/<camera>/true_positives`, `missed_localizations`, `false_positives` | `foxglove_msgs/GeoJSON` for the Map panel, one message per scoring tick carrying every estimate with that verdict. Each feature is named after the box label the image overlay draws, and its tooltip gives the detector's confidence, the targets the verdict names and the ground error. True green, yellow and red in the feature style. A tick with no such verdict publishes an empty collection, which clears the panel |
 | `/scoring/<camera>/position_error` | `std_msgs/Float64`, meters, one per matched estimate, mislocalized ones included |
 | `/scoring/<camera>/recall`, `/scoring/<camera>/precision` | `std_msgs/Float64`, targets placed within the gate |
 | `/scoring/<camera>/detection_recall`, `/scoring/<camera>/detection_precision` | `std_msgs/Float64`, the same ratios with MISLOCALIZED counted as found, so they measure the detector alone |

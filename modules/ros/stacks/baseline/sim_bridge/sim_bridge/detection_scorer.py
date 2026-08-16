@@ -29,7 +29,13 @@ Publishes, under /scoring/<camera>/
     markers         visualization_msgs/MarkerArray, per sim_bridge/verdicts.py.
                     An FN has no estimate to draw and gets no mark.
     true_positives, missed_localizations, false_positives
-                    sensor_msgs/NavSatFix, one per verdict, for the Map panel
+                    foxglove_msgs/GeoJSON for the Map panel, one message per
+                    tick carrying every estimate with that verdict. Each
+                    feature is named after the box label the annotator draws
+                    on the image, and carries the detector's confidence and
+                    the targets the verdict names. A tick with none publishes
+                    an empty collection, so the panel clears instead of
+                    holding the last hit on screen.
     position_error  std_msgs/Float64, meters, per matched estimate
     recall, precision
                     std_msgs/Float64, over the running window
@@ -45,11 +51,12 @@ from __future__ import annotations
 
 import math
 from collections import Counter, deque
+from typing import NamedTuple
 
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import CameraInfo, NavSatFix
+from sensor_msgs.msg import CameraInfo
 from std_msgs.msg import Float64
 from vision_msgs.msg import Detection3D, Detection3DArray, ObjectHypothesisWithPose
 from visualization_msgs.msg import MarkerArray
@@ -58,10 +65,13 @@ from sim_bridge.geo import MapOrigin
 from sim_bridge.projection import (GROUND_VIEW_MAX_DISTANCE_M,
                                    intrinsics_ready, point_in_view,
                                    point_to_ray_distance)
-from sim_bridge.runtime import LATCHED, now_s, spin, tf_buffer
+from sim_bridge.runtime import (LATCHED, geojson_publisher, now_s,
+                                publish_features, spin, tf_buffer)
 from sim_bridge.verdicts import (CROSS_VERDICTS, DETECTION_CROSS_LIFT,
                                  DETECTION_CROSS_SPAN, DETECTION_DOT_DIAMETER,
-                                 VERDICT_COLOR, cross_marker, marker)
+                                 MAP_VERDICT_COLOR, MAP_VERDICT_TOPIC,
+                                 VERDICT_COLOR, annotation_text, cross_marker,
+                                 marker)
 
 # ------------------------------------------------------------------- tunables
 SCORING_RATE_HZ = 2.0
@@ -73,6 +83,18 @@ CAMERA_TIMEOUT_S = 2.0
 MARKER_LIFETIME_S = 1.0
 # The metrics are computed over the last this-many verdicts.
 METRIC_WINDOW = 100
+
+
+class Estimate(NamedTuple):
+    """One localized detection. label and confidence come from the detector
+    and ride through to the map feature, so a pin names the same thing the
+    image box does."""
+    track_id: str
+    label: str
+    confidence: float
+    x: float
+    y: float
+    z: float
 
 
 class DetectionScorer(Node):
@@ -96,7 +118,7 @@ class DetectionScorer(Node):
         self.truth: list[tuple[str, float, float, float]] = []
         self.info: CameraInfo | None = None
         self.info_stamp = 0.0
-        self.estimates: list[tuple[str, float, float, float]] = []
+        self.estimates: list[Estimate] = []
         self.estimates_stamp = 0.0
         self.window = deque(maxlen=METRIC_WINDOW)
         self.tf_buffer = tf_buffer(self)
@@ -112,10 +134,10 @@ class DetectionScorer(Node):
 
         self.verdict_pub = self.create_publisher(Detection3DArray, "verdicts", 10)
         self.marker_pub = self.create_publisher(MarkerArray, "markers", 10)
-        self.fix_pub = {
-            "TP": self.create_publisher(NavSatFix, "true_positives", 10),
-            "MISLOCALIZED": self.create_publisher(NavSatFix, "missed_localizations", 10),
-            "FP": self.create_publisher(NavSatFix, "false_positives", 10),
+        self.map_pub = {
+            kind: geojson_publisher(self, topic,
+                                    f"the Map panel gets no {topic}")
+            for kind, topic in MAP_VERDICT_TOPIC.items()
         }
         self.error_pub = self.create_publisher(Float64, "position_error", 10)
         self.recall_pub = self.create_publisher(Float64, "recall", 10)
@@ -142,9 +164,13 @@ class DetectionScorer(Node):
         self.info_stamp = self._now()
 
     def _on_detections(self, msg: Detection3DArray) -> None:
-        self.estimates = [(d.id, d.bbox.center.position.x,
-                           d.bbox.center.position.y, d.bbox.center.position.z)
-                          for d in msg.detections]
+        self.estimates = [
+            Estimate(d.id,
+                     d.results[0].hypothesis.class_id if d.results else "object",
+                     d.results[0].hypothesis.score if d.results else 0.0,
+                     d.bbox.center.position.x, d.bbox.center.position.y,
+                     d.bbox.center.position.z)
+            for d in msg.detections]
         self.estimates_stamp = self._now()
 
     # ------------------------------------------------------------------ score
@@ -185,15 +211,18 @@ class DetectionScorer(Node):
         verdicts.header.stamp = self.get_clock().now().to_msg()
         verdicts.header.frame_id = self.reference
         named: set[str] = set()
-        for track_id, x, y, z in estimates:
-            ground = {name: math.hypot(x - tx, y - ty)
+        # Every estimate of one verdict rides in one message, so the Map panel
+        # shows the whole tick rather than whichever arrived last.
+        map_features: dict[str, list] = {kind: [] for kind in MAP_VERDICT_TOPIC}
+        for est in estimates:
+            ground = {name: math.hypot(est.x - tx, est.y - ty)
                       for name, tx, ty, _ in targets}
             hit = [name for name, distance in ground.items()
                    if distance <= self.gate]
             crossed = [] if camera is None else [
                 name for name, tx, ty, tz in targets
                 if point_to_ray_distance((tx, ty, tz), camera,
-                                         (x, y, z)) < self.gate]
+                                         (est.x, est.y, est.z)) < self.gate]
             if hit:
                 kind, names = "TP", [min(hit, key=ground.get)]
             elif crossed:
@@ -206,9 +235,11 @@ class DetectionScorer(Node):
             named.update(names)
             self.window.append(kind)
             verdicts.detections.append(
-                self._verdict(kind, track_id, x, y, z,
+                self._verdict(kind, est.track_id, est.x, est.y, est.z,
                               score=distance, names=names))
-            self._publish_fix(kind, x, y, verdicts.header.stamp)
+            feature = self._map_feature(est, kind, names, distance)
+            if feature is not None:
+                map_features[kind].append(feature)
 
         for name, x, y, z in targets:
             if name in named or name not in in_view:
@@ -218,12 +249,45 @@ class DetectionScorer(Node):
 
         self.verdict_pub.publish(verdicts)
         self.marker_pub.publish(self._verdict_markers(verdicts))
+        self._publish_map(map_features)
         self._publish_metrics()
 
-    def _publish_fix(self, kind: str, x: float, y: float, stamp) -> None:
-        fix = self.origin.navsat_fix(x, y, self.reference, stamp)
-        if fix is not None:
-            self.fix_pub[kind].publish(fix)
+    def _map_feature(self, est: Estimate, kind: str, names: list,
+                     distance: float) -> dict | None:
+        """One estimate as a GeoJSON point for the Map panel, or None before
+        the origin is known. The Map panel shows `name` and `metadata` in the
+        hover tooltip and reads Leaflet options from `style`."""
+        latlon = self.origin.to_lla(est.x, est.y)
+        if latlon is None:
+            return None
+        color = MAP_VERDICT_COLOR[kind]
+        metadata = {"camera": self.camera, "verdict": kind,
+                    "confidence": round(float(est.confidence), 3)}
+        if names:
+            # What this estimate matched, so the pin and the truth bubble it
+            # colored can be read together.
+            metadata["targets"] = ", ".join(names)
+            metadata["error_m"] = round(distance, 2)
+        return {
+            "type": "Feature",
+            "geometry": {"type": "Point",
+                         "coordinates": [latlon[1], latlon[0]]},
+            "properties": {
+                "name": annotation_text(est.label, est.track_id),
+                "metadata": metadata,
+                "style": {"color": color, "fillColor": color,
+                          "fillOpacity": 0.9},
+            },
+        }
+
+    def _publish_map(self, features: dict[str, list]) -> None:
+        """Every Map panel topic, every tick. A verdict with nothing this tick
+        publishes an empty collection, which clears it from the panel instead
+        of leaving the last hit on screen."""
+        if not self.origin.ready:
+            return
+        for kind, publisher in self.map_pub.items():
+            publish_features(publisher, features[kind])
 
     def _verdict(self, kind: str, track_id: str, x: float, y: float, z: float,
                  score: float = 0.0, names: list[str] = ()) -> Detection3D:

@@ -1,8 +1,8 @@
 """Where local (0, 0) is on the Earth, for the Map panel publishers.
 
-The scorers publish NavSatFix and ground truth publishes GeoJSON for the
-Map panel, and they must agree on the origin: truth from one origin and
-estimates from another would show a bias that is not there.
+Ground truth, the scorers, the footprints and the gimbal ROI all publish
+GeoJSON for the Map panel, and they must agree on the origin: truth from one
+origin and estimates from another would show a bias that is not there.
 
 PX4 does not send GPS_GLOBAL_ORIGIN unless something asks for it, so the
 fallback pairs the drone's own fix with its local position: if the aircraft
@@ -20,7 +20,7 @@ import math
 
 from geometry_msgs.msg import PoseStamped
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import NavSatFix, NavSatStatus
+from sensor_msgs.msg import NavSatFix
 from std_msgs.msg import Float64
 
 try:
@@ -152,25 +152,6 @@ class MapOrigin:
                 for lat, lon in (self.to_lla(x, y) for x, y in points_xy)]
         ring.append(ring[0])
         return ring
-
-    def navsat_fix(self, x: float, y: float, frame_id: str,
-                   stamp) -> NavSatFix | None:
-        """A NavSatFix at local (x, y), or None before the origin is known.
-
-        Altitude is NaN: a point on the ground plane has no height worth
-        plotting.
-        """
-        ll = self.to_lla(x, y)
-        if ll is None:
-            return None
-        fix = NavSatFix()
-        fix.header.stamp = stamp
-        fix.header.frame_id = frame_id
-        fix.status.status = NavSatStatus.STATUS_FIX
-        fix.status.service = NavSatStatus.SERVICE_GPS
-        fix.latitude, fix.longitude = ll
-        fix.altitude = float("nan")
-        return fix
 
 
 class GroundPlane:

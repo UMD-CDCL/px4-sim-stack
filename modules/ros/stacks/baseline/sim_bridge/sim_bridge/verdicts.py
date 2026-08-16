@@ -27,6 +27,29 @@ CROSS_VERDICTS = frozenset({"MISLOCALIZED", "FP"})
 # Image boxes before the first verdict arrives.
 UNJUDGED_COLOR = (0.75, 0.75, 0.78, 1.0)
 
+# The same three verdicts on the Map panel, as CSS colors for GeoJSON. True
+# red, yellow and green rather than the muted tones above: a flat map pin
+# carries no shading to soften, and the operator reads it at a glance.
+MAP_VERDICT_COLOR = {
+    "TP": "#00ff00",
+    "MISLOCALIZED": "#ffff00",
+    "FP": "#ff0000",
+}
+# Which Map panel topic each verdict goes to. An FN has no estimate to place,
+# so it has no entry: it shows as the ground truth pin turning red.
+MAP_VERDICT_TOPIC = {
+    "TP": "true_positives",
+    "MISLOCALIZED": "missed_localizations",
+    "FP": "false_positives",
+}
+
+
+def annotation_text(label: str, track_id: str) -> str:
+    """What one detection is called, in every view at once: the box label on
+    the image and the feature name on the map. One function, so an operator
+    can match a map pin to the box it came from."""
+    return f"{label} {track_id}".strip()
+
 # A detection is a small dot on the ground, not a person-sized shape.
 DETECTION_DOT_DIAMETER = 0.4
 # A cross is wider than the dot, because it marks a problem worth a look.
