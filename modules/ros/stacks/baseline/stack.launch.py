@@ -77,6 +77,23 @@ CAMERAS = [PERCEPTION_CAMERA, PERCEPTION_CAMERA_2]
 # stamping, because it is the largest known part of the capture delay.
 RTSP_LATENCY_MS = 100
 
+# How far DeepStream's payload timestamp trails true frame capture, seconds,
+# negated. The localizer looks up the camera pose at the detection stamp, so a
+# stamp that names the wrong instant aims the ray from where the camera had
+# already moved to, and the error grows with slew rate.
+#
+# Measured on this stack against ground truth: the payload time sits a little
+# over one frame period past its own capture. detections_bridge applies this
+# and then snaps the result onto a real capture time from the frame clock, so
+# the value only has to land within half a frame period of the truth.
+# scripts/check-localization-lag.py reports the offset that flattens the error
+# against slew rate.
+DETECTION_TIME_OFFSET = float(os.environ.get("DETECTION_TIME_OFFSET", "-0.112"))
+# The frame clock's MQTT prefix, matching FRAME_TOPIC_PREFIX on the sim.
+# Empty turns the snap off and leaves the offset carrying the whole
+# correction, which is the real hardware case.
+FRAME_TOPIC = os.environ.get("FRAME_TOPIC_PREFIX", "video/frames")
+
 # The GStreamer element that decodes each H.264 stream. nvh264dec moves the
 # decode to NVDEC.
 RTSP_DECODER = os.environ.get("RTSP_DECODER", "avdec_h264")
@@ -278,10 +295,12 @@ def generate_launch_description() -> LaunchDescription:
                 ] or [""],
                 "sensor_ids": CAMERAS,
                 "sensor_frames": [CAMERA[cam]["optical_frame"] for cam in CAMERAS],
-                # DeepStream's frame time trails true capture by about 16 ms
-                # on this hardware. Measure yours with
-                # scripts/measure-latency.py and put the difference here.
-                "time_offset": 0.0,
+                # Where the frame clock publishes capture times. The bridge
+                # snaps each corrected payload time onto one of these, so the
+                # stamp is the capture instant rather than an estimate.
+                # Empty turns the snap off.
+                "frame_topic": FRAME_TOPIC,
+                "time_offset": DETECTION_TIME_OFFSET,
         }),
 
         # ------------------------------------------- boxes on the video

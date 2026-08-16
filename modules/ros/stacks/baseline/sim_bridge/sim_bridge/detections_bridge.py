@@ -12,11 +12,26 @@ schema (payload-type=0), one message per object with a nested bbox. This
 node reads both. bbox_format selects the field order, which differs across
 DeepStream releases.
 
-Each payload carries "@timestamp", set when the frame enters the DeepStream
-pipeline, before inference. That instant becomes the header stamp, so the
-localizer can look up the drone pose for the right moment. The arrival time
-would fold in decode, inference and transport. Measure the remaining offset
-with scripts/measure-latency.py and feed it back through time_offset.
+Each payload carries "@timestamp", which trails true capture by a latency
+this node has to take back out: the localizer looks up the drone pose at the
+header stamp, so a stamp that names the wrong instant points the camera where
+it had already moved to, and the error grows with slew rate.
+
+The correction is two steps. time_offset walks the payload time back by the
+measured pipeline latency, and the result is then snapped to a real capture
+time from the frame clock (modules/sim/frame_clock.py, topic
+<frame_topic>/<sensor>). The snap is what makes the stamp exact: any
+time_offset within half a frame period of the truth lands on the right frame,
+and the stamp that goes out is the capture instant itself rather than an
+estimate of it.
+
+Snapping without the offset would pick the wrong frame. The payload time sits
+a little over one frame period past its own capture, so the nearest capture to
+it is the next one along, a whole period too new.
+
+Without a frame clock, on real hardware or with FRAME_CLOCK=0, nothing is
+snapped and time_offset carries the whole correction. Measure it with
+scripts/measure-latency.py.
 
 DeepStream reports boxes in its own coordinate space, which can differ from
 the image resolution without any error message. The boxes are scaled here
@@ -30,6 +45,8 @@ pick one camera without filtering.
 Parameters
     host, port     the MQTT broker
     topic          MQTT topic to subscribe to
+    frame_topic    prefix the frame clock publishes capture times under.
+                   Empty turns the snap off.
     bbox_format    ltrb (default) or ltwh
     source_width   the coordinate space DeepStream reports in. 0 disables
     source_height  scaling.
@@ -38,7 +55,8 @@ Parameters
                    disturbing the other.
     sensor_ids     DeepStream sensorId values, one per camera
     sensor_frames  the optical frame for each sensor id, same order
-    time_offset    seconds added to the payload timestamp, for calibration
+    time_offset    seconds added to the payload timestamp. Negative: the
+                   payload time trails capture. The snap corrects the rest.
 
 Topics
     /perception/<camera>/detections   vision_msgs/Detection2DArray
@@ -48,6 +66,7 @@ from __future__ import annotations
 
 import datetime
 import json
+from collections import deque
 
 import paho.mqtt.client as mqtt
 from builtin_interfaces.msg import Time
@@ -66,6 +85,13 @@ from sim_bridge.runtime import BEST_EFFORT, now_s, spin
 # ------------------------------------------------------------------- tunables
 # Drop a payload older than this, in seconds.
 MAX_AGE_S = 2.0
+# How much capture history the join keeps per camera. It only has to cover
+# the pipeline latency; a second is many frames of headroom at any rate.
+FRAME_HISTORY_S = 1.0
+# How far a corrected payload time may sit from a capture time and still snap
+# to it. Under half a frame period, so the join lands on one frame or refuses
+# rather than silently taking its neighbour.
+FRAME_SNAP_WINDOW_S = 0.030
 
 
 class DetectionsBridge(Node):
@@ -75,6 +101,7 @@ class DetectionsBridge(Node):
         self.declare_parameter("host", "message-bus")
         self.declare_parameter("port", 1883)
         self.declare_parameter("topic", "perception/detections")
+        self.declare_parameter("frame_topic", "video/frames")
         self.declare_parameter("bbox_format", "ltrb")
         self.declare_parameter("source_width", 0)
         self.declare_parameter("source_height", 0)
@@ -92,8 +119,12 @@ class DetectionsBridge(Node):
         self.unrouted = 0
         self.no_stamp = 0
         self.stale = 0
+        self.snapped = 0
+        self.unsnapped = 0
         self.lag_sum = 0.0
         self.lag_n = 0
+        # Capture times per camera, newest last, from the frame clock.
+        self.captures: dict[str, deque] = {}
 
         sensor_ids = list(self.get_parameter("sensor_ids").value)
         frames = list(self.get_parameter("sensor_frames").value)
@@ -136,7 +167,9 @@ class DetectionsBridge(Node):
 
         host = self.get_parameter("host").value
         port = int(self.get_parameter("port").value)
-        topic = self.get_parameter("topic").value
+        self.topic = self.get_parameter("topic").value
+        prefix = str(self.get_parameter("frame_topic").value).rstrip("/")
+        self.frame_topic = f"{prefix}/" if prefix else ""
 
         # paho-mqtt 2.x wants an explicit callback API version. Ubuntu 24.04
         # ships 1.x, which has neither the enum nor the extra callback
@@ -147,13 +180,17 @@ class DetectionsBridge(Node):
             self.client = mqtt.Client()
         self.client.on_connect = self._on_connect
         self.client.on_message = self._on_message
-        self.client.user_data_set(topic)
         # A broker that is not up yet is normal at start. Retry rather than
         # exit.
         self.client.connect_async(host, port, keepalive=30)
         self.client.loop_start()
 
-        self.get_logger().info(f"reading mqtt://{host}:{port} topic '{topic}'")
+        self.get_logger().info(
+            f"reading mqtt://{host}:{port} topic '{self.topic}', "
+            + (f"capture times from '{self.frame_topic}#', "
+               f"offset {self.time_offset * 1000:+.0f} ms then snapped"
+               if self.frame_topic else
+               f"no frame clock, offset {self.time_offset * 1000:+.0f} ms only"))
         self.create_timer(60.0, self._report)
 
     def _on_camera_info(self, sensor: str, msg: CameraInfo) -> None:
@@ -169,8 +206,24 @@ class DetectionsBridge(Node):
         if reason_code != 0:
             self.get_logger().warn(f"broker refused the connection: {reason_code}")
             return
-        client.subscribe(userdata, qos=0)
-        self.get_logger().info(f"subscribed to '{userdata}'")
+        topics = [(self.topic, 0)]
+        if self.frame_topic:
+            topics.append((f"{self.frame_topic}#", 0))
+        client.subscribe(topics)
+        self.get_logger().info(
+            "subscribed to " + ", ".join(f"'{name}'" for name, _ in topics))
+
+    def _on_capture(self, payload: dict) -> None:
+        """Record one frame's capture time, and drop what has aged out."""
+        stream = payload.get("stream")
+        nanoseconds = payload.get("capture_unix_ns")
+        if not stream or nanoseconds is None:
+            return
+        seconds = float(nanoseconds) / 1e9
+        history = self.captures.setdefault(stream, deque())
+        history.append(seconds)
+        while history and seconds - history[0] > FRAME_HISTORY_S:
+            history.popleft()
 
     def _on_message(self, client, userdata, message):
         try:
@@ -179,21 +232,16 @@ class DetectionsBridge(Node):
             self.malformed += 1
             return
 
+        if self.frame_topic and message.topic.startswith(self.frame_topic):
+            self._on_capture(payload)
+            return
+
         detections = self._parse(payload)
         if detections is None:
             self.malformed += 1
             return
 
-        stamp, lag = self._frame_time(payload)
-        if stamp is None:
-            # Without a frame time the localizer cannot pick the right pose,
-            # and a wrong pose is worse than no answer.
-            self.no_stamp += 1
-            return
-        if lag is not None and lag > MAX_AGE_S:
-            self.stale += 1
-            return
-
+        # The sensor comes first: the capture time is joined per camera.
         sensor = str(payload.get("sensorId") or "") or self.primary
         if sensor not in self.publisher_for:
             self.unrouted += 1
@@ -202,6 +250,16 @@ class DetectionsBridge(Node):
                     f"detections tagged sensorId={sensor!r}, which is not in "
                     f"sensor_ids {list(self.publisher_for)}. They are dropped. "
                     f"Check the id in the deepstream msgconv config.")
+            return
+
+        stamp, lag = self._frame_time(payload, sensor)
+        if stamp is None:
+            # Without a frame time the localizer cannot pick the right pose,
+            # and a wrong pose is worse than no answer.
+            self.no_stamp += 1
+            return
+        if lag is not None and lag > MAX_AGE_S:
+            self.stale += 1
             return
 
         self._rescale(sensor, detections)
@@ -213,8 +271,25 @@ class DetectionsBridge(Node):
         self.count += len(detections)
 
     # -------------------------------------------------------------- timestamp
-    def _frame_time(self, payload: dict):
-        """The instant the frame entered DeepStream, as a ROS stamp.
+    def _snap(self, sensor: str, seconds: float) -> float:
+        """The real capture time this corrected payload time belongs to.
+
+        Returns the input unchanged when no capture is close enough, so a
+        camera with no frame clock keeps working on time_offset alone.
+        """
+        history = self.captures.get(sensor)
+        if not history:
+            self.unsnapped += 1
+            return seconds
+        nearest = min(history, key=lambda capture: abs(capture - seconds))
+        if abs(nearest - seconds) > FRAME_SNAP_WINDOW_S:
+            self.unsnapped += 1
+            return seconds
+        self.snapped += 1
+        return nearest
+
+    def _frame_time(self, payload: dict, sensor: str):
+        """The instant the frame was captured, as a ROS stamp.
 
         Returns (stamp, lag_seconds). lag is how far behind the clock the
         frame is, which is the pipeline latency.
@@ -229,7 +304,7 @@ class DetectionsBridge(Node):
         except ValueError:
             return None, None
 
-        seconds = when.timestamp() + self.time_offset
+        seconds = self._snap(sensor, when.timestamp() + self.time_offset)
         lag = now_s(self) - seconds
         self.lag_sum += lag
         self.lag_n += 1
@@ -341,12 +416,16 @@ class DetectionsBridge(Node):
 
     def _report(self) -> None:
         lag = (self.lag_sum / self.lag_n * 1000.0) if self.lag_n else float("nan")
+        joined = self.snapped + self.unsnapped
+        snap = (f", {self.snapped * 100 // joined}% snapped to a capture time"
+                if joined else "")
         self.get_logger().info(
             f"{self.count} detections in the last minute, mean pipeline lag "
-            f"{lag:.0f} ms, {self.malformed} unparsed, {self.no_stamp} without a "
-            f"frame time, {self.stale} stale"
+            f"{lag:.0f} ms{snap}, {self.malformed} unparsed, {self.no_stamp} "
+            f"without a frame time, {self.stale} stale"
         )
         self.count = self.malformed = self.no_stamp = self.stale = 0
+        self.snapped = self.unsnapped = 0
         self.lag_sum = 0.0
         self.lag_n = 0
 
