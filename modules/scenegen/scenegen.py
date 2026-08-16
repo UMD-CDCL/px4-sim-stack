@@ -289,59 +289,61 @@ def cmd_list(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _fetch_options(parser, *, required: bool) -> None:
+    """The create arguments, shared with `all`. `all` takes them optional,
+    because an existing scene.json is reused as is."""
+    parser.add_argument("--center", type=parse_center, required=required,
+                        help="LAT,LON" if required else
+                             "LAT,LON. Needed for a new scene; an existing "
+                             "scene.json is reused as is.")
+    parser.add_argument("--side", type=float, required=required,
+                        help="square side, meters")
+    parser.add_argument("--imagery", default=DEFAULT_IMAGERY_SOURCE,
+                        choices=sorted(sources.IMAGERY_URL_TEMPLATES))
+    parser.add_argument("--imagery-zoom", type=int, default=DEFAULT_IMAGERY_ZOOM)
+    parser.add_argument("--terrain-grid", type=int, default=DEFAULT_TERRAIN_GRID)
+    parser.add_argument("--casualties",
+                        help="YAML casualty list to import as ground-truth "
+                             "targets; scene.json owns them afterwards")
+    parser.add_argument("--force", action="store_true",
+                        help="refetch and overwrite an existing scene.json")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="command", required=True)
 
-    everything = sub.add_parser(
-        "all", help="create, detect, edit and build in one run; the build "
-                    "starts when the browser sends Save & build")
+    def command(name: str, handler, help: str):
+        parser = sub.add_parser(name, help=help)
+        parser.set_defaults(handler=handler)
+        return parser
+
+    everything = command(
+        "all", cmd_all,
+        "create, detect, edit and build in one run; the build starts when "
+        "the browser sends Save & build")
     everything.add_argument("--name", required=True)
-    everything.add_argument("--center", type=parse_center,
-                            help="LAT,LON. Needed for a new scene; an existing "
-                                 "scene.json is reused as is.")
-    everything.add_argument("--side", type=float, help="square side, meters")
-    everything.add_argument("--imagery", default=DEFAULT_IMAGERY_SOURCE,
-                            choices=sorted(sources.IMAGERY_URL_TEMPLATES))
-    everything.add_argument("--imagery-zoom", type=int, default=DEFAULT_IMAGERY_ZOOM)
-    everything.add_argument("--terrain-grid", type=int, default=DEFAULT_TERRAIN_GRID)
-    everything.add_argument("--force", action="store_true",
-                            help="refetch and overwrite an existing scene.json")
+    _fetch_options(everything, required=False)
     everything.add_argument("--skip-detect", action="store_true",
                             help="no vehicle detection; place vehicles by hand")
     everything.add_argument("--confidence", type=float, default=0.10)
-    everything.add_argument("--casualties",
-                            help="YAML casualty list to import as ground-truth "
-                                 "targets; scene.json owns them afterwards")
     everything.add_argument("--port", type=int, default=8090)
-    everything.set_defaults(handler=cmd_all)
 
-    create = sub.add_parser("create", help="fetch data and write scene.json")
-    create.add_argument("--name", required=True, help="scene name, also the world name")
-    create.add_argument("--center", required=True, type=parse_center, help="LAT,LON")
-    create.add_argument("--side", required=True, type=float, help="square side, meters")
-    create.add_argument("--imagery", default=DEFAULT_IMAGERY_SOURCE,
-                        choices=sorted(sources.IMAGERY_URL_TEMPLATES))
-    create.add_argument("--imagery-zoom", type=int, default=DEFAULT_IMAGERY_ZOOM)
-    create.add_argument("--terrain-grid", type=int, default=DEFAULT_TERRAIN_GRID)
-    create.add_argument("--casualties",
-                        help="YAML casualty list to import as ground-truth "
-                             "targets; scene.json owns them afterwards")
-    create.add_argument("--force", action="store_true",
-                        help="overwrite an existing scene.json")
-    create.set_defaults(handler=cmd_create)
+    create = command("create", cmd_create, "fetch data and write scene.json")
+    create.add_argument("--name", required=True,
+                        help="scene name, also the world name")
+    _fetch_options(create, required=True)
 
-    importer = sub.add_parser("import-casualties",
-                              help="load a lat/lon casualty file into the "
-                                   "scene's ground-truth targets")
+    importer = command("import-casualties", cmd_import,
+                       "load a lat/lon casualty file into the scene's "
+                       "ground-truth targets")
     importer.add_argument("--name", required=True)
     importer.add_argument("--casualties", required=True,
                           help="YAML list; replaces earlier imported targets, "
                                "keeps hand-placed ones")
-    importer.set_defaults(handler=cmd_import)
 
-    detect = sub.add_parser("detect", help="find vehicles in the imagery")
+    detect = command("detect", cmd_detect, "find vehicles in the imagery")
     detect.add_argument("--name", required=True)
     # 0.10 found about 3x the vehicles of 0.25 on a campus test with few
     # false boxes, and deleting a false box costs less than placing a
@@ -349,26 +351,20 @@ def main() -> int:
     detect.add_argument("--confidence", type=float, default=0.10)
     detect.add_argument("--keep-auto", dest="replace_auto", action="store_false",
                         help="add to earlier detections instead of replacing them")
-    detect.set_defaults(handler=cmd_detect)
 
-    edit = sub.add_parser("edit", help="serve the browser editor")
+    edit = command("edit", cmd_edit, "serve the browser editor")
     edit.add_argument("--name", required=True)
     edit.add_argument("--port", type=int, default=8090)
-    edit.set_defaults(handler=cmd_edit)
 
-    build = sub.add_parser("build",
-                           help="write the world and the target scenario "
-                                "into modules/sim/scenes, all from scene.json")
+    build = command("build", cmd_build,
+                    "write the world and the target scenario into "
+                    "modules/sim/scenes, all from scene.json")
     build.add_argument("--name", required=True)
-    build.set_defaults(handler=cmd_build)
 
-    build_all = sub.add_parser("build-all",
-                               help="build every scene in the data directory; "
-                                    "the setup step for a fresh clone")
-    build_all.set_defaults(handler=cmd_build_all)
-
-    scene_list = sub.add_parser("list", help="show the scenes on disk")
-    scene_list.set_defaults(handler=cmd_list)
+    command("build-all", cmd_build_all,
+            "build every scene in the data directory; the setup step for a "
+            "fresh clone")
+    command("list", cmd_list, "show the scenes on disk")
 
     args = ap.parse_args()
     if getattr(args, "side", None) is not None \

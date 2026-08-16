@@ -138,6 +138,42 @@ FIDUCIAL_ENABLED = os.environ.get("FIDUCIAL_ENABLED", "0") == "1"
 OUTPUT_FRAME = "fiducial" if FIDUCIAL_ENABLED else ""
 
 
+# Every localizing node answers rays the same way: one mode, one surface
+# file, one class. Spread into the parameters of each.
+LOCALIZER = {
+    "reference_frame": REFERENCE_FRAME,
+    "use_rel_alt": True,
+    "localization_mode": LOCALIZATION_MODE,
+    "surface_file": SURFACE_FILE,
+}
+
+
+def bridge_node(executable: str, name: str, parameters: dict,
+                namespace: str = "") -> Node:
+    """One sim_bridge node. Respawn is not optional: a dead per-camera node
+    would vanish silently and take its half of the layout with it."""
+    return Node(
+        package="sim_bridge",
+        executable=executable,
+        name=name,
+        namespace=namespace,
+        output="screen",
+        respawn=True,
+        respawn_delay=RESPAWN_DELAY_S,
+        parameters=[parameters],
+    )
+
+
+def per_camera(executable: str, suffix: str, namespace: str,
+               parameters) -> list:
+    """One node of the same kind for each camera, each in its own namespace,
+    so the two never publish to one topic. `parameters` takes the camera name
+    and returns that node's parameters."""
+    return [bridge_node(executable, f"{cam}_{suffix}", parameters(cam),
+                        namespace=namespace.format(cam=cam))
+            for cam in CAMERAS]
+
+
 def mavros_configs() -> list:
     """The PX4 plugin list and parameter file that ship with mavros.
 
@@ -184,14 +220,7 @@ def generate_launch_description() -> LaunchDescription:
         ),
 
         # -------------------------------------------------------- frames
-        Node(
-            package="sim_bridge",
-            executable="scene_tf",
-            name="scene_tf",
-            output="screen",
-            respawn=True,
-            respawn_delay=RESPAWN_DELAY_S,
-            parameters=[{
+        bridge_node("scene_tf", "scene_tf", {
                 "base_frame": "base_link",
                 "gimbal_mount_xyz": [0.0, 0.0, 0.10],
                 "nadir_xyz": [
@@ -216,42 +245,20 @@ def generate_launch_description() -> LaunchDescription:
                 ],
                 "log_gimbal_diagnostics":
                     os.environ.get("GIMBAL_DIAGNOSTICS", "0") == "1",
-            }],
-        ),
+        }),
 
         # --------------------------------------------------------- video
-        # The namespace carries the camera name, so two cameras never publish
-        # to one topic.
-        *[
-            Node(
-                package="sim_bridge",
-                executable="rtsp_camera",
-                name=f"{cam}_camera",
-                namespace=f"camera/{cam}",
-                output="screen",
-                respawn=True,
-                respawn_delay=RESPAWN_DELAY_S,
-                parameters=[{
-                    "url": f"{RTSP_BASE}/{cam}",
-                    "frame_id": CAMERA[cam]["optical_frame"],
-                    "latency_ms": RTSP_LATENCY_MS,
-                    "protocols": "tcp",
-                    "decoder": RTSP_DECODER,
-                    "hfov": CAMERA[cam]["hfov"],
-                }],
-            )
-            for cam in CAMERAS
-        ],
+        *per_camera("rtsp_camera", "camera", "camera/{cam}", lambda cam: {
+            "url": f"{RTSP_BASE}/{cam}",
+            "frame_id": CAMERA[cam]["optical_frame"],
+            "latency_ms": RTSP_LATENCY_MS,
+            "protocols": "tcp",
+            "decoder": RTSP_DECODER,
+            "hfov": CAMERA[cam]["hfov"],
+        }),
 
         # ---------------------------------------------------- detections
-        Node(
-            package="sim_bridge",
-            executable="detections_bridge",
-            name="detections_bridge",
-            output="screen",
-            respawn=True,
-            respawn_delay=RESPAWN_DELAY_S,
-            parameters=[{
+        bridge_node("detections_bridge", "detections_bridge", {
                 "host": MQTT_HOST,
                 "port": 1883,
                 "topic": "perception/detections",
@@ -275,94 +282,44 @@ def generate_launch_description() -> LaunchDescription:
                 # on this hardware. Measure yours with
                 # scripts/measure-latency.py and put the difference here.
                 "time_offset": 0.0,
-            }],
-        ),
+        }),
 
         # ------------------------------------------- boxes on the video
         # Each annotator reads its own camera's verdicts, so the box colors
         # match the spheres for the same camera in the 3D view.
-        *[
-            Node(
-                package="sim_bridge",
-                executable="detection_annotator",
-                name=f"{cam}_annotator",
-                namespace=f"camera/{cam}",
-                output="screen",
-                respawn=True,
-                respawn_delay=RESPAWN_DELAY_S,
-                parameters=[{
-                    "detections_topic": f"/perception/{cam}/detections",
-                    "annotations_topic": "annotations",
-                    "verdicts_topic": f"/scoring/{cam}/verdicts",
-                }],
-            )
-            for cam in CAMERAS
-        ],
+        *per_camera("detection_annotator", "annotator", "camera/{cam}",
+                    lambda cam: {
+            "detections_topic": f"/perception/{cam}/detections",
+            "annotations_topic": "annotations",
+            "verdicts_topic": f"/scoring/{cam}/verdicts",
+        }),
 
         # ------------------------------------------------------- ground
         # What each camera covers on the ground, as a polygon.
-        *[
-            Node(
-                package="sim_bridge",
-                executable="ground_projector",
-                name=f"{cam}_ground_projector",
-                namespace=f"camera/{cam}",
-                output="screen",
-                respawn=True,
-                respawn_delay=RESPAWN_DELAY_S,
-                parameters=[{
-                    "camera": cam,
-                    "camera_info_topic": f"/camera/{cam}/camera_info",
-                    "optical_frame": CAMERA[cam]["optical_frame"],
-                    "reference_frame": REFERENCE_FRAME,
-                    "use_rel_alt": True,
-                    # The footprint drapes over the same surface everything
-                    # else localizes onto: one localizer class.
-                    "localization_mode": LOCALIZATION_MODE,
-                    "surface_file": SURFACE_FILE,
-                }],
-            )
-            for cam in CAMERAS
-        ],
+        *per_camera("ground_projector", "ground_projector", "camera/{cam}",
+                    lambda cam: {
+            "camera": cam,
+            "camera_info_topic": f"/camera/{cam}/camera_info",
+            "optical_frame": CAMERA[cam]["optical_frame"],
+            **LOCALIZER,
+        }),
 
-        # One localizer for each camera, each in its own namespace, so the
-        # topics come out as /perception/<camera>/detections_3d.
-        *[
-            Node(
-                package="sim_bridge",
-                executable="detection_localizer",
-                name=f"{cam}_localizer",
-                namespace=f"perception/{cam}",
-                output="screen",
-                respawn=True,
-                respawn_delay=RESPAWN_DELAY_S,
-                parameters=[{
-                    "camera": cam,
-                    "detections_topic": f"/perception/{cam}/detections",
-                    "camera_info_topic": f"/camera/{cam}/camera_info",
-                    "optical_frame": CAMERA[cam]["optical_frame"],
-                    "reference_frame": REFERENCE_FRAME,
-                    "use_rel_alt": True,
-                    "anchor": CAMERA[cam]["anchor"],
-                    "output_frame": OUTPUT_FRAME,
-                    "localization_mode": LOCALIZATION_MODE,
-                    "surface_file": SURFACE_FILE,
-                }],
-            )
-            for cam in CAMERAS
-        ],
+        # The topics come out as /perception/<camera>/detections_3d.
+        *per_camera("detection_localizer", "localizer", "perception/{cam}",
+                    lambda cam: {
+            "camera": cam,
+            "detections_topic": f"/perception/{cam}/detections",
+            "camera_info_topic": f"/camera/{cam}/camera_info",
+            "optical_frame": CAMERA[cam]["optical_frame"],
+            "anchor": CAMERA[cam]["anchor"],
+            "output_frame": OUTPUT_FRAME,
+            **LOCALIZER,
+        }),
 
         # ---------------------------------------- ground truth and scoring
         # Simulation only. These exist to measure the detector, not to fly
         # the aircraft. Drop them from a stack you intend to run on hardware.
-        Node(
-            package="sim_bridge",
-            executable="ground_truth",
-            name="ground_truth",
-            output="screen",
-            respawn=True,
-            respawn_delay=RESPAWN_DELAY_S,
-            parameters=[{
+        bridge_node("ground_truth", "ground_truth", {
                 "scenario_file": os.environ.get(
                     "GROUND_TRUTH_FILE",
                     "/scenes/scenarios/urban_casualties.yaml"),
@@ -373,60 +330,33 @@ def generate_launch_description() -> LaunchDescription:
                 # point. Shift this if you spawn somewhere else.
                 "origin_offset_xyz": [0.0, 0.0, 0.0],
                 "cameras": GROUND_TRUTH_CAMERAS,
-            }],
-        ),
+        }),
 
         # The scene's buildings as one latched MarkerArray for the 3D
         # panel. Reads the file scenegen build writes next to the world;
         # without one it publishes an empty scene and waits for it.
-        Node(
-            package="sim_bridge",
-            executable="scene_buildings",
-            name="scene_buildings",
-            output="screen",
-            respawn=True,
-            respawn_delay=RESPAWN_DELAY_S,
-            parameters=[{
+        bridge_node("scene_buildings", "scene_buildings", {
                 "buildings_file": BUILDINGS_FILE,
                 "reference_frame": REFERENCE_FRAME,
-            }],
-        ),
+        }),
 
         # One scorer for each camera. Each judges its own estimates against
         # the targets its own camera sees, so recall means "of what this
         # camera could see". The gate is shared, because it is a statement
         # about the task rather than about a lens.
-        *[
-            Node(
-                package="sim_bridge",
-                executable="detection_scorer",
-                name=f"{cam}_scorer",
-                namespace=f"scoring/{cam}",
-                output="screen",
-                respawn=True,
-                respawn_delay=RESPAWN_DELAY_S,
-                parameters=[{
-                    "camera": cam,
-                    "detections_topic": f"/perception/{cam}/detections_3d",
-                    "camera_info_topic": f"/camera/{cam}/camera_info",
-                    "optical_frame": CAMERA[cam]["optical_frame"],
-                    "gate_radius": SCORING_GATE_M,
-                    "reference_frame": REFERENCE_FRAME,
-                }],
-            )
-            for cam in CAMERAS
-        ],
+        *per_camera("detection_scorer", "scorer", "scoring/{cam}",
+                    lambda cam: {
+            "camera": cam,
+            "detections_topic": f"/perception/{cam}/detections_3d",
+            "camera_info_topic": f"/camera/{cam}/camera_info",
+            "optical_frame": CAMERA[cam]["optical_frame"],
+            "gate_radius": SCORING_GATE_M,
+            "reference_frame": REFERENCE_FRAME,
+        }),
 
         # Frame alignment against a surveyed point. Off until you have one.
         # Do not survey a target you also score against.
-        Node(
-            package="sim_bridge",
-            executable="fiducial_alignment",
-            name="fiducial_alignment",
-            output="screen",
-            respawn=True,
-            respawn_delay=RESPAWN_DELAY_S,
-            parameters=[{
+        bridge_node("fiducial_alignment", "fiducial_alignment", {
                 "enabled": FIDUCIAL_ENABLED,
                 "surveyed_lla": [
                     float(os.environ.get("FIDUCIAL_SURVEYED_LAT", "0.0")),
@@ -440,36 +370,19 @@ def generate_launch_description() -> LaunchDescription:
                 ],
                 "fiducial_frame": "fiducial",
                 "reference_frame": REFERENCE_FRAME,
-            }],
-        ),
+        }),
 
         # The live image draped on the localization surface, so the 3D view
         # shows the camera's own picture where the localizer thinks it is.
-        *[
-            Node(
-                package="sim_bridge",
-                executable="image_ground_projector",
-                name=f"{cam}_ground_image",
-                namespace=f"camera/{cam}",
-                output="screen",
-                respawn=True,
-                respawn_delay=RESPAWN_DELAY_S,
-                parameters=[{
-                    "image_topic": f"/camera/{cam}/image_raw/compressed",
-                    "camera_info_topic": f"/camera/{cam}/camera_info",
-                    "optical_frame": CAMERA[cam]["optical_frame"],
-                    "reference_frame": REFERENCE_FRAME,
-                    "use_rel_alt": True,
-                    # The mosaic drapes over the same surface detections
-                    # and ROI clicks localize onto: one localizer class.
-                    "localization_mode": LOCALIZATION_MODE,
-                    "surface_file": SURFACE_FILE,
-                    "size": GROUND_IMAGE_SIZE[cam],
-                    "rate_hz": GROUND_IMAGE_RATE_HZ,
-                }],
-            )
-            for cam in CAMERAS
-        ],
+        *per_camera("image_ground_projector", "ground_image", "camera/{cam}",
+                    lambda cam: {
+            "image_topic": f"/camera/{cam}/image_raw/compressed",
+            "camera_info_topic": f"/camera/{cam}/camera_info",
+            "optical_frame": CAMERA[cam]["optical_frame"],
+            "size": GROUND_IMAGE_SIZE[cam],
+            "rate_hz": GROUND_IMAGE_RATE_HZ,
+            **LOCALIZER,
+        }),
 
         # ------------------------------------------------ click to point
         # A click on the gimbal image in Foxglove becomes a MAVLink gimbal
@@ -477,52 +390,27 @@ def generate_launch_description() -> LaunchDescription:
         # Skipped when the gimbal camera is not in the camera set, so the
         # node never claims gimbal control for a camera that is not
         # streaming.
-        *([
-            Node(
-                package="sim_bridge",
-                executable="click_to_gimbal",
-                name="click_to_gimbal",
-                output="screen",
-                respawn=True,
-                respawn_delay=RESPAWN_DELAY_S,
-                parameters=[{
-                    "click_topic": "/foxglove/cursor/click",
-                    "camera_info_topic": "/camera/gimbal/camera_info",
-                    "optical_frame": CAMERA["gimbal"]["optical_frame"],
-                    "reference_frame": REFERENCE_FRAME,
-                    # What a click does: roi holds the camera on the ground
-                    # point, point turns the camera once, off ignores clicks.
-                    # Runtime switchable with ros2 param set or the Foxglove
-                    # Parameters panel.
-                    "click_mode": os.environ.get("CLICK_MODE", "roi"),
-                    "use_rel_alt": True,
-                    # A click localizes exactly like a detection: the same
-                    # mode, the same surface file, one localizer class.
-                    "localization_mode": LOCALIZATION_MODE,
-                    "surface_file": SURFACE_FILE,
-                    # "gz_sim" matches the simulated gimbal, whose joints
-                    # ride on the airframe: the node commands vehicle
-                    # relative. Set "mavlink" for a gimbal that obeys the
-                    # MAVLink frame flags: the node commands earth
-                    # referenced with the lock flags set.
-                    "gimbal_convention": "gz_sim",
-                }],
-            ),
-        ] if "gimbal" in CAMERAS else []),
+        *([bridge_node("click_to_gimbal", "click_to_gimbal", {
+            "click_topic": "/foxglove/cursor/click",
+            "camera_info_topic": "/camera/gimbal/camera_info",
+            "optical_frame": CAMERA["gimbal"]["optical_frame"],
+            # What a click does: roi holds the camera on the ground point,
+            # point turns the camera once, off ignores clicks. Runtime
+            # switchable with ros2 param set or the Foxglove Parameters panel.
+            "click_mode": os.environ.get("CLICK_MODE", "roi"),
+            # "gz_sim" matches the simulated gimbal, whose joints ride on the
+            # airframe: the node commands vehicle relative. Set "mavlink" for
+            # a gimbal that obeys the MAVLink frame flags.
+            "gimbal_convention": "gz_sim",
+            **LOCALIZER,
+        })] if "gimbal" in CAMERAS else []),
 
         # ------------------------------------------------- observability
         # The vehicle fix paired with the compass heading, as one
         # foxglove_msgs/LocationFix. NavSatFix cannot carry a heading, and
         # with one the Map panel draws an arrowhead that turns with the
         # drone.
-        Node(
-            package="sim_bridge",
-            executable="drone_position",
-            name="drone_position",
-            output="screen",
-            respawn=True,
-            respawn_delay=RESPAWN_DELAY_S,
-        ),
+        bridge_node("drone_position", "drone_position", {}),
 
         Node(
             package="foxglove_bridge",

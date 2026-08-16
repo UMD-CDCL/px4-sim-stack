@@ -15,24 +15,20 @@ Publishes
 
 from __future__ import annotations
 
-import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from vision_msgs.msg import Detection2DArray, Detection3DArray
 
+from sim_bridge.runtime import BEST_EFFORT, HAVE_FOXGLOVE, require_foxglove, spin
 from sim_bridge.verdicts import UNJUDGED_COLOR, VERDICT_COLOR
 
-try:
+if HAVE_FOXGLOVE:
     from foxglove_msgs.msg import (
         Color,
         ImageAnnotations,
-        PointsAnnotation,
         Point2,
+        PointsAnnotation,
         TextAnnotation,
     )
-    HAVE_FOXGLOVE = True
-except ImportError:
-    HAVE_FOXGLOVE = False
 
 # ----------------------------------------------------------------- appearance
 BOX_LINE_THICKNESS = 2.0
@@ -40,8 +36,10 @@ LABEL_FONT_SIZE = 14.0
 LABEL_TEXT_COLOR = (1.0, 1.0, 1.0, 1.0)
 LABEL_BACKGROUND = (0.0, 0.0, 0.0, 0.6)
 
-BEST_EFFORT = QoSProfile(reliability=QoSReliabilityPolicy.BEST_EFFORT,
-                         history=QoSHistoryPolicy.KEEP_LAST, depth=10)
+
+def color(rgba, alpha: float | None = None) -> "Color":
+    return Color(r=rgba[0], g=rgba[1], b=rgba[2],
+                 a=rgba[3] if alpha is None else alpha)
 
 
 class DetectionAnnotator(Node):
@@ -54,10 +52,7 @@ class DetectionAnnotator(Node):
         # these boxes by what a different lens found.
         self.declare_parameter("verdicts_topic", "/scoring/verdicts")
 
-        if not HAVE_FOXGLOVE:
-            self.get_logger().error(
-                "foxglove_msgs is missing, so no annotations can be published. "
-                "Install ros-$ROS_DISTRO-foxglove-msgs.")
+        if not require_foxglove(self, "no annotations can be published"):
             return
 
         self.verdict_for: dict[str, str] = {}
@@ -79,10 +74,9 @@ class DetectionAnnotator(Node):
             for d in msg.detections
         }
 
-    def _box_color(self, track_id: str) -> Color:
+    def _box_color(self, track_id: str) -> "Color":
         verdict = self.verdict_for.get(track_id)
-        rgba = VERDICT_COLOR.get(verdict, UNJUDGED_COLOR)
-        return Color(r=rgba[0], g=rgba[1], b=rgba[2], a=1.0)
+        return color(VERDICT_COLOR.get(verdict, UNJUDGED_COLOR), alpha=1.0)
 
     def _on_detections(self, msg: Detection2DArray) -> None:
         out = ImageAnnotations()
@@ -117,25 +111,15 @@ class DetectionAnnotator(Node):
                                     y=max(center_y - half_h - 4.0, LABEL_FONT_SIZE))
             label.text = f"{class_name} {det.id}".strip()
             label.font_size = LABEL_FONT_SIZE
-            label.text_color = Color(r=LABEL_TEXT_COLOR[0], g=LABEL_TEXT_COLOR[1],
-                                     b=LABEL_TEXT_COLOR[2], a=LABEL_TEXT_COLOR[3])
-            label.background_color = Color(r=LABEL_BACKGROUND[0], g=LABEL_BACKGROUND[1],
-                                           b=LABEL_BACKGROUND[2], a=LABEL_BACKGROUND[3])
+            label.text_color = color(LABEL_TEXT_COLOR)
+            label.background_color = color(LABEL_BACKGROUND)
             out.texts.append(label)
 
         self.pub.publish(out)
 
 
 def main() -> None:
-    rclpy.init()
-    node = DetectionAnnotator()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.try_shutdown()
+    spin(DetectionAnnotator)
 
 
 if __name__ == "__main__":

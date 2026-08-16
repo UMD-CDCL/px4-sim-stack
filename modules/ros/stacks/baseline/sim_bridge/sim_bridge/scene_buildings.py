@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
 """Publish the scene's buildings for the Foxglove 3D panel.
 
-scenegen build writes worlds/<scene>_buildings.json next to the world:
-every building as triangles, roofs with a satellite color per vertex,
-walls in one flat gray per building. This node turns the file into one
-latched MarkerArray, so the 3D panel shows the buildings the drone flies
-between. Buildings only, on purpose: vehicle props would clutter the
-panel without telling the operator anything.
+scenegen build writes worlds/<scene>_buildings.json next to the world: every
+building as triangles, roofs with a satellite color per vertex, walls in one
+flat gray. Buildings only, on purpose: vehicle props would clutter the panel
+without telling the operator anything.
 
-The markers follow the file: a timer watches its mtime, so a rebuilt
-scene shows up within a few seconds and no restart. A missing file means
-an empty scene until it appears, which is normal for a hand-written world
-that no scenegen build produced. Every publish leads with a DELETEALL, so
-buildings that left the scene also leave the display.
+A timer watches the file's mtime, so a rebuilt scene shows up within a few
+seconds and no restart. A missing file means an empty scene until it appears,
+which is normal for a hand-written world. Every publish leads with a
+DELETEALL, so buildings that left the scene also leave the display.
 
 Publishes
     /scene/buildings    visualization_msgs/MarkerArray, latched
@@ -24,21 +21,18 @@ import json
 import os
 from pathlib import Path
 
-import rclpy
 from geometry_msgs.msg import Point
 from rclpy.node import Node
-from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile
 from std_msgs.msg import ColorRGBA
 from visualization_msgs.msg import Marker, MarkerArray
+
+from sim_bridge.runtime import LATCHED, spin
 
 # ------------------------------------------------------------------- tunables
 BUILDINGS_FORMAT = "scenegen-buildings/1"
 # How often to look for a changed file on disk. One stat call costs
 # nothing, and a rebuilt scene shows up in the panel within this long.
 RELOAD_CHECK_S = 2.0
-
-LATCHED = QoSProfile(durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
-                     history=QoSHistoryPolicy.KEEP_LAST, depth=1)
 
 
 class SceneBuildings(Node):
@@ -57,7 +51,7 @@ class SceneBuildings(Node):
             self.get_logger().warn(
                 "no buildings_file configured (SCENE is empty); the 3D "
                 "panel shows no buildings")
-            self.publisher.publish(self._wipe_only())
+            self.publisher.publish(self._markers())
             return
         self._maybe_publish()
         self.create_timer(RELOAD_CHECK_S, self._maybe_publish)
@@ -74,13 +68,7 @@ class SceneBuildings(Node):
             self.get_logger().info(
                 f"no buildings file at {self.path}; the 3D panel shows "
                 f"none until scenegen build writes it next to the world")
-        self.publisher.publish(self._markers() if stamp is not None
-                               else self._wipe_only())
-
-    def _wipe_only(self) -> MarkerArray:
-        markers = MarkerArray()
-        markers.markers.append(self._wipe())
-        return markers
+        self.publisher.publish(self._markers())
 
     def _wipe(self) -> Marker:
         wipe = Marker()
@@ -89,8 +77,12 @@ class SceneBuildings(Node):
         return wipe
 
     def _markers(self) -> MarkerArray:
+        """The buildings on disk, led by the wipe. With no usable file the
+        wipe goes out alone, which clears the panel."""
         markers = MarkerArray()
         markers.markers.append(self._wipe())
+        if self.path is None or not self.path.is_file():
+            return markers
         try:
             data = json.loads(self.path.read_text())
         except (OSError, json.JSONDecodeError) as error:
@@ -134,15 +126,7 @@ class SceneBuildings(Node):
 
 
 def main() -> None:
-    rclpy.init()
-    node = SceneBuildings()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.try_shutdown()
+    spin(SceneBuildings)
 
 
 if __name__ == "__main__":

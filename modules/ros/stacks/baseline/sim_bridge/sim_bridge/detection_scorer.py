@@ -1,75 +1,44 @@
 #!/usr/bin/env python3
 """Score localized detections against ground truth, while the drone flies.
+One node per camera, and the results are never merged.
 
 Scoring runs on a clock, not on detection arrival, so a camera that detects
-nothing still reports its misses: every target in view with no estimate
-near it is published as an FN each tick, detections or not.
+nothing still reports its misses each tick. Each estimate is judged alone by
+its viewing ray, which crosses the gate of the target the detector saw even
+when the estimate lands far off, as it does for an elevated target:
 
-Each estimate is judged alone, by its viewing ray. The ray runs from the
-camera through the estimate, so it crosses the gate of the target the
-detector saw, an elevated target included: a detection on a roof projects
-onto the ground far beyond, but the ray still passes within the gate.
-
-The verdict follows from the estimate and its ray:
-    TP            the estimate lies within the gate of a target. The
-                  verdict names the nearest such target, and only that
-                  one: the other targets the ray crosses keep the status
-                  the view gives them.
-    MISLOCALIZED  the ray crosses the gate of a target, but the estimate
-                  lies within the gate of none. The verdict names every
-                  crossed target, and each one turns yellow unless a TP
-                  turns it green.
+    TP            the estimate lies within the gate of a target. The verdict
+                  names the nearest such target, and only that one.
+    MISLOCALIZED  the ray crosses the gate of a target, but the estimate lies
+                  within the gate of none. The verdict names every crossed
+                  target.
     FP            the ray crosses the gate of no target.
-The score on a TP or MISLOCALIZED verdict is the ground distance to the
-nearest named target, because that is the error anyone acting on the
-estimate would experience. Without a camera pose there are no rays, so
-an estimate is a TP within a gate and an FP everywhere else.
+    FN            the camera sees a target and no verdict names it.
 
-Verdicts are pure geometry over every target, in view or not. A real
-detection therefore overrides what the view alone would say about a
-target: one behind a roof still turns green or yellow when a ray
-crosses it.
-
-The view decides only what counts as a miss: a target is an FN when the
-camera sees it and no verdict names it. A target counts as in view when
-its exact point projects inside the image, in front of the camera, within
-the same distance that truncates the footprint. Occlusion is not
-modelled: a target behind a structure but inside the view still counts,
-the same flat-scene assumption the rest of the pipeline makes.
-
-CameraInfo that stops arriving means the camera is down, so nothing is in
-view and nothing is a miss. Estimates also expire, so a detector that
-goes quiet turns its hits into misses instead of freezing the last answer.
-
-A TP or MISLOCALIZED verdict carries the target names it colors as
-further results, so the ground truth node can color its bubbles without
-matching again.
-
-One node runs for each camera, and the results are never merged.
+The score on a TP or MISLOCALIZED is the ground distance to the nearest named
+target, the error anyone acting on the estimate would experience. Verdicts are
+pure geometry over every target, so a real detection overrides what the view
+alone would say; the view decides only what counts as a miss. Occlusion is not
+modelled. A camera whose CameraInfo stops arriving sees nothing and misses
+nothing, and estimates expire rather than freezing the last answer.
 
 Publishes, under /scoring/<camera>/
-    verdicts        vision_msgs/Detection3DArray, each labelled TP,
-                    MISLOCALIZED, FP or FN
-    markers         visualization_msgs/MarkerArray. A TP is a green dot, a
-                    MISLOCALIZED estimate a yellow cross, an FP a red cross.
-                    An FN has no estimate to draw and gets no mark: it
-                    appears as the ground truth bubble turning red.
-    true_positives  sensor_msgs/NavSatFix, one per TP, for the Map panel
-    missed_localizations
-                    sensor_msgs/NavSatFix, one per MISLOCALIZED
-    false_positives sensor_msgs/NavSatFix, one per FP, for the Map panel
-    position_error  std_msgs/Float64, meters, one per matched estimate,
-                    mislocalized ones included
-    recall          std_msgs/Float64, targets placed within the gate over
-                    targets in view, across the running window
-    precision       std_msgs/Float64, estimates within the gate over all
-                    estimates, across the running window
+    verdicts        vision_msgs/Detection3DArray, labelled TP, MISLOCALIZED,
+                    FP or FN. A TP or MISLOCALIZED carries the target names
+                    it colors as further results, for the ground truth node.
+    markers         visualization_msgs/MarkerArray, per sim_bridge/verdicts.py.
+                    An FN has no estimate to draw and gets no mark.
+    true_positives, missed_localizations, false_positives
+                    sensor_msgs/NavSatFix, one per verdict, for the Map panel
+    position_error  std_msgs/Float64, meters, per matched estimate
+    recall, precision
+                    std_msgs/Float64, over the running window
     detection_recall, detection_precision
-                    std_msgs/Float64, the same ratios with MISLOCALIZED
-                    counted as found, so they measure the detector alone
+                    the same ratios with MISLOCALIZED counted as found, so
+                    they measure the detector alone
 
-The metrics go out only while something subscribes to them. The window
-updates either way, so a late subscriber sees correct values.
+The metrics go out only while something subscribes. The window updates either
+way, so a late subscriber sees correct values.
 """
 
 from __future__ import annotations
@@ -79,11 +48,9 @@ from collections import Counter, deque
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import (QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile,
-                       qos_profile_sensor_data)
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, NavSatFix
 from std_msgs.msg import Float64
-from tf2_ros import Buffer, TransformListener
 from vision_msgs.msg import Detection3D, Detection3DArray, ObjectHypothesisWithPose
 from visualization_msgs.msg import MarkerArray
 
@@ -91,6 +58,7 @@ from sim_bridge.geo import MapOrigin
 from sim_bridge.projection import (GROUND_VIEW_MAX_DISTANCE_M,
                                    intrinsics_ready, point_in_view,
                                    point_to_ray_distance)
+from sim_bridge.runtime import LATCHED, now_s, spin, tf_buffer
 from sim_bridge.verdicts import (CROSS_VERDICTS, DETECTION_CROSS_LIFT,
                                  DETECTION_CROSS_SPAN, DETECTION_DOT_DIAMETER,
                                  VERDICT_COLOR, cross_marker, marker)
@@ -105,9 +73,6 @@ CAMERA_TIMEOUT_S = 2.0
 MARKER_LIFETIME_S = 1.0
 # The metrics are computed over the last this-many verdicts.
 METRIC_WINDOW = 100
-
-LATCHED = QoSProfile(durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
-                     history=QoSHistoryPolicy.KEEP_LAST, depth=1)
 
 
 class DetectionScorer(Node):
@@ -134,12 +99,7 @@ class DetectionScorer(Node):
         self.estimates: list[tuple[str, float, float, float]] = []
         self.estimates_stamp = 0.0
         self.window = deque(maxlen=METRIC_WINDOW)
-
-        self.tf_buffer = Buffer()
-        # spin_thread=True is required. On this node's executor, a lookup that
-        # waits for a transform would block the callback that delivers it.
-        self.tf_listener = TransformListener(self.tf_buffer, self,
-                                             spin_thread=True)
+        self.tf_buffer = tf_buffer(self)
 
         self.create_subscription(Detection3DArray, "/ground_truth/truth_3d",
                                  self._on_truth, LATCHED)
@@ -169,7 +129,7 @@ class DetectionScorer(Node):
         self.create_timer(1.0 / SCORING_RATE_HZ, self._score)
 
     def _now(self) -> float:
-        return self.get_clock().now().nanoseconds / 1e9
+        return now_s(self)
 
     # ------------------------------------------------------------------ input
     def _on_truth(self, msg: Detection3DArray) -> None:
@@ -290,32 +250,23 @@ class DetectionScorer(Node):
             kind = det.results[0].hypothesis.class_id if det.results else "FP"
             if kind not in VERDICT_COLOR:
                 continue    # an FN has no mark, only a red truth bubble
-            position = (det.bbox.center.position.x, det.bbox.center.position.y,
-                        det.bbox.center.position.z)
+            build, size, lift = (
+                (cross_marker, DETECTION_CROSS_SPAN, DETECTION_CROSS_LIFT)
+                if kind in CROSS_VERDICTS
+                else (marker, DETECTION_DOT_DIAMETER,
+                      DETECTION_DOT_DIAMETER / 2.0))
+            p = det.bbox.center.position
             # Namespaced by camera and verdict, so the 3D panel can switch
             # off one camera's false positives without touching the other.
-            if kind in CROSS_VERDICTS:
-                out.markers.append(cross_marker(
-                    ns=f"{self.camera}_{kind}",
-                    marker_id=i,
-                    frame_id=verdicts.header.frame_id,
-                    stamp=verdicts.header.stamp,
-                    position=(position[0], position[1],
-                              position[2] + DETECTION_CROSS_LIFT),
-                    span_m=DETECTION_CROSS_SPAN,
-                    rgba=VERDICT_COLOR[kind],
-                    lifetime=lifetime))
-            else:
-                out.markers.append(marker(
-                    ns=f"{self.camera}_{kind}",
-                    marker_id=i,
-                    frame_id=verdicts.header.frame_id,
-                    stamp=verdicts.header.stamp,
-                    position=(position[0], position[1],
-                              position[2] + DETECTION_DOT_DIAMETER / 2.0),
-                    size_m=DETECTION_DOT_DIAMETER,
-                    rgba=VERDICT_COLOR[kind],
-                    lifetime=lifetime))
+            out.markers.append(build(
+                ns=f"{self.camera}_{kind}",
+                marker_id=i,
+                frame_id=verdicts.header.frame_id,
+                stamp=verdicts.header.stamp,
+                position=(p.x, p.y, p.z + lift),
+                size_m=size,
+                rgba=VERDICT_COLOR[kind],
+                lifetime=lifetime))
         return out
 
     def _publish_metrics(self) -> None:
@@ -336,15 +287,7 @@ class DetectionScorer(Node):
 
 
 def main() -> None:
-    rclpy.init()
-    node = DetectionScorer()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.try_shutdown()
+    spin(DetectionScorer)
 
 
 if __name__ == "__main__":

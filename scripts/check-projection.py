@@ -52,17 +52,15 @@ import paho.mqtt.client as mqtt
 import rclpy
 from rclpy.duration import Duration
 from rclpy.node import Node
-from rclpy.qos import (QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy,
-                       qos_profile_sensor_data)
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo
 from tf2_ros import Buffer, TransformListener
 from vision_msgs.msg import Detection2DArray, Detection3DArray
 
 sys.path.insert(0, "/stacks/baseline/sim_bridge")
 from sim_bridge.projection import intersect_ground, quat_rotate, ray_in_optical
+from sim_bridge.runtime import BEST_EFFORT as DETECTION_QOS
 
-DETECTION_QOS = QoSProfile(reliability=QoSReliabilityPolicy.BEST_EFFORT,
-                           history=QoSHistoryPolicy.KEEP_LAST, depth=10)
 # Matches stack.launch.py: straight down projects from the box center, oblique
 # from the bottom edge where the feet meet the ground.
 ANCHOR = {"nadir": "center", "gimbal": "bottom"}

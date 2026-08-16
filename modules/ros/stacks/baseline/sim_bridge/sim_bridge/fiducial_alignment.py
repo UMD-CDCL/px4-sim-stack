@@ -2,26 +2,21 @@
 """Correct localization bias against a surveyed point.
 
 Localized positions land in `map`, the vehicle's own EKF frame, which sits
-meters away from any frame built from a different GPS receiver. That offset
-is a frame difference, not noise, so it does not average away. Measure it
-once against a point whose position is known, then subtract it.
+meters away from any frame built from a different GPS receiver. That offset is
+a frame difference, not noise, so it does not average away. A fiducial is a
+point known in both frames: `surveyed` is where it truly is, `measured` is
+where this pipeline put it, and the difference goes out as a static transform
+from `map` to `fiducial` so tf2 does the arithmetic for every consumer.
 
-A fiducial is a physical point known in both frames: `surveyed` is where it
-truly is, `measured` is where this pipeline put it. The difference is the
-bias, published as a static transform from `map` to `fiducial`, so tf2 does
-the arithmetic for every consumer. Both come as latitude, longitude and
-altitude, the form a survey exchanges.
+Do not use a target you also score against. Fitting the correction to a scored
+target and then reporting the error against it measures nothing but the
+arithmetic.
 
-Do not use a target you also score against. Fitting the correction to a
-scored target and then reporting the error against it measures nothing but
-the arithmetic.
-
-A bad configuration falls back to the identity transform, with an error in
-the log. Both points at 0.0 mean one was never filled in, and a correction
-past MAX_CORRECTION_M is a wrong coordinate rather than a receiver bias.
-Either would move every localization by an absurd distance and empty the
-Foxglove panels. The identity keeps the fiducial frame resolvable, so the
-localizers keep publishing, uncorrected.
+A bad configuration falls back to the identity transform, with an error in the
+log: both points at 0.0 mean one was never filled in, and a correction past
+MAX_CORRECTION_M is a wrong coordinate rather than a receiver bias. The
+identity keeps the fiducial frame resolvable, so the localizers keep
+publishing, uncorrected.
 
 Parameters
     enabled           off by default
@@ -35,27 +30,19 @@ from __future__ import annotations
 
 import math
 
-import rclpy
-from geometry_msgs.msg import PoseStamped, TransformStamped
+from geometry_msgs.msg import TransformStamped
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import NavSatFix
 from tf2_ros import StaticTransformBroadcaster
+
+from sim_bridge.geo import MapOrigin, lla_to_enu
+from sim_bridge.runtime import spin
 
 # ------------------------------------------------------------------- tunables
 # A GPS frame bias is metres. A larger correction is a wrong coordinate.
 MAX_CORRECTION_M = 100.0
 
-EARTH_R = 6378137.0
 UNSET_LLA = [0.0, 0.0, 0.0]
-
-
-def lla_to_enu(lat: float, lon: float, alt: float,
-               ref_lat: float, ref_lon: float, ref_alt: float) -> tuple[float, float, float]:
-    """Flat-earth local ENU meters, about a reference. Good over a few km."""
-    east = math.radians(lon - ref_lon) * EARTH_R * math.cos(math.radians(ref_lat))
-    north = math.radians(lat - ref_lat) * EARTH_R
-    return east, north, alt - ref_alt
+IDENTITY_OFFSET = (0.0, 0.0, 0.0)
 
 
 class FiducialAlignment(Node):
@@ -77,9 +64,6 @@ class FiducialAlignment(Node):
         self.bc = StaticTransformBroadcaster(self)
         self.published = False
 
-        self.origin: tuple[float, float, float] | None = None
-        self.local: tuple[float, float, float] | None = None
-
         if not self.enabled:
             # Off means nothing to compute, so take no inputs at all.
             self.get_logger().info(
@@ -94,27 +78,21 @@ class FiducialAlignment(Node):
                 "and FIDUCIAL_MEASURED_*, or set FIDUCIAL_ENABLED=0.")
             return
 
-        self.sub_local = self.create_subscription(
-            PoseStamped, "/mavros/local_position/pose",
-            self._on_local, qos_profile_sensor_data)
-        self.sub_fix = self.create_subscription(
-            NavSatFix, "/mavros/global_position/global",
-            self._on_fix, qos_profile_sensor_data)
+        # The same origin estimate the Map panel publishers use, so the
+        # correction is measured against the frame they report in.
+        self.origin = MapOrigin(self)
         self.timer = self.create_timer(1.0, self._try_publish)
 
-    def _on_local(self, msg) -> None:
-        p = msg.pose.position
-        self.local = (p.x, p.y, p.z)
-
-    def _on_fix(self, msg) -> None:
-        # Walk the vehicle's own fix back to local zero, which is where the
-        # EKF frame starts.
-        if self.local is None or msg.status.status < 0:
-            return
-        x, y, z = self.local
-        lat = msg.latitude - math.degrees(y / EARTH_R)
-        lon = msg.longitude - math.degrees(x / (EARTH_R * math.cos(math.radians(msg.latitude))))
-        self.origin = (lat, lon, msg.altitude - z)
+    def _send(self, offset) -> None:
+        t = TransformStamped()
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = self.reference
+        t.child_frame_id = self.fiducial_frame
+        (t.transform.translation.x, t.transform.translation.y,
+         t.transform.translation.z) = offset
+        t.transform.rotation.w = 1.0
+        self.bc.sendTransform(t)
+        self.published = True
 
     def _publish_identity(self, reason: str) -> None:
         """Latch the identity transform, so the fiducial frame resolves and
@@ -122,66 +100,41 @@ class FiducialAlignment(Node):
         self.get_logger().error(
             f"{reason} Publishing the identity: positions in "
             f"'{self.fiducial_frame}' carry no correction.")
-        t = TransformStamped()
-        t.header.stamp = self.get_clock().now().to_msg()
-        t.header.frame_id = self.reference
-        t.child_frame_id = self.fiducial_frame
-        t.transform.rotation.w = 1.0
-        self.bc.sendTransform(t)
-        self.published = True
+        self._send(IDENTITY_OFFSET)
 
     def _try_publish(self) -> None:
-        if self.published or not self.enabled or self.origin is None:
+        origin = self.origin.lla
+        if self.published or origin is None:
             return
 
-        s = lla_to_enu(*self.surveyed, *self.origin)
-        m = lla_to_enu(*self.measured, *self.origin)
+        surveyed = lla_to_enu(*self.surveyed, *origin)
+        measured = lla_to_enu(*self.measured, *origin)
         # Where the true position sits relative to where we reported it.
-        correction = (s[0] - m[0], s[1] - m[1], s[2] - m[2])
+        correction = tuple(s - m for s, m in zip(surveyed, measured))
+        distance = math.hypot(*correction)
 
-        if math.hypot(*correction) > MAX_CORRECTION_M:
+        if distance > MAX_CORRECTION_M:
             self._publish_identity(
-                f"the fiducial correction came out {math.hypot(*correction):.0f} m, "
-                f"past the {MAX_CORRECTION_M:.0f} m bound. Check the surveyed "
-                f"and the measured coordinates against each other.")
+                f"the fiducial correction came out {distance:.0f} m, past the "
+                f"{MAX_CORRECTION_M:.0f} m bound. Check the surveyed and the "
+                f"measured coordinates against each other.")
         else:
             # The child frame origin goes at minus the correction, so that
             # transforming a point out of `reference` and into `fiducial` adds
             # it. Getting this sign backwards doubles the error instead of
             # removing it, which looks like the correction made things worse.
-            t = TransformStamped()
-            t.header.stamp = self.get_clock().now().to_msg()
-            t.header.frame_id = self.reference
-            t.child_frame_id = self.fiducial_frame
-            t.transform.translation.x = -correction[0]
-            t.transform.translation.y = -correction[1]
-            t.transform.translation.z = -correction[2]
-            t.transform.rotation.w = 1.0
-            self.bc.sendTransform(t)
-            self.published = True
-
+            self._send(tuple(-c for c in correction))
             self.get_logger().info(
                 f"fiducial correction: east {correction[0]:+.2f} m, "
                 f"north {correction[1]:+.2f} m, up {correction[2]:+.2f} m. "
                 f"Positions in '{self.fiducial_frame}' carry it.")
 
-        # Done for good: the broadcaster latches the transform. Re-publishing
-        # on a parameter change would need these recreated.
+        # Done for good: the broadcaster latches the transform.
         self.timer.cancel()
-        self.destroy_subscription(self.sub_local)
-        self.destroy_subscription(self.sub_fix)
 
 
 def main() -> None:
-    rclpy.init()
-    node = FiducialAlignment()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.try_shutdown()
+    spin(FiducialAlignment)
 
 
 if __name__ == "__main__":

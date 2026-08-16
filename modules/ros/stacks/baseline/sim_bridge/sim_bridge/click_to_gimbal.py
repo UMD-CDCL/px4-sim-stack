@@ -1,135 +1,35 @@
 #!/usr/bin/env python3
 """Turn clicks on the gimbal image into gimbal action.
 
-Foxglove publishes the clicked pixel as a PointStamped, x and y in image
-coordinates. The click_mode parameter decides what one click does, and
-because it is one parameter the modes cannot overlap:
+Foxglove publishes the clicked pixel as a PointStamped. click_mode decides
+what one click does:
 
-    roi     hold the camera on the ground point under the pixel. Default.
-    point   put the camera axis on the pixel: pitch and roll hold against
-            the horizon, and yaw follows the vehicle heading.
+    roi     hold the camera on the scene point under the pixel. Default.
+    point   hold the clicked pitch against the horizon, yaw follows the
+            vehicle heading.
     off     ignore clicks.
 
-Foxglove can flood the click topic with cursor events, and each
-processed click runs a TF lookup that can block for TF_TIMEOUT_S. A
-trailing-edge guard therefore processes at most one click each
-CLICK_MIN_INTERVAL_S: a click inside the interval waits as the pending
-click, newest wins, and a one-shot timer lands it when the interval
-ends. No final click is dropped, and a same-pixel re-click lands like
-any other, because it is the user's recovery action.
+A hold persists across mode changes and through off mode; the modes only
+decide what a new click does. A new click replaces the hold, and
+/gimbal/center releases it.
 
-Both click behaviors are the gimbal protocol's stabilized ones. An ROI
-holds every axis on the point. A point click uses the protocol's
-default lock flags: roll and pitch locked to the horizon, yaw
-unlocked, so the view turns with the aircraft. A hold persists across
-mode changes and through off mode: the modes only decide what a new
-click does. A new click replaces the hold, and /gimbal/center releases
-it.
+gimbal_convention selects how a command is expressed. "mavlink" sends an
+earth-referenced attitude with the lock flags set and lets the device
+stabilize, and uses DO_SET_ROI_LOCATION for a hold. "gz_sim" sends a
+vehicle-relative attitude with the flags clear and lets roi_tracker.py do
+the stabilizing, because PX4's simulated gimbal ignores the flags and
+computes an ROI attitude only once. docs/px4-simulated-gimbal.md states
+every device behavior this accommodates, and why a command must never be
+built from the TF gimbal segment alone, which carries the EKF heading error.
 
-The mode changes at runtime with `ros2 param set` or the Foxglove
-Parameters panel, and the current mode is published latched on
-/gimbal/click_mode for the layout's indicator. Three Trigger services,
-/gimbal/click_mode/roi, /gimbal/click_mode/point and
-/gimbal/click_mode/off, set the mode with an empty request, so a
-Foxglove service-call button needs no payload. Each goes through the
-parameter, which stays the single source of truth. A fourth service,
-/gimbal/center, releases any hold and points the gimbal straight
-ahead, pitch and yaw zero, the same center command the recovery path
-uses. The mode does not change.
-
-In roi mode the node casts the pixel ray with the camera intrinsics,
-intersects the scene, and records the region of interest: a latched
-reference-frame PointStamped on /gimbal/roi_local, and one latched
-GeoJSON point feature on /gimbal/roi_geojson for the Map panel. GeoJSON
-rather than a NavSatFix because a latched NavSatFix cannot be taken
-back: when the hold is released, by a point click or by /gimbal/center,
-an empty feature collection goes out and the marker leaves the map, the
-same clearing the footprints use.
-The intersection comes from sim_bridge/localization.py, the same
-localizer the detection localizers use, so a click on a detection's
-pixel holds the gimbal on the point the detection was localized to.
-Its localization_mode parameter selects the flat plane latched at the
-takeoff altitude or the scene surface scenegen build writes, terrain
-and roofs: a click on a roof holds the roof, not the ground under it.
-A ray that meets no ground within the footprint limit drops the click
-with a warning. What happens next depends on the gimbal convention. With
-"gz_sim", roi_tracker.py holds the camera on the point, because PX4
-cannot: its v2 gimbal output computes the ROI attitude once per command,
-and the simulated gimbal ignores the frame flags. With "mavlink" the
-node sends DO_SET_ROI_LOCATION and the autopilot does the holding, the
-same path QGC uses, and a point click on top of an ROI sends
-DO_SET_ROI_NONE first.
-
-In point mode the command leaves as the MAVLink
-GIMBAL_MANAGER_SET_ATTITUDE message through the mavros gimbal_control
-plugin: the clicked pitch against the horizon, the clicked yaw as an
-offset from the vehicle heading, roll zero. An honest gimbal
-stabilizes it because the flags say so, and roi_tracker.py does the
-same for the simulated gimbal.
-
-How a command is expressed depends on which convention the gimbal
-obeys. A gimbal that obeys MAVLink reads the lock flags: the node
-sends the roll and pitch lock flags with yaw unlocked, so the
-quaternion carries a horizon-referenced pitch and a heading-relative
-yaw, and the device does the stabilizing. That is the "mavlink"
-convention.
-
-PX4's simulated gimbal does not read the flags. PX4's gimbal module
-passes the setpoint quaternion through unchanged (output_mavlink.cpp,
-OutputMavlinkV2). GZGimbal.cpp (pollSetpoint) converts it to Euler
-angles and writes them onto the CGO3 joint position controllers, and
-the joints ride on the airframe. The joint chain is the 180 degree
-mount in x500_recon/model.sdf, the yaw joint on -z and the pitch joint
-on +y in gimbal/model.sdf, and the camera sensor yawed 180 degrees
-inside its link. That chain realizes the commanded Euler angles
-exactly, vehicle relative, in the aerospace sign convention, verified
-against Gazebo link poses to 0.1 degrees. The device is a follow mode
-gimbal on every axis, whatever the flags say. So the "gz_sim"
-convention sends a vehicle-relative attitude with the lock flags
-clear, which also labels the setpoint honestly for scene_tf.
-
-The world direction of a click comes from the full map to optical TF
-chain, which is world true. The gimbal segment of that tree alone
-carries the EKF heading error, measured at 16 degrees in flight,
-because it divides the device report, which Gazebo builds from ground
-truth, by the EKF attitude. Composing the vehicle attitude back on
-cancels the error exactly, so the full chain is safe and the
-vehicle-relative half is not. roi_tracker.py therefore converts world
-targets back to vehicle-relative joints with a corrected vehicle
-attitude, built from that chain and the joint state in
-cmd_q_body_link. A gimbal moved by another controller, usually the
-QGC joystick, leaves that state stale. Each click therefore compares
-the joint state the TF chain implies, under the standing correction,
-against cmd_q_body_link, and adopts the TF answer when they disagree:
-the disagreement belongs to the joints, because the correction only
-drifts at EKF speed. A click from any gimbal pose then lands without
-an initial offset. GIMBAL_DEVICE_SET_ATTITUDE would carry the joint
-setpoint directly, but mavros does not translate it, so the TF chain
-is the one live source.
-
-Two earlier wrong answers are worth recording. A calibration at rest
-measured a constant 90 degree yaw error and subtracted it as a mount
-offset, but the vehicle spawns facing east, compass 90 degrees, so the
-constant was the vehicle heading. A later version read the ray from
-the TF vehicle segment and inherited the EKF heading error above.
-docs/interfaces.md section 6 records the sibling bug in the reported
-attitude.
-
-PX4 ignores the setpoint unless its sender holds primary gimbal control
-(input_mavlink.cpp, _process_set_attitude), and it drops it silently. The
-node therefore claims control with DO_GIMBAL_MANAGER_CONFIGURE at startup,
-and claims again when a command goes out while someone else, usually QGC,
-holds control. It never wrestles control back on a timer: outside a click
-there is no user intent to act on. The claim goes through the generic
-/mavros/cmd/command service, not the gimbal_control configure service.
-The configure handler blocks its plugin's executor until the command is
-acknowledged, so one lost acknowledgment stops that plugin from sending
-any gimbal message at all. The command plugin times out and recovers.
-A claim whose response never arrives is treated as a stuck gimbal, and
-the recovery is the center action QGC offers: command pitch and yaw
-zero, straight ahead. That command also hands primary control to its
-sender, so it doubles as the claim. ROI location commands go to the
-navigator instead and need no gimbal control at all.
+PX4 drops a setpoint silently unless its sender holds primary gimbal
+control, so the node claims control at startup and again whenever a command
+goes out while another party holds it. The claim goes through the generic
+/mavros/cmd/command service rather than the gimbal_control configure
+service, whose handler blocks its plugin's executor until acknowledged: one
+lost acknowledgment would stop that plugin sending any gimbal message at
+all. A claim that never answers is treated as a stuck gimbal and recovered
+with the center command, which also hands control to its sender.
 
 Subscribes
     <click_topic>        geometry_msgs/PointStamped, pixels on the image
@@ -145,7 +45,9 @@ Publishes
     /mavros/gimbal_control/manager/set_attitude
     /gimbal/click_mode   std_msgs/String, latched
     /gimbal/roi_local    geometry_msgs/PointStamped, latched
-    /gimbal/roi_geojson  foxglove_msgs/GeoJSON, latched, empty when unset
+    /gimbal/roi_geojson  foxglove_msgs/GeoJSON, latched, empty when unset.
+                         GeoJSON rather than NavSatFix because a latched fix
+                         cannot be taken back when the hold is released.
 
 Serves
     /gimbal/click_mode/{roi,point,off}   std_srvs/Trigger
@@ -154,7 +56,6 @@ Serves
 
 from __future__ import annotations
 
-import json
 import math
 import time
 
@@ -166,18 +67,10 @@ from rcl_interfaces.msg import SetParametersResult
 from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.parameter import Parameter
-from rclpy.qos import (QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile,
-                       qos_profile_sensor_data)
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, NavSatFix
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
-from tf2_ros import Buffer, TransformListener
-
-try:
-    from foxglove_msgs.msg import GeoJSON
-    HAVE_FOXGLOVE = True
-except ImportError:
-    HAVE_FOXGLOVE = False
 
 from sim_bridge.geo import MapOrigin
 from sim_bridge.localization import GroundLocalizer
@@ -187,6 +80,8 @@ from sim_bridge.projection import (GROUND_VIEW_MAX_DISTANCE_M,
                                    quat_rotate, ray_in_optical,
                                    ros_to_aerospace, rpy_from_quat, wrap_pi)
 from sim_bridge.roi_tracker import RoiTracker
+from sim_bridge.runtime import (LATCHED, geojson_publisher, now_s,
+                                publish_features, spin, tf_buffer)
 
 # ------------------------------------------------------------------- tunables
 # How often the startup claim retries until the autopilot accepts one.
@@ -228,9 +123,6 @@ FOLLOW_LOCK_FLAGS = (
     GimbalManagerSetAttitude.GIMBAL_MANAGER_FLAGS_ROLL_LOCK
     | GimbalManagerSetAttitude.GIMBAL_MANAGER_FLAGS_PITCH_LOCK)
 
-LATCHED = QoSProfile(durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
-                     history=QoSHistoryPolicy.KEEP_LAST, depth=1)
-
 
 class ClickToGimbal(Node):
     def __init__(self) -> None:
@@ -270,12 +162,7 @@ class ClickToGimbal(Node):
         # steers the joints to zero without a setpoint, and _center
         # commands the same zero.
         self.cmd_q_body_link = (0.0, 0.0, 0.0, 1.0)
-
-        self.tf_buffer = Buffer()
-        # spin_thread=True is required. On this node's executor, a lookup that
-        # waits for a transform would block the callback that delivers it.
-        self.tf_listener = TransformListener(self.tf_buffer, self,
-                                             spin_thread=True)
+        self.tf_buffer = tf_buffer(self)
 
         self.info: CameraInfo | None = None
         self.vehicle_q: tuple[float, float, float, float] | None = None
@@ -296,14 +183,8 @@ class ClickToGimbal(Node):
                                               LATCHED)
         self.roi_point_pub = self.create_publisher(PointStamped,
                                                    "/gimbal/roi_local", LATCHED)
-        self.roi_geojson_pub = None
-        if HAVE_FOXGLOVE:
-            self.roi_geojson_pub = self.create_publisher(
-                GeoJSON, "/gimbal/roi_geojson", LATCHED)
-        else:
-            self.get_logger().error(
-                "foxglove_msgs is missing, so the Map panel gets no ROI "
-                "marker. Install ros-$ROS_DISTRO-foxglove-msgs.")
+        self.roi_geojson_pub = geojson_publisher(
+            self, "/gimbal/roi_geojson", "the Map panel gets no ROI marker")
         self.claim_client = self.create_client(CommandLong, "/mavros/cmd/command")
         # CommandInt carries only the ROI location commands, which exist
         # only on the mavlink convention.
@@ -456,8 +337,7 @@ class ClickToGimbal(Node):
     # ------------------------------------------------------------------- claim
     def _claim_tick(self) -> None:
         if self.claim_inflight:
-            now = self.get_clock().now().nanoseconds / 1e9
-            if now - self.claim_sent_at > CLAIM_RECOVER_S:
+            if now_s(self) - self.claim_sent_at > CLAIM_RECOVER_S:
                 self.claim_inflight = False
                 self.get_logger().warn(
                     "gimbal control claim got no response, centering the "
@@ -502,7 +382,7 @@ class ClickToGimbal(Node):
         if self.claim_inflight or not self.claim_client.service_is_ready():
             return False
         self.claim_inflight = True
-        self.claim_sent_at = self.get_clock().now().nanoseconds / 1e9
+        self.claim_sent_at = now_s(self)
         self.claim_future = self.claim_client.call_async(request)
         self.claim_future.add_done_callback(self._on_claim_done)
         return True
@@ -656,22 +536,15 @@ class ClickToGimbal(Node):
         self._publish_roi_geojson(latlon)
 
     def _publish_roi_geojson(self, latlon) -> None:
-        """Publish the ROI to the Map panel as one GeoJSON point, or clear
-        it with an empty collection when latlon is None."""
-        if self.roi_geojson_pub is None:
-            return
-        features = []
-        if latlon is not None:
-            features.append({
-                "type": "Feature",
-                "geometry": {"type": "Point",
-                             "coordinates": [latlon[1], latlon[0]]},
-                "properties": {"name": "gimbal roi"},
-            })
-        msg = GeoJSON()
-        msg.geojson = json.dumps(
-            {"type": "FeatureCollection", "features": features})
-        self.roi_geojson_pub.publish(msg)
+        """Publish the ROI as one GeoJSON point, or clear it with an empty
+        collection when latlon is None."""
+        features = [] if latlon is None else [{
+            "type": "Feature",
+            "geometry": {"type": "Point",
+                         "coordinates": [latlon[1], latlon[0]]},
+            "properties": {"name": "gimbal roi"},
+        }]
+        publish_features(self.roi_geojson_pub, features)
 
     def _send_roi_location(self, hit) -> None:
         rel_alt = self.localizer.ground_plane.rel_alt
@@ -751,15 +624,7 @@ class ClickToGimbal(Node):
 
 
 def main() -> None:
-    rclpy.init()
-    node = ClickToGimbal()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.try_shutdown()
+    spin(ClickToGimbal)
 
 
 if __name__ == "__main__":

@@ -107,13 +107,9 @@ def _pose(x: float, y: float, z: float, yaw_rad: float = 0.0) -> str:
     return f"{x:.3f} {y:.3f} {z:.3f} 0 0 {yaw_rad:.4f}"
 
 
-def _stable_choice(options: list[str], key: str) -> str:
-    return options[sum(key.encode()) % len(options)]
-
-
 def _wall_rgba(building_id: str) -> tuple[float, float, float, float]:
     gray_low, gray_high = BUILDING_GRAY_RANGE
-    gray = gray_low + (sum(building_id.encode()) % 100) / 100.0 * (gray_high - gray_low)
+    gray = gray_low + scene_model.unit_hash(building_id) * (gray_high - gray_low)
     return (gray, gray, gray * 0.97, 1.0)
 
 
@@ -344,10 +340,10 @@ def build_target_scenario(scene: scene_model.SceneSpec,
         floor = _floor_z(placed, grid, meta, scene.origin_alt_m,
                          target.east_m, target.north_m, target.on_building)
         z = floor + (target.agl_m or 0.0)
-        uri = target.model_uri or _stable_choice(scene_model.CASUALTY_MODEL_POOL,
-                                                 scene.name + name)
+        uri = target.model_uri or scene_model.stable_choice(
+            scene_model.CASUALTY_MODEL_POOL, scene.name + name)
         yaw_deg = target.yaw_deg if target.yaw_deg is not None \
-            else float(sum((scene.name + name).encode()) % 360)
+            else scene_model.unit_hash(scene.name + name + ":yaw") * 360.0
         entities.append({"name": name, "uri": uri,
                          "pose": [round(target.east_m, 3), round(target.north_m, 3),
                                   round(z, 3), 0, 0,
@@ -389,8 +385,8 @@ def tree_instances(scene: scene_model.SceneSpec) -> list[dict]:
     return instances
 
 
-def build_world_sdf(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
-                    placed: list[PlacedBuilding], grid, meta) -> tuple[str, dict]:
+def build_world_sdf(scene: scene_model.SceneSpec, placed: list[PlacedBuilding],
+                    grid, meta) -> tuple[str, dict]:
     origin_alt = scene.origin_alt_m
     counts = {"buildings": 0, "building_overrides": 0, "vehicles": 0}
 
@@ -409,8 +405,9 @@ def build_world_sdf(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
     for vehicle in scene.vehicles:
         if not vehicle.enabled:
             continue
-        uri = vehicle.model_uri or _stable_choice(
-            VEHICLE_MODEL_POOLS.get(vehicle.cls, VEHICLE_MODEL_POOLS["car"]), vehicle.id)
+        uri = vehicle.model_uri or scene_model.stable_choice(
+            VEHICLE_MODEL_POOLS.get(vehicle.cls, VEHICLE_MODEL_POOLS["car"]),
+            vehicle.id)
         floor = _floor_z(placed, grid, meta, origin_alt,
                          vehicle.east_m, vehicle.north_m, vehicle.on_building)
         model_yaw = vehicle.heading_deg + VEHICLE_MODEL_YAW_OFFSET_DEG.get(uri, 0.0)
@@ -559,6 +556,23 @@ def build_world_sdf(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
     return world, counts
 
 
+def _texture_dir(scenes_dir: Path, model_name: str, scene: scene_model.SceneSpec,
+                 scene_data_dir: Path) -> Path:
+    """A model directory with the satellite texture in place, ready for its
+    mesh. Both generated models wear the same image."""
+    model_dir = scenes_dir / "models" / model_name
+    (model_dir / "materials" / "textures").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(scene_data_dir / scene.imagery["file"],
+                 model_dir / "materials" / "textures" / "satellite.jpg")
+    return model_dir
+
+
+def _write_model_files(model_dir: Path, model_name: str, mesh_file: str,
+                       description: str) -> None:
+    (model_dir / "model.config").write_text(_model_config(model_name, description))
+    (model_dir / "model.sdf").write_text(_model_sdf(model_name, mesh_file))
+
+
 def _model_config(model_name: str, description: str) -> str:
     return f"""<?xml version="1.0"?>
 <model>
@@ -597,10 +611,7 @@ def write_buildings_model(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
     envelope roofs, one flat wall gray per cluster. Returns numbers for
     the build report."""
     model_name = f"{scene.name}_buildings"
-    model_dir = scenes_dir / "models" / model_name
-    (model_dir / "materials" / "textures").mkdir(parents=True, exist_ok=True)
-    shutil.copy2(scene_data_dir / scene.imagery["file"],
-                 model_dir / "materials" / "textures" / "satellite.jpg")
+    model_dir = _texture_dir(scenes_dir, model_name, scene, scene_data_dir)
 
     materials = [collada.Material(id="satellite",
                                   texture="../materials/textures/satellite.jpg")]
@@ -630,11 +641,10 @@ def write_buildings_model(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
         triangles += int(indices.shape[0])
 
     collada.write_dae(model_dir / "meshes" / "buildings.dae", materials, geometries)
-    (model_dir / "model.config").write_text(_model_config(
-        model_name, f"Buildings of the {scene.name} scene, extruded from "
-                    f"map footprints with the satellite image over the "
-                    f"roofs. Generated by modules/scenegen."))
-    (model_dir / "model.sdf").write_text(_model_sdf(model_name, "buildings.dae"))
+    _write_model_files(model_dir, model_name, "buildings.dae",
+                       f"Buildings of the {scene.name} scene, extruded from map "
+                       f"footprints with the satellite image over the roofs. "
+                       f"Generated by modules/scenegen.")
     return {"holes": sum(cluster.holes for cluster in clusters),
             "triangles": triangles}
 
@@ -690,19 +700,15 @@ def run(scene_data_dir: Path, scenes_dir: Path) -> int:
     grid = terrain_mesh.apply_flatten_zones(raw_grid, meta, scene.flatten_zones,
                                             scene.origin_alt_m)
 
-    model_dir = scenes_dir / "models" / f"{scene.name}_terrain"
-    (model_dir / "materials" / "textures").mkdir(parents=True, exist_ok=True)
-    shutil.copy2(scene_data_dir / scene.imagery["file"],
-                 model_dir / "materials" / "textures" / "satellite.jpg")
+    terrain_name = f"{scene.name}_terrain"
+    model_dir = _texture_dir(scenes_dir, terrain_name, scene, scene_data_dir)
     mesh_stats = terrain_mesh.write_terrain_dae(
         frame, grid, meta, scene.imagery, scene.origin_alt_m,
         "../materials/textures/satellite.jpg", model_dir / "meshes" / "terrain.dae")
-    (model_dir / "model.config").write_text(_model_config(
-        f"{scene.name}_terrain",
-        f"Terrain for the {scene.name} scene: elevation grid with the "
-        f"satellite image draped over it. Generated by modules/scenegen."))
-    (model_dir / "model.sdf").write_text(_model_sdf(f"{scene.name}_terrain",
-                                                    "terrain.dae"))
+    _write_model_files(model_dir, terrain_name, "terrain.dae",
+                       f"Terrain for the {scene.name} scene: elevation grid with "
+                       f"the satellite image draped over it. Generated by "
+                       f"modules/scenegen.")
 
     placed, dropped_outside = place_buildings(scene, grid, meta)
     clusters = cluster_buildings(placed)
@@ -711,7 +717,7 @@ def run(scene_data_dir: Path, scenes_dir: Path) -> int:
         building_stats = write_buildings_model(scene, frame, clusters,
                                                scene_data_dir, scenes_dir)
 
-    world, counts = build_world_sdf(scene, frame, placed, grid, meta)
+    world, counts = build_world_sdf(scene, placed, grid, meta)
     world_path = scenes_dir / "worlds" / f"{scene.name}.sdf"
     world_path.parent.mkdir(parents=True, exist_ok=True)
     world_path.write_text(world)
@@ -761,9 +767,8 @@ def run(scene_data_dir: Path, scenes_dir: Path) -> int:
               f"vehicles   {counts['vehicles']}",
               f"trees      {counts['trees']} placed, {counts['trees_skipped']} "
               f"under buildings or outside the square dropped"]
-    if scenario_path:
-        report.append(f"scenario   {scenario_path}")
-        report += ["  " + line for line in target_lines]
+    report.append(f"scenario   {scenario_path}")
+    report += ["  " + line for line in target_lines]
     report.append("")
     report.append("Put these two in .env; home and fiducial ride inside the "
                   "scenario file:")

@@ -2,39 +2,21 @@
 """Lay the live camera image on the localization surface, in 3D.
 
 Foxglove's 3D panel cannot texture a surface with an image, so this projects
-a subsampled grid of pixels onto the scene and publishes them as a colored
-PointCloud2. The result is the camera view draped over the ground, next to
-the detections and the ground truth.
+a subsampled grid of pixels onto the surface sim_bridge/localization.py
+selects and publishes them as a colored PointCloud2. Detections localize onto
+the same surface, so a mosaic pixel showing a target lies where the localizer
+puts that target: imagery lined up with the truth bubbles means the
+localization is correct, and imagery that is out shows which way.
 
-The intersection comes from sim_bridge/localization.py, the one localizer
-this stack has: detections and the gimbal ROI click use the same one, so
-the mosaic pixel that shows a target lies exactly where the localizer puts
-that target. In plane mode the imagery lies flat at the takeoff altitude;
-in scene mode it drapes over the terrain and the roofs. When the imagery
-lines up with the ground truth bubbles, the localization is correct. When
-it does not, the picture shows which way it is out.
+Cost tracks what is displayed. The cloud stops at GROUND_VIEW_MAX_DISTANCE_M,
+the limit that also truncates the footprint; the rate, subscriber and
+intrinsics gates all run before the JPEG is decoded; and the grid rays are
+cached, so a steady stream pays for one decode, one rotation, one
+intersection and the packing.
 
-The cloud stops at GROUND_VIEW_MAX_DISTANCE_M, the same limit that
-truncates the footprint, so the imagery fills the outline that frames it.
-Rays are cast for the whole grid, but colors are gathered and points packed
-only for pixels that land inside the limit, so the cost tracks what is
-displayed: a camera near the horizon pays for the near ground it shows,
-not for the sky.
-
-The frame arrives as the camera's JPEG stream, the same encoding the image
-panels read, so no raw image topic has to exist. The rate limit, the
-subscriber check, and the intrinsics check all run before the JPEG is
-decoded, so a frame that will not be displayed costs almost nothing. The
-decode runs through GStreamer, the library the camera node encodes with.
-The rays through the grid depend only on the grid and the intrinsics, so
-they are computed once and reused: a steady stream pays only for one decode
-per period, the rotation, the intersection, and the packing.
-
-`size` is the resolution the frame is sampled down to, and it bounds the
-cost for both cameras. 640x360 is at most 230,400 points and 3.7 MB per
-message, which already reads as a picture. Scene mode marches every ray
-over the terrain, about 1.5 s for that grid; a mosaic that lags the
-GROUND_IMAGE_RATE is the sign to lower GROUND_IMAGE_SIZE.
+`size` bounds the cost. 640x360 is at most 230,400 points and 3.7 MB per
+message. Scene mode marches every ray over the terrain, about 1.5 s for that
+grid, so a mosaic lagging GROUND_IMAGE_RATE means lower GROUND_IMAGE_SIZE.
 
 Subscribes
     <ns>/image_raw/compressed, <ns>/camera_info
@@ -53,13 +35,12 @@ import numpy as np  # noqa: E402
 import rclpy  # noqa: E402
 from rclpy.duration import Duration  # noqa: E402
 from rclpy.node import Node  # noqa: E402
-from rclpy.qos import (HistoryPolicy, QoSProfile, ReliabilityPolicy,  # noqa: E402
-                       qos_profile_sensor_data)
+from rclpy.qos import qos_profile_sensor_data  # noqa: E402
 from sensor_msgs.msg import CameraInfo, CompressedImage, PointCloud2, PointField  # noqa: E402
-from tf2_ros import Buffer, TransformListener  # noqa: E402
 
 from sim_bridge.localization import GroundLocalizer  # noqa: E402
 from sim_bridge.projection import GROUND_VIEW_MAX_DISTANCE_M, intrinsics_ready
+from sim_bridge.runtime import NEWEST_ONLY, now_s, spin, tf_buffer  # noqa: E402
 
 # The point layout, as one 16 byte record. Naming it here means point_step,
 # row_step and the packing can never drift apart.
@@ -69,11 +50,6 @@ POINT_DTYPE = np.dtype([("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("rgb", "<u4")
 # the aspect ratio of both cameras.
 STANDARD_SIZES = ("1920x1080", "1280x720", "960x540", "854x480", "640x360",
                   "480x270", "426x240", "240x135")
-
-# Keep only the newest frame. The publisher's queue is one deep, and this
-# node never wants an older frame than the one it just got.
-IMAGE_QOS = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
-                       history=HistoryPolicy.KEEP_LAST, depth=1)
 
 
 def parse_size(text: str) -> tuple[int, int] | None:
@@ -193,24 +169,27 @@ class ImageGroundProjector(Node):
         self.last_processed = 0.0
 
         self.decoder = JpegDecoder()
-        self.tf_buffer = Buffer(cache_time=Duration(seconds=5.0))
-        self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
+        self.tf_buffer = tf_buffer(self, cache_time=Duration(seconds=5.0))
 
         self.create_subscription(CameraInfo,
                                  self.get_parameter("camera_info_topic").value,
                                  self._on_info, qos_profile_sensor_data)
         self.create_subscription(CompressedImage,
                                  self.get_parameter("image_topic").value,
-                                 self._on_image, IMAGE_QOS)
+                                 self._on_image, NEWEST_ONLY)
 
         self.pub = self.create_publisher(PointCloud2, "ground_projection",
                                          qos_profile_sensor_data)
+
+    def destroy_node(self) -> bool:
+        self.decoder.close()
+        return super().destroy_node()
 
     def _on_info(self, msg: CameraInfo) -> None:
         self.info = msg
 
     def _on_image(self, msg: CompressedImage) -> None:
-        now = self.get_clock().now().nanoseconds / 1e9
+        now = now_s(self)
         if now - self.last_processed < self.min_period:
             return
         # The throttle does not advance here, so the first frame after a
@@ -230,19 +209,9 @@ class ImageGroundProjector(Node):
             return
         pixels, width, height, step = decoded
 
-        try:
-            # At the image's own timestamp, the same rule the localizer follows,
-            # so the imagery lands where the camera was when it was taken.
-            tf = self.tf_buffer.lookup_transform(
-                self.reference, self.optical,
-                rclpy.time.Time.from_msg(msg.header.stamp),
-                timeout=Duration(seconds=0.1))
-        except Exception:
-            try:
-                tf = self.tf_buffer.lookup_transform(
-                    self.reference, self.optical, rclpy.time.Time())
-            except Exception:
-                return
+        tf = self._camera_tf(msg.header.stamp)
+        if tf is None:
+            return
 
         t, r = tf.transform.translation, tf.transform.rotation
         origin = (t.x, t.y, t.z)
@@ -270,6 +239,21 @@ class ImageGroundProjector(Node):
         cloud.is_dense = True
         cloud.data = points.tobytes()
         self.pub.publish(cloud)
+
+    def _camera_tf(self, stamp):
+        """The camera pose at the frame time, so the imagery lands where the
+        camera was when it was taken. Falls back to the newest transform, and
+        gives up rather than draping a frame on a pose that never held."""
+        attempts = ((rclpy.time.Time.from_msg(stamp), 0.1),
+                    (rclpy.time.Time(), 0.0))
+        for when, timeout in attempts:
+            try:
+                return self.tf_buffer.lookup_transform(
+                    self.reference, self.optical, when,
+                    timeout=Duration(seconds=timeout))
+            except Exception:
+                continue
+        return None
 
     # -------------------------------------------------------------- the math
     def _sample_grid(self, width: int, height: int):
@@ -372,16 +356,7 @@ class ImageGroundProjector(Node):
 
 
 def main() -> None:
-    rclpy.init()
-    node = ImageGroundProjector()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.decoder.close()
-        node.destroy_node()
-        rclpy.try_shutdown()
+    spin(ImageGroundProjector)
 
 
 if __name__ == "__main__":

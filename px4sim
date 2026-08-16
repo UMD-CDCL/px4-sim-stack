@@ -48,6 +48,37 @@ need_sources() {
 	[ -d src/PX4-Autopilot ] || die "No PX4 source. Run: ./px4sim setup"
 }
 
+# Short names for the services whose compose name is longer. Every command
+# that takes a service resolves it here, so one name works everywhere.
+service_name() {
+	case "$1" in
+	hub) echo mavlink-hub ;;
+	bus) echo message-bus ;;
+	video) echo video-router ;;
+	*) echo "$1" ;;
+	esac
+}
+
+# Open a shell in a service. Probes quietly first: attaching to a missing
+# shell prints a raw OCI error before anything of ours can explain it.
+enter_service() {
+	local svc
+	svc=$(service_name "$1")
+	$DC ps --status running --services 2>/dev/null | grep -qx "$svc" \
+		|| die "$svc is not running. Run: ./px4sim start"
+	for candidate in bash sh; do
+		if $DC exec -T "$svc" "$candidate" -c 'exit 0' >/dev/null 2>&1; then
+			# A login shell in ros, so the stack overlay is sourced.
+			[ "$svc" = ros ] && exec $DC exec "$svc" "$candidate" -l
+			exec $DC exec "$svc" "$candidate"
+		fi
+	done
+	die "$svc has no shell. That image ships one binary and nothing else.
+    Look at it from outside instead:
+      ./px4sim logs $svc
+      docker inspect px4simstack-$svc-1"
+}
+
 usage() {
 	cat <<EOF
 ${BOLD}px4sim${OFF} - PX4, Gazebo, ROS 2 and DeepStream in containers
@@ -150,13 +181,7 @@ stop|down)
 	COMPOSE_PROFILES="$ALL_PROFILES" $DC down --remove-orphans
 	;;
 
-restart)
-	if [ $# -gt 0 ]; then
-		COMPOSE_PROFILES="$ALL_PROFILES" $DC restart "$@"
-	else
-		COMPOSE_PROFILES="$ALL_PROFILES" $DC restart
-	fi
-	;;
+restart)  COMPOSE_PROFILES="$ALL_PROFILES" $DC restart "$@" ;;
 
 status|ps)
 	COMPOSE_PROFILES="$ALL_PROFILES" $DC ps \
@@ -173,32 +198,8 @@ console)
 	docker attach "$id"
 	;;
 
-shell|sh)
-	svc=${1:-sim}
-	case "$svc" in
-		hub) svc=mavlink-hub ;;
-	esac
-	$DC exec "$svc" bash 2>/dev/null || $DC exec "$svc" sh
-	;;
-
-sim|ros|qgc|perception|hub|bus|video)
-	svc=$cmd
-	case "$cmd" in hub) svc=mavlink-hub ;; bus) svc=message-bus ;; video) svc=video-router ;; esac
-	$DC ps --status running --services 2>/dev/null | grep -qx "$svc" \
-		|| die "$svc is not running. Run: ./px4sim start"
-	# Probe quietly first. Attaching to a missing shell prints a raw OCI error
-	# before anything of ours can explain what happened.
-	for candidate in bash sh; do
-		if $DC exec -T "$svc" "$candidate" -c 'exit 0' >/dev/null 2>&1; then
-			[ "$svc" = ros ] && exec $DC exec "$svc" "$candidate" -l
-			exec $DC exec "$svc" "$candidate"
-		fi
-	done
-	die "$svc has no shell. That image ships one binary and nothing else.
-    Look at it from outside instead:
-      ./px4sim logs $svc
-      docker inspect px4simstack-$svc-1"
-	;;
+shell|sh)                       enter_service "${1:-sim}" ;;
+sim|ros|qgc|perception|hub|bus|video)  enter_service "$cmd" ;;
 
 streams)
 	say "Video paths"

@@ -93,28 +93,33 @@ Everything is graphical. You never edit a file to fix the scene.
   under it, and an offset above that floor.
 - `+ Car`, `+ Bus`, `+ Building`: click the map to place one. Hold shift
   to keep placing.
-- Shift-click stamps a copy of the last vehicle, target or tree you
-  placed or selected, at the click point. Buildings and the fiducial do
-  not stamp: selecting one leaves the stamp source where it was. A copy
-  takes the source's properties as they are at that moment, edits
-  included; a target copy gets a fresh name, because the scorer treats
-  the name as identity, and a pool-draw tree copy draws its own species.
-  Stamp a parking row, a cluster of casualties or a grove in a few
-  clicks; a ctrl-drag grabs the row afterward as a group.
-- Ctrl-drag (Cmd on macOS) draws a selection rectangle over vehicles,
-  buildings and targets; ctrl-click adds or drops one object. A selection
-  moves as a group. The white handle turns every selected object in
-  place; positions hold. The panel edits every field the selected objects
-  share, in bulk: rotation always, length and width for vehicles and
-  buildings, height for buildings, class for vehicles, floor and offset
-  for vehicles and targets, and model and inclusion for everything. A
-  field only some
-  of the selection has stays hidden, and target names stay one at a time.
-- Undo and redo cover every edit: `Ctrl+Z` and `Ctrl+Y`, or the arrow
-  buttons in the toolbar. One drag is one step.
+- Shift-click stamps a copy of the selected object at the click point.
+  Every kind stamps: vehicle, building, target, tree, tree area and
+  flatten zone. Only the fiducial does not, because a scene has exactly
+  one. A copy takes the source's properties as they are at that moment,
+  edits included; a target copy gets a fresh name, because the scorer
+  treats the name as identity, and a pool-draw tree copy draws its own
+  species. A polygon copy keeps its shape and lands centered on the
+  click. Stamp a parking row, a cluster of casualties or a grove in a
+  few clicks; a ctrl-drag grabs the row afterward as a group.
+- Ctrl-drag (Cmd on macOS) draws a selection rectangle over every kind;
+  ctrl-click adds or drops one object. A selection moves as a group. The
+  white handle turns every selected object in place; positions hold. A
+  polygon turns about its own centroid, because it has no heading field.
+  The panel edits every field the selected objects share, in bulk:
+  length and width for vehicles and buildings, height for buildings,
+  class for vehicles, rotation for anything with a heading, floor and
+  offset for vehicles and targets, and model and inclusion for
+  everything that has them. A field only some of the selection has stays
+  hidden, and target names stay one at a time.
+- Undo and redo cover every edit of every kind, trees and tree areas
+  included: `Ctrl+Z` and `Ctrl+Y`, or the arrow buttons in the toolbar.
+  One drag is one step.
 - Click a building to set its height, reset it to the map's value,
-  replace its mesh with a model URI, or take it out of the world (`Del`
-  toggles an OSM building, removes a hand-placed one).
+  replace its mesh with a model URI, or take it out of the world. `Del`
+  removes a hand-placed building and excludes an OSM one, whose map data
+  cannot be fetched again without recreating the scene; the panel
+  checkbox puts it back.
 - `+ Target`: click to place a ground-truth casualty (green circle with
   its name). Drag to move it; the panel sets name, model, the floor it
   stands on (the terrain, or the building under it when snapped), an

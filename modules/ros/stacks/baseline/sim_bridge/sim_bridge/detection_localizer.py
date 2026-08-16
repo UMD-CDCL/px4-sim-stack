@@ -1,23 +1,15 @@
 #!/usr/bin/env python3
-"""Turn image-space detections into ground positions.
+"""Turn image-space detections into ground positions. One node per camera.
 
-For each detection this casts a ray through its box anchor, intersects
-the scene, and reports where the object stands. The intersection comes
-from sim_bridge/localization.py, the one localizer this stack has: the
-gimbal click uses the same one, so a click and a detection through the
-same pixel land on the same point. Its localization_mode parameter
-selects the flat plane latched at takeoff or the scene surface scenegen
-build writes; see that module.
+Each detection casts a ray through its box anchor onto the surface
+sim_bridge/localization.py selects, so a click and a detection through the
+same pixel land on the same point.
 
-Every transform lookup uses the detection stamp, which is the frame time
-DeepStream reported, not the arrival time. Detections arrive 60 to 90 ms
-after capture, and a moving drone or a slewing gimbal makes "where is the
-camera now" the wrong question. When no transform exists at the frame time,
-the detection is dropped: a silently wrong position is worse than a missing
-one.
-
-One node runs for each camera, in its own namespace. The two cameras answer
-different questions, so their topics are never merged.
+Every transform lookup uses the detection stamp, the frame time DeepStream
+reported. Detections arrive 60 to 90 ms after capture, and a moving drone or
+a slewing gimbal makes "where is the camera now" the wrong question. With no
+transform at the frame time the detection is dropped: a silently wrong
+position is worse than a missing one.
 
 Publishes, under /perception/<camera>/
     detections_3d   vision_msgs/Detection3DArray with covariance
@@ -27,15 +19,12 @@ from __future__ import annotations
 
 import math
 
-import rclpy
 from geometry_msgs.msg import Pose
 from rclpy.duration import Duration
 from rclpy.node import Node
-from rclpy.qos import (QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy,
-                       qos_profile_sensor_data)
+from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo
-from tf2_ros import Buffer, TransformListener
 from vision_msgs.msg import (
     BoundingBox3D,
     Detection2DArray,
@@ -47,6 +36,7 @@ from vision_msgs.msg import (
 from sim_bridge.localization import GroundLocalizer
 from sim_bridge.projection import (intrinsics_ready, quat_rotate,
                                    ray_in_optical, slant_range)
+from sim_bridge.runtime import BEST_EFFORT, spin, tf_buffer
 
 # ------------------------------------------------------------------- tunables
 # Diagonal of the 6x6 pose covariance, in m^2 and rad^2, as
@@ -91,30 +81,17 @@ class DetectionLocalizer(Node):
         self.reference = self.get_parameter("reference_frame").value
         self.anchor = self.get_parameter("anchor").value
         self.output_frame = self.get_parameter("output_frame").value or self.reference
-        # Declares localization_mode, surface_file, use_rel_alt and
-        # ground_z, and answers every ray. See sim_bridge/localization.py.
         self.localizer = GroundLocalizer(self)
         self.warned_output = False
-
-        self.tf_buffer = Buffer(cache_time=Duration(seconds=10.0))
-        # spin_thread=True is required. On this node's executor, a lookup that
-        # waits for a transform would block the callback that delivers it.
-        self.tf_listener = TransformListener(self.tf_buffer, self,
-                                             spin_thread=True)
+        self.tf_buffer = tf_buffer(self, cache_time=Duration(seconds=10.0))
 
         self.info: CameraInfo | None = None
-
-        # Sensor QoS throughout: these topics are best effort, and a reliable
-        # subscription to a best effort publisher receives nothing.
-        detections_qos = QoSProfile(
-            reliability=QoSReliabilityPolicy.BEST_EFFORT,
-            history=QoSHistoryPolicy.KEEP_LAST, depth=10)
         self.create_subscription(CameraInfo,
                                  self.get_parameter("camera_info_topic").value,
                                  self._on_info, qos_profile_sensor_data)
         self.create_subscription(Detection2DArray,
                                  self.get_parameter("detections_topic").value,
-                                 self._on_detections, detections_qos)
+                                 self._on_detections, BEST_EFFORT)
 
         self.det3d_pub = self.create_publisher(Detection3DArray, "detections_3d", 10)
 
@@ -189,13 +166,12 @@ class DetectionLocalizer(Node):
             hypothesis.hypothesis.score = (
                 det.results[0].hypothesis.score if det.results else 0.0)
             hypothesis.pose.pose = pose
+            # The diagonal of a row-major 6x6. Range widens x and y only; z is
+            # fixed by the surface and the angles are not estimated.
+            spread = [range_variance, range_variance, 0.0, 0.0, 0.0, 0.0]
             covariance = [0.0] * 36
-            covariance[0] = COVARIANCE_DIAGONAL[0] + range_variance    # x
-            covariance[7] = COVARIANCE_DIAGONAL[1] + range_variance    # y
-            covariance[14] = COVARIANCE_DIAGONAL[2]     # z, fixed by the plane
-            covariance[21] = COVARIANCE_DIAGONAL[3]
-            covariance[28] = COVARIANCE_DIAGONAL[4]
-            covariance[35] = COVARIANCE_DIAGONAL[5]
+            for axis, (base, extra) in enumerate(zip(COVARIANCE_DIAGONAL, spread)):
+                covariance[axis * 7] = base + extra
             hypothesis.pose.covariance = covariance
 
             d3 = Detection3D()
@@ -276,15 +252,7 @@ class DetectionLocalizer(Node):
 
 
 def main() -> None:
-    rclpy.init()
-    node = DetectionLocalizer()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.try_shutdown()
+    spin(DetectionLocalizer)
 
 
 if __name__ == "__main__":

@@ -149,13 +149,23 @@ def run(host: str, port: int, mode: str, period: float, transport: str) -> int:
             time.sleep(2)
 
 
+# What KEEPALIVE accepts, and the mode each spelling means. None is off.
+KEEPALIVE_MODES = {
+    "0": None, "off": None, "false": None, "no": None,
+    "1": "always", "true": "always", "yes": "always", "always": "always",
+    "bootstrap": "bootstrap",
+}
+
+
 def main() -> int:
-    mode = os.environ.get("KEEPALIVE", "1").lower()
-    if mode in ("0", "off", "false", "no"):
+    setting = os.environ.get("KEEPALIVE", "1").lower()
+    if setting not in KEEPALIVE_MODES:
+        print(f"[keepalive] KEEPALIVE={setting!r} is not one of "
+              f"{sorted(KEEPALIVE_MODES)}. Using always.", flush=True)
+    mode = KEEPALIVE_MODES.get(setting, "always")
+    if mode is None:
         print("[keepalive] disabled", flush=True)
         return 0
-    if mode in ("1", "true", "yes"):
-        mode = "always"
 
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)

@@ -25,11 +25,10 @@ from __future__ import annotations
 
 import math
 
-import rclpy
 from geometry_msgs.msg import PoseStamped, TransformStamped
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from tf2_ros import TransformBroadcaster, StaticTransformBroadcaster
+from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
 
 try:
     from mavros_msgs.msg import GimbalDeviceAttitudeStatus
@@ -40,6 +39,7 @@ except ImportError:  # pragma: no cover - only when mavros_extras is absent
 from sim_bridge.projection import (LINK_TO_OPTICAL, aerospace_to_ros,
                                    body_frd_to_flu, quat_conj, quat_from_rpy,
                                    quat_mul)
+from sim_bridge.runtime import now_s, spin
 
 # ------------------------------------------------------------------- tunables
 GIMBAL_PUBLISH_RATE_HZ = 30.0
@@ -194,7 +194,7 @@ class SceneTf(Node):
     def _on_gimbal_setpoint(self, msg) -> None:
         if self.gimbal_source == "status":
             return
-        self.last_setpoint = self.get_clock().now().nanoseconds / 1e9
+        self.last_setpoint = now_s(self)
 
         # The setpoint is already vehicle relative on any axis whose LOCK
         # flag is clear, so it needs the body axis conversion and nothing
@@ -227,7 +227,7 @@ class SceneTf(Node):
 
         # MAVROS passes the PX4 quaternion through untouched, in aerospace
         # convention: NED reference, FRD body axes.
-        self.last_status = self.get_clock().now().nanoseconds / 1e9
+        self.last_status = now_s(self)
         absolute = aerospace_to_ros((msg.q.x, msg.q.y, msg.q.z, msg.q.w))
         if self.gimbal_reference == "earth":
             # The report is absolute, so divide the vehicle attitude off the
@@ -239,29 +239,20 @@ class SceneTf(Node):
             body = absolute
         self.q_status = quat_mul(body, self.gimbal_offset)
 
-    def _setpoint_fresh(self) -> bool:
-        if self.last_setpoint is None:
-            return False
-        now = self.get_clock().now().nanoseconds / 1e9
-        return (now - self.last_setpoint) < SETPOINT_TIMEOUT_S
-
-    def _status_fresh(self) -> bool:
-        if self.last_status is None:
-            return False
-        now = self.get_clock().now().nanoseconds / 1e9
-        return (now - self.last_status) < STATUS_FRESH_S
+    def _fresh(self, stamp: float | None, window: float) -> bool:
+        return stamp is not None and (now_s(self) - stamp) < window
 
     def _gimbal_choice(self) -> tuple[str, tuple]:
         """The orientation the frame tree gets, and its source for the log."""
-        if self.gimbal_source == "setpoint":
-            return "setpoint", self.q_setpoint
-        if self.gimbal_source == "status":
-            return "status", self.q_status
-        if self._status_fresh():
-            return "status", self.q_status
-        if self._setpoint_fresh():
-            return "setpoint", self.q_setpoint
-        return "status", self.q_status
+        if self.gimbal_source in ("setpoint", "status"):
+            source = self.gimbal_source
+        elif self._fresh(self.last_status, STATUS_FRESH_S):
+            source = "status"
+        elif self._fresh(self.last_setpoint, SETPOINT_TIMEOUT_S):
+            source = "setpoint"
+        else:
+            source = "status"    # nothing fresh: the stale report is the last resort
+        return source, (self.q_setpoint if source == "setpoint" else self.q_status)
 
     def _publish_gimbal(self) -> None:
         _, self.gimbal_q = self._gimbal_choice()
@@ -294,15 +285,7 @@ class SceneTf(Node):
 
 
 def main() -> None:
-    rclpy.init()
-    node = SceneTf()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.try_shutdown()
+    spin(SceneTf)
 
 
 if __name__ == "__main__":

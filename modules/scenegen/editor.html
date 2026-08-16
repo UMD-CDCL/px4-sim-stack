@@ -4,14 +4,9 @@
   /scene.json, /satellite.jpg and POST /save. Everything is plain JS on a
   canvas: no build step, no dependency, works offline.
 
-  What it edits, all in scene ENU meters on top of the satellite image:
-    vehicles       move, rotate, resize, add, delete, flip, class, model
-    buildings      select, change height, disable, name a model override,
-                   move/rotate/resize the box
-    trees          place one, or draw an area that fills at a density,
-                   with true canopy footprints drawn
-    flatten zones  draw polygons that level the terrain (overhang fix)
-    fiducial       drag the orange survey marker
+  Every kind of object is declared once in KINDS. Selection, stamping,
+  deletion, group edits, dragging and undo all read that table, so a kind
+  either exists there or it does not exist at all.
 -->
 <html lang="en">
 <head>
@@ -71,12 +66,12 @@
 <div id="main">
   <div id="canvas-wrap"><canvas id="canvas"></canvas></div>
   <div id="panel"><h3>Nothing selected</h3>
-    <div id="panel-body">Click a vehicle, a building outline, a tree, a zone or the
-    orange fiducial. Drag empty ground to pan, wheel to zoom.</div></div>
+    <div id="panel-body">Click a vehicle, a building outline, a target, a tree, a
+    zone or the orange fiducial. Drag empty ground to pan, wheel to zoom.</div></div>
 </div>
 <div id="help">
   drag empty = pan · wheel = zoom · handles: round = rotate, square = resize ·
-  shift-click = stamp a copy of the last vehicle, target or tree · ctrl-drag = select many ·
+  shift-click = stamp a copy of the selected object · ctrl-drag = select many ·
   ctrl-click an object = add or drop it from the selection ·
   <kbd>Ctrl+Z</kbd> undo · <kbd>Ctrl+Y</kbd> redo ·
   <kbd>F</kbd> flip · <kbd>Del</kbd> delete · <kbd>Esc</kbd> deselect ·
@@ -97,19 +92,15 @@ let scene = null;
 let image = new Image();
 let view = { s: 0.3, panX: 0, panY: 0 };
 let mode = "select";
-let selection = null;          // {kind: vehicle|building|zone|fiducial, index}
-let drag = null;               // {kind: pan|move|rotate|resize|vertex, ...}
+let selection = null;          // {kind, index}, or {kind: "fiducial"}
+let drag = null;
 let zoneDraft = [];
 let dirty = false;
-let vehicleCounter = 1;
-let buildingCounter = 1;
-let targetCounter = 1;
-let treeCounter = 1;
-let treeAreaCounter = 1;
+let counters = {};             // next free id number per kind
 let TREE_MODELS = [];          // /tree_models.json: uri, height_m, canopy_m
 let treeFillCache = {};        // generated points per area, keyed by params
 let multi = [];                // [{kind, index}] when several objects are selected
-let stampRef = null;           // {kind, id} of the object behind shift-click copies
+let stampRef = null;           // {kind, id} of the object shift-click copies
 let undoStack = [];
 let redoStack = [];
 const MAX_UNDO_STATES = 50;
@@ -135,9 +126,8 @@ function enuFromMouse(event) {
   const py = (event.clientY - rect.top) / view.s + view.panY;
   return enuFromImage(px, py);
 }
-
-// ------------------------------------------------------------------- drawing
 function metersToImagePx(meters) { return meters / mpp()[0]; }
+function lw(pixels) { return pixels / view.s; }
 
 function corners(x, y, length, width, headingDeg) {
   const a = headingDeg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
@@ -155,183 +145,7 @@ function polyPath(pointsEnu) {
   ctx.closePath();
 }
 
-function draw() {
-  const w = canvas.clientWidth, h = canvas.clientHeight;
-  if (canvas.width !== w) canvas.width = w;
-  if (canvas.height !== h) canvas.height = h;
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = "#14171c";
-  ctx.fillRect(0, 0, w, h);
-  if (!scene || !image.complete) return;
-  ctx.setTransform(view.s, 0, 0, view.s, -view.panX * view.s, -view.panY * view.s);
-  ctx.drawImage(image, 0, 0);
-  const lw = k => k / view.s;
-
-  scene.buildings.forEach((b, index) => {
-    const single = selection && selection.kind === "building" && selection.index === index;
-    const selected = single || isMultiMember("building", index);
-    ctx.strokeStyle = b.enabled ? "#62d98c" : "#777";
-    ctx.setLineDash(b.enabled ? [] : [lw(6), lw(5)]);
-    ctx.lineWidth = lw(selected ? 2.4 : 1.2);
-    if (b.outline_m.length > 2) {
-      polyPath(b.outline_m); ctx.stroke();
-      (b.holes_m || []).forEach(ring => {
-        if (ring.length > 2) { polyPath(ring); ctx.stroke(); }
-      });
-    }
-    if (selected || b.outline_m.length <= 2 || b.source !== "osm") {
-      ctx.setLineDash([lw(5), lw(4)]);
-      polyPath(corners(b.east_m, b.north_m, b.length_m, b.width_m, b.yaw_deg));
-      ctx.stroke();
-      if (single) drawHandles(b.east_m, b.north_m, b.length_m, b.width_m, b.yaw_deg, "#62d98c");
-    }
-    ctx.setLineDash([]);
-  });
-
-  scene.flatten_zones.forEach((z, index) => {
-    const selected = selection && selection.kind === "zone" && selection.index === index;
-    ctx.fillStyle = "rgba(255,92,225,0.14)";
-    ctx.strokeStyle = "#ff5ce1";
-    ctx.lineWidth = lw(selected ? 2.4 : 1.3);
-    polyPath(z.polygon_m); ctx.fill(); ctx.stroke();
-    if (selected) z.polygon_m.forEach(([e, n]) => squareHandle(e, n, "#ff5ce1"));
-  });
-
-  scene.tree_areas.forEach((a, index) => {
-    const selected = selection && selection.kind === "treearea" && selection.index === index;
-    const color = a.enabled ? "#4ade80" : "#777";
-    ctx.fillStyle = a.enabled ? "rgba(74,222,128,0.10)" : "rgba(120,120,120,0.10)";
-    ctx.strokeStyle = color;
-    ctx.setLineDash(a.enabled ? [] : [lw(6), lw(5)]);
-    ctx.lineWidth = lw(selected ? 2.4 : 1.3);
-    polyPath(a.polygon_m); ctx.fill(); ctx.stroke();
-    ctx.setLineDash([]);
-    if (selected) a.polygon_m.forEach(([e, n]) => squareHandle(e, n, color));
-    // The exact fill the build places: every canopy footprint, true size.
-    ctx.lineWidth = lw(1.0);
-    areaTreePoints(a).forEach(([e, n, key]) => {
-      const model = treeModelFor(key, a.min_height_m, a.max_height_m);
-      if (!model) return;
-      const [px, py] = imageFromEnu(e, n);
-      ctx.beginPath();
-      ctx.arc(px, py, Math.max(metersToImagePx(model.canopy_m / 2), lw(1.5)), 0, 7);
-      ctx.stroke();
-    });
-  });
-
-  scene.trees.forEach((t, index) => {
-    const selected = selection && selection.kind === "tree" && selection.index === index;
-    const [px, py] = imageFromEnu(t.east_m, t.north_m);
-    ctx.strokeStyle = t.enabled ? "#4ade80" : "#777";
-    ctx.lineWidth = lw(selected ? 2.6 : 1.4);
-    ctx.beginPath();
-    ctx.arc(px, py, Math.max(metersToImagePx(treeCanopyOf(t)), lw(3)), 0, 7);
-    ctx.stroke();
-    ctx.fillStyle = ctx.strokeStyle;
-    ctx.beginPath(); ctx.arc(px, py, lw(2), 0, 7); ctx.fill();
-  });
-
-  if (zoneDraft.length) {
-    ctx.strokeStyle = mode === "treearea" ? "#4ade80" : "#ff5ce1";
-    ctx.lineWidth = lw(1.6);
-    ctx.setLineDash([lw(4), lw(4)]);
-    polyPath(zoneDraft); ctx.stroke(); ctx.setLineDash([]);
-    zoneDraft.forEach(([e, n]) => squareHandle(e, n, ctx.strokeStyle));
-  }
-
-  scene.vehicles.forEach((v, index) => {
-    if (!v.enabled) return;
-    const single = selection && selection.kind === "vehicle" && selection.index === index;
-    const selected = single || isMultiMember("vehicle", index);
-    ctx.strokeStyle = v.cls === "bus" ? "#ffd21e" : "#3bd9ff";
-    ctx.lineWidth = lw(selected ? 2.6 : 1.6);
-    polyPath(corners(v.east_m, v.north_m, v.length_m, v.width_m, v.heading_deg));
-    ctx.stroke();
-    const a = v.heading_deg * Math.PI / 180;
-    const [nx, ny] = imageFromEnu(v.east_m + Math.cos(a) * v.length_m / 2,
-                                  v.north_m + Math.sin(a) * v.length_m / 2);
-    const [cx, cy] = imageFromEnu(v.east_m, v.north_m);
-    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(nx, ny); ctx.stroke();
-    if (v.source === "manual") {
-      ctx.fillStyle = "#fff";
-      ctx.beginPath(); ctx.arc(cx, cy, lw(2.2), 0, 7); ctx.fill();
-    }
-    if (single) drawHandles(v.east_m, v.north_m, v.length_m, v.width_m, v.heading_deg,
-                            ctx.strokeStyle);
-  });
-
-  scene.targets.forEach((t, index) => {
-    const selected = (selection && selection.kind === "target"
-                      && selection.index === index)
-                     || isMultiMember("target", index);
-    const [tx, ty] = imageFromEnu(t.east_m, t.north_m);
-    const radius = Math.max(metersToImagePx(0.5), lw(4));
-    ctx.strokeStyle = t.enabled ? "#3ddc7f" : "#777";
-    ctx.setLineDash(t.enabled ? [] : [lw(4), lw(3)]);
-    ctx.lineWidth = lw(selected ? 2.6 : 1.6);
-    ctx.beginPath(); ctx.arc(tx, ty, radius, 0, 7); ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(tx - radius * 0.6, ty); ctx.lineTo(tx + radius * 0.6, ty);
-    ctx.moveTo(tx, ty - radius * 0.6); ctx.lineTo(tx, ty + radius * 0.6);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = t.enabled ? "#3ddc7f" : "#777";
-    ctx.font = `${12 / view.s}px system-ui, sans-serif`;
-    ctx.fillText(t.name, tx + radius * 1.4, ty - radius * 0.4);
-  });
-
-  const f = scene.fiducial;
-  const [fx, fy] = imageFromEnu(f.east_m, f.north_m);
-  const radius = Math.max(metersToImagePx(f.diameter_m / 2), lw(5));
-  ctx.strokeStyle = "#ff8a00"; ctx.lineWidth = lw(2);
-  ctx.beginPath(); ctx.arc(fx, fy, radius, 0, 7); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(fx - radius * 1.6, fy); ctx.lineTo(fx + radius * 1.6, fy);
-  ctx.moveTo(fx, fy - radius * 1.6); ctx.lineTo(fx, fy + radius * 1.6); ctx.stroke();
-
-  if (drag && drag.kind === "marquee") {
-    ctx.strokeStyle = "#7ab8ff";
-    ctx.fillStyle = "rgba(122,184,255,0.12)";
-    ctx.lineWidth = lw(1.2);
-    ctx.setLineDash([lw(5), lw(4)]);
-    polyPath([[drag.startE, drag.startN], [drag.e, drag.startN],
-              [drag.e, drag.n], [drag.startE, drag.n]]);
-    ctx.fill(); ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  if (multi.length > 1) {
-    const [centerE, centerN] = multiCentroid();
-    const [handleE, handleN] = groupHandlePoint(centerE, centerN);
-    const [cx, cy] = imageFromEnu(centerE, centerN);
-    const [hx, hy] = imageFromEnu(handleE, handleN);
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = lw(1.4);
-    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(hx, hy); ctx.stroke();
-    ctx.fillStyle = "#fff";
-    ctx.beginPath(); ctx.arc(hx, hy, 5 / view.s, 0, 7); ctx.fill();
-  }
-}
-
-function squareHandle(e, n, color) {
-  const [px, py] = imageFromEnu(e, n);
-  const r = 4 / view.s;
-  ctx.fillStyle = color;
-  ctx.fillRect(px - r, py - r, 2 * r, 2 * r);
-}
-
-function drawHandles(x, y, length, width, headingDeg, color) {
-  const a = headingDeg * Math.PI / 180;
-  const rot = [x + Math.cos(a) * (length / 2 + rotateGap()),
-               y + Math.sin(a) * (length / 2 + rotateGap())];
-  const [rx, ry] = imageFromEnu(rot[0], rot[1]);
-  ctx.fillStyle = color;
-  ctx.beginPath(); ctx.arc(rx, ry, 5 / view.s, 0, 7); ctx.fill();
-  const corner = corners(x, y, length, width, headingDeg)[0];
-  squareHandle(corner[0], corner[1], color);
-}
-function rotateGap() { return Math.max(2, 8 / view.s * mpp()[0]); }
-
-// ------------------------------------------------------------------ hit test
+// ------------------------------------------------------------------ hit tests
 function inBox(e, n, box) {
   const a = -box.heading * Math.PI / 180;
   const dx = e - box.x, dy = n - box.y;
@@ -351,40 +165,14 @@ function inPolygon(e, n, points) {
   }
   return inside;
 }
-
 function clickTolerance() {
   return Math.max(1.0, 8 / view.s * mpp()[0]);
 }
 
-function nearestZoneVertex(zone, e, n) {
-  const tol = clickTolerance();
-  for (let i = 0; i < zone.polygon_m.length; i++)
-    if (nearPoint(e, n, zone.polygon_m[i][0], zone.polygon_m[i][1], tol))
-      return i;
-  return -1;
-}
-
-function nearestZoneEdge(zone, e, n) {
-  const tol = clickTolerance();
-  const points = zone.polygon_m;
-  for (let i = 0; i < points.length; i++) {
-    const [ax, ay] = points[i];
-    const [bx, by] = points[(i + 1) % points.length];
-    const lengthSq = (bx - ax) ** 2 + (by - ay) ** 2;
-    if (lengthSq === 0) continue;
-    let t = ((e - ax) * (bx - ax) + (n - ay) * (by - ay)) / lengthSq;
-    t = Math.min(Math.max(t, 0), 1);
-    const px = ax + t * (bx - ax), py = ay + t * (by - ay);
-    if (Math.hypot(e - px, n - py) < tol)
-      return { insertAt: i + 1, e: +px.toFixed(2), n: +py.toFixed(2) };
-  }
-  return null;
-}
-
-// ------------------------------------------------------------------- trees
-// Mirrors scene_model.py exactly (fnv1a, unit_hash, area_tree_points),
-// so the footprints drawn here are the trees the build places. Change
-// either side only with the other.
+// --------------------------------------------------------------------- trees
+// Mirrors scene_model.py exactly (fnv1a, unit_hash, area_tree_points), so the
+// footprints drawn here are the trees the build places. Change either side
+// only with the other.
 function fnv1a(text) {
   let h = 2166136261 >>> 0;
   for (let i = 0; i < text.length; i++)
@@ -436,9 +224,9 @@ function treeCanopyOf(tree) {
   return model ? model.canopy_m / 2 : 1.5;
 }
 
-// The outline is what the build extrudes, so every rectangle edit
-// carries it along: into the old box frame, scale, and back out at the
-// new center and heading. Holes ride the same transform.
+// The outline is what the build extrudes, so every rectangle edit carries it
+// along: into the old box frame, scale, and back out at the new center and
+// heading. Holes ride the same transform.
 function applyBuildingBox(b, p) {
   if (b.outline_m.length > 2) {
     const old = b.yaw_deg * Math.PI / 180, now = p.heading * Math.PI / 180;
@@ -460,70 +248,379 @@ function applyBuildingBox(b, p) {
   b.width_m = p.width; b.yaw_deg = p.heading;
 }
 
-function boxOf(selectionRef) {
-  if (selectionRef.kind === "vehicle") {
-    const v = scene.vehicles[selectionRef.index];
-    return { x: v.east_m, y: v.north_m, length: v.length_m, width: v.width_m,
-             heading: v.heading_deg, set(p) {
-               v.east_m = p.x; v.north_m = p.y; v.length_m = p.length;
-               v.width_m = p.width; v.heading_deg = p.heading; } };
+// ------------------------------------------------------------------ the kinds
+// One entry per kind of scene object. Every capability reads this table:
+//   key       the scene.json array it lives in
+//   prefix    id prefix for objects this editor creates
+//   shape     "box" (center, size, heading), "point" or "polygon"
+//   heading   the field holding its heading, or null when it has none
+//   copy      fields a stamped copy carries over from its source
+//   keepFetched  deleting a non-manual object disables it instead of
+//                removing it, because the map data cannot be refetched
+//                without starting the scene over
+//   reshape   takes a whole box patch, for a kind that stores more than the
+//             box and must carry it along
+//   blank     a new object, before its id and position are set
+//   draw, hit, panel  per kind, called by the shared loops below
+const KINDS = {
+  vehicle: {
+    key: "vehicles", prefix: "v_manual_", shape: "box", heading: "heading_deg",
+    copy: ["cls", "length_m", "width_m", "heading_deg", "model_uri", "agl_m",
+           "on_building"],
+    blank: () => ({ cls: "car", length_m: 4.6, width_m: 1.9, heading_deg: 0,
+                    confidence: 1.0, source: "manual", model_uri: null,
+                    agl_m: null, on_building: true, enabled: true }),
+    draw: drawVehicle, hit: hitVehicle, panel: vehiclePanel,
+  },
+  building: {
+    key: "buildings", prefix: "b_manual_", shape: "box", heading: "yaw_deg",
+    copy: ["length_m", "width_m", "yaw_deg", "height_m", "model_uri"],
+    keepFetched: true,
+    reshape: applyBuildingBox,    // the outline rides along with every edit
+    title: b => b.name || b.id,   // the map gives a building a real name
+    blank: () => ({ length_m: 14, width_m: 10, yaw_deg: 0, height_m: 6,
+                    height_source: "manual", name: "", map_height_m: null,
+                    map_height_source: "", outline_m: [], holes_m: [],
+                    source: "manual", model_uri: null, enabled: true }),
+    draw: drawBuilding, hit: hitBuilding, panel: buildingPanel,
+  },
+  target: {
+    key: "targets", prefix: "t_manual_", shape: "point", heading: "yaw_deg",
+    // name stays out: it is the identity the scorer keys on, so every copy
+    // gets a fresh one from blank().
+    copy: ["agl_m", "on_building", "yaw_deg", "model_uri"],
+    blank: () => ({ name: "casualty_m" + counters.target, agl_m: null,
+                    on_building: true, yaw_deg: null, model_uri: null,
+                    enabled: true, source: "manual" }),
+    draw: drawTarget, hit: hitTarget, panel: targetPanel,
+  },
+  tree: {
+    key: "trees", prefix: "tr_manual_", shape: "point", heading: null,
+    copy: ["model_uri"],
+    blank: () => ({ model_uri: null, source: "manual", enabled: true }),
+    draw: drawTree, hit: hitTree, panel: treePanel,
+  },
+  treearea: {
+    key: "tree_areas", prefix: "ta_manual_", shape: "polygon", heading: null,
+    copy: ["density_per_ha", "min_height_m", "max_height_m"],
+    blank: () => ({ polygon_m: [], density_per_ha: 150.0, min_height_m: 1.0,
+                    max_height_m: 10.0, source: "manual", enabled: true }),
+    draw: drawTreeArea, hit: hitPolygon, panel: treeAreaPanel,
+  },
+  zone: {
+    key: "flatten_zones", prefix: "fz_", shape: "polygon", heading: null,
+    copy: ["mode", "height_m"],
+    blank: () => ({ polygon_m: [], mode: "min", height_m: null }),
+    draw: drawZone, hit: hitPolygon, panel: zonePanel,
+  },
+};
+
+// Draw order: later kinds land on top. Hit order is smallest first, so a
+// tree inside a tree area and a building inside a flatten zone both stay
+// reachable; the big polygons come last and never swallow a click.
+const DRAW_ORDER = ["building", "zone", "treearea", "tree", "vehicle", "target"];
+const HIT_ORDER = ["target", "tree", "vehicle", "zone", "building", "treearea"];
+
+function listOf(kind) { return scene[KINDS[kind].key]; }
+function objectOf(ref) { return listOf(ref.kind)[ref.index]; }
+function isPolyKind(kind) { return KINDS[kind].shape === "polygon"; }
+function isBoxKind(kind) { return KINDS[kind].shape === "box"; }
+function sameRef(a, b) { return a && b && a.kind === b.kind && a.index === b.index; }
+function isMultiMember(kind, index) {
+  return multi.some(m => m.kind === kind && m.index === index);
+}
+function isSelected(kind, index) {
+  return sameRef(selection, { kind, index }) || isMultiMember(kind, index);
+}
+
+// ------------------------------------------------------------------- geometry
+// Where an object sits, how to put it somewhere, and how to turn it. Every
+// drag, stamp and marquee test goes through these three, so no caller needs
+// to know whether a kind stores a center or a ring.
+function centroid(points) {
+  if (!points.length) return [0, 0];
+  const sum = points.reduce(([e, n], [pe, pn]) => [e + pe, n + pn], [0, 0]);
+  return [sum[0] / points.length, sum[1] / points.length];
+}
+function anchorOf(ref) {
+  const o = objectOf(ref);
+  return isPolyKind(ref.kind) ? centroid(o.polygon_m) : [o.east_m, o.north_m];
+}
+function geometryOf(ref) {
+  // A frozen copy, so a drag repositions from the original every time and
+  // rounding never accumulates across a move.
+  const o = objectOf(ref);
+  return isPolyKind(ref.kind) ? o.polygon_m.map(p => p.slice())
+                              : [[o.east_m, o.north_m]];
+}
+// The center, size and heading a kind's fields describe, with `over` applied
+// on top. A kind that declares `reshape` takes the whole patch at once, so
+// whatever else it stores (a building's outline) rides along with the edit.
+function applyBox(ref, over) {
+  const spec = KINDS[ref.kind], o = objectOf(ref);
+  const patch = { x: o.east_m, y: o.north_m, length: o.length_m,
+                  width: o.width_m, heading: o[spec.heading], ...over };
+  if (spec.reshape) { spec.reshape(o, patch); return; }
+  o.east_m = patch.x;
+  o.north_m = patch.y;
+  if (spec.shape === "box") { o.length_m = patch.length; o.width_m = patch.width; }
+  if (spec.heading) o[spec.heading] = patch.heading;
+}
+function placeAt(ref, frozen, e, n) {
+  if (!isPolyKind(ref.kind)) {
+    applyBox(ref, { x: +e.toFixed(2), y: +n.toFixed(2) });
+    return;
   }
-  const b = scene.buildings[selectionRef.index];
-  return { x: b.east_m, y: b.north_m, length: b.length_m, width: b.width_m,
-           heading: b.yaw_deg, set(p) { applyBuildingBox(b, p); } };
+  const o = objectOf(ref);
+  const [ce, cn] = centroid(frozen);
+  o.polygon_m = frozen.map(([pe, pn]) =>
+    [+(pe + e - ce).toFixed(2), +(pn + n - cn).toFixed(2)]);
+}
+function headingOf(ref) {
+  const field = KINDS[ref.kind].heading;
+  return field ? (objectOf(ref)[field] ?? 0) : 0;
+}
+function setHeading(ref, degrees) {
+  if (!KINDS[ref.kind].heading) return;
+  applyBox(ref, {
+    heading: +((((degrees + 180) % 360) + 360) % 360 - 180).toFixed(1) });
+}
+function turnBy(ref, frozen, startHeading, deltaDeg) {
+  // A polygon has no heading field, so it turns about its own centroid.
+  // Everything else carries the delta on its heading and stays in place.
+  if (!isPolyKind(ref.kind)) { setHeading(ref, startHeading + deltaDeg); return; }
+  const o = objectOf(ref);
+  const [ce, cn] = centroid(frozen);
+  const a = deltaDeg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+  o.polygon_m = frozen.map(([pe, pn]) => {
+    const de = pe - ce, dn = pn - cn;
+    return [+(ce + de * c - dn * s).toFixed(2), +(cn + de * s + dn * c).toFixed(2)];
+  });
+}
+function setSize(ref, patch) {
+  if (isBoxKind(ref.kind)) applyBox(ref, patch);
+}
+function boxOf(ref) {
+  const o = objectOf(ref);
+  return { x: o.east_m, y: o.north_m, length: o.length_m, width: o.width_m,
+           heading: o[KINDS[ref.kind].heading],
+           set(p) { applyBox(ref, p); } };
+}
+
+// ------------------------------------------------------------------- drawing
+function squareHandle(e, n, color) {
+  const [px, py] = imageFromEnu(e, n);
+  const r = 4 / view.s;
+  ctx.fillStyle = color;
+  ctx.fillRect(px - r, py - r, 2 * r, 2 * r);
+}
+function rotateGap() { return Math.max(2, 8 / view.s * mpp()[0]); }
+function drawHandles(x, y, length, width, headingDeg, color) {
+  const a = headingDeg * Math.PI / 180;
+  const rot = [x + Math.cos(a) * (length / 2 + rotateGap()),
+               y + Math.sin(a) * (length / 2 + rotateGap())];
+  const [rx, ry] = imageFromEnu(rot[0], rot[1]);
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(rx, ry, 5 / view.s, 0, 7); ctx.fill();
+  const corner = corners(x, y, length, width, headingDeg)[0];
+  squareHandle(corner[0], corner[1], color);
+}
+function drawVertices(points, color) {
+  points.forEach(([e, n]) => squareHandle(e, n, color));
+}
+
+function drawBuilding(b, ref, selected, single) {
+  ctx.strokeStyle = b.enabled ? "#62d98c" : "#777";
+  ctx.setLineDash(b.enabled ? [] : [lw(6), lw(5)]);
+  ctx.lineWidth = lw(selected ? 2.4 : 1.2);
+  if (b.outline_m.length > 2) {
+    polyPath(b.outline_m); ctx.stroke();
+    (b.holes_m || []).forEach(ring => {
+      if (ring.length > 2) { polyPath(ring); ctx.stroke(); }
+    });
+  }
+  if (selected || b.outline_m.length <= 2 || b.source !== "osm") {
+    ctx.setLineDash([lw(5), lw(4)]);
+    polyPath(corners(b.east_m, b.north_m, b.length_m, b.width_m, b.yaw_deg));
+    ctx.stroke();
+    if (single) drawHandles(b.east_m, b.north_m, b.length_m, b.width_m,
+                            b.yaw_deg, "#62d98c");
+  }
+  ctx.setLineDash([]);
+}
+
+function drawZone(z, ref, selected) {
+  ctx.fillStyle = "rgba(255,92,225,0.14)";
+  ctx.strokeStyle = "#ff5ce1";
+  ctx.lineWidth = lw(selected ? 2.4 : 1.3);
+  polyPath(z.polygon_m); ctx.fill(); ctx.stroke();
+  if (selected) drawVertices(z.polygon_m, "#ff5ce1");
+}
+
+function drawTreeArea(a, ref, selected) {
+  const color = a.enabled ? "#4ade80" : "#777";
+  ctx.fillStyle = a.enabled ? "rgba(74,222,128,0.10)" : "rgba(120,120,120,0.10)";
+  ctx.strokeStyle = color;
+  ctx.setLineDash(a.enabled ? [] : [lw(6), lw(5)]);
+  ctx.lineWidth = lw(selected ? 2.4 : 1.3);
+  polyPath(a.polygon_m); ctx.fill(); ctx.stroke();
+  ctx.setLineDash([]);
+  if (selected) drawVertices(a.polygon_m, color);
+  // The exact fill the build places: every canopy footprint, true size.
+  ctx.lineWidth = lw(1.0);
+  areaTreePoints(a).forEach(([e, n, key]) => {
+    const model = treeModelFor(key, a.min_height_m, a.max_height_m);
+    if (!model) return;
+    const [px, py] = imageFromEnu(e, n);
+    ctx.beginPath();
+    ctx.arc(px, py, Math.max(metersToImagePx(model.canopy_m / 2), lw(1.5)), 0, 7);
+    ctx.stroke();
+  });
+}
+
+function drawTree(t, ref, selected) {
+  const [px, py] = imageFromEnu(t.east_m, t.north_m);
+  ctx.strokeStyle = t.enabled ? "#4ade80" : "#777";
+  ctx.lineWidth = lw(selected ? 2.6 : 1.4);
+  ctx.beginPath();
+  ctx.arc(px, py, Math.max(metersToImagePx(treeCanopyOf(t)), lw(3)), 0, 7);
+  ctx.stroke();
+  ctx.fillStyle = ctx.strokeStyle;
+  ctx.beginPath(); ctx.arc(px, py, lw(2), 0, 7); ctx.fill();
+}
+
+function drawVehicle(v, ref, selected, single) {
+  if (!v.enabled) return;
+  ctx.strokeStyle = v.cls === "bus" ? "#ffd21e" : "#3bd9ff";
+  ctx.lineWidth = lw(selected ? 2.6 : 1.6);
+  polyPath(corners(v.east_m, v.north_m, v.length_m, v.width_m, v.heading_deg));
+  ctx.stroke();
+  const a = v.heading_deg * Math.PI / 180;
+  const [nx, ny] = imageFromEnu(v.east_m + Math.cos(a) * v.length_m / 2,
+                                v.north_m + Math.sin(a) * v.length_m / 2);
+  const [cx, cy] = imageFromEnu(v.east_m, v.north_m);
+  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(nx, ny); ctx.stroke();
+  if (v.source === "manual") {
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(cx, cy, lw(2.2), 0, 7); ctx.fill();
+  }
+  if (single) drawHandles(v.east_m, v.north_m, v.length_m, v.width_m,
+                          v.heading_deg, ctx.strokeStyle);
+}
+
+function drawTarget(t, ref, selected) {
+  const [tx, ty] = imageFromEnu(t.east_m, t.north_m);
+  const radius = Math.max(metersToImagePx(0.5), lw(4));
+  ctx.strokeStyle = t.enabled ? "#3ddc7f" : "#777";
+  ctx.setLineDash(t.enabled ? [] : [lw(4), lw(3)]);
+  ctx.lineWidth = lw(selected ? 2.6 : 1.6);
+  ctx.beginPath(); ctx.arc(tx, ty, radius, 0, 7); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(tx - radius * 0.6, ty); ctx.lineTo(tx + radius * 0.6, ty);
+  ctx.moveTo(tx, ty - radius * 0.6); ctx.lineTo(tx, ty + radius * 0.6);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = t.enabled ? "#3ddc7f" : "#777";
+  ctx.font = `${12 / view.s}px system-ui, sans-serif`;
+  ctx.fillText(t.name, tx + radius * 1.4, ty - radius * 0.4);
+}
+
+function draw() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (canvas.width !== w) canvas.width = w;
+  if (canvas.height !== h) canvas.height = h;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "#14171c";
+  ctx.fillRect(0, 0, w, h);
+  if (!scene || !image.complete) return;
+  ctx.setTransform(view.s, 0, 0, view.s, -view.panX * view.s, -view.panY * view.s);
+  ctx.drawImage(image, 0, 0);
+
+  DRAW_ORDER.forEach(kind => {
+    listOf(kind).forEach((o, index) => {
+      const ref = { kind, index };
+      KINDS[kind].draw(o, ref, isSelected(kind, index), sameRef(selection, ref));
+    });
+  });
+
+  if (zoneDraft.length) {
+    ctx.strokeStyle = mode === "treearea" ? "#4ade80" : "#ff5ce1";
+    ctx.lineWidth = lw(1.6);
+    ctx.setLineDash([lw(4), lw(4)]);
+    polyPath(zoneDraft); ctx.stroke(); ctx.setLineDash([]);
+    drawVertices(zoneDraft, ctx.strokeStyle);
+  }
+
+  const f = scene.fiducial;
+  const [fx, fy] = imageFromEnu(f.east_m, f.north_m);
+  const radius = Math.max(metersToImagePx(f.diameter_m / 2), lw(5));
+  ctx.strokeStyle = "#ff8a00"; ctx.lineWidth = lw(2);
+  ctx.beginPath(); ctx.arc(fx, fy, radius, 0, 7); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(fx - radius * 1.6, fy); ctx.lineTo(fx + radius * 1.6, fy);
+  ctx.moveTo(fx, fy - radius * 1.6); ctx.lineTo(fx, fy + radius * 1.6); ctx.stroke();
+
+  if (drag && drag.kind === "marquee") {
+    ctx.strokeStyle = "#7ab8ff";
+    ctx.fillStyle = "rgba(122,184,255,0.12)";
+    ctx.lineWidth = lw(1.2);
+    ctx.setLineDash([lw(5), lw(4)]);
+    polyPath([[drag.startE, drag.startN], [drag.e, drag.startN],
+              [drag.e, drag.n], [drag.startE, drag.n]]);
+    ctx.fill(); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  if (multi.length > 1) {
+    const [centerE, centerN] = multiCentroid();
+    const [handleE, handleN] = groupHandlePoint(centerE, centerN);
+    const [cx, cy] = imageFromEnu(centerE, centerN);
+    const [hx, hy] = imageFromEnu(handleE, handleN);
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = lw(1.4);
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(hx, hy); ctx.stroke();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(hx, hy, 5 / view.s, 0, 7); ctx.fill();
+  }
+}
+
+// ----------------------------------------------------------------- selecting
+function hitVehicle(v, e, n, tol) {
+  return v.enabled && inBox(e, n, { x: v.east_m, y: v.north_m, length: v.length_m,
+                                    width: v.width_m, heading: v.heading_deg });
+}
+function hitTarget(t, e, n, tol) {
+  return nearPoint(e, n, t.east_m, t.north_m, Math.max(1.0, tol));
+}
+function hitTree(t, e, n, tol) {
+  return nearPoint(e, n, t.east_m, t.north_m, Math.max(treeCanopyOf(t), tol));
+}
+function hitPolygon(o, e, n, tol) {
+  return inPolygon(e, n, o.polygon_m);
+}
+function hitBuilding(b, e, n, tol) {
+  const outline = b.outline_m.length > 2 ? b.outline_m
+    : corners(b.east_m, b.north_m, b.length_m, b.width_m, b.yaw_deg);
+  const inHole = (b.holes_m || []).some(
+    ring => ring.length > 2 && inPolygon(e, n, ring));
+  return inPolygon(e, n, outline) && !inHole;
 }
 
 function hitAt(e, n) {
-  const f = scene.fiducial;
   const tol = 6 * mpp()[0] / view.s;
+  const f = scene.fiducial;
   if (nearPoint(e, n, f.east_m, f.north_m, Math.max(f.diameter_m, tol)))
     return { kind: "fiducial" };
-  for (let i = scene.targets.length - 1; i >= 0; i--) {
-    const t = scene.targets[i];
-    if (nearPoint(e, n, t.east_m, t.north_m, Math.max(1.0, tol)))
-      return { kind: "target", index: i };
+  for (const kind of HIT_ORDER) {
+    const list = listOf(kind);
+    // Newest first, so a fresh stamp is what the next click grabs.
+    for (let i = list.length - 1; i >= 0; i--)
+      if (KINDS[kind].hit(list[i], e, n, tol)) return { kind, index: i };
   }
-  for (let i = scene.trees.length - 1; i >= 0; i--) {
-    const t = scene.trees[i];
-    if (nearPoint(e, n, t.east_m, t.north_m,
-                  Math.max(treeCanopyOf(t), tol)))
-      return { kind: "tree", index: i };
-  }
-  for (let i = scene.vehicles.length - 1; i >= 0; i--) {
-    const v = scene.vehicles[i];
-    if (v.enabled && inBox(e, n, { x: v.east_m, y: v.north_m, length: v.length_m,
-                                   width: v.width_m, heading: v.heading_deg }))
-      return { kind: "vehicle", index: i };
-  }
-  for (let i = 0; i < scene.flatten_zones.length; i++)
-    if (inPolygon(e, n, scene.flatten_zones[i].polygon_m))
-      return { kind: "zone", index: i };
-  for (let i = 0; i < scene.buildings.length; i++) {
-    const b = scene.buildings[i];
-    const outline = b.outline_m.length > 2 ? b.outline_m
-      : corners(b.east_m, b.north_m, b.length_m, b.width_m, b.yaw_deg);
-    const inHole = (b.holes_m || []).some(
-      ring => ring.length > 2 && inPolygon(e, n, ring));
-    if (inPolygon(e, n, outline) && !inHole)
-      return { kind: "building", index: i };
-  }
-  for (let i = 0; i < scene.tree_areas.length; i++)
-    if (inPolygon(e, n, scene.tree_areas[i].polygon_m))
-      return { kind: "treearea", index: i };
   return null;
 }
 
-// Zones and tree areas share every polygon interaction: move, corner
-// drag, corner add and remove. This resolves which list a selection or
-// hit lives in.
-function isPolyKind(kind) { return kind === "zone" || kind === "treearea"; }
-function polygonObjOf(ref) {
-  return ref.kind === "treearea" ? scene.tree_areas[ref.index]
-                                 : scene.flatten_zones[ref.index];
-}
-
 function handleAt(e, n) {
-  if (!selection || (selection.kind !== "vehicle" && selection.kind !== "building"))
+  if (!selection || !KINDS[selection.kind] || !isBoxKind(selection.kind))
     return null;
   const box = boxOf(selection);
   const tol = Math.max(0.8, 8 / view.s * mpp()[0]);
@@ -536,490 +633,441 @@ function handleAt(e, n) {
   return null;
 }
 
-// ------------------------------------------------------------ multi-selection
-function isMultiMember(kind, index) {
-  return multi.some(m => m.kind === kind && m.index === index);
+function nearestVertex(o, e, n) {
+  const tol = clickTolerance();
+  for (let i = 0; i < o.polygon_m.length; i++)
+    if (nearPoint(e, n, o.polygon_m[i][0], o.polygon_m[i][1], tol)) return i;
+  return -1;
 }
-function memberObject(member) {
-  if (member.kind === "vehicle") return scene.vehicles[member.index];
-  if (member.kind === "target") return scene.targets[member.index];
-  return scene.buildings[member.index];
+
+function nearestEdge(o, e, n) {
+  const tol = clickTolerance();
+  const points = o.polygon_m;
+  for (let i = 0; i < points.length; i++) {
+    const [ax, ay] = points[i];
+    const [bx, by] = points[(i + 1) % points.length];
+    const lengthSq = (bx - ax) ** 2 + (by - ay) ** 2;
+    if (lengthSq === 0) continue;
+    let t = ((e - ax) * (bx - ax) + (n - ay) * (by - ay)) / lengthSq;
+    t = Math.min(Math.max(t, 0), 1);
+    const px = ax + t * (bx - ax), py = ay + t * (by - ay);
+    if (Math.hypot(e - px, n - py) < tol)
+      return { insertAt: i + 1, e: +px.toFixed(2), n: +py.toFixed(2) };
+  }
+  return null;
 }
+
 function multiCentroid() {
-  let e = 0, n = 0;
-  multi.forEach(m => { const o = memberObject(m); e += o.east_m; n += o.north_m; });
-  return [e / multi.length, n / multi.length];
+  const points = multi.map(m => anchorOf(m));
+  return centroid(points);
 }
 function groupHandlePoint(centerE, centerN) {
   return [centerE + 40 / view.s * mpp()[0], centerN];
 }
-function headingOf(member) {
-  const o = memberObject(member);
-  if (member.kind === "vehicle") return o.heading_deg;
-  return o.yaw_deg ?? 0;
+
+// -------------------------------------------------------- create, copy, delete
+function nextId(kind) {
+  return KINDS[kind].prefix + counters[kind]++;
 }
-function setHeading(member, degrees) {
-  const normalized = +((((degrees + 180) % 360) + 360) % 360 - 180).toFixed(1);
-  const o = memberObject(member);
-  if (member.kind === "vehicle") o.heading_deg = normalized;
-  else if (member.kind === "building")
-    applyBuildingBox(o, { x: o.east_m, y: o.north_m, length: o.length_m,
-                          width: o.width_m, heading: normalized });
-  else o.yaw_deg = normalized;
+
+function addObject(kind, e, n, props = {}) {
+  const list = listOf(kind);
+  const object = Object.assign(KINDS[kind].blank(), props);
+  object.id = nextId(kind);
+  list.push(object);
+  const ref = { kind, index: list.length - 1 };
+  placeAt(ref, geometryOf(ref), e, n);
+  return ref;
 }
-function setSize(member, patch) {
-  const o = memberObject(member);
-  if (member.kind === "building")
-    applyBuildingBox(o, { x: o.east_m, y: o.north_m,
-                          length: patch.length ?? o.length_m,
-                          width: patch.width ?? o.width_m,
-                          heading: o.yaw_deg });
-  else {
-    if (patch.length !== undefined) o.length_m = patch.length;
-    if (patch.width !== undefined) o.width_m = patch.width;
-  }
+
+function removeAt(kind, index) {
+  const object = listOf(kind)[index];
+  if (KINDS[kind].keepFetched && object.source && object.source !== "manual")
+    object.enabled = false;    // the map data cannot be fetched again
+  else listOf(kind).splice(index, 1);
 }
+
 function deleteMembers(members) {
   pushUndo();
-  members.filter(m => m.kind === "vehicle").map(m => m.index)
-    .sort((a, b) => b - a).forEach(index => scene.vehicles.splice(index, 1));
-  members.filter(m => m.kind === "target").map(m => m.index)
-    .sort((a, b) => b - a).forEach(index => scene.targets.splice(index, 1));
-  members.filter(m => m.kind === "building").map(m => m.index)
-    .sort((a, b) => b - a).forEach(index => {
-      const building = scene.buildings[index];
-      if (building.source === "manual") scene.buildings.splice(index, 1);
-      else building.enabled = false;
-    });
+  // Descending index within each kind, so one splice never shifts the next.
+  Object.keys(KINDS).forEach(kind => {
+    members.filter(m => m.kind === kind).map(m => m.index)
+      .sort((a, b) => b - a)
+      .forEach(index => removeAt(kind, index));
+  });
   select(null);
-  markDirty();
-}
-function flipMembers() {
-  pushUndo();
-  multi.filter(m => m.kind === "vehicle")
-       .forEach(m => setHeading(m, headingOf(m) + 180));
   markDirty();
   draw();
 }
 
-// ------------------------------------------------------------- stamped copies
-function addVehicle(e, n, props) {
-  scene.vehicles.push({ id: "v_manual_" + vehicleCounter++, cls: props.cls,
-    east_m: +e.toFixed(2), north_m: +n.toFixed(2),
-    length_m: props.length_m, width_m: props.width_m,
-    heading_deg: props.heading_deg, confidence: 1.0, source: "manual",
-    model_uri: props.model_uri, agl_m: props.agl_m ?? null,
-    on_building: props.on_building ?? true, enabled: true });
-  return { kind: "vehicle", index: scene.vehicles.length - 1 };
+function flipMembers(members) {
+  pushUndo();
+  members.filter(m => KINDS[m.kind].heading)
+         .forEach(m => setHeading(m, headingOf(m) + 180));
+  markDirty();
+  draw();
 }
-function addBuilding(e, n, props) {
-  scene.buildings.push({ id: "b_manual_" + buildingCounter++,
-    east_m: +e.toFixed(2), north_m: +n.toFixed(2),
-    length_m: props.length_m, width_m: props.width_m, yaw_deg: props.yaw_deg,
-    height_m: props.height_m, height_source: "manual", name: "",
-    map_height_m: null, map_height_source: "",
-    outline_m: [], holes_m: [], source: "manual", model_uri: props.model_uri,
-    enabled: true });
-  return { kind: "building", index: scene.buildings.length - 1 };
-}
-function addTree(e, n, props) {
-  scene.trees.push({ id: "tr_manual_" + treeCounter++,
-    east_m: +e.toFixed(2), north_m: +n.toFixed(2),
-    model_uri: props?.model_uri ?? null,
-    source: "manual", enabled: true });
-  return { kind: "tree", index: scene.trees.length - 1 };
-}
-function addTarget(e, n, props) {
-  scene.targets.push({ id: "t_manual_" + targetCounter,
-    name: "casualty_m" + targetCounter,
-    east_m: +e.toFixed(2), north_m: +n.toFixed(2),
-    agl_m: props.agl_m ?? null, on_building: props.on_building ?? true,
-    yaw_deg: props.yaw_deg ?? null,
-    model_uri: props.model_uri ?? null, enabled: true, source: "manual" });
-  targetCounter++;
-  return { kind: "target", index: scene.targets.length - 1 };
-}
-const STAMP_POOLS = {
-  vehicle: () => scene.vehicles,
-  target: () => scene.targets,
-  tree: () => scene.trees,
-};
+
+// The stamp tracks its source by id and reads the properties at stamp time,
+// so a rotate or a panel edit after selecting carries into every later copy,
+// and the link survives undo, which rebuilds the arrays.
 function rememberStamp(ref) {
-  // Vehicles, targets and trees stamp; buildings are one-off shapes, so
-  // copying them earns misplaced boxes faster than it saves clicks, and
-  // there is only one fiducial. The stamp tracks the source by id and
-  // reads its properties at stamp time, so a rotate or a panel edit
-  // after selection carries into every later copy, and the link survives
-  // undo, which rebuilds the arrays.
-  if (!ref || !STAMP_POOLS[ref.kind]) return;
-  stampRef = { kind: ref.kind, id: STAMP_POOLS[ref.kind]()[ref.index].id };
+  stampRef = ref && KINDS[ref.kind]
+    ? { kind: ref.kind, id: objectOf(ref).id } : null;
 }
-function stampSourceObject() {
+function stampSource() {
   if (!stampRef) return null;
-  return STAMP_POOLS[stampRef.kind]().find(o => o.id === stampRef.id) || null;
+  return listOf(stampRef.kind).find(o => o.id === stampRef.id) || null;
 }
 function stampAt(e, n) {
-  const source = stampSourceObject();
+  const source = stampSource();
   if (!source) {
-    statusEl.textContent =
-      "nothing to copy yet: place or select a vehicle, target or tree first";
+    statusEl.textContent = "nothing to copy yet: place or select an object first";
     return;
   }
   pushUndo();
-  let ref;
-  if (stampRef.kind === "vehicle")
-    ref = addVehicle(e, n, { cls: source.cls, length_m: source.length_m,
-        width_m: source.width_m, heading_deg: source.heading_deg,
-        model_uri: source.model_uri, agl_m: source.agl_m,
-        on_building: source.on_building });
-  else if (stampRef.kind === "tree")
-    // A pool-draw source copies as a pool draw: each copy's own id draws
-    // its own species, so a stamped grove varies like an area fill.
-    ref = addTree(e, n, { model_uri: source.model_uri });
-  else
-    // A target copy keeps model and height but gets a fresh name: the
-    // name is the identity the scorer sees, so two must never share one.
-    ref = addTarget(e, n, { agl_m: source.agl_m, on_building: source.on_building,
-        yaw_deg: source.yaw_deg, model_uri: source.model_uri });
-  select(ref);   // the newest copy leads the next stamp
+  const spec = KINDS[stampRef.kind];
+  const props = {};
+  spec.copy.forEach(field => { props[field] = source[field]; });
+  // A pool-draw source copies as a pool draw: the copy's own id draws its own
+  // model, so a stamped grove varies the way an area fill does.
+  if (spec.shape === "polygon")
+    props.polygon_m = source.polygon_m.map(p => p.slice());
+  select(addObject(stampRef.kind, e, n, props));   // the newest copy leads the next stamp
   markDirty();
+  draw();
 }
 
-// ---------------------------------------------------------------------- panel
-function field(labelText, inputHtml) {
-  return `<label>${labelText}</label>${inputHtml}`;
+// ---------------------------------------------------------------- panel fields
+// A panel is a list of descriptors. render() writes the HTML and wires the
+// handlers, so no kind repeats the input plumbing.
+let fieldSeq = 0;
+function fieldId() { return "f" + (++fieldSeq); }
+
+function commit(apply, value, opts) {
+  pushUndo();
+  apply(value);
+  markDirty();
+  draw();
+  if (opts && opts.refresh) showPanel();
 }
 
-// The group panel edits every field the selected kinds share, in bulk.
-// Only names stay out: a target's name is the identity the scorer keys
-// on, so it edits one at a time. A field the kinds do not share is
-// absent rather than disabled.
+function numberField(label, value, step, apply, opts = {}) {
+  const id = fieldId();
+  const shown = (value === null || value === undefined) ? "" : value;
+  const hint = opts.placeholder ? ` placeholder="${opts.placeholder}"` : "";
+  return {
+    html: `<label>${label}</label><input id="${id}" type="number" step="${step}"` +
+          ` value="${shown}"${hint}>`,
+    bind() {
+      document.getElementById(id).onchange = ev => {
+        const v = parseFloat(ev.target.value);
+        if (Number.isNaN(v)) {
+          if (!opts.nullable) return;
+          commit(apply, null, opts);
+        } else commit(apply, v, opts);
+      };
+    },
+  };
+}
+
+function textField(label, value, apply, opts = {}) {
+  const id = fieldId();
+  const hint = opts.placeholder ? ` placeholder="${opts.placeholder}"` : "";
+  return {
+    html: `<label>${label}</label><input id="${id}" value="${value ?? ""}"${hint}>`,
+    bind() {
+      document.getElementById(id).onchange = ev =>
+        commit(apply, ev.target.value.trim(), opts);
+    },
+  };
+}
+
+function selectField(label, options, value, apply, opts = {}) {
+  const id = fieldId();
+  const items = options.map(([v, text]) =>
+    `<option value="${v}"${v === value ? " selected" : ""}>${text}</option>`);
+  return {
+    html: `<label>${label}</label><select id="${id}">${items.join("")}</select>`,
+    bind() {
+      document.getElementById(id).onchange = ev => {
+        if (opts.skipEmpty && !ev.target.value) return;
+        commit(apply, ev.target.value, opts);
+      };
+    },
+  };
+}
+
+function checkField(label, checked, apply, opts = {}) {
+  const id = fieldId();
+  return {
+    html: `<label style="display:flex;gap:6px;align-items:center;margin-top:8px">
+           <input id="${id}" type="checkbox" style="width:auto"` +
+          `${checked ? " checked" : ""}> ${label}</label>`,
+    bind() {
+      document.getElementById(id).onchange = ev =>
+        commit(apply, ev.target.checked, opts);
+    },
+  };
+}
+
+function button(label, onclick, danger = false) {
+  const id = fieldId();
+  return {
+    html: `<button id="${id}"${danger ? ' class="danger"' : ""}>${label}</button>`,
+    bind() { document.getElementById(id).onclick = onclick; },
+  };
+}
+
+function note(text) {
+  return { html: `<p style="color:var(--dim)">${text}</p>` };
+}
+
+function row(...fields) {
+  return {
+    html: `<div class="row">` +
+          fields.map(f => `<div>${f.html}</div>`).join("") + `</div>`,
+    bind() { fields.forEach(f => f.bind && f.bind()); },
+  };
+}
+
+// Shared descriptors. Written once, used by every kind that has the field.
+function modelUriField(o, label, placeholder) {
+  return textField(label, o.model_uri ?? "",
+                   v => { o.model_uri = v || null; }, { placeholder });
+}
+function enabledField(o, label) {
+  return checkField(label, o.enabled, v => { o.enabled = v; });
+}
+function floorFields(o) {
+  return [
+    checkField("snap to the building under it", o.on_building,
+               v => { o.on_building = v; }),
+    numberField("offset above the floor m (empty = 0)", o.agl_m, 0.5,
+                v => { o.agl_m = v; }, { nullable: true }),
+  ];
+}
+function deleteButton(ref, label) {
+  return button(label, () => deleteMembers([ref]), true);
+}
+
+function render(title, fields) {
+  panelTitle.textContent = title;
+  panelBody.innerHTML = fields.map(f => f.html).join("");
+  fields.forEach(f => f.bind && f.bind());
+}
+
+// ------------------------------------------------------------- kind panels
+function vehiclePanel(v, ref) {
+  return [
+    selectField("class", [["car", "car"], ["bus", "bus"]], v.cls,
+                x => { v.cls = x; }),
+    row(numberField("length m", v.length_m, 0.1, x => setSize(ref, { length: x })),
+        numberField("width m", v.width_m, 0.1, x => setSize(ref, { width: x }))),
+    numberField("heading deg (ccw from east)", v.heading_deg, 1,
+                x => setHeading(ref, x)),
+    ...floorFields(v),
+    modelUriField(v, "model uri (empty = pool)", "https://fuel… or model://…"),
+    button("Flip 180°", () => flipMembers([ref])),
+    deleteButton(ref, "Delete vehicle"),
+  ];
+}
+
+function buildingPanel(b, ref) {
+  const fields = [
+    numberField(`height m (source: ${b.height_source})`, b.height_m, 0.5,
+                x => { b.height_m = x; b.height_source = "manual"; }),
+    row(numberField("length m", b.length_m, 0.5, x => setSize(ref, { length: x })),
+        numberField("width m", b.width_m, 0.5, x => setSize(ref, { width: x }))),
+    numberField("yaw deg", b.yaw_deg, 1, x => setHeading(ref, x)),
+    modelUriField(b, "model uri (empty = extruded mesh)",
+                  "model://… replaces the mesh"),
+    enabledField(b, "include in the world"),
+  ];
+  if (b.map_height_m != null)
+    fields.push(button(`Reset height to map (${b.map_height_m} m)`, () => {
+      pushUndo();
+      b.height_m = b.map_height_m;
+      b.height_source = b.map_height_source || "map";
+      markDirty(); showPanel(); draw();
+    }));
+  fields.push(deleteButton(ref, b.source === "manual"
+    ? "Delete building" : "Exclude building from the world"));
+  return fields;
+}
+
+function targetPanel(t, ref) {
+  return [
+    textField("name", t.name, v => { t.name = v || t.name; }, { refresh: true }),
+    modelUriField(t, "model uri (empty = pool at build)",
+                  "model://casualty_prone, or a Fuel URI"),
+    ...floorFields(t),
+    enabledField(t, "include in the scenario"),
+    note(`Ground truth. The floor is the terrain, or the roof of the building
+          under it when snapped; with no building there it falls back to the
+          terrain. The build writes these into the scenario the sim spawns and
+          the scorer reads. A name needs "casualty" or "person" in it to score;
+          the build fixes one that does not.`),
+    deleteButton(ref, "Delete target"),
+  ];
+}
+
+function treePanel(t, ref) {
+  const drawn = treeModelFor(t.id, 0, 1000);
+  const options = [["", `pool draw${drawn
+    ? ` (now ${drawn.name}, ${drawn.height_m} m)` : ""}`]]
+    .concat(TREE_MODELS.map(m => [m.uri, `${m.name} (${m.height_m} m)`]));
+  return [
+    selectField("model (heights are the models' own)", options,
+                t.model_uri ?? "", v => { t.model_uri = v || null; }),
+    note(`The circle is the canopy footprint at its true size. The tree stands
+          on the terrain; one under a building is dropped at build.`),
+    deleteButton(ref, "Delete tree"),
+  ];
+}
+
+function treeAreaPanel(a, ref) {
+  const count = areaTreePoints(a).length;
+  const species = treeModelsInRange(a.min_height_m, a.max_height_m)
+    .map(m => `${m.name} (${m.height_m} m)`).join(", ") || "none";
+  return [
+    numberField("density, trees per hectare", a.density_per_ha, 10,
+                v => { if (v > 0) a.density_per_ha = v; }, { refresh: true }),
+    row(numberField("min height m", a.min_height_m, 0.5,
+                    v => { a.min_height_m = v; }, { refresh: true }),
+        numberField("max height m", a.max_height_m, 0.5,
+                    v => { a.max_height_m = v; }, { refresh: true })),
+    enabledField(a, "include in the world"),
+    note(`${count} trees at this density, drawn from: ${species}. Heights are
+          the models' own; the range picks among them, and the circles are the
+          exact canopies the build places. Drag the area to move it, a corner
+          to reshape it; double-click a corner to remove it, an edge to add one.`),
+    deleteButton(ref, "Delete tree area"),
+  ];
+}
+
+function zonePanel(z, ref) {
+  return [
+    selectField("mode", [["min", "min of zone"], ["mean", "mean of zone"],
+                         ["manual", "manual height"]], z.mode,
+                v => { z.mode = v; }),
+    numberField("height m (manual, 0 = origin ground)", z.height_m ?? 0, 0.1,
+                v => { z.height_m = v; }),
+    note(`Drag the zone to move it whole, a corner to reshape it. Double-click
+          a corner to remove it, double-click an edge to add one.`),
+    deleteButton(ref, "Delete zone"),
+  ];
+}
+
+function fiducialPanel() {
+  const f = scene.fiducial;
+  return [
+    numberField("east m", +f.east_m.toFixed(2), 0.1, v => { f.east_m = v; }),
+    numberField("north m", +f.north_m.toFixed(2), 0.1, v => { f.north_m = v; }),
+    note(`The orange 0.5 m survey circle. Its coordinates land in .env as
+          FIDUCIAL_SURVEYED_*.`),
+  ];
+}
+
+// ------------------------------------------------------------- group panel
+// Each entry says which kinds carry the field. A field shows when every
+// selected kind carries it, so nothing is gated on a kind name here.
+const GROUP_FIELDS = [
+  { kinds: ["vehicle"], build: () =>
+      selectField("class", [["", "mixed - leave as is"], ["car", "car"],
+                            ["bus", "bus"]],
+                  uniform(m => objectOf(m).cls) ?? "",
+                  v => multi.forEach(m => { objectOf(m).cls = v; }),
+                  { skipEmpty: true }) },
+  { kinds: ["building"], build: () =>
+      bulkNumber("height m", 0.5, m => objectOf(m).height_m,
+                 (m, v) => { const b = objectOf(m);
+                             b.height_m = v; b.height_source = "manual"; }) },
+  { kinds: ["vehicle", "building"], build: () =>
+      row(bulkNumber("length m", 0.5, m => objectOf(m).length_m,
+                     (m, v) => setSize(m, { length: v })),
+          bulkNumber("width m", 0.5, m => objectOf(m).width_m,
+                     (m, v) => setSize(m, { width: v }))) },
+  { kinds: ["vehicle", "building", "target"], build: () =>
+      bulkNumber("rotation deg", 1, m => headingOf(m),
+                 (m, v) => setHeading(m, v)) },
+  { kinds: ["vehicle", "target"], build: () => [
+      selectField("floor", [["", "mixed - leave as is"], ["terrain", "terrain"],
+                            ["building", "building under it"]],
+                  uniform(m => objectOf(m).on_building ? "building" : "terrain") ?? "",
+                  v => multi.forEach(m => {
+                    objectOf(m).on_building = v === "building"; }),
+                  { skipEmpty: true }),
+      bulkNumber("offset above the floor m", 0.5, m => objectOf(m).agl_m ?? 0,
+                 (m, v) => { objectOf(m).agl_m = v; })] },
+  { kinds: ["vehicle", "building", "target", "tree", "treearea"], build: () =>
+      selectField("included in the world",
+                  [["", "mixed - leave as is"], ["yes", "include"],
+                   ["no", "exclude"]],
+                  uniform(m => objectOf(m).enabled ? "yes" : "no") ?? "",
+                  v => multi.forEach(m => { objectOf(m).enabled = v === "yes"; }),
+                  { skipEmpty: true }) },
+  { kinds: ["vehicle", "building", "target", "tree"], build: () =>
+      textField("model uri", "",
+                v => { if (v) multi.forEach(m => {
+                  objectOf(m).model_uri = v === "none" ? null : v; }); },
+                { placeholder: "URI, or the word none for the pool" }) },
+];
+
+function uniform(read) {
+  const values = multi.map(read);
+  return values.every(v => v === values[0]) ? values[0] : null;
+}
+
+function bulkNumber(label, step, read, apply) {
+  const value = uniform(read);
+  return numberField(label, value, step, v => multi.forEach(m => apply(m, v)),
+                     { placeholder: "mixed - a number sets all" });
+}
+
 function showMultiPanel() {
   const kinds = [...new Set(multi.map(m => m.kind))];
-  const only = (...allowed) => kinds.every(k => allowed.includes(k));
-  const vehicles = multi.filter(m => m.kind === "vehicle");
-  const buildings = multi.filter(m => m.kind === "building");
-  const targets = multi.filter(m => m.kind === "target");
-  panelTitle.textContent = `${multi.length} selected`;
-
-  const uniform = read => {
-    const values = multi.map(read);
-    return values.every(v => v === values[0]) ? values[0] : null;
-  };
-  const numberField = (id, label, step, read) => {
-    const value = uniform(read);
-    const attr = value === null || value === undefined
-      ? `placeholder="mixed - a number sets all"` : `value="${value}"`;
-    return field(label,
-                 `<input id="${id}" type="number" step="${step}" ${attr}>`);
-  };
-  const selectField = (id, label, options, read) => {
-    const value = uniform(read);
-    const items = [`<option value="">mixed - leave as is</option>`]
-      .concat(options.map(([v, text]) =>
-        `<option value="${v}"${v === value ? " selected" : ""}>${text}</option>`));
-    return field(label, `<select id="${id}">${items.join("")}</select>`);
-  };
-
-  let html =
-    `<p style="color:var(--dim)">${vehicles.length} vehicles, ` +
-    `${buildings.length} buildings, ${targets.length} targets. Drag a ` +
-    `selected object to move the group; the white handle turns every ` +
-    `object in place. Each field below sets the whole selection.</p>`;
-  if (only("vehicle"))
-    html += selectField("m-cls", "class", [["car", "car"], ["bus", "bus"]],
-                        m => memberObject(m).cls);
-  if (only("building"))
-    html += numberField("m-h", "height m", 0.5, m => memberObject(m).height_m);
-  if (only("vehicle", "building"))
-    html += `<div class="row"><div>`
-      + numberField("m-l", "length m", 0.5, m => memberObject(m).length_m)
-      + `</div><div>`
-      + numberField("m-w", "width m", 0.5, m => memberObject(m).width_m)
-      + `</div></div>`;
-  html += numberField("m-rot", "rotation deg", 1, m => headingOf(m));
-  if (only("vehicle", "target"))
-    html += selectField("m-floor", "floor",
-                        [["terrain", "terrain"], ["building", "building under it"]],
-                        m => (memberObject(m).on_building ? "building" : "terrain"))
-      + numberField("m-agl", "offset above the floor m", 0.5,
-                    m => memberObject(m).agl_m ?? 0);
-  html += selectField("m-en",
-                      only("target") ? "in the scenario" : "included in the world",
-                      [["yes", "include"], ["no", "exclude"]],
-                      m => (memberObject(m).enabled ? "yes" : "no"))
-    + field("model uri",
-            `<input id="m-uri" placeholder="URI, or the word none for the pool">`)
-    + (vehicles.length ? `<button id="m-flip">Flip vehicles 180°</button>` : "")
-    + `<button id="m-del" class="danger">Delete selection</button>`;
-  panelBody.innerHTML = html;
-
-  const bulkNumber = (id, apply) => {
-    const input = document.getElementById(id);
-    if (!input) return;
-    input.onchange = ev => {
-      const value = parseFloat(ev.target.value);
-      if (Number.isNaN(value)) return;
-      pushUndo();
-      multi.forEach(m => apply(m, value));
-      markDirty(); draw();
-    };
-  };
-  const bulkSelect = (id, apply) => {
-    const select = document.getElementById(id);
-    if (!select) return;
-    select.onchange = ev => {
-      if (!ev.target.value) return;
-      pushUndo();
-      multi.forEach(m => apply(m, ev.target.value));
-      markDirty(); draw();
-    };
-  };
-  bulkSelect("m-cls", (m, v) => { memberObject(m).cls = v; });
-  bulkNumber("m-h", (m, v) => { const b = memberObject(m);
-                                b.height_m = v; b.height_source = "manual"; });
-  bulkNumber("m-l", (m, v) => setSize(m, { length: v }));
-  bulkNumber("m-w", (m, v) => setSize(m, { width: v }));
-  bulkNumber("m-rot", (m, v) => setHeading(m, v));
-  bulkSelect("m-floor", (m, v) => {
-    memberObject(m).on_building = v === "building"; });
-  bulkNumber("m-agl", (m, v) => { memberObject(m).agl_m = v; });
-  bulkSelect("m-en", (m, v) => { memberObject(m).enabled = v === "yes"; });
-  document.getElementById("m-uri").onchange = ev => {
-    const raw = ev.target.value.trim();
-    if (!raw) return;
-    pushUndo();
-    const value = raw === "none" ? null : raw;
-    multi.forEach(m => { memberObject(m).model_uri = value; });
-    markDirty();
-  };
-  if (vehicles.length)
-    document.getElementById("m-flip").onclick = flipMembers;
-  document.getElementById("m-del").onclick = () => deleteMembers(multi);
+  const counts = kinds.map(k => `${multi.filter(m => m.kind === k).length} ${k}`);
+  const fields = [
+    note(`${counts.join(", ")}. Drag a selected object to move the group; the
+          white handle turns every object in place. Each field below sets the
+          whole selection.`),
+  ];
+  GROUP_FIELDS.forEach(entry => {
+    if (!kinds.every(k => entry.kinds.includes(k))) return;
+    const built = entry.build();
+    Array.isArray(built) ? fields.push(...built) : fields.push(built);
+  });
+  if (multi.some(m => KINDS[m.kind].heading))
+    fields.push(button("Flip 180°", () => flipMembers(multi)));
+  fields.push(button("Delete selection", () => deleteMembers(multi), true));
+  render(`${multi.length} selected`, fields);
 }
 
 function showPanel() {
   if (multi.length > 1) { showMultiPanel(); return; }
   if (!selection) {
     panelTitle.textContent = "Nothing selected";
-    panelBody.innerHTML = "Click a vehicle, a building outline, a tree, a zone or the " +
-      "orange fiducial. Drag empty ground to pan, wheel to zoom.";
+    panelBody.innerHTML = "Click a vehicle, a building outline, a target, a " +
+      "tree, a zone or the orange fiducial. Drag empty ground to pan, wheel " +
+      "to zoom.";
     return;
   }
   if (selection.kind === "fiducial") {
-    const f = scene.fiducial;
-    panelTitle.textContent = "Fiducial";
-    panelBody.innerHTML =
-      field("east m", `<input id="p-e" type="number" step="0.1" value="${f.east_m.toFixed(2)}">`) +
-      field("north m", `<input id="p-n" type="number" step="0.1" value="${f.north_m.toFixed(2)}">`) +
-      `<p style="color:var(--dim)">The orange 0.5 m survey circle. Its
-       coordinates land in .env as FIDUCIAL_SURVEYED_*.</p>`;
-    bind("p-e", v => f.east_m = v); bind("p-n", v => f.north_m = v);
+    render("Fiducial", fiducialPanel());
     return;
   }
-  if (selection.kind === "zone") {
-    const z = scene.flatten_zones[selection.index];
-    panelTitle.textContent = z.id;
-    panelBody.innerHTML =
-      field("mode", `<select id="p-mode">
-        <option value="min"${z.mode === "min" ? " selected" : ""}>min of zone</option>
-        <option value="mean"${z.mode === "mean" ? " selected" : ""}>mean of zone</option>
-        <option value="manual"${z.mode === "manual" ? " selected" : ""}>manual height</option>
-      </select>`) +
-      field("height m (manual, 0 = origin ground)",
-            `<input id="p-h" type="number" step="0.1" value="${z.height_m ?? 0}">`) +
-      `<p style="color:var(--dim)">Drag the zone to move it whole, a corner
-       to reshape it. Double-click a corner to remove it, double-click an
-       edge to add one.</p>` +
-      `<button id="p-del" class="danger">Delete zone</button>`;
-    document.getElementById("p-mode").onchange = ev => {
-      pushUndo(); z.mode = ev.target.value; markDirty(); };
-    bind("p-h", v => z.height_m = v);
-    document.getElementById("p-del").onclick = () => {
-      pushUndo();
-      scene.flatten_zones.splice(selection.index, 1); select(null); markDirty(); };
-    return;
-  }
-  if (selection.kind === "tree") {
-    const t = scene.trees[selection.index];
-    const drawn = treeModelFor(t.id, 0, 1000);
-    panelTitle.textContent = `${t.id} (${t.source})`;
-    const options = [`<option value="">pool draw${drawn
-      ? ` (now ${drawn.name}, ${drawn.height_m} m)` : ""}</option>`]
-      .concat(TREE_MODELS.map(m =>
-        `<option value="${m.uri}"${m.uri === t.model_uri ? " selected" : ""}>
-         ${m.name} (${m.height_m} m)</option>`));
-    panelBody.innerHTML =
-      field("model (heights are the models' own)",
-            `<select id="p-model">${options.join("")}</select>`) +
-      `<p style="color:var(--dim)">The circle is the canopy footprint at
-       its true size. The tree stands on the terrain; one under a
-       building is dropped at build.</p>` +
-      `<button id="p-del" class="danger">Delete tree</button>`;
-    document.getElementById("p-model").onchange = ev => {
-      pushUndo(); t.model_uri = ev.target.value || null; markDirty(); draw(); };
-    document.getElementById("p-del").onclick = () => {
-      pushUndo(); scene.trees.splice(selection.index, 1); select(null); markDirty(); };
-    return;
-  }
-  if (selection.kind === "treearea") {
-    const a = scene.tree_areas[selection.index];
-    const count = areaTreePoints(a).length;
-    const species = treeModelsInRange(a.min_height_m, a.max_height_m)
-      .map(m => `${m.name} (${m.height_m} m)`).join(", ") || "none";
-    panelTitle.textContent = `${a.id} (${a.source})`;
-    panelBody.innerHTML =
-      field("density, trees per hectare",
-            `<input id="p-dens" type="number" step="10" value="${a.density_per_ha}">`) +
-      `<div class="row"><div>` +
-      field("min height m", `<input id="p-hmin" type="number" step="0.5" value="${a.min_height_m}">`) +
-      `</div><div>` +
-      field("max height m", `<input id="p-hmax" type="number" step="0.5" value="${a.max_height_m}">`) +
-      `</div></div>` +
-      field("", `<label style="display:flex;gap:6px;align-items:center;margin-top:8px">
-        <input id="p-en" type="checkbox" style="width:auto"${a.enabled ? " checked" : ""}>
-        include in the world</label>`) +
-      `<p style="color:var(--dim)">${count} trees at this density, drawn
-       from: ${species}. Heights are the models' own; the range picks
-       among them, and the circles are the exact canopies the build
-       places. Drag the area to move it, a corner to reshape it;
-       double-click a corner to remove it, an edge to add one.</p>` +
-      `<button id="p-del" class="danger">Delete tree area</button>`;
-    bind("p-dens", v => { if (v > 0) a.density_per_ha = v; draw(); showPanel(); });
-    bind("p-hmin", v => { a.min_height_m = v; draw(); showPanel(); });
-    bind("p-hmax", v => { a.max_height_m = v; draw(); showPanel(); });
-    document.getElementById("p-en").onchange = ev => {
-      pushUndo(); a.enabled = ev.target.checked; markDirty(); draw(); };
-    document.getElementById("p-del").onclick = () => {
-      pushUndo();
-      scene.tree_areas.splice(selection.index, 1); select(null); markDirty(); };
-    return;
-  }
-  if (selection.kind === "target") {
-    const t = scene.targets[selection.index];
-    panelTitle.textContent = `${t.id} (${t.source})`;
-    panelBody.innerHTML =
-      field("name", `<input id="p-name" value="${t.name}">`) +
-      field("model uri (empty = pool at build)",
-            `<input id="p-uri" value="${t.model_uri ?? ""}"
-                    placeholder="model://casualty_prone, or a Fuel URI">`) +
-      field("", `<label style="display:flex;gap:6px;align-items:center;margin-top:8px">
-        <input id="p-roof" type="checkbox" style="width:auto"${t.on_building ? " checked" : ""}>
-        snap to the building under it</label>`) +
-      field("offset above the floor m (empty = 0)",
-            `<input id="p-alt" value="${t.agl_m ?? ""}">`) +
-      field("", `<label style="display:flex;gap:6px;align-items:center;margin-top:8px">
-        <input id="p-en" type="checkbox" style="width:auto"${t.enabled ? " checked" : ""}>
-        include in the scenario</label>`) +
-      `<p style="color:var(--dim)">Ground truth. The floor is the terrain,
-       or the roof of the building under it when snapped; with no building
-       there it falls back to the terrain. The build writes these into the
-       scenario the sim spawns and the scorer reads. A name needs
-       "casualty" or "person" in it to score; the build fixes one that
-       does not.</p>` +
-      `<button id="p-del" class="danger">Delete target</button>`;
-    document.getElementById("p-name").onchange = ev => {
-      pushUndo(); t.name = ev.target.value.trim() || t.name; markDirty(); draw(); };
-    document.getElementById("p-uri").onchange = ev => {
-      pushUndo(); t.model_uri = ev.target.value.trim() || null; markDirty(); };
-    document.getElementById("p-roof").onchange = ev => {
-      pushUndo(); t.on_building = ev.target.checked; markDirty(); };
-    document.getElementById("p-alt").onchange = ev => {
-      const value = parseFloat(ev.target.value);
-      pushUndo(); t.agl_m = Number.isNaN(value) ? null : value; markDirty(); };
-    document.getElementById("p-en").onchange = ev => {
-      pushUndo(); t.enabled = ev.target.checked; markDirty(); draw(); };
-    document.getElementById("p-del").onclick = () => {
-      pushUndo(); scene.targets.splice(selection.index, 1); select(null); markDirty(); };
-    return;
-  }
-  if (selection.kind === "vehicle") {
-    const v = scene.vehicles[selection.index];
-    panelTitle.textContent = `${v.id} (${v.source}` +
-      (v.source === "auto" ? `, conf ${v.confidence})` : ")");
-    panelBody.innerHTML =
-      field("class", `<select id="p-cls">
-        <option value="car"${v.cls === "car" ? " selected" : ""}>car</option>
-        <option value="bus"${v.cls === "bus" ? " selected" : ""}>bus</option></select>`) +
-      `<div class="row"><div>` +
-      field("length m", `<input id="p-l" type="number" step="0.1" value="${v.length_m}">`) +
-      `</div><div>` +
-      field("width m", `<input id="p-w" type="number" step="0.1" value="${v.width_m}">`) +
-      `</div></div>` +
-      field("heading deg (ccw from east)",
-            `<input id="p-hd" type="number" step="1" value="${v.heading_deg}">`) +
-      field("", `<label style="display:flex;gap:6px;align-items:center;margin-top:8px">
-        <input id="p-roof" type="checkbox" style="width:auto"${v.on_building ? " checked" : ""}>
-        snap to the building under it</label>`) +
-      field("offset above the floor m (empty = 0)",
-            `<input id="p-alt" value="${v.agl_m ?? ""}">`) +
-      field("model uri (empty = pool)",
-            `<input id="p-uri" value="${v.model_uri ?? ""}" placeholder="https://fuel… or model://…">`) +
-      `<button id="p-flip">Flip 180°</button>` +
-      `<button id="p-del" class="danger">Delete vehicle</button>`;
-    document.getElementById("p-cls").onchange = ev => {
-      pushUndo(); v.cls = ev.target.value; markDirty(); };
-    bind("p-l", val => v.length_m = val); bind("p-w", val => v.width_m = val);
-    bind("p-hd", val => v.heading_deg = val);
-    document.getElementById("p-roof").onchange = ev => {
-      pushUndo(); v.on_building = ev.target.checked; markDirty(); };
-    document.getElementById("p-alt").onchange = ev => {
-      const value = parseFloat(ev.target.value);
-      pushUndo(); v.agl_m = Number.isNaN(value) ? null : value; markDirty(); };
-    document.getElementById("p-uri").onchange = ev => {
-      pushUndo(); v.model_uri = ev.target.value.trim() || null; markDirty(); };
-    document.getElementById("p-flip").onclick = () => {
-      pushUndo();
-      v.heading_deg = ((v.heading_deg + 180 + 180) % 360) - 180; markDirty(); };
-    document.getElementById("p-del").onclick = () => {
-      pushUndo();
-      scene.vehicles.splice(selection.index, 1); select(null); markDirty(); };
-    return;
-  }
-  const b = scene.buildings[selection.index];
-  panelTitle.textContent = b.name || b.id;
-  panelBody.innerHTML =
-    field("height m (source: " + b.height_source + ")",
-          `<input id="p-h" type="number" step="0.5" value="${b.height_m}">`) +
-    `<div class="row"><div>` +
-    field("length m", `<input id="p-l" type="number" step="0.5" value="${b.length_m}">`) +
-    `</div><div>` +
-    field("width m", `<input id="p-w" type="number" step="0.5" value="${b.width_m}">`) +
-    `</div></div>` +
-    field("yaw deg", `<input id="p-y" type="number" step="1" value="${b.yaw_deg}">`) +
-    field("model uri (empty = extruded mesh)",
-          `<input id="p-uri" value="${b.model_uri ?? ""}" placeholder="model://… replaces the mesh">`) +
-    field("", `<label style="display:flex;gap:6px;align-items:center;margin-top:8px">
-      <input id="p-en" type="checkbox" style="width:auto"${b.enabled ? " checked" : ""}>
-      include in the world</label>`) +
-    (b.map_height_m != null
-      ? `<button id="p-mheight">Reset height to map (${b.map_height_m} m)</button>`
-      : "");
-  bind("p-h", v => { b.height_m = v; b.height_source = "manual"; });
-  if (b.map_height_m != null)
-    document.getElementById("p-mheight").onclick = () => {
-      pushUndo();
-      b.height_m = b.map_height_m;
-      b.height_source = b.map_height_source || "map";
-      markDirty(); showPanel(); draw();
-    };
-  const boxWith = patch => applyBuildingBox(b, {
-    x: b.east_m, y: b.north_m, length: b.length_m, width: b.width_m,
-    heading: b.yaw_deg, ...patch });
-  bind("p-l", v => boxWith({ length: v }));
-  bind("p-w", v => boxWith({ width: v }));
-  bind("p-y", v => boxWith({ heading: v }));
-  document.getElementById("p-uri").onchange = ev => {
-    pushUndo(); b.model_uri = ev.target.value.trim() || null; markDirty(); };
-  document.getElementById("p-en").onchange = ev => {
-    pushUndo(); b.enabled = ev.target.checked; markDirty(); };
+  const spec = KINDS[selection.kind];
+  const object = objectOf(selection);
+  render(spec.title ? spec.title(object) : defaultTitle(object),
+         spec.panel(object, selection));
 }
 
-function bind(id, setter) {
-  document.getElementById(id).onchange = ev => {
-    const value = parseFloat(ev.target.value);
-    if (!Number.isNaN(value)) { pushUndo(); setter(value); markDirty(); }
-  };
+function defaultTitle(o) {
+  if (!o.source) return o.id;
+  const detail = o.source === "auto" ? `${o.source}, conf ${o.confidence}`
+                                     : o.source;
+  return `${o.id} (${detail})`;
 }
 
 function select(hit) {
@@ -1041,9 +1089,7 @@ function selectMulti(members) {
 
 function toggleMember(hit) {
   let members = multi.slice();
-  if (members.length === 0 && selection
-      && (selection.kind === "vehicle" || selection.kind === "building"
-          || selection.kind === "target"))
+  if (members.length === 0 && selection && KINDS[selection.kind])
     members = [selection];
   const at = members.findIndex(m => m.kind === hit.kind && m.index === hit.index);
   if (at >= 0) members.splice(at, 1);
@@ -1052,6 +1098,16 @@ function toggleMember(hit) {
 }
 
 // -------------------------------------------------------------------- events
+// What each toolbar add mode places, and with what departure from blank().
+const ADD_MODES = {
+  add_car: { kind: "vehicle", props: {} },
+  add_bus: { kind: "vehicle", props: { cls: "bus", length_m: 12.0, width_m: 2.5 } },
+  add_building: { kind: "building", props: {} },
+  add_target: { kind: "target", props: {} },
+  add_tree: { kind: "tree", props: {} },
+};
+const DRAFT_MODES = { zone: "zone", treearea: "treearea" };
+
 canvas.addEventListener("wheel", event => {
   event.preventDefault();
   const rect = canvas.getBoundingClientRect();
@@ -1064,46 +1120,28 @@ canvas.addEventListener("wheel", event => {
   draw();
 }, { passive: false });
 
+function beginMove(members, e, n) {
+  pushUndo();
+  drag = { kind: "move", members: members.map(ref => {
+    const [ae, an] = anchorOf(ref);
+    return { ref, frozen: geometryOf(ref), de: ae - e, dn: an - n };
+  }) };
+}
+
 canvas.addEventListener("mousedown", event => {
   if (!scene || event.button !== 0) return;
   const [e, n] = enuFromMouse(event);
-  if (mode === "add_car" || mode === "add_bus") {
+
+  const add = ADD_MODES[mode];
+  if (add) {
     pushUndo();
-    const bus = mode === "add_bus";
-    const ref = addVehicle(e, n, { cls: bus ? "bus" : "car",
-      length_m: bus ? 12.0 : 4.6, width_m: bus ? 2.5 : 1.9,
-      heading_deg: 0, model_uri: null });
+    const ref = addObject(add.kind, e, n, { ...add.props });
     if (!event.shiftKey) setMode("select");   // shift keeps placing
     select(ref);
     markDirty();
     return;
   }
-  if (mode === "add_building") {
-    pushUndo();
-    const ref = addBuilding(e, n, { length_m: 14, width_m: 10, yaw_deg: 0,
-      height_m: 6, model_uri: null });
-    if (!event.shiftKey) setMode("select");   // shift keeps placing
-    select(ref);
-    markDirty();
-    return;
-  }
-  if (mode === "add_target") {
-    pushUndo();
-    const ref = addTarget(e, n, {});
-    if (!event.shiftKey) setMode("select");   // shift keeps placing
-    select(ref);
-    markDirty();
-    return;
-  }
-  if (mode === "add_tree") {
-    pushUndo();
-    const ref = addTree(e, n);
-    if (!event.shiftKey) setMode("select");   // shift keeps placing
-    select(ref);
-    markDirty();
-    return;
-  }
-  if (mode === "zone" || mode === "treearea") {
+  if (DRAFT_MODES[mode]) {
     zoneDraft.push([+e.toFixed(2), +n.toFixed(2)]); draw(); return;
   }
   if (mode === "fiducial") {
@@ -1112,23 +1150,19 @@ canvas.addEventListener("mousedown", event => {
     scene.fiducial.east_m = +e.toFixed(2); scene.fiducial.north_m = +n.toFixed(2);
     markDirty(); draw(); return;
   }
+
   if (event.ctrlKey || event.metaKey) {
     // Ctrl selects: a click toggles one object in the group, a drag from
     // empty ground opens a selection rectangle. Mousemove decides which.
     const hit = hitAt(e, n);
-    if (hit && (hit.kind === "vehicle" || hit.kind === "building"
-                || hit.kind === "target")) {
-      toggleMember(hit);
-      return;
-    }
+    if (hit && KINDS[hit.kind]) { toggleMember(hit); return; }
     drag = { kind: "boxpending", startE: e, startN: n,
              startX: event.clientX, startY: event.clientY };
     return;
   }
   if (event.shiftKey) {
-    // A still shift-click stamps a copy of the last stampable selection
-    // at the click point, over an object or not: a casualty lands next
-    // to a car that way. A drag turns into a pan.
+    // A still shift-click stamps a copy of the selection at the click point,
+    // over an object or not. A drag turns into a pan.
     drag = { kind: "stamppending", startE: e, startN: n,
              startX: event.clientX, startY: event.clientY };
     return;
@@ -1140,17 +1174,15 @@ canvas.addEventListener("mousedown", event => {
     const tol = Math.max(0.8, 8 / view.s * mpp()[0]);
     if (nearPoint(e, n, handleE, handleN, tol)) {
       pushUndo();
-      drag = { kind: "grouprotate", centerE, centerN,
+      drag = { kind: "turn", centerE, centerN,
                startAngle: Math.atan2(n - centerN, e - centerE),
-               initialHeadings: multi.map(m => headingOf(m)) };
+               members: multi.map(ref => ({ ref, frozen: geometryOf(ref),
+                                            heading: headingOf(ref) })) };
       return;
     }
     const hit = hitAt(e, n);
     if (hit && isMultiMember(hit.kind, hit.index)) {
-      pushUndo();
-      drag = { kind: "groupmove",
-               offsets: multi.map(m => { const o = memberObject(m);
-                 return { de: o.east_m - e, dn: o.north_m - n }; }) };
+      beginMove(multi, e, n);
       return;
     }
     // Clicking outside the group falls through and clears it.
@@ -1158,9 +1190,9 @@ canvas.addEventListener("mousedown", event => {
 
   const handle = handleAt(e, n);
   if (handle) { pushUndo(); drag = { kind: handle.kind }; return; }
-  if (selection && isPolyKind(selection.kind)) {
-    const zone = polygonObjOf(selection);
-    const vertexIndex = nearestZoneVertex(zone, e, n);
+  if (selection && KINDS[selection.kind] && isPolyKind(selection.kind)) {
+    const object = objectOf(selection);
+    const vertexIndex = nearestVertex(object, e, n);
     if (vertexIndex >= 0) {
       pushUndo();
       drag = { kind: "vertex", index: vertexIndex };
@@ -1168,94 +1200,59 @@ canvas.addEventListener("mousedown", event => {
     }
     // A click on the selected polygon's edge keeps the selection, so the
     // double-click that adds a corner there still finds it selected.
-    if (nearestZoneEdge(zone, e, n)) return;
+    if (nearestEdge(object, e, n)) return;
   }
+
   const hit = hitAt(e, n);
   select(hit);
-  if (hit && hit.kind === "fiducial") { pushUndo(); drag = { kind: "fiducial" }; }
-  else if (hit && hit.kind === "target") {
-    pushUndo();
-    const t = scene.targets[hit.index];
-    drag = { kind: "targetmove", offsetE: t.east_m - e, offsetN: t.north_m - n };
-  } else if (hit && (hit.kind === "vehicle" || hit.kind === "building")) {
-    pushUndo();
-    const box = boxOf(hit);
-    drag = { kind: "move", offsetE: box.x - e, offsetN: box.y - n };
-  } else if (hit && hit.kind === "tree") {
-    pushUndo();
-    const t = scene.trees[hit.index];
-    drag = { kind: "treemove", offsetE: t.east_m - e, offsetN: t.north_m - n };
-  } else if (hit && isPolyKind(hit.kind)) {
-    pushUndo();
-    // The whole polygon rides the drag, offset from a frozen copy so
-    // rounding never accumulates across the corners.
-    drag = { kind: "zonemove", startE: e, startN: n,
-             initial: polygonObjOf(hit).polygon_m.map(p => p.slice()) };
-  } else if (!hit) {
+  if (!hit) {
     drag = { kind: "pan", startX: event.clientX, startY: event.clientY,
              panX: view.panX, panY: view.panY };
+  } else if (hit.kind === "fiducial") {
+    pushUndo();
+    drag = { kind: "fiducial" };
+  } else {
+    beginMove([hit], e, n);
   }
 });
 
 window.addEventListener("mousemove", event => {
   if (!drag || !scene) { if (scene) updateStatus(event); return; }
   const [e, n] = enuFromMouse(event);
+  const moved = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+
   if (drag.kind === "pan") {
     view.panX = drag.panX - (event.clientX - drag.startX) / view.s;
     view.panY = drag.panY - (event.clientY - drag.startY) / view.s;
   } else if (drag.kind === "boxpending") {
-    if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 4)
+    if (moved > 4)
       drag = { kind: "marquee", startE: drag.startE, startN: drag.startN, e, n };
   } else if (drag.kind === "stamppending") {
-    if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 4)
+    if (moved > 4)
       drag = { kind: "pan", startX: event.clientX, startY: event.clientY,
                panX: view.panX, panY: view.panY };
   } else if (drag.kind === "marquee") {
     drag.e = e; drag.n = n;
-  } else if (drag.kind === "groupmove") {
-    multi.forEach((m, i) => {
-      const o = memberObject(m);
-      const easted = +(e + drag.offsets[i].de).toFixed(2);
-      const northed = +(n + drag.offsets[i].dn).toFixed(2);
-      if (m.kind === "building")
-        applyBuildingBox(o, { x: easted, y: northed, length: o.length_m,
-                              width: o.width_m, heading: o.yaw_deg });
-      else { o.east_m = easted; o.north_m = northed; }
-    });
+  } else if (drag.kind === "move") {
+    drag.members.forEach(m => placeAt(m.ref, m.frozen, e + m.de, n + m.dn));
     markDirty();
-  } else if (drag.kind === "grouprotate") {
-    // Headings only. Every object turns in place; nothing orbits.
-    const delta = Math.atan2(n - drag.centerN, e - drag.centerE) - drag.startAngle;
-    multi.forEach((m, i) =>
-      setHeading(m, drag.initialHeadings[i] + delta * 180 / Math.PI));
+  } else if (drag.kind === "turn") {
+    // Every object turns in place; nothing orbits.
+    const delta = (Math.atan2(n - drag.centerN, e - drag.centerE)
+                   - drag.startAngle) * 180 / Math.PI;
+    drag.members.forEach(m => turnBy(m.ref, m.frozen, m.heading, delta));
     markDirty();
   } else if (drag.kind === "fiducial") {
     scene.fiducial.east_m = +e.toFixed(2); scene.fiducial.north_m = +n.toFixed(2);
     markDirty();
   } else if (drag.kind === "vertex" && selection && isPolyKind(selection.kind)) {
-    polygonObjOf(selection).polygon_m[drag.index] = [+e.toFixed(2), +n.toFixed(2)];
+    objectOf(selection).polygon_m[drag.index] = [+e.toFixed(2), +n.toFixed(2)];
     markDirty();
-  } else if (drag.kind === "targetmove" && selection && selection.kind === "target") {
-    const t = scene.targets[selection.index];
-    t.east_m = +(e + drag.offsetE).toFixed(2);
-    t.north_m = +(n + drag.offsetN).toFixed(2);
-    markDirty();
-  } else if (drag.kind === "treemove" && selection && selection.kind === "tree") {
-    const t = scene.trees[selection.index];
-    t.east_m = +(e + drag.offsetE).toFixed(2);
-    t.north_m = +(n + drag.offsetN).toFixed(2);
-    markDirty();
-  } else if (drag.kind === "zonemove" && selection && isPolyKind(selection.kind)) {
-    const de = e - drag.startE, dn = n - drag.startN;
-    polygonObjOf(selection).polygon_m = drag.initial.map(
-      ([pe, pn]) => [+(pe + de).toFixed(2), +(pn + dn).toFixed(2)]);
-    markDirty();
-  } else if (selection && (selection.kind === "vehicle" || selection.kind === "building")) {
+  } else if (selection && KINDS[selection.kind] && isBoxKind(selection.kind)) {
     const box = boxOf(selection);
-    if (drag.kind === "move") {
-      box.set({ ...box, x: +(e + drag.offsetE).toFixed(2), y: +(n + drag.offsetN).toFixed(2) });
-    } else if (drag.kind === "rotate") {
-      box.set({ ...box, heading: +(Math.atan2(n - box.y, e - box.x) * 180 / Math.PI).toFixed(1) });
+    if (drag.kind === "rotate") {
+      box.set({ ...box,
+                heading: +(Math.atan2(n - box.y, e - box.x) * 180 / Math.PI).toFixed(1) });
     } else if (drag.kind === "resize") {
       const a = -box.heading * Math.PI / 180;
       const dx = e - box.x, dy = n - box.y;
@@ -1277,17 +1274,14 @@ window.addEventListener("mouseup", () => {
   } else if (drag && drag.kind === "marquee") {
     const minE = Math.min(drag.startE, drag.e), maxE = Math.max(drag.startE, drag.e);
     const minN = Math.min(drag.startN, drag.n), maxN = Math.max(drag.startN, drag.n);
-    const inside = (o) => o.east_m >= minE && o.east_m <= maxE
-                       && o.north_m >= minN && o.north_m <= maxN;
     const members = [];
-    scene.vehicles.forEach((v, index) => {
-      if (v.enabled && inside(v)) members.push({ kind: "vehicle", index });
-    });
-    scene.buildings.forEach((b, index) => {
-      if (b.enabled && inside(b)) members.push({ kind: "building", index });
-    });
-    scene.targets.forEach((t, index) => {
-      if (t.enabled && inside(t)) members.push({ kind: "target", index });
+    Object.keys(KINDS).forEach(kind => {
+      listOf(kind).forEach((o, index) => {
+        if (o.enabled === false) return;
+        const [ae, an] = anchorOf({ kind, index });
+        if (ae >= minE && ae <= maxE && an >= minN && an <= maxN)
+          members.push({ kind, index });
+      });
     });
     selectMulti(members);
   }
@@ -1296,46 +1290,38 @@ window.addEventListener("mouseup", () => {
 });
 
 canvas.addEventListener("dblclick", event => {
-  if ((mode === "zone" || mode === "treearea") && zoneDraft.length >= 3) {
+  const draftKind = DRAFT_MODES[mode];
+  if (draftKind && zoneDraft.length >= 3) {
     pushUndo();
     const polygon = zoneDraft.slice(0, -1);
-    let ref;
-    if (mode === "zone") {
-      scene.flatten_zones.push({ id: "fz_" + (scene.flatten_zones.length + 1),
-        polygon_m: polygon, mode: "min", height_m: null });
-      ref = { kind: "zone", index: scene.flatten_zones.length - 1 };
-    } else {
-      scene.tree_areas.push({ id: "ta_manual_" + treeAreaCounter++,
-        polygon_m: polygon, density_per_ha: 150.0, min_height_m: 1.0,
-        max_height_m: 10.0, source: "manual", enabled: true });
-      ref = { kind: "treearea", index: scene.tree_areas.length - 1 };
-    }
+    const [ce, cn] = centroid(polygon);
     zoneDraft = [];
     setMode("select");
-    select(ref);
+    select(addObject(draftKind, ce, cn, { polygon_m: polygon }));
     markDirty();
     return;
   }
-  // On a selected zone or tree area: double-click a corner to remove it,
-  // an edge to add one. The polygon never needs a delete-and-redraw.
-  if (mode === "select" && selection && isPolyKind(selection.kind)) {
+  // On a selected polygon: double-click a corner to remove it, an edge to add
+  // one. The polygon never needs a delete-and-redraw.
+  if (mode === "select" && selection && KINDS[selection.kind]
+      && isPolyKind(selection.kind)) {
     const [e, n] = enuFromMouse(event);
-    const zone = polygonObjOf(selection);
-    const vertexIndex = nearestZoneVertex(zone, e, n);
+    const object = objectOf(selection);
+    const vertexIndex = nearestVertex(object, e, n);
     if (vertexIndex >= 0) {
-      if (zone.polygon_m.length <= 3) {
+      if (object.polygon_m.length <= 3) {
         statusEl.textContent = "a polygon keeps at least 3 corners - delete it instead";
         return;
       }
       pushUndo();
-      zone.polygon_m.splice(vertexIndex, 1);
+      object.polygon_m.splice(vertexIndex, 1);
       markDirty(); draw();
       return;
     }
-    const edge = nearestZoneEdge(zone, e, n);
+    const edge = nearestEdge(object, e, n);
     if (edge) {
       pushUndo();
-      zone.polygon_m.splice(edge.insertAt, 0, [edge.e, edge.n]);
+      object.polygon_m.splice(edge.insertAt, 0, [edge.e, edge.n]);
       markDirty(); draw();
     }
   }
@@ -1343,46 +1329,25 @@ canvas.addEventListener("dblclick", event => {
 
 window.addEventListener("keydown", event => {
   if (event.target.tagName === "INPUT" || event.target.tagName === "SELECT") return;
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+  const control = event.ctrlKey || event.metaKey;
+  if (control && event.key.toLowerCase() === "z") {
     event.preventDefault();
     if (event.shiftKey) redo(); else undo();
     return;
   }
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
+  if (control && event.key.toLowerCase() === "y") {
     event.preventDefault();
     redo();
     return;
   }
   if (event.key === "Escape") { zoneDraft = []; select(null); setMode("select"); }
+  const members = multi.length > 1 ? multi
+    : (selection && KINDS[selection.kind] ? [selection] : []);
   if (event.key === "Delete" || event.key === "Backspace") {
-    if (multi.length > 1) { deleteMembers(multi); return; }
-    if (!selection) return;
-    pushUndo();
-    if (selection.kind === "vehicle") scene.vehicles.splice(selection.index, 1);
-    else if (selection.kind === "target") scene.targets.splice(selection.index, 1);
-    else if (selection.kind === "zone") scene.flatten_zones.splice(selection.index, 1);
-    else if (selection.kind === "tree") scene.trees.splice(selection.index, 1);
-    else if (selection.kind === "treearea") scene.tree_areas.splice(selection.index, 1);
-    else if (selection.kind === "building") {
-      const building = scene.buildings[selection.index];
-      if (building.source !== "manual") {
-        // An OSM building keeps its data and toggles out of the world; a
-        // hand-placed box just goes.
-        building.enabled = !building.enabled;
-        markDirty(); showPanel(); draw(); return;
-      }
-      scene.buildings.splice(selection.index, 1);
-    }
-    select(null); markDirty();
+    if (members.length) deleteMembers(members);
   }
   if (event.key === "f" || event.key === "F") {
-    if (multi.length > 1) { flipMembers(); return; }
-    if (selection && selection.kind === "vehicle") {
-      pushUndo();
-      const v = scene.vehicles[selection.index];
-      v.heading_deg = ((v.heading_deg + 180 + 180) % 360) - 180;
-      markDirty(); showPanel(); draw();
-    }
+    if (members.length) flipMembers(members);
   }
 });
 
@@ -1391,7 +1356,7 @@ document.querySelectorAll("#toolbar button[data-mode]").forEach(button => {
 });
 function setMode(next) {
   mode = next;
-  if (next !== "zone" && next !== "treearea") zoneDraft = [];
+  if (!DRAFT_MODES[next]) zoneDraft = [];
   document.querySelectorAll("#toolbar button[data-mode]").forEach(button =>
     button.classList.toggle("active", button.dataset.mode === next));
   draw();
@@ -1405,13 +1370,13 @@ function markDirty() {
 
 // ----------------------------------------------------------------- undo/redo
 // One snapshot per user action: pushUndo() runs at the start of every
-// mutation, so a whole drag is one undo step. Selection is not part of a
-// snapshot; it clears on undo because indices may not survive the jump.
+// mutation, so a whole drag is one undo step. Every kind in KINDS is in the
+// snapshot, so no edit is silently outside the history. Selection is not part
+// of it; it clears on undo because indices may not survive the jump.
 function editableState() {
-  return JSON.stringify({ vehicles: scene.vehicles, buildings: scene.buildings,
-                          targets: scene.targets,
-                          flatten_zones: scene.flatten_zones,
-                          fiducial: scene.fiducial });
+  const state = { fiducial: scene.fiducial };
+  Object.values(KINDS).forEach(spec => { state[spec.key] = scene[spec.key]; });
+  return JSON.stringify(state);
 }
 function pushUndo() {
   const state = editableState();
@@ -1423,15 +1388,13 @@ function pushUndo() {
 }
 function applyState(state) {
   const parsed = JSON.parse(state);
-  scene.vehicles = parsed.vehicles;
-  scene.buildings = parsed.buildings;
-  scene.targets = parsed.targets;
-  scene.flatten_zones = parsed.flatten_zones;
   scene.fiducial = parsed.fiducial;
+  Object.values(KINDS).forEach(spec => { scene[spec.key] = parsed[spec.key]; });
   selection = null;
   multi = [];
   zoneDraft = [];
   drag = null;
+  treeFillCache = {};
   markDirty();
   refreshUndoButtons();
   showPanel();
@@ -1459,6 +1422,7 @@ function refreshUndoButtons() {
 document.getElementById("undo").onclick = () => undo();
 document.getElementById("redo").onclick = () => redo();
 
+// ---------------------------------------------------------------------- save
 async function saveScene() {
   const reply = await fetch("/save", { method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1499,15 +1463,12 @@ window.addEventListener("beforeunload", event => {
 
 function updateStatus(event) {
   const [e, n] = enuFromMouse(event);
-  const vehicles = scene.vehicles.filter(v => v.enabled).length;
-  const buildings = scene.buildings.filter(b => b.enabled).length;
-  const targets = scene.targets.filter(t => t.enabled).length;
+  const live = kind => listOf(kind).filter(o => o.enabled !== false).length;
   const selectedNote = multi.length > 1 ? ` · ${multi.length} selected` : "";
-  const trees = scene.trees.filter(t => t.enabled).length;
   statusEl.textContent =
-    `${scene.name} · ${buildings} buildings · ${vehicles} vehicles · ` +
-    `${targets} targets · ${trees} trees + ${scene.tree_areas.length} areas · ` +
-    `${scene.flatten_zones.length} zones${selectedNote} · ` +
+    `${scene.name} · ${live("building")} buildings · ${live("vehicle")} vehicles · ` +
+    `${live("target")} targets · ${live("tree")} trees + ${live("treearea")} areas · ` +
+    `${listOf("zone").length} zones${selectedNote} · ` +
     `cursor ${e.toFixed(1)}, ${n.toFixed(1)} m`;
 }
 
@@ -1523,14 +1484,16 @@ function nextIdNumber(items) {
 
 async function init() {
   scene = await (await fetch("/scene.json")).json();
-  if (!scene.targets) scene.targets = [];   // a scene.json from before targets
-  scene.targets.forEach(t => {   // and one from before terrain-relative heights
+  // Fill in what an older scene.json predates, so every kind's array exists
+  // before anything reads it.
+  Object.values(KINDS).forEach(spec => {
+    if (!scene[spec.key]) scene[spec.key] = [];
+  });
+  scene.targets.forEach(t => {   // a scene from before terrain-relative heights
     if (t.agl_m === undefined) t.agl_m = t.alt_m ?? null;
     delete t.alt_m;
     if (t.on_building === undefined) t.on_building = false;
   });
-  if (!scene.trees) scene.trees = [];       // a scene.json from before trees
-  if (!scene.tree_areas) scene.tree_areas = [];
   try {
     const config = await (await fetch("/config.json")).json();
     if (config.finish_enabled)
@@ -1539,11 +1502,9 @@ async function init() {
   try {
     TREE_MODELS = await (await fetch("/tree_models.json")).json();
   } catch (error) { /* an older server; footprints draw a default size */ }
-  vehicleCounter = nextIdNumber(scene.vehicles);
-  buildingCounter = nextIdNumber(scene.buildings);
-  targetCounter = nextIdNumber(scene.targets);
-  treeCounter = nextIdNumber(scene.trees);
-  treeAreaCounter = nextIdNumber(scene.tree_areas);
+  Object.keys(KINDS).forEach(kind => {
+    counters[kind] = nextIdNumber(listOf(kind));
+  });
   image.onload = () => {
     const fit = Math.min(canvas.clientWidth / image.width,
                          canvas.clientHeight / image.height);

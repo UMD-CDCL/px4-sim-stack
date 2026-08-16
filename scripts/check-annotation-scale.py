@@ -43,13 +43,13 @@ import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import (QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy,
-                       qos_profile_sensor_data)
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CompressedImage
 from vision_msgs.msg import Detection2DArray
 
-DETECTION_QOS = QoSProfile(reliability=QoSReliabilityPolicy.BEST_EFFORT,
-                           history=QoSHistoryPolicy.KEEP_LAST, depth=10)
+sys.path.insert(0, "/stacks/baseline/sim_bridge")
+from sim_bridge.runtime import BEST_EFFORT as DETECTION_QOS
+
 CANDIDATES = (1.0, 1.5, 2.0, 0.6667, 0.5)
 
 

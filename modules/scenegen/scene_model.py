@@ -205,9 +205,11 @@ class SceneSpec:
 
 
 def fnv1a(text: str) -> int:
-    """32-bit FNV-1a. The stable randomness behind tree placement. The
-    editor mirrors it in JS with Math.imul, so both sides draw the same
-    positions from the same keys; change one only with the other."""
+    """32-bit FNV-1a. The one stable hash in scenegen: model draws, tree
+    placement, wall grays and fallback yaws all come from it, so a rebuild
+    of an unchanged scene is byte-identical. The editor mirrors it in JS
+    with Math.imul, so both sides draw the same answers from the same
+    keys; change one only with the other."""
     value = 2166136261
     for byte in text.encode():
         value = ((value ^ byte) * 16777619) & 0xFFFFFFFF
@@ -217,6 +219,11 @@ def fnv1a(text: str) -> int:
 def unit_hash(key: str) -> float:
     """A stable draw in [0, 1) from a string key."""
     return fnv1a(key) / 4294967296.0
+
+
+def stable_choice(options: list, key: str):
+    """A stable pick from a list, by key."""
+    return options[fnv1a(key) % len(options)]
 
 
 def polygon_contains(points: list, east: float, north: float) -> bool:
@@ -247,8 +254,8 @@ def tree_models_in_range(min_height_m: float, max_height_m: float) -> list:
 
 
 def tree_model_for(key: str, min_height_m: float, max_height_m: float) -> dict:
-    candidates = tree_models_in_range(min_height_m, max_height_m)
-    return candidates[fnv1a(key + ":model") % len(candidates)]
+    return stable_choice(tree_models_in_range(min_height_m, max_height_m),
+                         key + ":model")
 
 
 def area_tree_points(area: TreeArea) -> list:

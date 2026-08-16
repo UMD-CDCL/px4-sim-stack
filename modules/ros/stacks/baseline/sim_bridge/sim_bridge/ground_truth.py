@@ -1,62 +1,34 @@
 #!/usr/bin/env python3
 """Publish where the targets actually are, for scoring detections against.
 
-The simulator places targets from a scenario file, so their positions are
-known exactly. This is the one node that reads a simulator file, and that is
-safe: ground truth is evaluation data, nothing in the flight path reads it,
-and on real hardware this node does not run.
+Simulation only. This is the one node that reads a simulator file, which is
+safe because nothing in the flight path reads ground truth.
 
-Each target is drawn as a bubble with the scoring gate's radius, colored by
-its scene status across the cameras the `cameras` parameter selects, the
-gimbal alone by default: green when an estimate lies within the gate of
-it, yellow when a viewing ray crosses the gate of it but that ray's
-estimate lies within no gate, red when some camera's view covers it and
-no verdict names it, grey when no camera sees it and no verdict names it.
-Green beats yellow beats red beats grey. Green and yellow need no view: a
-detection overrides what the view alone would say. The status comes from
-the scorers' verdicts: an FN names a target in view but undetected, and a
-TP or MISLOCALIZED verdict carries the names of the targets it colors.
+Each target is a bubble at the scoring gate's radius, colored by its status
+across the cameras the `cameras` parameter selects. sim_bridge/verdicts.py
+holds the status meanings and the colors. A timer watches the scenario and
+resolved files, so a re-placed scenario follows with no restart, and every
+marker message leads with a DELETEALL so departed targets leave the display.
 
-A billboard label names each target. The Map panel gets the same gate
-circle and colors from one GeoJSON message that carries every target.
-The tooltip on a target shows its name and altitude.
-
-Markers and truth_3d go out on every timer tick. Ticks are cheap: the
-messages are built once, and a tick only restamps them and recolors the
-bubbles. The GeoJSON topic is latched, so it goes out only when a status
-or the origin changes, and the Map panel still sees the current state.
-
-The scenario can change while this node runs: px4sim scenario places a
-new layout, and spawn_scenario.py rewrites the resolved file. A timer
-watches both files and reloads on any change, so the published truth
-follows the world with no restart. Every marker message leads with a
-DELETEALL, so targets that left the scenario also leave the display.
-
-Scenario poses are Gazebo world coordinates, x east and y north in meters.
-PX4's local frame starts where the vehicle spawned, so the two line up.
-origin_offset_xyz shifts them when they do not.
+Scenario poses are Gazebo world coordinates, x east and y north. PX4's local
+frame starts where the vehicle spawned, so the two line up; origin_offset_xyz
+shifts them when they do not.
 
 Publishes
-    /ground_truth/markers      visualization_msgs/MarkerArray, the bubbles
-                               and the name labels
+    /ground_truth/markers      visualization_msgs/MarkerArray, bubbles and labels
     /ground_truth/truth_3d     vision_msgs/Detection3DArray, for the scorers
     /ground_truth/geojson      foxglove_msgs/GeoJSON, every target in one
-                               message, for the Map panel. Each target is a
-                               gate circle plus a pin. The tooltip shows the
-                               name and the altitude. Sent only on a change.
+                               latched message, sent only on a change
 """
 
 from __future__ import annotations
 
-import json
 import math
 import os
 from pathlib import Path
 
-import rclpy
 import yaml
 from rclpy.node import Node
-from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile
 from std_msgs.msg import ColorRGBA
 from vision_msgs.msg import (
     BoundingBox3D,
@@ -67,16 +39,12 @@ from vision_msgs.msg import (
 from visualization_msgs.msg import Marker, MarkerArray
 
 from sim_bridge.geo import MapOrigin
+from sim_bridge.runtime import (LATCHED, geojson_publisher, now_s,
+                                publish_features, spin)
 from sim_bridge.verdicts import (GROUND_TRUTH_BUBBLE_RADIUS,
                                  GROUND_TRUTH_COLOR,
                                  GROUND_TRUTH_LABEL_COLOR,
                                  GROUND_TRUTH_LABEL_HEIGHT, hex_rgb, marker)
-
-try:
-    from foxglove_msgs.msg import GeoJSON
-    HAVE_FOXGLOVE = True
-except ImportError:
-    HAVE_FOXGLOVE = False
 
 # ------------------------------------------------------------------- tunables
 # Only entities whose name contains one of these count as findable targets.
@@ -98,9 +66,6 @@ ORIGIN_CHANGE_DEG = 1e-6
 # stat calls a second cost nothing, and a re-placed scenario shows up in
 # the published truth within this long.
 RELOAD_CHECK_S = 1.0
-
-LATCHED = QoSProfile(durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
-                     history=QoSHistoryPolicy.KEEP_LAST, depth=1)
 
 # One ColorRGBA per status, shared by every bubble that has that status.
 BUBBLE_COLOR = {status: ColorRGBA(r=rgba[0], g=rgba[1], b=rgba[2], a=rgba[3])
@@ -151,14 +116,9 @@ class GroundTruth(Node):
 
         self.marker_pub = self.create_publisher(MarkerArray, "/ground_truth/markers", LATCHED)
         self.truth_pub = self.create_publisher(Detection3DArray, "/ground_truth/truth_3d", LATCHED)
-        self.geojson_pub = None
-        if HAVE_FOXGLOVE:
-            self.geojson_pub = self.create_publisher(
-                GeoJSON, "/ground_truth/geojson", LATCHED)
-        else:
-            self.get_logger().error(
-                "foxglove_msgs is missing, so the Map panel gets no ground "
-                "truth. Install ros-$ROS_DISTRO-foxglove-msgs.")
+        self.geojson_pub = geojson_publisher(
+            self, "/ground_truth/geojson",
+            "the Map panel gets no ground truth")
         self.origin = MapOrigin(self)
 
         # Positions, labels and sizes never change, so the tick messages are
@@ -263,12 +223,12 @@ class GroundTruth(Node):
         self.detected_by[cam] = detected
         self.mislocalized_by[cam] = mislocalized
         self.visible_by[cam] = visible
-        self.verdict_stamp[cam] = self.get_clock().now().nanoseconds / 1e9
+        self.verdict_stamp[cam] = now_s(self)
 
     def _statuses(self) -> dict[str, str]:
         """The scene status of every target, from one clock read. The best
         answer from any camera wins."""
-        now = self.get_clock().now().nanoseconds / 1e9
+        now = now_s(self)
         detected: set[str] = set()
         mislocalized: set[str] = set()
         visible: set[str] = set()
@@ -389,7 +349,7 @@ class GroundTruth(Node):
 
         The topic is latched, so the message goes out only when a status or
         the origin changed since the last publish."""
-        if self.geojson_pub is None or not self.origin.ready:
+        if not self.origin.ready:
             return
         origin = (self.origin.lat, self.origin.lon)
         moved = self._origin_moved(origin)
@@ -416,10 +376,7 @@ class GroundTruth(Node):
                 "properties": dict(tooltip, style={
                     "color": hex_rgb(rgba), "weight": 2}),
             })
-        msg = GeoJSON()
-        msg.geojson = json.dumps(
-            {"type": "FeatureCollection", "features": features})
-        self.geojson_pub.publish(msg)
+        publish_features(self.geojson_pub, features)
         self.last_geojson_statuses = statuses
         # Anchor the origin only when it moved, so a slow drift cannot ratchet
         # under the threshold forever.
@@ -428,15 +385,7 @@ class GroundTruth(Node):
 
 
 def main() -> None:
-    rclpy.init()
-    node = GroundTruth()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.try_shutdown()
+    spin(GroundTruth)
 
 
 if __name__ == "__main__":

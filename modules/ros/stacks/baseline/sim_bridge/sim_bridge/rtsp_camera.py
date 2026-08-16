@@ -43,19 +43,12 @@ from gi.repository import Gst  # noqa: E402
 
 import rclpy  # noqa: E402
 from rclpy.node import Node  # noqa: E402
-from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy  # noqa: E402
 from sensor_msgs.msg import CameraInfo, CompressedImage  # noqa: E402
 
+from sim_bridge.runtime import NEWEST_ONLY, spin  # noqa: E402
 
 # ------------------------------------------------------------------- tunables
 JPEG_QUALITY = 75
-
-SENSOR_QOS = QoSProfile(
-    reliability=QoSReliabilityPolicy.BEST_EFFORT,
-    durability=QoSDurabilityPolicy.VOLATILE,
-    history=QoSHistoryPolicy.KEEP_LAST,
-    depth=1,
-)
 
 
 class RtspCamera(Node):
@@ -79,8 +72,8 @@ class RtspCamera(Node):
             + float(self.get_parameter("time_offset").value)
 
         self.jpeg_pub = self.create_publisher(
-            CompressedImage, "image_raw/compressed", SENSOR_QOS)
-        self.info_pub = self.create_publisher(CameraInfo, "camera_info", SENSOR_QOS)
+            CompressedImage, "image_raw/compressed", NEWEST_ONLY)
+        self.info_pub = self.create_publisher(CameraInfo, "camera_info", NEWEST_ONLY)
 
         Gst.init(None)
         self.pipeline = None
@@ -229,15 +222,7 @@ class RtspCamera(Node):
 
 
 def main() -> None:
-    rclpy.init()
-    node = RtspCamera()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.try_shutdown()
+    spin(RtspCamera)
 
 
 if __name__ == "__main__":

@@ -50,10 +50,9 @@ import datetime
 import json
 
 import paho.mqtt.client as mqtt
-import rclpy
-from rclpy.node import Node
 from builtin_interfaces.msg import Time
-from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy, qos_profile_sensor_data
+from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo
 from vision_msgs.msg import (
     BoundingBox2D,
@@ -62,15 +61,11 @@ from vision_msgs.msg import (
     ObjectHypothesisWithPose,
 )
 
+from sim_bridge.runtime import BEST_EFFORT, now_s, spin
+
 # ------------------------------------------------------------------- tunables
 # Drop a payload older than this, in seconds.
 MAX_AGE_S = 2.0
-
-DETECTION_QOS = QoSProfile(
-    reliability=QoSReliabilityPolicy.BEST_EFFORT,
-    history=QoSHistoryPolicy.KEEP_LAST,
-    depth=10,
-)
 
 
 class DetectionsBridge(Node):
@@ -135,7 +130,7 @@ class DetectionsBridge(Node):
 
         self.publisher_for = {
             name: self.create_publisher(
-                Detection2DArray, f"/perception/{name}/detections", DETECTION_QOS)
+                Detection2DArray, f"/perception/{name}/detections", BEST_EFFORT)
             for name in sensor_ids
         }
 
@@ -235,8 +230,7 @@ class DetectionsBridge(Node):
             return None, None
 
         seconds = when.timestamp() + self.time_offset
-        now = self.get_clock().now()
-        lag = now.nanoseconds / 1e9 - seconds
+        lag = now_s(self) - seconds
         self.lag_sum += lag
         self.lag_n += 1
 
@@ -300,9 +294,10 @@ class DetectionsBridge(Node):
         if size is None:
             return
         sx, sy = size[0] / src_w, size[1] / src_h
+        same = abs(sx - 1.0) < 1e-6 and abs(sy - 1.0) < 1e-6
         if sensor not in self.scale_logged:
             self.scale_logged.add(sensor)
-            if abs(sx - 1.0) < 1e-6 and abs(sy - 1.0) < 1e-6:
+            if same:
                 self.get_logger().info(
                     f"{sensor}: detections and image are both {size[0]}x{size[1]}")
             else:
@@ -311,7 +306,7 @@ class DetectionsBridge(Node):
                     f"image is {size[0]}x{size[1]}. Scaling boxes by "
                     f"{sx:.3f}x{sy:.3f}. Check [tiled-display] in the "
                     f"deepstream-app config if that is not deliberate.")
-        if abs(sx - 1.0) < 1e-6 and abs(sy - 1.0) < 1e-6:
+        if same:
             return
         for det in detections:
             det.bbox.center.position.x *= sx
@@ -362,15 +357,7 @@ class DetectionsBridge(Node):
 
 
 def main() -> None:
-    rclpy.init()
-    node = DetectionsBridge()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.try_shutdown()
+    spin(DetectionsBridge)
 
 
 if __name__ == "__main__":

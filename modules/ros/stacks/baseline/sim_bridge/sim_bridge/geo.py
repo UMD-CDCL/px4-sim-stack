@@ -32,6 +32,16 @@ except ImportError:          # geographic_msgs is optional in some distros
 EARTH_R = 6378137.0
 
 
+def lla_to_enu(lat: float, lon: float, alt: float,
+               ref_lat: float, ref_lon: float,
+               ref_alt: float) -> tuple[float, float, float]:
+    """Flat-earth local ENU meters about a reference. Good over a few km,
+    the inverse of MapOrigin.to_lla."""
+    east = math.radians(lon - ref_lon) * EARTH_R * math.cos(math.radians(ref_lat))
+    north = math.radians(lat - ref_lat) * EARTH_R
+    return east, north, alt - ref_alt
+
+
 class MapOrigin:
     """Tracks the WGS84 position of local (0, 0) for the node that owns it.
 
@@ -50,8 +60,9 @@ class MapOrigin:
         self.node = node
         self.lat: float | None = None
         self.lon: float | None = None
+        self.alt: float | None = None
         self.from_fix = False
-        self._local: tuple[float, float] | None = None
+        self._local: tuple[float, float, float] | None = None
         self._local_sub = self._fix_sub = None
         self._drop_timer = None
 
@@ -71,11 +82,20 @@ class MapOrigin:
     def ready(self) -> bool:
         return self.lat is not None
 
+    @property
+    def lla(self) -> tuple[float, float, float] | None:
+        """The origin as (latitude, longitude, altitude), or None before a
+        fix. Altitude is the AMSL of local z zero."""
+        if self.lat is None or self.alt is None:
+            return None
+        return (self.lat, self.lon, self.alt)
+
     def _on_origin(self, msg) -> None:
         # Zero means PX4 has no origin yet, not a point off west Africa.
         if abs(msg.position.latitude) > 1e-9 or abs(msg.position.longitude) > 1e-9:
             self.lat = msg.position.latitude
             self.lon = msg.position.longitude
+            self.alt = msg.position.altitude
             self.from_fix = False
             self._drop_feed_subscriptions()
 
@@ -95,7 +115,8 @@ class MapOrigin:
         self._drop_timer.cancel()
 
     def on_local(self, msg) -> None:
-        self._local = (msg.pose.position.x, msg.pose.position.y)
+        p = msg.pose.position
+        self._local = (p.x, p.y, p.z)
 
     def on_fix(self, msg) -> None:
         # Stop once gp_origin has spoken: it is the real origin, not a guess.
@@ -103,11 +124,12 @@ class MapOrigin:
             return
         if self._local is None or msg.status.status < 0:
             return
-        x, y = self._local
+        x, y, z = self._local
         first = self.lat is None
         self.lat = msg.latitude - math.degrees(y / EARTH_R)
         self.lon = msg.longitude - math.degrees(
             x / (EARTH_R * math.cos(math.radians(msg.latitude))))
+        self.alt = msg.altitude - z
         self.from_fix = True
         if first:
             self.node.get_logger().info(

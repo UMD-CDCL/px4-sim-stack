@@ -90,13 +90,13 @@ def marker(ns: str, marker_id: int, frame_id: str, stamp,
 
 
 def cross_marker(ns: str, marker_id: int, frame_id: str, stamp,
-                 position, span_m: float, rgba, lifetime=None) -> Marker:
-    """A flat X centered on position, span_m across. For the verdicts that
-    mark a wrong answer, so they read differently from a dot at a glance."""
-    m = marker(ns, marker_id, frame_id, stamp, position, span_m, rgba,
+                 position, size_m: float, rgba, lifetime=None) -> Marker:
+    """A flat X centered on position, size_m across. Same signature as
+    marker(), so a caller can pick either builder by verdict."""
+    m = marker(ns, marker_id, frame_id, stamp, position, size_m, rgba,
                lifetime=lifetime)
     m.type = Marker.LINE_LIST
-    half = span_m / 2.0
+    half = size_m / 2.0
     m.points = [Point(x=-half, y=-half), Point(x=half, y=half),
                 Point(x=-half, y=half), Point(x=half, y=-half)]
     m.scale.x = DETECTION_CROSS_LINE_WIDTH
