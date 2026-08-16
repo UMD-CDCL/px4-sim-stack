@@ -16,6 +16,13 @@ Do not use a target you also score against. Fitting the correction to a
 scored target and then reporting the error against it measures nothing but
 the arithmetic.
 
+A bad configuration falls back to the identity transform, with an error in
+the log. Both points at 0.0 mean one was never filled in, and a correction
+past MAX_CORRECTION_M is a wrong coordinate rather than a receiver bias.
+Either would move every localization by an absurd distance and empty the
+Foxglove panels. The identity keeps the fiducial frame resolvable, so the
+localizers keep publishing, uncorrected.
+
 Parameters
     enabled           off by default
     surveyed_lla      [lat, lon, alt] where the fiducial truly is
@@ -35,7 +42,12 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import NavSatFix
 from tf2_ros import StaticTransformBroadcaster
 
+# ------------------------------------------------------------------- tunables
+# A GPS frame bias is metres. A larger correction is a wrong coordinate.
+MAX_CORRECTION_M = 100.0
+
 EARTH_R = 6378137.0
+UNSET_LLA = [0.0, 0.0, 0.0]
 
 
 def lla_to_enu(lat: float, lon: float, alt: float,
@@ -75,6 +87,13 @@ class FiducialAlignment(Node):
                 "own frame. See the module docstring to turn it on.")
             return
 
+        if self.surveyed == UNSET_LLA or self.measured == UNSET_LLA:
+            self._publish_identity(
+                "fiducial correction is enabled, but the surveyed or the "
+                "measured point is still 0.0. Fill in both FIDUCIAL_SURVEYED_* "
+                "and FIDUCIAL_MEASURED_*, or set FIDUCIAL_ENABLED=0.")
+            return
+
         self.sub_local = self.create_subscription(
             PoseStamped, "/mavros/local_position/pose",
             self._on_local, qos_profile_sensor_data)
@@ -97,6 +116,20 @@ class FiducialAlignment(Node):
         lon = msg.longitude - math.degrees(x / (EARTH_R * math.cos(math.radians(msg.latitude))))
         self.origin = (lat, lon, msg.altitude - z)
 
+    def _publish_identity(self, reason: str) -> None:
+        """Latch the identity transform, so the fiducial frame resolves and
+        the localizers keep publishing while the configuration is unusable."""
+        self.get_logger().error(
+            f"{reason} Publishing the identity: positions in "
+            f"'{self.fiducial_frame}' carry no correction.")
+        t = TransformStamped()
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = self.reference
+        t.child_frame_id = self.fiducial_frame
+        t.transform.rotation.w = 1.0
+        self.bc.sendTransform(t)
+        self.published = True
+
     def _try_publish(self) -> None:
         if self.published or not self.enabled or self.origin is None:
             return
@@ -106,25 +139,31 @@ class FiducialAlignment(Node):
         # Where the true position sits relative to where we reported it.
         correction = (s[0] - m[0], s[1] - m[1], s[2] - m[2])
 
-        # The child frame origin goes at minus the correction, so that
-        # transforming a point out of `reference` and into `fiducial` adds it.
-        # Getting this sign backwards doubles the error instead of removing it,
-        # which looks like the correction made things worse.
-        t = TransformStamped()
-        t.header.stamp = self.get_clock().now().to_msg()
-        t.header.frame_id = self.reference
-        t.child_frame_id = self.fiducial_frame
-        t.transform.translation.x = -correction[0]
-        t.transform.translation.y = -correction[1]
-        t.transform.translation.z = -correction[2]
-        t.transform.rotation.w = 1.0
-        self.bc.sendTransform(t)
-        self.published = True
+        if math.hypot(*correction) > MAX_CORRECTION_M:
+            self._publish_identity(
+                f"the fiducial correction came out {math.hypot(*correction):.0f} m, "
+                f"past the {MAX_CORRECTION_M:.0f} m bound. Check the surveyed "
+                f"and the measured coordinates against each other.")
+        else:
+            # The child frame origin goes at minus the correction, so that
+            # transforming a point out of `reference` and into `fiducial` adds
+            # it. Getting this sign backwards doubles the error instead of
+            # removing it, which looks like the correction made things worse.
+            t = TransformStamped()
+            t.header.stamp = self.get_clock().now().to_msg()
+            t.header.frame_id = self.reference
+            t.child_frame_id = self.fiducial_frame
+            t.transform.translation.x = -correction[0]
+            t.transform.translation.y = -correction[1]
+            t.transform.translation.z = -correction[2]
+            t.transform.rotation.w = 1.0
+            self.bc.sendTransform(t)
+            self.published = True
 
-        self.get_logger().info(
-            f"fiducial correction: east {correction[0]:+.2f} m, "
-            f"north {correction[1]:+.2f} m, up {correction[2]:+.2f} m. "
-            f"Positions in '{self.fiducial_frame}' carry it.")
+            self.get_logger().info(
+                f"fiducial correction: east {correction[0]:+.2f} m, "
+                f"north {correction[1]:+.2f} m, up {correction[2]:+.2f} m. "
+                f"Positions in '{self.fiducial_frame}' carry it.")
 
         # Done for good: the broadcaster latches the transform. Re-publishing
         # on a parameter change would need these recreated.

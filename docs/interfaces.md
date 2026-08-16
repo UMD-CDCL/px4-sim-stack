@@ -404,10 +404,20 @@ offset. Nothing in the flight path depends on it.
 ### Ground truth and scoring
 
 Simulation only. `ground_truth` reads the scenario file and publishes where the
-targets really are; `detection_scorer` matches estimates against them inside a
-gate and reports recall, precision and mean position error. Only targets inside
-the current camera footprint count, so flying away from the scene does not read
-as a collapse in recall.
+targets really are; `detection_scorer` matches estimates against them with two
+radii. Within the gate the verdict is TP. Between the gate and the detection
+radius it is MISLOCALIZED: the detector saw the target, but the reported
+position is not good enough to act on. Beyond the detection radius it is FP,
+with one exception: an estimate whose viewing ray from the camera passes
+within the gate of an unclaimed target detected that target through the
+ground-plane assumption, a roof target being the usual case, and it scores
+MISLOCALIZED at any ground distance.
+Only targets the camera sees count: a target's 3D position must project into
+the image within the same 100 m limit that truncates the footprint. The 3D
+test, rather than the footprint polygon, is what covers an elevated target
+whose ground coordinates fall outside the polygon while the camera looks
+straight at it. So flying away from the scene does not read as a collapse in
+recall, and a rooftop target is a miss only when it is truly in view.
 
 Every camera is localized and scored on its own, under `/perception/<camera>/`
 and `/scoring/<camera>/`. Nothing merges them. A camera looking straight down
@@ -422,22 +432,27 @@ recall figure would describe neither.
 | `/perception/<camera>/detections_3d` | `vision_msgs/Detection3DArray` with covariance |
 | `/camera/<camera>/footprint` | `geometry_msgs/PolygonStamped`, truncated at 100 m |
 | `/camera/<camera>/footprint_geojson` | `foxglove_msgs/GeoJSON`, the same outline for the Map panel. The Foxglove layout colors it to match the 3D panel line |
-| `/scoring/<camera>/verdicts` | `vision_msgs/Detection3DArray`, each labelled TP, FP or FN |
-| `/scoring/<camera>/markers` | `visualization_msgs/MarkerArray`, TP and FP as dots |
-| `/scoring/<camera>/true_positives`, `false_positives` | `sensor_msgs/NavSatFix`, one per verdict, for the Map panel and recordings |
-| `/scoring/<camera>/position_error` | `std_msgs/Float64`, meters |
-| `/scoring/<camera>/recall`, `/scoring/<camera>/precision` | `std_msgs/Float64` |
+| `/scoring/<camera>/verdicts` | `vision_msgs/Detection3DArray`, each labelled TP, MISLOCALIZED, FP or FN |
+| `/scoring/<camera>/markers` | `visualization_msgs/MarkerArray`, a TP as a green dot, a MISLOCALIZED estimate as a yellow cross, an FP as a red cross |
+| `/scoring/<camera>/true_positives`, `missed_localizations`, `false_positives` | `sensor_msgs/NavSatFix`, one per verdict, for the Map panel and recordings |
+| `/scoring/<camera>/position_error` | `std_msgs/Float64`, meters, one per matched estimate, mislocalized ones included |
+| `/scoring/<camera>/recall`, `/scoring/<camera>/precision` | `std_msgs/Float64`, targets placed within the gate |
+| `/scoring/<camera>/detection_recall`, `/scoring/<camera>/detection_precision` | `std_msgs/Float64`, the same ratios with MISLOCALIZED counted as found, so they measure the detector alone |
 
 In the 3D view each truth target is a bubble with the scoring gate's radius,
-colored by its status across every camera: green when some camera detected
-it, yellow when some footprint covers it but nothing detected it, grey when
-no camera sees it. Each camera's estimates are dots: green within the gate
-of a target, red outside it. A dot inside a bubble is a hit by construction,
-because the bubble radius equals the gate. A missed target gets no dot, only
-its yellow bubble. The image overlay colors its boxes by the same verdicts.
-Scoring runs on a clock, so misses appear even while the detector is silent.
-The colors, shapes and status rules live in `sim_bridge/verdicts.py`, so the
-views cannot drift apart.
+colored by its status across the cameras GROUND_TRUTH_CAMERAS selects, the
+gimbal alone by default: green when some camera placed an
+estimate within the gate of it, yellow when some camera detected it but
+every estimate failed the gate, red when some camera's view covers it but
+nothing detected it, grey when no camera sees it. Each camera's estimates
+are marks: a green dot within the gate of a target, a yellow cross for a
+matched estimate outside it, a red cross for an estimate that matched
+nothing. A dot inside a bubble is a hit by construction, because the bubble
+radius equals the gate. A missed target gets no mark, only its red bubble.
+The image overlay colors its boxes by the same verdicts. Scoring runs on a
+clock, so misses appear even while the detector is silent. The colors,
+shapes and status rules live in `sim_bridge/verdicts.py`, so the views
+cannot drift apart.
 
 The footprint is truncated at 100 m from the camera. A camera near the
 horizon reports the near ground it sees, closed by an arc at the limit, and

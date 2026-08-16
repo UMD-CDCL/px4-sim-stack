@@ -40,8 +40,9 @@ from vision_msgs.msg import (
 )
 
 from sim_bridge.geo import GroundPlane
-from sim_bridge.projection import (intersect_ground, intrinsics_ready,
-                                   quat_rotate, ray_in_optical, slant_range)
+from sim_bridge.projection import (PERSON_HEIGHT_M, intersect_ground,
+                                   intrinsics_ready, quat_rotate,
+                                   ray_in_optical, slant_range)
 
 # ------------------------------------------------------------------- tunables
 # Diagonal of the 6x6 pose covariance, in m^2 and rad^2, as
@@ -53,7 +54,6 @@ COVARIANCE_DIAGONAL = [4.0, 4.0, 1.0, 0.0, 0.0, 0.0]
 # angle stretches a pixel across much more ground. 0.0004 adds a two
 # centimetre standard deviation for every metre of range.
 RANGE_VARIANCE_SCALE = 0.0004
-PERSON_HEIGHT = 1.7
 # Beyond this slant range a ray is treated as missing the ground.
 MAX_RANGE = 2000.0
 # The detection stamp is often a few tens of milliseconds newer than the
@@ -202,7 +202,7 @@ class DetectionLocalizer(Node):
             d3.bbox.center = pose
             d3.bbox.size.x = 2.0 * math.sqrt(covariance[0])
             d3.bbox.size.y = 2.0 * math.sqrt(covariance[7])
-            d3.bbox.size.z = PERSON_HEIGHT
+            d3.bbox.size.z = PERSON_HEIGHT_M
             out.detections.append(d3)
             self.localized += 1
 

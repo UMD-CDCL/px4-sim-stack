@@ -7,11 +7,13 @@ safe: ground truth is evaluation data, nothing in the flight path reads it,
 and on real hardware this node does not run.
 
 Each target is drawn as a bubble with the scoring gate's radius, colored by
-its scene status across every camera: green when some camera detected it,
-yellow when some camera's footprint covers it but nothing detected it, grey
-when no camera sees it. The status comes from the scorers' verdicts: an FN
-names a visible undetected target, and a TP carries the name of the target
-it matched.
+its scene status across the cameras the `cameras` parameter selects, the
+gimbal alone by default: green when some camera placed an
+estimate within the gate of it, yellow when some camera detected it but
+every estimate failed the gate, red when some camera's view covers it but
+nothing detected it, grey when no camera sees it. The status comes from
+the scorers' verdicts: an FN names a visible undetected target, and a TP
+or MISLOCALIZED verdict carries the name of the target it matched.
 
 A billboard label names each target. The Map panel gets the same gate
 circle and colors from one GeoJSON message that carries every target.
@@ -118,7 +120,9 @@ class GroundTruth(Node):
         self.declare_parameter("reference_frame", "map")
         self.declare_parameter("origin_offset_xyz", [0.0, 0.0, 0.0])
         self.declare_parameter("rate_hz", 10.0)
-        self.declare_parameter("cameras", ["nadir", "gimbal"])
+        # Whose verdicts color the bubbles. The launch file sets it from
+        # GROUND_TRUTH_CAMERAS, the gimbal alone by default.
+        self.declare_parameter("cameras", ["gimbal"])
 
         self.reference = self.get_parameter("reference_frame").value
         self.offset = [float(x) for x in self.get_parameter("origin_offset_xyz").value]
@@ -132,9 +136,10 @@ class GroundTruth(Node):
             names = ", ".join(t["name"] for t in self.targets)
             self.get_logger().info(f"{len(self.targets)} ground truth targets: {names}")
 
-        # Per camera: which targets its verdicts marked detected or visible,
-        # and when. Stale entries stop counting.
+        # Per camera: which targets its verdicts put in each status, and
+        # when. Stale entries stop counting.
         self.detected_by: dict[str, set[str]] = {}
+        self.mislocalized_by: dict[str, set[str]] = {}
         self.visible_by: dict[str, set[str]] = {}
         self.verdict_stamp: dict[str, float] = {}
         for cam in [str(c) for c in self.get_parameter("cameras").value]:
@@ -240,32 +245,42 @@ class GroundTruth(Node):
         return out
 
     def _on_verdicts(self, cam: str, msg: Detection3DArray) -> None:
-        detected, visible = set(), set()
+        detected, mislocalized, visible = set(), set(), set()
         for det in msg.detections:
             kind = det.results[0].hypothesis.class_id if det.results else ""
             if kind == "FN":
                 visible.add(det.id)
-            elif kind == "TP" and len(det.results) > 1:
+            elif len(det.results) > 1:
                 # The second result names the matched target.
-                detected.add(det.results[1].hypothesis.class_id)
+                name = det.results[1].hypothesis.class_id
+                if kind == "TP":
+                    detected.add(name)
+                elif kind == "MISLOCALIZED":
+                    mislocalized.add(name)
         self.detected_by[cam] = detected
+        self.mislocalized_by[cam] = mislocalized
         self.visible_by[cam] = visible
         self.verdict_stamp[cam] = self.get_clock().now().nanoseconds / 1e9
 
     def _statuses(self) -> dict[str, str]:
-        """The scene status of every target, from one clock read."""
+        """The scene status of every target, from one clock read. The best
+        answer from any camera wins."""
         now = self.get_clock().now().nanoseconds / 1e9
         detected: set[str] = set()
+        mislocalized: set[str] = set()
         visible: set[str] = set()
         for cam, stamp in self.verdict_stamp.items():
             if (now - stamp) <= VERDICT_TIMEOUT_S:
                 detected |= self.detected_by[cam]
+                mislocalized |= self.mislocalized_by[cam]
                 visible |= self.visible_by[cam]
         out = {}
         for target in self.targets:
             name = target["name"]
             if name in detected:
                 out[name] = "detected"
+            elif name in mislocalized:
+                out[name] = "mislocalized"
             elif name in visible:
                 out[name] = "visible"
             else:

@@ -19,6 +19,10 @@ from typing import Iterable, Sequence
 # outline that frames it.
 GROUND_VIEW_MAX_DISTANCE_M = 100.0
 
+# A standing person's vertical extent. The localizer sizes its boxes with
+# it, and the scorer judges a target seen when any part of it is in frame.
+PERSON_HEIGHT_M = 1.7
+
 
 def intrinsics_ready(info) -> bool:
     """True when a CameraInfo carries a usable pinhole matrix.
@@ -129,6 +133,58 @@ def quat_rotate(q: Sequence[float], v: Sequence[float]) -> tuple[float, float, f
         v[1] + qw * ty + (qz * tx - qx * tz),
         v[2] + qw * tz + (qx * ty - qy * tx),
     )
+
+
+def point_in_view(
+    point: Sequence[float],
+    k: Sequence[float],
+    width: int,
+    height: int,
+    origin: Sequence[float],
+    rotation: Sequence[float],
+    max_distance: float,
+) -> bool:
+    """True when the camera sees a 3D point, occlusion aside.
+
+    origin and rotation place the optical frame in the reference frame, the
+    same pose every projection here uses. The point must project inside the
+    image and lie within max_distance horizontal meters of the camera, the
+    same horizontal cutoff that truncates the footprint.
+    """
+    relative = (point[0] - origin[0], point[1] - origin[1], point[2] - origin[2])
+    if math.hypot(relative[0], relative[1]) > max_distance:
+        return False
+    x, y, z = quat_rotate(quat_conj(rotation), relative)
+    if z <= 0.0:
+        return False
+    fx, cx, fy, cy = k[0], k[2], k[4], k[5]
+    u = fx * x / z + cx
+    v = fy * y / z + cy
+    return 0.0 <= u < width and 0.0 <= v < height
+
+
+def point_to_ray_distance(
+    point: Sequence[float],
+    origin: Sequence[float],
+    through: Sequence[float],
+) -> float:
+    """Distance from a point to the ray that starts at origin and passes
+    through a second point. Behind the origin, the distance is to the
+    origin itself."""
+    direction = (through[0] - origin[0], through[1] - origin[1],
+                 through[2] - origin[2])
+    length = math.sqrt(sum(d * d for d in direction))
+    relative = (point[0] - origin[0], point[1] - origin[1],
+                point[2] - origin[2])
+    if length < 1e-9:
+        return math.sqrt(sum(r * r for r in relative))
+    along = sum(r * d for r, d in zip(relative, direction)) / length
+    if along <= 0.0:
+        return math.sqrt(sum(r * r for r in relative))
+    closest = (origin[0] + along * direction[0] / length,
+               origin[1] + along * direction[1] / length,
+               origin[2] + along * direction[2] / length)
+    return slant_range(point, closest)
 
 
 def intersect_ground(

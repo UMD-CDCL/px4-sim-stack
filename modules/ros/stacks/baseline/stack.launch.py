@@ -82,6 +82,21 @@ RTSP_DECODER = os.environ.get("RTSP_DECODER", "avdec_h264")
 # meters means "a position good enough to send someone to". A wider gate
 # scores geometry that is not actually useful as a success.
 SCORING_GATE_M = float(os.environ.get("SCORING_GATE_M", "2.0"))
+# Between the gate and this radius, an estimate still proves the detector
+# saw the target, and the verdict is MISLOCALIZED instead of FP. Geometry
+# faults, a wrong ground plane or a stale transform, put estimates in this
+# band. Keep it under the spacing between targets, or a drifted estimate
+# claims a neighbour.
+SCORING_DETECTION_RADIUS_M = float(
+    os.environ.get("SCORING_DETECTION_RADIUS_M", "10.0"))
+
+# Whose verdicts color the truth bubbles. The nadir camera keeps most of
+# the scene in view from above, so counting it marks every target it sees
+# as a miss even while only the gimbal hunts. The gimbal alone is the
+# default. Set GROUND_TRUTH_CAMERAS=nadir,gimbal to combine both.
+GROUND_TRUTH_CAMERAS = [
+    cam.strip() for cam in
+    os.environ.get("GROUND_TRUTH_CAMERAS", "gimbal").split(",") if cam.strip()]
 
 # The resolution each frame is sampled down to before it is projected onto
 # the ground. One number decides the cost for both cameras. 640x360 is
@@ -334,15 +349,14 @@ def generate_launch_description() -> LaunchDescription:
                 # frame starts where the vehicle spawned, which is the same
                 # point. Shift this if you spawn somewhere else.
                 "origin_offset_xyz": [0.0, 0.0, 0.0],
-                # Whose verdicts color the truth bubbles.
-                "cameras": CAMERAS,
+                "cameras": GROUND_TRUTH_CAMERAS,
             }],
         ),
 
         # One scorer for each camera. Each judges its own estimates against
-        # the targets inside its own footprint, so recall means "of what
-        # this camera could see". The gate is shared, because it is a
-        # statement about the task rather than about a lens.
+        # the targets its own camera sees, so recall means "of what this
+        # camera could see". The gate is shared, because it is a statement
+        # about the task rather than about a lens.
         *[
             Node(
                 package="sim_bridge",
@@ -355,8 +369,10 @@ def generate_launch_description() -> LaunchDescription:
                 parameters=[{
                     "camera": cam,
                     "detections_topic": f"/perception/{cam}/detections_3d",
-                    "footprint_topic": f"/camera/{cam}/footprint",
+                    "camera_info_topic": f"/camera/{cam}/camera_info",
+                    "optical_frame": CAMERA[cam]["optical_frame"],
                     "gate_radius": SCORING_GATE_M,
+                    "detection_radius": SCORING_DETECTION_RADIUS_M,
                     "reference_frame": REFERENCE_FRAME,
                 }],
             )

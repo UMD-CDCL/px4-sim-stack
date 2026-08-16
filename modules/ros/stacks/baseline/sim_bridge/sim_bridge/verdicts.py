@@ -5,32 +5,48 @@ change often. Edit this file and the image boxes, the detection dots, and
 the truth bubbles all follow. None of it is a ROS parameter on purpose.
 """
 
+from geometry_msgs.msg import Point
 from std_msgs.msg import ColorRGBA
 from visualization_msgs.msg import Marker
 
 # ------------------------------------------------------- detections, per camera
 # TP: the estimate landed within the gate of a ground truth target.
-# FP: no target within the gate.
+# MISLOCALIZED: a target sits within the detection radius, so the detector
+#   saw it, but the estimate failed the gate.
+# FP: no target within the detection radius.
 # An FN, a target in view that this camera did not detect, has no estimate
-# and gets no dot. It appears as the ground truth bubble turning yellow.
+# and gets no mark. It appears as the ground truth bubble turning red.
+# The Map panel colors in foxglove/px4-sim-stack.json mirror these values.
 VERDICT_COLOR = {
-    "TP": (0.18, 0.80, 0.44, 0.95),   # green
-    "FP": (0.91, 0.30, 0.24, 0.95),   # red
+    "TP": (0.18, 0.80, 0.44, 0.95),            # green
+    "MISLOCALIZED": (0.95, 0.77, 0.06, 0.95),  # yellow
+    "FP": (0.91, 0.30, 0.24, 0.95),            # red
 }
+# Verdicts drawn as a flat cross on the ground instead of a dot.
+CROSS_VERDICTS = frozenset({"MISLOCALIZED", "FP"})
 # Image boxes before the first verdict arrives.
 UNJUDGED_COLOR = (0.75, 0.75, 0.78, 1.0)
 
 # A detection is a small dot on the ground, not a person-sized shape.
 DETECTION_DOT_DIAMETER = 0.4
+# A cross is wider than the dot, because it marks a problem worth a look.
+DETECTION_CROSS_SPAN = 1.2
+DETECTION_CROSS_LINE_WIDTH = 0.15
+# The cross floats this far above the ground, clear of z fighting.
+DETECTION_CROSS_LIFT = 0.05
 
 # --------------------------------------------------- ground truth, whole scene
-# A target's scene status combines every camera:
-#   detected     some camera's estimate landed within the gate of it
-#   visible      inside some camera's footprint, but nothing detected it
-#   out_of_view  no camera's footprint covers it
+# A target's scene status combines the cameras GROUND_TRUTH_CAMERAS selects,
+# the gimbal alone by default. The colors follow the verdict colors: green
+# localized, yellow mislocalized, red undetected.
+#   detected      some camera placed an estimate within the gate of it
+#   mislocalized  some camera detected it, but every estimate failed the gate
+#   visible       in some camera's view, but nothing detected it
+#   out_of_view   no camera sees it
 GROUND_TRUTH_COLOR = {
     "detected": (0.18, 0.80, 0.44, 0.30),      # green
-    "visible": (0.95, 0.77, 0.06, 0.30),       # yellow
+    "mislocalized": (0.95, 0.77, 0.06, 0.30),  # yellow
+    "visible": (0.91, 0.30, 0.24, 0.30),       # red
     "out_of_view": (0.55, 0.55, 0.58, 0.25),   # grey
 }
 
@@ -68,6 +84,21 @@ def marker(ns: str, marker_id: int, frame_id: str, stamp,
     m.color = ColorRGBA(r=rgba[0], g=rgba[1], b=rgba[2], a=rgba[3])
     if lifetime is not None:
         m.lifetime = lifetime
+    return m
+
+
+def cross_marker(ns: str, marker_id: int, frame_id: str, stamp,
+                 position, span_m: float, rgba, lifetime=None) -> Marker:
+    """A flat X centered on position, span_m across. For the verdicts that
+    mark a wrong answer, so they read differently from a dot at a glance."""
+    m = marker(ns, marker_id, frame_id, stamp, position, span_m, rgba,
+               lifetime=lifetime)
+    m.type = Marker.LINE_LIST
+    half = span_m / 2.0
+    m.points = [Point(x=-half, y=-half), Point(x=half, y=half),
+                Point(x=-half, y=half), Point(x=half, y=-half)]
+    m.scale.x = DETECTION_CROSS_LINE_WIDTH
+    m.scale.y = m.scale.z = 0.0
     return m
 
 

@@ -134,18 +134,18 @@
     "Parameters!3t5mz9g": {},
     "3D!scene": {
       "cameraState": {
-        "distance": 69.64028437490886,
+        "distance": 20,
         "perspective": true,
-        "phi": 62.83470296765191,
+        "phi": 76.06304942435818,
         "target": [
           0,
           0,
           0
         ],
         "targetOffset": [
-          10.390359578475747,
-          -0.8474391881162652,
-          -1.945111681235947e-16
+          0,
+          0,
+          0
         ],
         "targetOrientation": [
           0,
@@ -153,7 +153,7 @@
           0,
           1
         ],
-        "thetaOffset": 115.27559055118232,
+        "thetaOffset": 78.42519685039618,
         "fovy": 45,
         "near": 0.5,
         "far": 5000
@@ -402,7 +402,9 @@
         "/scoring/gimbal/false_positives": "#ff0000",
         "/mavros/global_position/raw/fix": "#f5774d",
         "/mavros/sim_state/global_position": "#f7df71",
-        "/gimbal/roi_geojson": "#ffb74d"
+        "/gimbal/roi_geojson": "#ffb74d",
+        "/scoring/gimbal/missed_localizations": "#ffff00",
+        "/scoring/nadir/missed_localizations": "#ffff00"
       },
       "zoomLevel": 20,
       "maxNativeZoom": 19,
@@ -461,6 +463,16 @@
           "historyMode": "none",
           "pointSize": 6,
           "pointDisplayMode": "arrowhead"
+        },
+        "/scoring/gimbal/missed_localizations": {
+          "historyMode": "previous",
+          "pointSize": 6,
+          "pointDisplayMode": "cross"
+        },
+        "/scoring/nadir/missed_localizations": {
+          "historyMode": "previous",
+          "pointSize": 6,
+          "pointDisplayMode": "cross"
         }
       },
       "layers": []
