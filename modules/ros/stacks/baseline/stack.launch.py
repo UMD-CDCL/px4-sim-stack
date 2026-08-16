@@ -85,13 +85,6 @@ RTSP_DECODER = os.environ.get("RTSP_DECODER", "avdec_h264")
 # meters means "a position good enough to send someone to". A wider gate
 # scores geometry that is not actually useful as a success.
 SCORING_GATE_M = float(os.environ.get("SCORING_GATE_M", "2.0"))
-# Between the gate and this radius, an estimate still proves the detector
-# saw the target, and the verdict is MISLOCALIZED instead of FP. Geometry
-# faults, a wrong ground plane or a stale transform, put estimates in this
-# band. Keep it under the spacing between targets, or a drifted estimate
-# claims a neighbour.
-SCORING_DETECTION_RADIUS_M = float(
-    os.environ.get("SCORING_DETECTION_RADIUS_M", "10.0"))
 
 # How a localization ray becomes a ground position, for the detection
 # localizers and the gimbal ROI click alike. "plane" intersects the flat
@@ -418,7 +411,6 @@ def generate_launch_description() -> LaunchDescription:
                     "camera_info_topic": f"/camera/{cam}/camera_info",
                     "optical_frame": CAMERA[cam]["optical_frame"],
                     "gate_radius": SCORING_GATE_M,
-                    "detection_radius": SCORING_DETECTION_RADIUS_M,
                     "reference_frame": REFERENCE_FRAME,
                 }],
             )

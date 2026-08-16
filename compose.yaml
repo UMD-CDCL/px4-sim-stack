@@ -259,9 +259,6 @@ services:
       # Camera fields of view, radians. Trim nadir without touching gimbal.
       # An estimate must land within this many metres of a target to count.
       SCORING_GATE_M: ${SCORING_GATE_M:-2.0}
-      # Between the gate and this many metres, a detection is real but the
-      # position failed: a yellow cross instead of a red one.
-      SCORING_DETECTION_RADIUS_M: ${SCORING_DETECTION_RADIUS_M:-10.0}
       GIMBAL_HFOV: ${GIMBAL_HFOV:-2.0}
       NADIR_HFOV: ${NADIR_HFOV:-1.74}
       # The grid each camera image is sampled to before it is laid on the

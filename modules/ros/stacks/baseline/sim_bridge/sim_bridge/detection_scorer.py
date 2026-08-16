@@ -5,40 +5,45 @@ Scoring runs on a clock, not on detection arrival, so a camera that detects
 nothing still reports its misses: every target in view with no estimate
 near it is published as an FN each tick, detections or not.
 
-Matching is greedy, closest pair first: estimates and truth targets claim
-each other in order of ground distance, inside detection_radius. The scene
-holds a handful of targets meters apart, and at that spacing greedy agrees
-with optimal assignment. Estimates still unmatched get a second pass by
-viewing ray: a detection of an elevated target projects through it onto
-the ground far beyond, so an estimate whose ray from the camera passes
-within the gate of a target claims that target, whatever the ground
-distance.
+Each estimate is judged alone, by its viewing ray. The ray runs from the
+camera through the estimate, so it crosses the gate of the target the
+detector saw, an elevated target included: a detection on a roof projects
+onto the ground far beyond, but the ray still passes within the gate.
 
-Association is pure geometry over every target, in view or not. A real
+The verdict follows from the estimate and its ray:
+    TP            the estimate lies within the gate of a target. The
+                  verdict names the nearest such target, and only that
+                  one: the other targets the ray crosses keep the status
+                  the view gives them.
+    MISLOCALIZED  the ray crosses the gate of a target, but the estimate
+                  lies within the gate of none. The verdict names every
+                  crossed target, and each one turns yellow unless a TP
+                  turns it green.
+    FP            the ray crosses the gate of no target.
+The score on a TP or MISLOCALIZED verdict is the ground distance to the
+nearest named target, because that is the error anyone acting on the
+estimate would experience. Without a camera pose there are no rays, so
+an estimate is a TP within a gate and an FP everywhere else.
+
+Verdicts are pure geometry over every target, in view or not. A real
 detection therefore overrides what the view alone would say about a
-target: one behind a roof still turns green or yellow when a detection
-lands on it.
+target: one behind a roof still turns green or yellow when a ray
+crosses it.
 
-The ground distance then splits detection from localization. Within
-gate_radius the verdict is TP: the detector saw the target and placed it.
-Otherwise a matched estimate is MISLOCALIZED: the detector saw the target,
-but the position it reported is not good enough to act on. An unmatched
-estimate is FP.
-
-The view decides only what counts as a miss: an unclaimed target is an FN
-when the camera sees it, and nothing when it does not. A target counts as
-in view when its exact point projects inside the image, in front of the
-camera, within the same distance that truncates the footprint. Occlusion
-is not modelled: a target behind a structure but inside the view still
-counts, the same flat-scene assumption the rest of the pipeline makes.
+The view decides only what counts as a miss: a target is an FN when the
+camera sees it and no verdict names it. A target counts as in view when
+its exact point projects inside the image, in front of the camera, within
+the same distance that truncates the footprint. Occlusion is not
+modelled: a target behind a structure but inside the view still counts,
+the same flat-scene assumption the rest of the pipeline makes.
 
 CameraInfo that stops arriving means the camera is down, so nothing is in
 view and nothing is a miss. Estimates also expire, so a detector that
 goes quiet turns its hits into misses instead of freezing the last answer.
 
-A TP or MISLOCALIZED verdict carries the matched target name as a second
-result, so the ground truth node can color its bubbles without matching
-again.
+A TP or MISLOCALIZED verdict carries the target names it colors as
+further results, so the ground truth node can color its bubbles without
+matching again.
 
 One node runs for each camera, and the results are never merged.
 
@@ -116,18 +121,10 @@ class DetectionScorer(Node):
         self.declare_parameter("camera_info_topic", "/camera/gimbal/camera_info")
         self.declare_parameter("optical_frame", "gimbal_camera_optical_frame")
         self.declare_parameter("gate_radius", 2.0)
-        self.declare_parameter("detection_radius", 10.0)
         self.declare_parameter("reference_frame", "map")
 
         self.camera = self.get_parameter("camera").value
         self.gate = float(self.get_parameter("gate_radius").value)
-        self.detection_radius = float(self.get_parameter("detection_radius").value)
-        if self.detection_radius < self.gate:
-            self.get_logger().warn(
-                f"detection_radius {self.detection_radius} is inside the gate "
-                f"{self.gate}, so it is raised to the gate. A claim within the "
-                f"gate must count as a TP.")
-            self.detection_radius = self.gate
         self.optical = self.get_parameter("optical_frame").value
         self.reference = self.get_parameter("reference_frame").value
 
@@ -224,64 +221,37 @@ class DetectionScorer(Node):
                      if (self._now() - self.estimates_stamp) <= ESTIMATE_TIMEOUT_S
                      else [])
 
-        # Greedy matching, closest pair first, so a far estimate cannot take
-        # a target from a near one. Every target takes part, in view or not:
-        # association is pure geometry, and the view decides only what
-        # counts as a miss below.
-        pairs = sorted(
-            (math.hypot(ex - tx, ey - ty), e, t)
-            for e, (_, ex, ey, _) in enumerate(estimates)
-            for t, (_, tx, ty, _) in enumerate(targets))
-        match: dict[int, tuple[int, float]] = {}
-        claimed: set[int] = set()
-        for distance, e, t in pairs:
-            if distance >= self.detection_radius:
-                break
-            if e in match or t in claimed:
-                continue
-            match[e] = (t, distance)
-            claimed.add(t)
-
-        # Second pass, by viewing ray: a detection of an elevated target
-        # projects through it onto the ground far beyond, a roof being the
-        # usual case. The estimate's ray from the camera still passes
-        # within the gate of the target it saw, so claim by that distance.
-        # The ground distance is kept as the score, because it is the error
-        # anyone acting on the estimate would experience.
-        if camera is not None:
-            ray_pairs = sorted(
-                (point_to_ray_distance((tx, ty, tz), camera, (ex, ey, ez)), e, t)
-                for e, (_, ex, ey, ez) in enumerate(estimates) if e not in match
-                for t, (_, tx, ty, tz) in enumerate(targets) if t not in claimed)
-            for ray_distance, e, t in ray_pairs:
-                if ray_distance >= self.gate:
-                    break
-                if e in match or t in claimed:
-                    continue
-                match[e] = (t, math.hypot(estimates[e][1] - targets[t][1],
-                                          estimates[e][2] - targets[t][2]))
-                claimed.add(t)
-
         verdicts = Detection3DArray()
         verdicts.header.stamp = self.get_clock().now().to_msg()
         verdicts.header.frame_id = self.reference
-        for e, (track_id, x, y, z) in enumerate(estimates):
-            if e not in match:
-                kind, matched, distance = "FP", "", 0.0
+        named: set[str] = set()
+        for track_id, x, y, z in estimates:
+            ground = {name: math.hypot(x - tx, y - ty)
+                      for name, tx, ty, _ in targets}
+            hit = [name for name, distance in ground.items()
+                   if distance <= self.gate]
+            crossed = [] if camera is None else [
+                name for name, tx, ty, tz in targets
+                if point_to_ray_distance((tx, ty, tz), camera,
+                                         (x, y, z)) < self.gate]
+            if hit:
+                kind, names = "TP", [min(hit, key=ground.get)]
+            elif crossed:
+                kind, names = "MISLOCALIZED", crossed
             else:
-                t, distance = match[e]
-                kind = "TP" if distance <= self.gate else "MISLOCALIZED"
-                matched = targets[t][0]
-                if self.error_pub.get_subscription_count() > 0:
-                    self.error_pub.publish(Float64(data=distance))
+                kind, names = "FP", []
+            distance = min((ground[name] for name in names), default=0.0)
+            if names and self.error_pub.get_subscription_count() > 0:
+                self.error_pub.publish(Float64(data=distance))
+            named.update(names)
             self.window.append(kind)
             verdicts.detections.append(
                 self._verdict(kind, track_id, x, y, z,
-                              score=distance, matched=matched))
+                              score=distance, names=names))
             self._publish_fix(kind, x, y, verdicts.header.stamp)
 
-        for t, (name, x, y, z) in enumerate(targets):
-            if t in claimed or name not in in_view:
+        for name, x, y, z in targets:
+            if name in named or name not in in_view:
                 continue
             self.window.append("FN")
             verdicts.detections.append(self._verdict("FN", name, x, y, z))
@@ -296,7 +266,7 @@ class DetectionScorer(Node):
             self.fix_pub[kind].publish(fix)
 
     def _verdict(self, kind: str, track_id: str, x: float, y: float, z: float,
-                 score: float = 0.0, matched: str = "") -> Detection3D:
+                 score: float = 0.0, names: list[str] = ()) -> Detection3D:
         v = Detection3D()
         v.id = track_id
         v.bbox.center.position.x = x
@@ -307,10 +277,10 @@ class DetectionScorer(Node):
         hypothesis.hypothesis.class_id = kind
         hypothesis.hypothesis.score = float(score)
         v.results.append(hypothesis)
-        if matched:
-            match = ObjectHypothesisWithPose()
-            match.hypothesis.class_id = matched
-            v.results.append(match)
+        for name in names:
+            named = ObjectHypothesisWithPose()
+            named.hypothesis.class_id = name
+            v.results.append(named)
         return v
 
     def _verdict_markers(self, verdicts: Detection3DArray) -> MarkerArray:

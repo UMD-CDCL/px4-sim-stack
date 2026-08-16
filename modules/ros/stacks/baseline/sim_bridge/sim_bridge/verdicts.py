@@ -10,12 +10,12 @@ from std_msgs.msg import ColorRGBA
 from visualization_msgs.msg import Marker
 
 # ------------------------------------------------------- detections, per camera
-# TP: the estimate landed within the gate of a ground truth target.
-# MISLOCALIZED: a target sits within the detection radius, so the detector
-#   saw it, but the estimate failed the gate.
-# FP: no target within the detection radius.
-# An FN, a target in view that this camera did not detect, has no estimate
-# and gets no mark. It appears as the ground truth bubble turning red.
+# TP: the estimate lies within the gate of a ground truth target.
+# MISLOCALIZED: the viewing ray to the estimate crosses the gate of a
+#   target, but the estimate lies within the gate of none.
+# FP: the ray crosses the gate of no target.
+# An FN, a target in view that no verdict names, has no estimate and gets
+# no mark. It appears as the ground truth bubble turning red.
 # The Map panel colors in foxglove/px4-sim-stack.json mirror these values.
 VERDICT_COLOR = {
     "TP": (0.18, 0.80, 0.44, 0.95),            # green
@@ -37,13 +37,14 @@ DETECTION_CROSS_LIFT = 0.05
 
 # --------------------------------------------------- ground truth, whole scene
 # A target's scene status combines the cameras GROUND_TRUTH_CAMERAS selects,
-# the gimbal alone by default. The colors follow the verdict colors: green
-# localized, yellow mislocalized, red undetected. The first two need no
-# view: a detection overrides what the view alone would say.
-#   detected      some camera placed an estimate within the gate of it
-#   mislocalized  some camera detected it, but every estimate failed the gate
-#   visible       in some camera's view, but nothing detected it
-#   out_of_view   no camera sees it, and nothing matched it
+# the gimbal alone by default. Green beats yellow beats red beats grey.
+# Green and yellow need no view: a detection overrides what the view alone
+# would say.
+#   detected      an estimate lies within the gate of it
+#   mislocalized  a viewing ray crosses the gate of it, but that ray's
+#                 estimate lies within the gate of none
+#   visible       in some camera's view, and no verdict names it
+#   out_of_view   no camera sees it, and no verdict names it
 GROUND_TRUTH_COLOR = {
     "detected": (0.18, 0.80, 0.44, 0.30),      # green
     "mislocalized": (0.95, 0.77, 0.06, 0.30),  # yellow

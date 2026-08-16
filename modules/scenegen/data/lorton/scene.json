@@ -1,0 +1,1251 @@
+{
+ "name": "lorton",
+ "center_lat": 38.684615,
+ "center_lon": -77.243195,
+ "side_m": 200,
+ "origin_alt_m": 41.19,
+ "imagery": {
+  "source": "google",
+  "zoom": 19,
+  "file": "satellite.jpg",
+  "width_px": 858,
+  "height_px": 861,
+  "m_per_px": 0.2331,
+  "origin_px": 38310085,
+  "origin_py": 51445757
+ },
+ "elevation": {
+  "grid_n": 128,
+  "side_m": 200,
+  "zoom": 15,
+  "row0": "south",
+  "origin_alt_m": 41.19,
+  "min_m": 32.85,
+  "max_m": 50.72
+ },
+ "fiducial": {
+  "east_m": 0,
+  "north_m": 0,
+  "diameter_m": 0.5
+ },
+ "buildings": [
+  {
+   "id": "b_way_860266001",
+   "east_m": 147.01,
+   "north_m": 101.51,
+   "length_m": 87.02,
+   "width_m": 83.6,
+   "yaw_deg": -40.36,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "Lorton Prison (decommissioned)",
+   "outline_m": [
+    [
+     148.21,
+     155.34
+    ],
+    [
+     134.82,
+     154.36
+    ],
+    [
+     137.55,
+     117.36
+    ],
+    [
+     129.69,
+     107.36
+    ],
+    [
+     93.31,
+     104.62
+    ],
+    [
+     94.31,
+     91.43
+    ],
+    [
+     130.64,
+     94.17
+    ],
+    [
+     143.5,
+     84.19
+    ],
+    [
+     145.28,
+     48.12
+    ],
+    [
+     157.86,
+     48.74
+    ],
+    [
+     156.17,
+     82.89
+    ],
+    [
+     166.99,
+     95.01
+    ],
+    [
+     200.05,
+     96.73
+    ],
+    [
+     199.3,
+     110.89
+    ],
+    [
+     161.4,
+     108.91
+    ],
+    [
+     150.92,
+     118.77
+    ],
+    [
+     148.21,
+     155.34
+    ]
+   ],
+   "holes_m": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_1147223266",
+   "east_m": -0.76,
+   "north_m": 144.09,
+   "length_m": 92.24,
+   "width_m": 79.12,
+   "yaw_deg": -33.29,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     -36,
+     119.91
+    ],
+    [
+     -16.87,
+     148.82
+    ],
+    [
+     -8.04,
+     143.02
+    ],
+    [
+     3.32,
+     160.18
+    ],
+    [
+     -30.7,
+     182.52
+    ],
+    [
+     -19.6,
+     199.3
+    ],
+    [
+     5.47,
+     182.85
+    ],
+    [
+     7.53,
+     185.97
+    ],
+    [
+     28.11,
+     172.46
+    ],
+    [
+     26.71,
+     170.33
+    ],
+    [
+     58.13,
+     149.75
+    ],
+    [
+     47.11,
+     133.06
+    ],
+    [
+     14.96,
+     154.11
+    ],
+    [
+     -0.89,
+     130.11
+    ],
+    [
+     4.5,
+     126.58
+    ],
+    [
+     5.25,
+     127.71
+    ],
+    [
+     13.25,
+     122.47
+    ],
+    [
+     3.47,
+     107.69
+    ],
+    [
+     -0.76,
+     110.46
+    ],
+    [
+     -7.08,
+     100.92
+    ],
+    [
+     -36,
+     119.91
+    ]
+   ],
+   "holes_m": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_1147223267",
+   "east_m": -59.73,
+   "north_m": 112.98,
+   "length_m": 18.59,
+   "width_m": 15.92,
+   "yaw_deg": 56.26,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     -58.24,
+     100.88
+    ],
+    [
+     -47.94,
+     116.28
+    ],
+    [
+     -61.22,
+     125.08
+    ],
+    [
+     -71.51,
+     109.67
+    ],
+    [
+     -58.24,
+     100.88
+    ]
+   ],
+   "holes_m": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_1147223268",
+   "east_m": -78.23,
+   "north_m": 98.69,
+   "length_m": 4.22,
+   "width_m": 4.01,
+   "yaw_deg": -34.89,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     -78.8,
+     101.53
+    ],
+    [
+     -75.35,
+     99.13
+    ],
+    [
+     -77.66,
+     95.85
+    ],
+    [
+     -81.11,
+     98.26
+    ],
+    [
+     -78.8,
+     101.53
+    ]
+   ],
+   "holes_m": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": true
+  },
+  {
+   "id": "b_manual_1147223269",
+   "east_m": -30.75,
+   "north_m": 87,
+   "length_m": 36.32,
+   "width_m": 29.3,
+   "yaw_deg": -32.4,
+   "height_m": 6,
+   "height_source": "manual",
+   "name": "",
+   "map_height_m": null,
+   "map_height_source": "",
+   "outline_m": [],
+   "holes_m": [],
+   "source": "manual",
+   "model_uri": null,
+   "enabled": true
+  },
+  {
+   "id": "b_manual_1147223270",
+   "east_m": 79.84,
+   "north_m": 93.13,
+   "length_m": 41.39,
+   "width_m": 12.11,
+   "yaw_deg": 3.1,
+   "height_m": 3,
+   "height_source": "manual",
+   "name": "",
+   "map_height_m": null,
+   "map_height_source": "",
+   "outline_m": [],
+   "holes_m": [],
+   "source": "manual",
+   "model_uri": null,
+   "enabled": true
+  },
+  {
+   "id": "b_manual_1147223271",
+   "east_m": 22.92,
+   "north_m": 42.48,
+   "length_m": 15.59,
+   "width_m": 7.22,
+   "yaw_deg": 58.7,
+   "height_m": 1,
+   "height_source": "manual",
+   "name": "",
+   "map_height_m": null,
+   "map_height_source": "",
+   "outline_m": [],
+   "holes_m": [],
+   "source": "manual",
+   "model_uri": null,
+   "enabled": true
+  }
+ ],
+ "vehicles": [
+  {
+   "id": "v_manual_1",
+   "cls": "car",
+   "east_m": 13.88,
+   "north_m": -11.91,
+   "length_m": 4.6,
+   "width_m": 1.9,
+   "heading_deg": 53.6,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_2",
+   "cls": "car",
+   "east_m": 11.24,
+   "north_m": -15.4,
+   "length_m": 4.6,
+   "width_m": 1.9,
+   "heading_deg": 53.6,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_3",
+   "cls": "car",
+   "east_m": 9.09,
+   "north_m": -19.75,
+   "length_m": 4.6,
+   "width_m": 1.9,
+   "heading_deg": 53.6,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_4",
+   "cls": "car",
+   "east_m": 2.22,
+   "north_m": -31.37,
+   "length_m": 4.6,
+   "width_m": 1.9,
+   "heading_deg": 53.6,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_5",
+   "cls": "car",
+   "east_m": -4.64,
+   "north_m": -41.56,
+   "length_m": 4.6,
+   "width_m": 1.9,
+   "heading_deg": 53.6,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_6",
+   "cls": "car",
+   "east_m": -10.65,
+   "north_m": -50.19,
+   "length_m": 4.6,
+   "width_m": 1.9,
+   "heading_deg": 53.6,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_7",
+   "cls": "car",
+   "east_m": -1.57,
+   "north_m": -36.72,
+   "length_m": 6.51,
+   "width_m": 3.08,
+   "heading_deg": 53.6,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_8",
+   "cls": "car",
+   "east_m": 4.8,
+   "north_m": -27.24,
+   "length_m": 4.6,
+   "width_m": 1.9,
+   "heading_deg": 53.6,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_9",
+   "cls": "car",
+   "east_m": -21.6,
+   "north_m": -28.88,
+   "length_m": 7.23,
+   "width_m": 3.07,
+   "heading_deg": -120.3,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_10",
+   "cls": "car",
+   "east_m": -24.82,
+   "north_m": -47.3,
+   "length_m": 7.35,
+   "width_m": 2.5,
+   "heading_deg": 67.5,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_11",
+   "cls": "car",
+   "east_m": 35.08,
+   "north_m": -8,
+   "length_m": 4.6,
+   "width_m": 1.9,
+   "heading_deg": 0,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_12",
+   "cls": "bus",
+   "east_m": 30.17,
+   "north_m": 37.59,
+   "length_m": 7.7,
+   "width_m": 2.92,
+   "heading_deg": 150.1,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_13",
+   "cls": "bus",
+   "east_m": 12.1,
+   "north_m": 24.4,
+   "length_m": 12,
+   "width_m": 2.5,
+   "heading_deg": -119.1,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_14",
+   "cls": "bus",
+   "east_m": 13.19,
+   "north_m": 16.51,
+   "length_m": 19.55,
+   "width_m": 2.59,
+   "heading_deg": -121.3,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_15",
+   "cls": "bus",
+   "east_m": 21.97,
+   "north_m": 3.53,
+   "length_m": 12,
+   "width_m": 2.5,
+   "heading_deg": -111,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_16",
+   "cls": "bus",
+   "east_m": -7.96,
+   "north_m": -5.86,
+   "length_m": 9.64,
+   "width_m": 3.06,
+   "heading_deg": -95.9,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_17",
+   "cls": "bus",
+   "east_m": -5.94,
+   "north_m": -10.96,
+   "length_m": 9.36,
+   "width_m": 2.62,
+   "heading_deg": -119.1,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_18",
+   "cls": "bus",
+   "east_m": -2.2,
+   "north_m": -16.61,
+   "length_m": 12,
+   "width_m": 2.5,
+   "heading_deg": -119.1,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_19",
+   "cls": "bus",
+   "east_m": -2.67,
+   "north_m": -27.18,
+   "length_m": 12,
+   "width_m": 2.5,
+   "heading_deg": -116.7,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_20",
+   "cls": "bus",
+   "east_m": -13.57,
+   "north_m": -18.62,
+   "length_m": 12,
+   "width_m": 2.5,
+   "heading_deg": -106.7,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_21",
+   "cls": "bus",
+   "east_m": -22.35,
+   "north_m": -17.33,
+   "length_m": 12,
+   "width_m": 2.5,
+   "heading_deg": -119.1,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_22",
+   "cls": "bus",
+   "east_m": -34.72,
+   "north_m": -40.27,
+   "length_m": 15.47,
+   "width_m": 3.39,
+   "heading_deg": -121.8,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_23",
+   "cls": "bus",
+   "east_m": -14.84,
+   "north_m": -37.25,
+   "length_m": 8.83,
+   "width_m": 2.58,
+   "heading_deg": -107,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_24",
+   "cls": "bus",
+   "east_m": -36.98,
+   "north_m": -59.9,
+   "length_m": 12,
+   "width_m": 2.5,
+   "heading_deg": -119.1,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_25",
+   "cls": "bus",
+   "east_m": -42.25,
+   "north_m": -64.2,
+   "length_m": 12,
+   "width_m": 2.5,
+   "heading_deg": -104.6,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_26",
+   "cls": "bus",
+   "east_m": -47.96,
+   "north_m": -52.17,
+   "length_m": 9.63,
+   "width_m": 2.18,
+   "heading_deg": -92.5,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_27",
+   "cls": "bus",
+   "east_m": -42.34,
+   "north_m": -20.77,
+   "length_m": 10.48,
+   "width_m": 2.6,
+   "heading_deg": -125.7,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_28",
+   "cls": "bus",
+   "east_m": 23.26,
+   "north_m": -76.68,
+   "length_m": 12,
+   "width_m": 2.5,
+   "heading_deg": -119.1,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  },
+  {
+   "id": "v_manual_29",
+   "cls": "bus",
+   "east_m": 27.44,
+   "north_m": -78.98,
+   "length_m": 12,
+   "width_m": 2.5,
+   "heading_deg": -119.1,
+   "confidence": 1,
+   "source": "manual",
+   "model_uri": null,
+   "agl_m": null,
+   "on_building": true,
+   "enabled": true
+  }
+ ],
+ "targets": [
+  {
+   "id": "t_manual_1",
+   "name": "casualty_m1",
+   "east_m": -1.21,
+   "north_m": 10.68,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_2",
+   "name": "casualty_m2",
+   "east_m": -3.72,
+   "north_m": 7.69,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_3",
+   "name": "casualty_m3",
+   "east_m": -5.79,
+   "north_m": 4.26,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_4",
+   "name": "casualty_m4",
+   "east_m": -1.28,
+   "north_m": -1.08,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_5",
+   "name": "casualty_m5",
+   "east_m": 1.86,
+   "north_m": 3.41,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_6",
+   "name": "casualty_m6",
+   "east_m": 4.37,
+   "north_m": 6.97,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_7",
+   "name": "casualty_m7",
+   "east_m": 9.66,
+   "north_m": 2.84,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_8",
+   "name": "casualty_m8",
+   "east_m": 7.16,
+   "north_m": -0.44,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_9",
+   "name": "casualty_m9",
+   "east_m": 4.65,
+   "north_m": -5.15,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_10",
+   "name": "casualty_m10",
+   "east_m": 9.02,
+   "north_m": -9.07,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_11",
+   "name": "casualty_m11",
+   "east_m": 11.88,
+   "north_m": -4.43,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_12",
+   "name": "casualty_m12",
+   "east_m": 14.67,
+   "north_m": -0.87,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_13",
+   "name": "casualty_m13",
+   "east_m": -8.65,
+   "north_m": -11.7,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_14",
+   "name": "casualty_m14",
+   "east_m": -12.09,
+   "north_m": -11.99,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_15",
+   "name": "casualty_m15",
+   "east_m": -19.67,
+   "north_m": -16.55,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_16",
+   "name": "casualty_m16",
+   "east_m": -25.96,
+   "north_m": -19.69,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_17",
+   "name": "casualty_m17",
+   "east_m": -30.83,
+   "north_m": -33.09,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_18",
+   "name": "casualty_m18",
+   "east_m": -22.53,
+   "north_m": -33.02,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_19",
+   "name": "casualty_m19",
+   "east_m": -10.23,
+   "north_m": -31.16,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_20",
+   "name": "casualty_m20",
+   "east_m": -10.44,
+   "north_m": -16.41,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_21",
+   "name": "casualty_m21",
+   "east_m": -12.01,
+   "north_m": -35.26,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_22",
+   "name": "casualty_m22",
+   "east_m": 8.54,
+   "north_m": 38,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_23",
+   "name": "casualty_m23",
+   "east_m": 21.78,
+   "north_m": 41.77,
+   "agl_m": null,
+   "on_building": false,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_24",
+   "name": "casualty_m24",
+   "east_m": 16.03,
+   "north_m": 41.53,
+   "agl_m": null,
+   "on_building": false,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_25",
+   "name": "casualty_m25",
+   "east_m": -39.7,
+   "north_m": -47.86,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_26",
+   "name": "casualty_m26",
+   "east_m": -40.93,
+   "north_m": -57.94,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_27",
+   "name": "casualty_m27",
+   "east_m": -38.85,
+   "north_m": -58.6,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_28",
+   "name": "casualty_m28",
+   "east_m": -37.43,
+   "north_m": -64.17,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_29",
+   "name": "casualty_m29",
+   "east_m": -25.32,
+   "north_m": -49.93,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_30",
+   "name": "casualty_m30",
+   "east_m": -0.35,
+   "north_m": -34.38,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_31",
+   "name": "casualty_m31",
+   "east_m": 13.46,
+   "north_m": -11.47,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  },
+  {
+   "id": "t_manual_32",
+   "name": "casualty_m32",
+   "east_m": 0.22,
+   "north_m": -24.57,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual"
+  }
+ ],
+ "trees": [],
+ "tree_areas": [
+  {
+   "id": "ta_manual_3",
+   "polygon_m": [
+    [
+     -99.99,
+     -34.56
+    ],
+    [
+     -10.97,
+     -100.51
+    ],
+    [
+     -100.32,
+     -100.18
+    ]
+   ],
+   "density_per_ha": 1000,
+   "min_height_m": 1,
+   "max_height_m": 10,
+   "source": "manual",
+   "enabled": true
+  },
+  {
+   "id": "ta_manual_4",
+   "polygon_m": [
+    [
+     100.22,
+     -70.67
+    ],
+    [
+     70.76,
+     -100.01
+    ],
+    [
+     99.55,
+     -100.18
+    ]
+   ],
+   "density_per_ha": 1000,
+   "min_height_m": 1,
+   "max_height_m": 10,
+   "source": "manual",
+   "enabled": true
+  }
+ ],
+ "flatten_zones": [
+  {
+   "id": "fz_1",
+   "polygon_m": [
+    [
+     17.69,
+     53.74
+    ],
+    [
+     30.32,
+     47.54
+    ],
+    [
+     21.88,
+     34
+    ],
+    [
+     11.04,
+     40.98
+    ]
+   ],
+   "mode": "min",
+   "height_m": 0
+  }
+ ],
+ "format": "scenegen-scene/1"
+}

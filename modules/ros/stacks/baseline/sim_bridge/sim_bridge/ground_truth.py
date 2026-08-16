@@ -8,14 +8,14 @@ and on real hardware this node does not run.
 
 Each target is drawn as a bubble with the scoring gate's radius, colored by
 its scene status across the cameras the `cameras` parameter selects, the
-gimbal alone by default: green when some camera placed an
-estimate within the gate of it, yellow when some camera detected it but
-every estimate failed the gate, red when some camera's view covers it but
-nothing detected it, grey when no camera sees it and nothing matched it.
-Green and yellow need no view: a detection overrides what the view alone
-would say. The status comes from the scorers' verdicts: an FN names a
-target in view but undetected, and a TP or MISLOCALIZED verdict carries
-the name of the target it matched.
+gimbal alone by default: green when an estimate lies within the gate of
+it, yellow when a viewing ray crosses the gate of it but that ray's
+estimate lies within no gate, red when some camera's view covers it and
+no verdict names it, grey when no camera sees it and no verdict names it.
+Green beats yellow beats red beats grey. Green and yellow need no view: a
+detection overrides what the view alone would say. The status comes from
+the scorers' verdicts: an FN names a target in view but undetected, and a
+TP or MISLOCALIZED verdict carries the names of the targets it colors.
 
 A billboard label names each target. The Map panel gets the same gate
 circle and colors from one GeoJSON message that carries every target.
@@ -250,15 +250,16 @@ class GroundTruth(Node):
         detected, mislocalized, visible = set(), set(), set()
         for det in msg.detections:
             kind = det.results[0].hypothesis.class_id if det.results else ""
+            # The results after the first name the targets this verdict
+            # colors: the one gate a TP hit, every gate a MISLOCALIZED
+            # ray crossed.
+            names = [r.hypothesis.class_id for r in det.results[1:]]
             if kind == "FN":
                 visible.add(det.id)
-            elif len(det.results) > 1:
-                # The second result names the matched target.
-                name = det.results[1].hypothesis.class_id
-                if kind == "TP":
-                    detected.add(name)
-                elif kind == "MISLOCALIZED":
-                    mislocalized.add(name)
+            elif kind == "TP":
+                detected.update(names)
+            elif kind == "MISLOCALIZED":
+                mislocalized.update(names)
         self.detected_by[cam] = detected
         self.mislocalized_by[cam] = mislocalized
         self.visible_by[cam] = visible
