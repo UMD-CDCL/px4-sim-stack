@@ -115,9 +115,17 @@ GROUND_TRUTH_CAMERAS = [
     os.environ.get("GROUND_TRUTH_CAMERAS", "gimbal").split(",") if cam.strip()]
 
 # The resolution each frame is sampled down to before it is projected onto
-# the ground. One number decides the cost for both cameras. 640x360 is
-# 230,400 points and 3.7 MB per message.
-GROUND_IMAGE_SIZE = os.environ.get("GROUND_IMAGE_SIZE", "640x360")
+# the ground, one entry for each camera. The gimbal mosaic is the one the
+# operator reads, so it keeps more pixels; the nadir mosaic is context.
+# 480x270 is 129,600 points and 2.1 MB per message, 240x135 a quarter of
+# that. GROUND_IMAGE_SIZE sets both cameras at once, and
+# GROUND_IMAGE_SIZE_GIMBAL or GROUND_IMAGE_SIZE_NADIR sets one.
+GROUND_IMAGE_SIZE = {
+    "gimbal": (os.environ.get("GROUND_IMAGE_SIZE_GIMBAL")
+               or os.environ.get("GROUND_IMAGE_SIZE") or "480x270"),
+    "nadir": (os.environ.get("GROUND_IMAGE_SIZE_NADIR")
+              or os.environ.get("GROUND_IMAGE_SIZE") or "240x135"),
+}
 GROUND_IMAGE_RATE_HZ = float(os.environ.get("GROUND_IMAGE_RATE", "1.0"))
 
 # How often ground truth publishes, in hertz. The markers project into the
@@ -464,7 +472,7 @@ def generate_launch_description() -> LaunchDescription:
                     # and ROI clicks localize onto: one localizer class.
                     "localization_mode": LOCALIZATION_MODE,
                     "surface_file": SURFACE_FILE,
-                    "size": GROUND_IMAGE_SIZE,
+                    "size": GROUND_IMAGE_SIZE[cam],
                     "rate_hz": GROUND_IMAGE_RATE_HZ,
                 }],
             )

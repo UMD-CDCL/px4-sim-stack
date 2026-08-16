@@ -167,7 +167,7 @@ class GroundTruth(Node):
         self.truth_msg = self._build_truth()
         self.last_geojson_statuses: dict[str, str] | None = None
         self.last_geojson_origin: tuple[float, float] | None = None
-        self.target_shapes: list[tuple[list, float, float]] = []
+        self.target_shapes: list[list] = []
 
         rate = float(self.get_parameter("rate_hz").value)
         self.create_timer(1.0 / max(rate, 0.1), self._publish)
@@ -373,20 +373,18 @@ class GroundTruth(Node):
                 or abs(origin[0] - last[0]) > ORIGIN_CHANGE_DEG
                 or abs(origin[1] - last[1]) > ORIGIN_CHANGE_DEG)
 
-    def _target_shape(self, target: dict) -> tuple[list, float, float]:
-        """The gate circle ring and the pin position of one target. Both
-        depend only on the target position and the origin."""
-        ring = self.origin.geojson_ring(
+    def _target_shape(self, target: dict) -> list:
+        """The gate ring of one target. It depends only on the target
+        position and the origin."""
+        return self.origin.geojson_ring(
             [(target["x"] + GROUND_TRUTH_BUBBLE_RADIUS * math.cos(a),
               target["y"] + GROUND_TRUTH_BUBBLE_RADIUS * math.sin(a))
              for a in GATE_CIRCLE_ANGLES])
-        lat, lon = self.origin.to_lla(target["x"], target["y"])
-        return ring, lat, lon
 
     def _publish_geojson(self, statuses: dict[str, str]) -> None:
         """Publish every target in one GeoJSON message for the Map panel.
-        Each target becomes a gate circle in its status color, plus a pin.
-        The tooltip on both shows the name and the altitude.
+        Each target becomes a gate ring in its status color. The tooltip
+        on the ring shows the name and the altitude.
 
         The topic is latched, so the message goes out only when a status or
         the origin changed since the last publish."""
@@ -399,13 +397,13 @@ class GroundTruth(Node):
         if moved:
             self.target_shapes = [self._target_shape(t) for t in self.targets]
         features = []
-        for target, (ring, lat, lon) in zip(self.targets, self.target_shapes):
+        for target, ring in zip(self.targets, self.target_shapes):
             status = statuses[target["name"]]
             rgba = GROUND_TRUTH_COLOR[status]
             # The Map panel shows `name` and `metadata` in the hover tooltip,
-            # and reads Leaflet path options from `style`. fill false, not a
-            # transparent fill: without a fill layer the interior takes no
-            # clicks, so the circle cannot cover what sits inside it.
+            # and reads Leaflet path options from `style`. A LineString, not
+            # a polygon: the gate is a ring, not an area, and a line has no
+            # interior to fill, to tint, or to take clicks.
             tooltip = {
                 "name": target["name"],
                 "metadata": {"altitude_m": round(target["z"], 1),
@@ -413,14 +411,9 @@ class GroundTruth(Node):
             }
             features.append({
                 "type": "Feature",
-                "geometry": {"type": "Polygon", "coordinates": [ring]},
+                "geometry": {"type": "LineString", "coordinates": ring},
                 "properties": dict(tooltip, style={
-                    "color": hex_rgb(rgba), "weight": 2, "fill": False}),
-            })
-            features.append({
-                "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [lon, lat]},
-                "properties": tooltip,
+                    "color": hex_rgb(rgba), "weight": 2}),
             })
         msg = GeoJSON()
         msg.geojson = json.dumps(

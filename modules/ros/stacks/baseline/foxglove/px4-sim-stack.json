@@ -134,15 +134,16 @@
     "Parameters!3t5mz9g": {},
     "3D!scene": {
       "cameraState": {
-        "distance": 20,
         "perspective": true,
-        "phi": 76.06304942435818,
-        "target": [
+        "distance": 1.46195453025748,
+        "phi": 41.5748604924423,
+        "thetaOffset": 92.48940039377496,
+        "targetOffset": [
           0,
           0,
           0
         ],
-        "targetOffset": [
+        "target": [
           0,
           0,
           0
@@ -153,7 +154,6 @@
           0,
           1
         ],
-        "thetaOffset": 78.42519685039618,
         "fovy": 45,
         "near": 0.5,
         "far": 5000
@@ -205,9 +205,6 @@
         }
       },
       "topics": {
-        "/scene/buildings": {
-          "visible": true
-        },
         "/ground_truth/markers": {
           "visible": true
         },
@@ -409,7 +406,7 @@
         "/scoring/gimbal/missed_localizations": "#ffff00",
         "/scoring/nadir/missed_localizations": "#ffff00"
       },
-      "zoomLevel": 20,
+      "zoomLevel": 17,
       "maxNativeZoom": 19,
       "customTileUrl": "",
       "followFrame": "",
@@ -453,6 +450,16 @@
           "pointSize": 6,
           "pointDisplayMode": "pin"
         },
+        "/scoring/gimbal/missed_localizations": {
+          "historyMode": "previous",
+          "pointSize": 6,
+          "pointDisplayMode": "cross"
+        },
+        "/scoring/nadir/missed_localizations": {
+          "historyMode": "previous",
+          "pointSize": 6,
+          "pointDisplayMode": "cross"
+        },
         "/mavros/global_position/global": {
           "historyMode": "none",
           "pointSize": 6
@@ -466,16 +473,6 @@
           "historyMode": "none",
           "pointSize": 6,
           "pointDisplayMode": "arrowhead"
-        },
-        "/scoring/gimbal/missed_localizations": {
-          "historyMode": "previous",
-          "pointSize": 6,
-          "pointDisplayMode": "cross"
-        },
-        "/scoring/nadir/missed_localizations": {
-          "historyMode": "previous",
-          "pointSize": 6,
-          "pointDisplayMode": "cross"
         }
       },
       "layers": []

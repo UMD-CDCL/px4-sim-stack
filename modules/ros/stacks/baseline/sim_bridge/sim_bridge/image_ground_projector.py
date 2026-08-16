@@ -68,7 +68,7 @@ POINT_DTYPE = np.dtype([("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("rgb", "<u4")
 # What `size` accepts. Standard 16:9 resolutions, so the sampled grid keeps
 # the aspect ratio of both cameras.
 STANDARD_SIZES = ("1920x1080", "1280x720", "960x540", "854x480", "640x360",
-                  "480x270", "426x240")
+                  "480x270", "426x240", "240x135")
 
 # Keep only the newest frame. The publisher's queue is one deep, and this
 # node never wants an older frame than the one it just got.

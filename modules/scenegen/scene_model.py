@@ -37,13 +37,20 @@ FIDUCIAL_DIAMETER_M = 0.5
 # verified against the catalog on 2026-08-16: standing, walking, seated
 # and lying poses. Yaw is also drawn at build when the target has none,
 # so a default target gets a random pose and a random heading.
+#
+# Two kinds of person model stay out on purpose. "Male visitor" and
+# "MaleVisitorPhone" are Fuel actors, not models: an actor animates in
+# place and never reports into /world/<world>/pose/info, so the spawner
+# cannot read its pose back and the target gets no ground truth.
+# "Survivor Male" and "Survivor Female" read as manikins on camera, not
+# as people.
 _FUEL_OPENROBOTICS = "https://fuel.gazebosim.org/1.0/OpenRobotics/models/"
 CASUALTY_MODEL_POOL = [_FUEL_OPENROBOTICS + name for name in (
-    "Standing person", "Walking person", "Casual female", "Male visitor",
-    "FemaleVisitor", "MaleVisitorPhone", "MaleVisitorOnPhone", "Nurse",
+    "Standing person", "Walking person", "Casual female",
+    "FemaleVisitor", "MaleVisitorOnPhone", "Nurse",
     "Scrubs", "OpScrubs", "MaleVisitorSit", "FemaleVisitorSit",
     "VisitorKidSit", "PatientFSit", "PatientWheelChair", "Rescue Randy",
-    "Rescue Randy Sitting", "Survivor Female", "Survivor Male")]
+    "Rescue Randy Sitting")]
 # Every working tree model on Fuel, with its natural height and canopy
 # diameter measured in-sim against reference poles (2026-08-16). Nothing
 # rescales a tree: a height range selects among these as they are. The

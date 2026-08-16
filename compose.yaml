@@ -45,7 +45,7 @@ services:
       SCENE: ${SCENE:-recon_field}
       VEHICLE: ${VEHICLE:-x500_recon}
       SCENARIO: ${SCENARIO:-}
-      GZ_GUI: ${GZ_GUI:-1}
+      GZ_GUI: ${GZ_GUI:-0}
       VIDEO_SINK_BASE: rtsp://video-router:8554
       # The streamer probes the H.264 encoders and takes the first that works,
       # so a GPU whose driver has dropped the older NVENC presets falls through
@@ -265,10 +265,14 @@ services:
       GIMBAL_HFOV: ${GIMBAL_HFOV:-2.0}
       NADIR_HFOV: ${NADIR_HFOV:-1.74}
       # The grid each camera image is sampled to before it is laid on the
-      # ground plane. 640x360 is 230 thousand points and 3.7 MB for each
-      # camera. 1920x1080 is 2.07 million points and 33 MB, which held a core
-      # at full load and delivered nothing.
-      GROUND_IMAGE_SIZE: ${GROUND_IMAGE_SIZE:-640x360}
+      # ground plane. The launch file holds the defaults: 480x270 for the
+      # gimbal, 240x135 for the nadir. GROUND_IMAGE_SIZE sets both cameras
+      # at once, the per-camera variables each set one. 1920x1080 is 2.07
+      # million points and 33 MB, which held a core at full load and
+      # delivered nothing.
+      GROUND_IMAGE_SIZE: ${GROUND_IMAGE_SIZE:-}
+      GROUND_IMAGE_SIZE_GIMBAL: ${GROUND_IMAGE_SIZE_GIMBAL:-}
+      GROUND_IMAGE_SIZE_NADIR: ${GROUND_IMAGE_SIZE_NADIR:-}
       GROUND_IMAGE_RATE: ${GROUND_IMAGE_RATE:-1.0}
       # The rtsp_camera H.264 decoder element. nvh264dec is the NVDEC option.
       RTSP_DECODER: ${RTSP_DECODER:-avdec_h264}
