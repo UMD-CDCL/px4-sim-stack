@@ -562,11 +562,11 @@ shapes agree and the origins do not.
 That offset is measured once, against a point whose position is known, and then
 subtracted. `fiducial_alignment` does it:
 
-| Parameter | Meaning |
-|---|---|
-| `FIDUCIAL_SURVEYED_LAT/LON/ALT` | Where the fiducial truly is |
-| `FIDUCIAL_MEASURED_LAT/LON/ALT` | Where this pipeline put it |
-| `FIDUCIAL_ENABLED` | `1` turns the correction on |
+| Parameter | Meaning | Where it comes from |
+|---|---|---|
+| `FIDUCIAL_SURVEYED_LAT/LON/ALT` | Where the fiducial truly is | the scenario file, as `fiducial_*` |
+| `FIDUCIAL_MEASURED_LAT/LON/ALT` | Where this pipeline put it | `.env` |
+| `FIDUCIAL_ENABLED` | `1` turns the correction on | `1` when the scenario carries a marker |
 
 The node converts both to local metres, takes the difference, and publishes a
 transform from `map` to `fiducial`. With it enabled, `detection_localizer`

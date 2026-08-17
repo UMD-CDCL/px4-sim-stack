@@ -70,9 +70,10 @@ SCENARIO=campus_casualties
 ```
 
 The scenario file carries the world origin (`home_*`) and the survey
-marker (`fiducial_*`); `px4sim` and `make` read them from it, so no
-`HOME_*` or `FIDUCIAL_*` values move by hand. A hand-written scenario
-without those lines leaves the `.env` values in force. Then:
+marker (`fiducial_*`); `px4sim` reads them from it, so no coordinate
+moves by hand and none belongs in `.env`. A hand-written scenario without
+those lines falls back to the world's own `<spherical_coordinates>`.
+`./px4sim origin` prints what the pair resolves to. Then:
 
 ```bash
 ./px4sim scene campus          # restart the sim with the new world

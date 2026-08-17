@@ -67,8 +67,10 @@ Watch it:
 ./px4sim logs sim
 ```
 
-`./px4sim` with no arguments prints every command. The `Makefile` still does the
-same jobs if you prefer it.
+`./px4sim` with no arguments prints every command. It is the front door: it
+reads `.env`, picks the DeepStream release for this machine, and resolves the
+world origin from the scene and the scenario. The `Makefile` keeps the same
+target names and forwards each one to it.
 
 When Gazebo shows the drone and QGroundControl shows a connected vehicle, the
 stack is up. Take off from QGroundControl and the video appears in its window.

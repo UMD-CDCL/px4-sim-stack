@@ -38,3 +38,7 @@ modules/sim/scenes/scenarios/*_casualties.yaml
 # rebuilt for each GPU, driver and TensorRT version. Neither belongs in git.
 modules/perception/models/Primary_Detector/
 *.engine
+
+# Written by ./px4sim: the origin of the current scene and scenario,
+# carried to the containers. The scene and the scenario are the source.
+.origin.env

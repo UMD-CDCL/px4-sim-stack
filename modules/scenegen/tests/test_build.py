@@ -593,25 +593,39 @@ def test_scenario_metadata(scenes_dir: Path) -> None:
           and abs(data["fiducial_alt"] - ORIGIN_ALT) < 0.05)
 
 
-def test_scenario_env_script(scenes_dir: Path, tmp: Path) -> None:
-    print("scenario-env.sh derives the .env values")
-    script = Path(__file__).resolve().parents[3] / "scripts" / "scenario-env.sh"
-    scenario = scenes_dir / "scenarios" / "synthtest_casualties.yaml"
-    reply = subprocess.run(["bash", str(script), str(scenario)],
+def run_origin_env(scenario: Path | str, scene: Path | str = "") -> dict[str, str]:
+    """The values px4sim exports for one scene and scenario pair."""
+    script = Path(__file__).resolve().parents[3] / "scripts" / "origin-env.sh"
+    reply = subprocess.run(["bash", str(script), str(scenario), str(scene)],
                            capture_output=True, text=True)
-    values = dict(line.split("=", 1) for line in reply.stdout.strip().splitlines())
+    return dict(line.split("=", 1) for line in reply.stdout.strip().splitlines())
+
+
+def test_origin_env_script(scenes_dir: Path, tmp: Path) -> None:
+    print("origin-env.sh derives the origin from the scene and the scenario")
+    scenario = scenes_dir / "scenarios" / "synthtest_casualties.yaml"
+    world = scenes_dir / "worlds" / "synthtest.sdf"
+
+    values = run_origin_env(scenario, world)
     check("a generated scenario yields home and fiducial",
           values.get("FIDUCIAL_ENABLED") == "1"
           and abs(float(values["HOME_ALT"]) - ORIGIN_ALT) < 0.01
           and abs(float(values["HOME_LAT"]) - CENTER_LAT) < 1e-6
           and abs(float(values["FIDUCIAL_SURVEYED_LAT"]) - CENTER_LAT) < 1e-6,
-          reply.stdout)
+          values)
+
     handwritten = tmp / "handwritten.yaml"
     handwritten.write_text("name: x\nentities: []\n")
-    reply = subprocess.run(["bash", str(script), str(handwritten)],
-                           capture_output=True, text=True)
-    check("a hand-written scenario yields nothing, .env stands",
-          reply.stdout == "", reply.stdout)
+    values = run_origin_env(handwritten, world)
+    check("a hand-written scenario falls back to the world origin",
+          values.get("FIDUCIAL_ENABLED") == "0"
+          and "FIDUCIAL_SURVEYED_LAT" not in values
+          and abs(float(values["HOME_LAT"]) - CENTER_LAT) < 1e-6
+          and abs(float(values["HOME_LON"]) - CENTER_LON) < 1e-6,
+          values)
+
+    check("no scene and no scenario yields nothing, and the caller reports it",
+          run_origin_env("nosuch", "nosuch") == {})
 
 
 def main() -> int:
@@ -628,7 +642,7 @@ def main() -> int:
         test_legacy_alt_key()
         test_env_snippet(tmp)
         test_scenario_metadata(scenes_dir)
-        test_scenario_env_script(scenes_dir, tmp)
+        test_origin_env_script(scenes_dir, tmp)
 
     failed = [name for name, ok, _ in CHECKS if not ok]
     print(f"\n{len(CHECKS) - len(failed)} of {len(CHECKS)} checks passed")

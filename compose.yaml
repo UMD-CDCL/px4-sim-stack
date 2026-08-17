@@ -66,14 +66,20 @@ services:
       PX4_SIM_MODEL: gz_${VEHICLE:-x500_recon}
       PX4_GZ_STANDALONE: "1"
       PX4_SIM_SPEED_FACTOR: ${SIM_SPEED_FACTOR:-1}
-      PX4_HOME_LAT: ${HOME_LAT:-38.9869}
-      PX4_HOME_LON: ${HOME_LON:--76.9426}
-      PX4_HOME_ALT: ${HOME_ALT:-20}
+      # PX4_HOME_LAT, PX4_HOME_LON and PX4_HOME_ALT come from .origin.env,
+      # below. They are scene data, and a copy here would be a second origin
+      # that can disagree with the world.
       # rcS turns every PX4_PARAM_* variable into a `param set` before the
       # MAVLink links start. This is the supported way to change PX4 parameters
       # without a patch to the PX4 tree.
       PX4_PARAM_MAV_0_FORWARD: "1"
       PX4_PARAM_COM_RCL_EXCEPT: "4"
+    # The world origin, written by ./px4sim from the scene and the scenario.
+    # See scripts/origin-env.sh. Without the file PX4 keeps the coordinates
+    # the world file declares, which is the origin of that scene anyway.
+    env_file:
+      - path: ./.origin.env
+        required: false
     volumes:
       - ./src/PX4-Autopilot:/px4
       - ./modules/sim/scenes:/scenes
@@ -321,13 +327,18 @@ services:
       # it needs no gimbal pointing to work.
       PERCEPTION_CAMERA: ${PERCEPTION_CAMERA:-nadir}
       PERCEPTION_CAMERA_2: ${PERCEPTION_CAMERA_2:-gimbal}
-      FIDUCIAL_ENABLED: ${FIDUCIAL_ENABLED:-0}
-      FIDUCIAL_SURVEYED_LAT: ${FIDUCIAL_SURVEYED_LAT:-0.0}
-      FIDUCIAL_SURVEYED_LON: ${FIDUCIAL_SURVEYED_LON:-0.0}
-      FIDUCIAL_SURVEYED_ALT: ${FIDUCIAL_SURVEYED_ALT:-0.0}
+      # FIDUCIAL_ENABLED and FIDUCIAL_SURVEYED_* come from .origin.env, below:
+      # the scenario carries the surveyed point and turns the correction on.
+      # Only the measured half is a property of this pipeline, so only that
+      # half lives in .env. See docs/interfaces.md.
       FIDUCIAL_MEASURED_LAT: ${FIDUCIAL_MEASURED_LAT:-0.0}
       FIDUCIAL_MEASURED_LON: ${FIDUCIAL_MEASURED_LON:-0.0}
       FIDUCIAL_MEASURED_ALT: ${FIDUCIAL_MEASURED_ALT:-0.0}
+    # The surveyed marker, written by ./px4sim from the scenario. Same file
+    # the sim reads its origin from. See scripts/origin-env.sh.
+    env_file:
+      - path: ./.origin.env
+        required: false
     volumes:
       - ./modules/ros/stacks:/stacks
       - ./src/ros2_ws:/ws

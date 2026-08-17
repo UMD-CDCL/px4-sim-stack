@@ -34,8 +34,9 @@ build-all builds every scene in the data directory in one run. A fresh
 clone carries the scene sources but none of the build products, so this
 is the setup step that fills modules/sim/scenes.
 
-Then: SCENE=campus and the printed HOME_* values in .env, and restart the
-sim. See README.md.
+Then: SCENE=campus and SCENARIO=campus_casualties in .env, and restart the
+sim. Those two lines carry the origin and the survey marker with them. See
+README.md.
 """
 
 from __future__ import annotations

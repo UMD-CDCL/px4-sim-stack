@@ -25,13 +25,11 @@ editor adjusts targets there, and this build projects them into the
 scenario. The build draws nothing at random, so a rebuild of an unchanged
 scene is byte-identical.
 
-The scenario also carries home_* and fiducial_* lines. The front doors
-read them (scripts/scenario-env.sh), so SCENE and SCENARIO in .env select
-everything; nothing else is copied by hand.
-
-The world's <spherical_coordinates> ties ENU (0,0,0) to the scene center
-at the terrain's own altitude. The printed .env lines carry the same
-numbers to PX4 and QGC; apply them, or the map and the world disagree.
+The scenario also carries home_* and fiducial_* lines, and the world
+carries the same origin in <spherical_coordinates>, which ties ENU
+(0,0,0) to the scene center at the terrain's own altitude. px4sim reads
+them (scripts/origin-env.sh), so SCENE and SCENARIO in .env select
+everything and no coordinate is copied by hand.
 """
 
 from __future__ import annotations
@@ -749,8 +747,9 @@ def run(scene_data_dir: Path, scenes_dir: Path) -> int:
     env_lines = [f"SCENE={scene.name}", f"SCENARIO={scenario_path.stem}"]
     (scene_data_dir / "env.snippet").write_text(
         "\n".join(env_lines) + "\n"
-        + "# Home and fiducial ride inside the scenario file; px4sim and\n"
-        + "# make read them from it. For reference:\n"
+        + "# These two lines are the whole configuration. Home and fiducial\n"
+        + "# ride inside the scenario file, and px4sim reads them from it.\n"
+        + "# Put no coordinate in .env. For reference:\n"
         + "".join(f"# {key}={value}\n" for key, value in geo_meta.items()))
 
     report = [f"world      {world_path}",
@@ -770,8 +769,8 @@ def run(scene_data_dir: Path, scenes_dir: Path) -> int:
     report.append(f"scenario   {scenario_path}")
     report += ["  " + line for line in target_lines]
     report.append("")
-    report.append("Put these two in .env; home and fiducial ride inside the "
-                  "scenario file:")
+    report.append("Put these two in .env, and no coordinate. Home and "
+                  "fiducial ride inside the scenario file:")
     report += ["  " + line for line in env_lines]
     if abs(mesh_stats["z_min"]) > 5 or abs(mesh_stats["z_max"]) > 5:
         report.append("")

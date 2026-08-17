@@ -145,8 +145,11 @@
       </link>
     </model>
 
-    <!-- PX4 overwrites these at start from PX4_HOME_LAT, PX4_HOME_LON and
-         PX4_HOME_ALT. The values here are the fallback. -->
+    <!-- The origin of this scene. A scenario with home_lat, home_lon and
+         home_alt lines overrides it; one without, such as a hand-written
+         scenario, flies these. scripts/origin-env.sh reads them and puts
+         them in PX4_HOME_LAT, PX4_HOME_LON and PX4_HOME_ALT, which PX4
+         applies at start. -->
     <spherical_coordinates>
       <surface_model>EARTH_WGS84</surface_model>
       <world_frame_orientation>ENU</world_frame_orientation>

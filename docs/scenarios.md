@@ -21,10 +21,18 @@ SCENARIO=urban_casualties
 ```
 
 ```bash
-make scene SCENE=forest      # new world, restarts the sim
-make scenario                # place the targets again, no restart
-make reset                   # remove the targets
+./px4sim scene forest        # new world, restarts the sim
+./px4sim scenario            # place the targets again, no restart
+./px4sim reset               # remove the targets
+./px4sim origin              # the coordinates this pair flies at
 ```
+
+The scene and the scenario carry the coordinates. `SCENE` and `SCENARIO` are
+the only two lines that select them: the origin and the survey marker are read
+from the scenario file (`home_*` and `fiducial_*`), and from the world's
+`<spherical_coordinates>` when the scenario carries none. Keep no coordinate in
+`.env`. A second copy can disagree with the world, and then the whole mission
+flies somewhere else and looks correct while it does it.
 
 ## Scenes
 
@@ -39,7 +47,7 @@ merges the PX4 world directory with this one:
 `walls`, `windy`.
 
 ```bash
-make scene SCENE=baylands
+./px4sim scene baylands
 ```
 
 `baylands` is large and detailed. Expect a lower frame rate and a warning from
@@ -92,10 +100,16 @@ and a fiducial marker ties the world to the map frame.
 ./px4sim genscene --help
 ```
 
-A generated scenario carries `home_*` and `fiducial_*` lines. Both front
-doors read them (`scripts/scenario-env.sh`), so `SCENE` and `SCENARIO`
-in `.env` select the world, the targets, the origin and the survey
-marker together.
+A generated scenario carries `home_*` and `fiducial_*` lines, and every
+world file carries `<spherical_coordinates>`. `./px4sim` reads the
+scenario first and falls back to the world
+(`scripts/origin-env.sh`), so `SCENE` and `SCENARIO` in `.env` select the
+world, the targets, the origin and the survey marker together. No
+coordinate is written in `.env`. Print what the pair resolves to:
+
+```bash
+./px4sim origin
+```
 
 See [modules/scenegen/README.md](../modules/scenegen/README.md).
 
@@ -114,7 +128,7 @@ The upstream PX4 vehicles are available too: `x500`, `x500_gimbal`,
 `rover_ackermann`, `advanced_plane` and the rest.
 
 ```bash
-VEHICLE=x500_depth AIRFRAME=4002 make scene
+VEHICLE=x500_depth AIRFRAME=4002 ./px4sim scene
 ```
 
 `AIRFRAME` must match the vehicle. The number is the PX4 `SYS_AUTOSTART` id,
@@ -136,7 +150,7 @@ Edit `model.sdf`, change `<model name>` to match the directory, and edit
 `streams.conf`. Then:
 
 ```bash
-VEHICLE=x500_thermal make scene
+VEHICLE=x500_thermal ./px4sim scene
 ```
 
 You do not need a PX4 airframe file. `AIRFRAME` supplies the parameters and
@@ -165,9 +179,9 @@ entities:
 | `static` | `true` keeps the model still. Default is `true`. |
 
 ```bash
-make scenario                                  # apply SCENARIO from .env
-make reset                                     # remove what is placed
-docker compose exec sim /scenes/spawn_scenario.py --list
+./px4sim scenario                              # apply SCENARIO from .env
+./px4sim reset                                 # remove what is placed
+docker compose exec sim /scenes/spawn_scenario.py --list   # what is placed now
 ```
 
 Applying a scenario removes the previous one first, so scenarios do not stack.
@@ -219,20 +233,20 @@ cameras still render at their configured rate in simulation time, so the
 encoders and DeepStream receive frames faster than they can be produced in the
 real world. Expect dropped frames above about 2x on this hardware.
 
-For a repeatable run, set the world origin so that every scenario starts from
-the same coordinates:
+A run repeats itself because the origin is scene data: the same `SCENE` and
+`SCENARIO` always start from the same coordinates. To fly a scene from
+another point, edit `home_lat`, `home_lon` and `home_alt` in its scenario
+file. Check the result before the flight:
 
 ```bash
-HOME_LAT=38.9869
-HOME_LON=-76.9426
-HOME_ALT=20
+./px4sim origin
 ```
 
 ## A full test run
 
 ```bash
 # 1. Choose the scene and the targets
-SCENE=recon_field SCENARIO=urban_casualties make up
+SCENE=recon_field SCENARIO=urban_casualties ./px4sim start
 
 # 2. Wait for the vehicle in QGroundControl, then plan a survey in the app
 #    and start the mission
@@ -243,7 +257,7 @@ ffplay rtsp://localhost:8554/gimbal_annotated
 
 # 4. Change the targets without restarting anything
 vim modules/sim/scenes/scenarios/urban_casualties.yaml
-make scenario
+./px4sim scenario
 
 # 5. Fly the same mission again
 ```
