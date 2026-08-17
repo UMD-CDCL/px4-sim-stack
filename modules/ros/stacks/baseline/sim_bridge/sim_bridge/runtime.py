@@ -31,13 +31,18 @@ def now_s(node) -> float:
 
 
 def tf_buffer(node, cache_time=None) -> Buffer:
-    """A TF buffer whose listener runs on its own spin thread. Without the
-    thread a lookup that waits for a transform blocks the callback that
-    would deliver it. The listener is kept on the node so it outlives this
-    call."""
-    buffer = Buffer(cache_time=cache_time)
-    node.tf_listener = TransformListener(buffer, node, spin_thread=True)
-    return buffer
+    """The node's TF buffer, made on first use and shared after that.
+
+    The listener runs on its own spin thread, because a lookup that waits for
+    a transform would otherwise block the callback that delivers it. One
+    buffer per node, so a node watching several frames subscribes to /tf once
+    and the first caller's cache_time is the one that holds.
+    """
+    if getattr(node, "tf_buffer_shared", None) is None:
+        buffer = Buffer(cache_time=cache_time)
+        node.tf_listener = TransformListener(buffer, node, spin_thread=True)
+        node.tf_buffer_shared = buffer
+    return node.tf_buffer_shared
 
 
 def require_foxglove(node, consequence: str) -> bool:

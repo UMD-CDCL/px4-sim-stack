@@ -1,17 +1,25 @@
 #!/usr/bin/env python3
-"""Turn clicks on the gimbal image into gimbal action.
+"""Turn clicks on any camera image into gimbal action.
 
-Foxglove publishes the clicked pixel as a PointStamped. click_mode decides
-what one click does:
+Foxglove publishes the clicked pixel as a PointStamped on
+/foxglove/<camera>/click, one topic per camera in click_cameras. The pixel
+ray is cast through that camera's own intrinsics and pose, and every camera
+aims the same gimbal: a nadir click puts the gimbal on what the nadir camera
+saw. One click_mode governs them all.
 
-    roi     hold the camera on the scene point under the pixel. Default.
+    roi     hold the gimbal on the scene point under the pixel. Default.
     point   hold the clicked pitch against the horizon, yaw follows the
             vehicle heading.
-    off     ignore clicks.
+    off     ignore clicks and send nothing.
 
-A hold persists across mode changes and through off mode; the modes only
-decide what a new click does. A new click replaces the hold, and
-/gimbal/center releases it.
+A hold persists across a roi or point mode change. off drops it, so nothing
+keeps commanding the gimbal behind the operator, and /gimbal/center drops it
+from any mode.
+
+Another party taking primary gimbal control releases the hold and stops the
+commanding, with a warning. Tracking never claims control back, because two
+controllers trading a gimbal read as a fault from either side. A click is the
+user asking for it, so a click claims it back, and so does /gimbal/center.
 
 gimbal_convention selects how a command is expressed. "mavlink" sends an
 earth-referenced attitude with the lock flags set and lets the device
@@ -23,17 +31,18 @@ every device behavior this accommodates, and why a command must never be
 built from the TF gimbal segment alone, which carries the EKF heading error.
 
 PX4 drops a setpoint silently unless its sender holds primary gimbal
-control, so the node claims control at startup and again whenever a command
-goes out while another party holds it. The claim goes through the generic
-/mavros/cmd/command service rather than the gimbal_control configure
-service, whose handler blocks its plugin's executor until acknowledged: one
-lost acknowledgment would stop that plugin sending any gimbal message at
-all. A claim that never answers is treated as a stuck gimbal and recovered
-with the center command, which also hands control to its sender.
+control, so the node claims control once at startup. The claim goes through
+the generic /mavros/cmd/command service rather than the gimbal_control
+configure service, whose handler blocks its plugin's executor until
+acknowledged: one lost acknowledgment would stop that plugin sending any
+gimbal message at all. A claim that never answers is treated as a stuck
+gimbal and recovered with the center command, which also hands control to
+its sender.
 
 Subscribes
-    <click_topic>        geometry_msgs/PointStamped, pixels on the image
-    <camera_info_topic>  sensor_msgs/CameraInfo
+    /foxglove/<camera>/click      geometry_msgs/PointStamped, image pixels,
+                                  one per camera in click_cameras
+    /camera/<camera>/camera_info  sensor_msgs/CameraInfo, the same set
     /mavros/gimbal_control/manager/status   who holds control
     /mavros/local_position/pose             the vehicle attitude
     /mavros/global_position/rel_alt         the ground plane height
@@ -123,12 +132,53 @@ FOLLOW_LOCK_FLAGS = (
     | GimbalManagerSetAttitude.GIMBAL_MANAGER_FLAGS_PITCH_LOCK)
 
 
+class ClickSource:
+    """One camera whose clicks steer the gimbal.
+
+    The pixel ray is cast through this camera's own intrinsics and pose, so a
+    nadir click and a gimbal click both become a world ray. Everything after
+    that is the gimbal's, and there is one copy of it.
+    """
+
+    def __init__(self, node, camera: str, optical_frame: str) -> None:
+        self.camera = camera
+        self.optical = optical_frame
+        self.frame = CameraFrame(node, optical_frame, node.reference)
+        self.info: CameraInfo | None = None
+        node.create_subscription(
+            CameraInfo, f"/camera/{camera}/camera_info",
+            self._on_info, qos_profile_sensor_data)
+        # Foxglove publishes clicks reliable, the default.
+        node.create_subscription(
+            PointStamped, f"/foxglove/{camera}/click",
+            lambda msg: node.on_click(self, msg), 10)
+
+    def _on_info(self, msg: CameraInfo) -> None:
+        self.info = msg
+
+    def pixel_inside(self, u: float, v: float) -> bool:
+        return 0.0 <= u < self.info.width and 0.0 <= v < self.info.height
+
+    def ray(self, u: float, v: float):
+        """The click as a world origin and direction, or None when this
+        camera has no pose yet. The newest pose rather than the click stamp:
+        the command steers from where the camera looks now."""
+        pose = self.frame.latest(timeout_s=TF_TIMEOUT_S)
+        if pose is None:
+            return None
+        return pose.position, quat_rotate(pose.rotation,
+                                          ray_in_optical(u, v, self.info.k))
+
+
 class ClickToGimbal(Node):
     def __init__(self) -> None:
         super().__init__("click_to_gimbal")
 
-        self.declare_parameter("click_topic", "/foxglove/cursor/click")
-        self.declare_parameter("camera_info_topic", "/camera/gimbal/camera_info")
+        # Every camera a click can come from, and its optical frame in the
+        # same order. Each gets /foxglove/<camera>/click and reads
+        # /camera/<camera>/camera_info; all of them aim the gimbal.
+        self.declare_parameter("click_cameras", ["gimbal"])
+        self.declare_parameter("click_frames", ["gimbal_camera_optical_frame"])
         self.declare_parameter("optical_frame", "gimbal_camera_optical_frame")
         self.declare_parameter("reference_frame", "map")
         self.declare_parameter("click_mode", "roi")
@@ -161,17 +211,19 @@ class ClickToGimbal(Node):
         # steers the joints to zero without a setpoint, and _center
         # commands the same zero.
         self.cmd_q_body_link = (0.0, 0.0, 0.0, 1.0)
+        # roi_tracker steers the gimbal, so it reads the gimbal's own pose
+        # whichever camera the click came from.
         self.camera_frame = CameraFrame(self, self.optical, self.reference)
 
-        self.info: CameraInfo | None = None
         self.vehicle_q: tuple[float, float, float, float] | None = None
         self.amsl: float | None = None
         # None until the first manager status arrives. True while these
         # MAVROS_SYSID and MAVROS_COMPID ids hold primary control.
         self.in_control: bool | None = None
-        self.claim_acked = False
+        self.startup_claim_done = False
         self.claim_inflight = False
-        self.pending_click: PointStamped | None = None
+        # The newest click from any camera, and where it came from.
+        self.pending_click: tuple[ClickSource, PointStamped] | None = None
         self.pending_click_timer = None
         self.last_click_at = -CLICK_MIN_INTERVAL_S
 
@@ -219,9 +271,14 @@ class ClickToGimbal(Node):
         # everything a callback touches must already be built.
         # Sensor QoS on the mavros topics: they are best effort, and a
         # reliable subscription to a best effort publisher receives nothing.
-        self.create_subscription(CameraInfo,
-                                 self.get_parameter("camera_info_topic").value,
-                                 self._on_info, qos_profile_sensor_data)
+        cameras = [str(c) for c in self.get_parameter("click_cameras").value]
+        frames = [str(f) for f in self.get_parameter("click_frames").value]
+        self.sources = [ClickSource(self, camera, frame)
+                        for camera, frame in zip(cameras, frames)]
+        self.get_logger().info(
+            "clicks steer the gimbal from: "
+            + ", ".join(f"/foxglove/{s.camera}/click" for s in self.sources))
+
         self.create_subscription(GimbalManagerStatus,
                                  "/mavros/gimbal_control/manager/status",
                                  self._on_status, qos_profile_sensor_data)
@@ -235,10 +292,6 @@ class ClickToGimbal(Node):
             self.create_subscription(Altitude, "/mavros/altitude",
                                      self._on_altitude,
                                      qos_profile_sensor_data)
-        # Foxglove publishes clicks reliable, the default.
-        self.create_subscription(PointStamped,
-                                 self.get_parameter("click_topic").value,
-                                 self._on_click, 10)
 
         self.create_timer(CLAIM_RETRY_S, self._claim_tick)
         # The timer first fires a full period from now. Against an already
@@ -247,9 +300,6 @@ class ClickToGimbal(Node):
         self._claim_tick()
 
     # ------------------------------------------------------------------ inputs
-    def _on_info(self, msg: CameraInfo) -> None:
-        self.info = msg
-
     def _on_pose(self, msg: PoseStamped) -> None:
         # The one pose subscription in this process: the tracker and the
         # origin both feed from it.
@@ -268,15 +318,20 @@ class ClickToGimbal(Node):
     def _on_status(self, msg: GimbalManagerStatus) -> None:
         ours = (msg.sysid_primary == MAVROS_SYSID
                 and msg.compid_primary == MAVROS_COMPID)
-        if ours != self.in_control:
-            if ours:
-                self.get_logger().info("gimbal control is ours")
-            else:
-                self.get_logger().warn(
-                    f"gimbal control is held by "
-                    f"{msg.sysid_primary}/{msg.compid_primary}, not "
-                    f"{MAVROS_SYSID}/{MAVROS_COMPID}. A click claims it back.")
+        if ours == self.in_control:
+            return
         self.in_control = ours
+        if ours:
+            self.get_logger().info("gimbal control is ours")
+            return
+        # Someone else took it. Stand down rather than fight: a standing hold
+        # would keep sending setpoints the autopilot drops, and two
+        # controllers trading a gimbal look like a fault from either side.
+        self._release_hold()
+        self.get_logger().warn(
+            f"gimbal control taken by {msg.sysid_primary}/"
+            f"{msg.compid_primary}. Released the hold and stopped commanding. "
+            f"A click or /gimbal/center takes it back.")
 
     # -------------------------------------------------------------------- mode
     def _on_parameters(self, params) -> SetParametersResult:
@@ -324,12 +379,15 @@ class ClickToGimbal(Node):
             self.get_logger().warn(
                 f"click_mode '{mode}' is not one of {CLICK_MODES}, using roi")
             mode = "roi"
-        # A standing hold continues across mode changes, as a real gimbal
-        # keeps its last earth referenced command. The modes only decide
-        # what a new click does, and /gimbal/center releases the hold.
         changed = mode != self.mode
         self.mode = mode
         self.mode_pub.publish(String(data=mode))
+        # off means off: it drops the standing hold as well as refusing new
+        # clicks, so nothing keeps commanding the gimbal behind the operator.
+        # A hold survives roi and point alike, as a real gimbal keeps its
+        # last earth referenced command.
+        if mode == "off":
+            self._release_hold()
         if changed or announce:
             self.get_logger().info(f"click_mode: {mode}")
 
@@ -343,7 +401,7 @@ class ClickToGimbal(Node):
                     "gimbal to recover it")
                 self._center()
             return
-        if self.claim_acked:
+        if self.startup_claim_done:
             return
         self._claim()
 
@@ -398,17 +456,18 @@ class ClickToGimbal(Node):
             self.get_logger().warn(f"gimbal control claim failed: {err}")
             return
         if response.success:
-            if not self.claim_acked:
+            if not self.startup_claim_done:
                 self.get_logger().info(
                     f"gimbal control claimed for {MAVROS_SYSID}/{MAVROS_COMPID}")
-            self.claim_acked = True
+            self.startup_claim_done = True
         else:
             self.get_logger().warn(
                 f"gimbal control claim rejected, result={response.result}")
 
     # ------------------------------------------------------------------- click
-    def _on_click(self, msg: PointStamped) -> None:
-        """The trailing-edge flood guard. _process_click does the work."""
+    def on_click(self, source: "ClickSource", msg: PointStamped) -> None:
+        """The trailing-edge flood guard, shared by every camera.
+        _process_click does the work."""
         now = time.monotonic()
         if now - self.last_click_at >= CLICK_MIN_INTERVAL_S:
             # This click supersedes any held one: disarm the timer so a
@@ -418,9 +477,9 @@ class ClickToGimbal(Node):
                     and not self.pending_click_timer.is_canceled():
                 self.pending_click_timer.cancel()
             self.last_click_at = now
-            self._process_click(msg)
+            self._process_click(source, msg)
             return
-        self.pending_click = msg
+        self.pending_click = (source, msg)
         if self.pending_click_timer is not None:
             if not self.pending_click_timer.is_canceled():
                 return    # already armed; the newest click rides it
@@ -433,38 +492,50 @@ class ClickToGimbal(Node):
 
     def _on_pending_click(self) -> None:
         self.pending_click_timer.cancel()
-        msg, self.pending_click = self.pending_click, None
-        if msg is None:
+        pending, self.pending_click = self.pending_click, None
+        if pending is None:
             return    # a newer click already consumed the pending state
         self.last_click_at = time.monotonic()
-        self._process_click(msg)
+        self._process_click(*pending)
 
-    def _process_click(self, msg: PointStamped) -> None:
-        if not intrinsics_ready(self.info):
-            self.get_logger().warn("click ignored: no camera intrinsics yet")
-            return
-        u, v = msg.point.x, msg.point.y
-        if not (0.0 <= u < self.info.width and 0.0 <= v < self.info.height):
-            self.get_logger().warn(
-                f"click ignored: pixel ({u:.0f}, {v:.0f}) is outside the "
-                f"{self.info.width}x{self.info.height} image")
-            return
+    def _process_click(self, source: "ClickSource", msg: PointStamped) -> None:
         if self.mode == "off":
             self.get_logger().info("click ignored: click_mode is off",
                                    throttle_duration_sec=5.0)
             return
-
-        camera = self._camera_pose()
-        if camera is None:
+        if not intrinsics_ready(source.info):
+            self.get_logger().warn(
+                f"click ignored: no {source.camera} intrinsics yet")
             return
-        position, rotation = camera
-        direction = quat_rotate(rotation, ray_in_optical(u, v, self.info.k))
-        if self.mode == "roi":
-            self._roi_click(u, v, position, direction)
-        else:
-            self._point_click(u, v, direction)
+        u, v = msg.point.x, msg.point.y
+        if not source.pixel_inside(u, v):
+            self.get_logger().warn(
+                f"click ignored: pixel ({u:.0f}, {v:.0f}) is outside the "
+                f"{source.info.width}x{source.info.height} {source.camera} image")
+            return
 
-    def _point_click(self, u: float, v: float, direction) -> None:
+        ray = source.ray(u, v)
+        if ray is None:
+            self.get_logger().warn(
+                f"click dropped: no pose {self.reference} -> {source.optical}")
+            return
+        # A click is the user asking for the gimbal, so it is the one place
+        # that takes control back after another party took it.
+        self._claim_for_user()
+        position, direction = ray
+        if self.mode == "roi":
+            self._roi_click(source, u, v, position, direction)
+        else:
+            self._point_click(source, u, v, direction)
+
+    def _claim_for_user(self) -> None:
+        if self.in_control is False:
+            self.get_logger().info(
+                "taking gimbal control back for this click")
+            self._claim()
+
+    def _point_click(self, source: "ClickSource", u: float, v: float,
+                     direction) -> None:
         """Hold pitch and roll on the horizon, yaw follows the heading."""
         if self.vehicle_q is None:
             self.get_logger().warn("click dropped: no vehicle attitude yet")
@@ -477,18 +548,19 @@ class ClickToGimbal(Node):
         else:
             self.roi_tracker.follow(pitch, yaw)
         self.get_logger().info(
-            f"click ({u:.0f}, {v:.0f}) -> hold pitch "
+            f"{source.camera} click ({u:.0f}, {v:.0f}) -> hold pitch "
             f"{math.degrees(pitch):+.1f} deg on the horizon, yaw "
             f"{math.degrees(yaw):+.1f} deg now, following the heading")
 
-    def _roi_click(self, u: float, v: float, position, direction) -> None:
-        """Hold the camera on the scene point under the clicked pixel."""
+    def _roi_click(self, source: "ClickSource", u: float, v: float,
+                   position, direction) -> None:
+        """Hold the gimbal on the scene point under the clicked pixel."""
         hit = self.localizer.intersect(position, direction,
                                        GROUND_VIEW_MAX_DISTANCE_M)
         if hit is None:
             self.get_logger().warn(
-                f"click dropped: pixel ({u:.0f}, {v:.0f}) meets no ground "
-                f"within {GROUND_VIEW_MAX_DISTANCE_M:.0f} m")
+                f"click dropped: {source.camera} pixel ({u:.0f}, {v:.0f}) "
+                f"meets no ground within {GROUND_VIEW_MAX_DISTANCE_M:.0f} m")
             return
 
         self.roi_active = True
@@ -498,18 +570,8 @@ class ClickToGimbal(Node):
         else:
             self.roi_tracker.track(hit)
         self.get_logger().info(
-            f"click ({u:.0f}, {v:.0f}) -> ROI at map "
+            f"{source.camera} click ({u:.0f}, {v:.0f}) -> ROI at map "
             f"({hit[0]:.1f}, {hit[1]:.1f}, {hit[2]:.1f})")
-
-    def _camera_pose(self):
-        """Where the camera looks now, or None with a warning. The newest
-        pose rather than the click stamp: the command steers from here."""
-        pose = self.camera_frame.latest(timeout_s=TF_TIMEOUT_S)
-        if pose is None:
-            self.get_logger().warn(
-                f"click dropped: no pose {self.reference} -> {self.optical}")
-            return None
-        return pose.position, pose.rotation
 
     # --------------------------------------------------------------------- roi
     def _publish_roi(self, hit) -> None:
@@ -588,14 +650,17 @@ class ClickToGimbal(Node):
         """Command a vehicle-relative attitude, radians in the aerospace
         convention. roi_tracker calls this too."""
         if self.in_control is False:
-            # The setpoint races the claim to the autopilot, and a setpoint
-            # that arrives first is dropped. The command still goes out: at
-            # worst it restores control and the next one lands.
-            self._claim()
+            # Tracking never claims. Only a click does, so a held gimbal is
+            # left alone instead of being pulled back and forth.
             self.get_logger().warn(
-                "another party held gimbal control at command time. If the "
-                "gimbal does not move, click again.",
+                "not commanding the gimbal: another party holds control. "
+                "Click to take it back.", throttle_duration_sec=5.0)
+            return
+        if self.mode == "off":
+            self.get_logger().warn(
+                "not commanding the gimbal: click_mode is off.",
                 throttle_duration_sec=5.0)
+            return
         setpoint = quat_from_rpy(roll, pitch, yaw)
         if not self.earth_referenced:
             self.cmd_q_body_link = body_frd_to_flu(setpoint)

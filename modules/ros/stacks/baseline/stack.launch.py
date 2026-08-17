@@ -418,8 +418,12 @@ def generate_launch_description() -> LaunchDescription:
         # node never claims gimbal control for a camera that is not
         # streaming.
         *([bridge_node("click_to_gimbal", "click_to_gimbal", {
-            "click_topic": "/foxglove/cursor/click",
-            "camera_info_topic": "/camera/gimbal/camera_info",
+            # Every camera can be clicked, and all of them aim the gimbal:
+            # a nadir click puts the gimbal on what the nadir camera saw.
+            "click_cameras": CAMERAS,
+            "click_frames": [CAMERA[cam]["optical_frame"] for cam in CAMERAS],
+            # The gimbal's own frame, which roi_tracker steers from whichever
+            # camera the click came from.
             "optical_frame": CAMERA["gimbal"]["optical_frame"],
             # What a click does: roi holds the camera on the ground point,
             # point turns the camera once, off ignores clicks. Runtime
