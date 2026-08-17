@@ -104,6 +104,7 @@ RUN if getent passwd ${UID} >/dev/null; then \
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY px4-rcS /opt/sim/px4-rcS
+COPY hold-stream-rates.sh /opt/sim/hold-stream-rates.sh
 COPY frame_clock.py /opt/sim/frame_clock.py
 RUN chmod +x /usr/local/bin/entrypoint.sh /opt/sim/frame_clock.py \
     && chmod 0644 /opt/sim/px4-rcS

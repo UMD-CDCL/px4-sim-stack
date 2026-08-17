@@ -186,6 +186,12 @@ cd "$BUILD_DIR/rootfs"
 # stock rcS.
 PX4_RCS=${PX4_RCS:-/opt/sim/px4-rcS}
 if [ -f "$PX4_RCS" ] && [ -n "${MAVLINK_HUB_IP:-}" ]; then
+	# PX4 drops the boot-time stream rates when a ground station joins the
+	# link, which starves the camera frame. See hold-stream-rates.sh.
+	if [ "${HOLD_STREAM_RATES:-1}" = "1" ] && [ -x /opt/sim/hold-stream-rates.sh ]; then
+		PX4_RCS="$PX4_RCS" PX4_BUILD_DIR="$BUILD_DIR" \
+			/opt/sim/hold-stream-rates.sh &
+	fi
 	exec "$BUILD_DIR/bin/px4" -s "$PX4_RCS" "$BUILD_DIR/etc"
 fi
 warn "No PX4_RCS or no MAVLINK_HUB_IP. Using the stock PX4 startup."
