@@ -457,7 +457,7 @@ recall figure would describe neither.
 | `/scene/buildings` | `visualization_msgs/MarkerArray`, latched: the scene's buildings as triangle meshes for the 3D panel, roofs colored from the satellite image. Buildings only; vehicle props stay out on purpose |
 | `/perception/<camera>/detections_3d` | `vision_msgs/Detection3DArray` with covariance |
 | `/camera/<camera>/footprint` | `geometry_msgs/PolygonStamped`, truncated at 100 m. In `scene` mode the outline drapes over the terrain and the roofs |
-| `/camera/<camera>/footprint_geojson` | `foxglove_msgs/GeoJSON`, the same outline vertices for the Map panel, so both panels carry one shape. The Foxglove layout colors it to match the 3D panel line |
+| `/camera/<camera>/footprint_geojson` | `foxglove_msgs/GeoJSON`, the same outline vertices for the Map panel, so both panels carry one shape. A closed LineString, like the ground truth gates, so the outline is hollow and its interior takes no clicks. The Foxglove layout colors it to match the 3D panel line |
 | `/scoring/<camera>/verdicts` | `vision_msgs/Detection3DArray`, each labelled TP, MISLOCALIZED, FP or FN |
 | `/scoring/<camera>/markers` | `visualization_msgs/MarkerArray`, a TP as a green dot, a MISLOCALIZED estimate as a yellow cross, an FP as a red cross |
 | `/scoring/<camera>/true_positives`, `missed_localizations`, `false_positives` | `foxglove_msgs/GeoJSON` for the Map panel, one message per scoring tick carrying every estimate with that verdict. Each feature is named after the box label the image overlay draws, and its tooltip gives the detector's confidence, the targets the verdict names and the ground error. True green, yellow and red in the feature style. A tick with no such verdict publishes an empty collection, which clears the panel |

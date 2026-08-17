@@ -9,8 +9,10 @@ fills the outline that frames it.
 
 Publishes
     <camera_ns>/footprint           geometry_msgs/PolygonStamped
-    <camera_ns>/footprint_geojson   foxglove_msgs/GeoJSON, for the Map panel,
-                                    empty when no ground is in view
+    <camera_ns>/footprint_geojson   foxglove_msgs/GeoJSON for the Map panel, a
+                                    hollow closed LineString like the ground
+                                    truth gates. Empty when no ground is in
+                                    view, which clears it from the panel.
 """
 
 from __future__ import annotations
@@ -105,12 +107,15 @@ class GroundProjector(Node):
             ring = self.origin.geojson_ring([(p[0], p[1]) for p in outline])
             features.append({
                 "type": "Feature",
-                "geometry": {"type": "Polygon", "coordinates": [ring]},
-                # fill false, not a transparent fill: without a fill layer
-                # the interior takes no clicks. The Map panel merges `style`
-                # over the topic color, so the stroke keeps this camera's one.
+                # A closed LineString, not a polygon, the same shape the
+                # ground truth gates use. A line has no interior to fill, to
+                # tint or to take clicks, so the outline stays hollow whatever
+                # the panel does with a polygon's fill. The Map panel merges
+                # `style` over the topic color, so leaving color out keeps
+                # this camera's own.
+                "geometry": {"type": "LineString", "coordinates": ring},
                 "properties": {"name": f"{self.camera} footprint",
-                               "style": {"fill": False}},
+                               "style": {"weight": 2}},
             })
         publish_features(self.geojson_pub, features)
 
