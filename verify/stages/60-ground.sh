@@ -48,3 +48,26 @@ for side in "$lead" ground; do
 	name=$([ "$side" = ground ] && echo "the ground station" || echo "uas$lead")
 	expect_eq "$name scores the detections against the known targets" 3 "$scored"
 done
+
+# The operator points the gimbal by clicking the preview image on the ground.
+# A pixel low in the image is nearer the vehicle, so the camera looks steeper.
+moved() { sed -n 's/.*depression \([-0-9.]*\) -> \([-0-9.]*\).*/\2 - (\1)/p'; }
+steeper=$(./px4sim uas ground click point 320 320 2>/dev/null | moved)
+shallower=$(./px4sim uas ground click point 320 40 2>/dev/null | moved)
+if [ -z "$steeper" ] || [ -z "$shallower" ]; then
+	fail "a click on the ground points the gimbal on the vehicle"
+else
+	expect_eq "a click low in the image points the gimbal steeper" True \
+		"$(python3 -c "print($steeper > 5)")"
+	expect_eq "a click high in the image points the gimbal further out" True \
+		"$(python3 -c "print($shallower < -5)")"
+fi
+
+./px4sim uas ground click off >/dev/null 2>&1
+ignored=$(./px4sim uas ground click point 320 320 --keep-mode 2>/dev/null | moved)
+if [ -z "$ignored" ]; then
+	fail "a station whose clicks are off ignores them"
+else
+	expect_eq "a station whose clicks are off ignores them" True \
+		"$(python3 -c "print(abs($ignored) < 2)")"
+fi

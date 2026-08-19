@@ -28,7 +28,7 @@ from scipy.spatial.transform import Rotation
 from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
                        ReliabilityPolicy)
 
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PointStamped, PoseStamped
 from cdcl_umd_msgs.msg import TargetBoxArray
 from cdcl_umd_msgs.srv import TBALocalization
 from mavros_msgs.msg import Altitude, GimbalDeviceAttitudeStatus, HomePosition, State
@@ -104,6 +104,14 @@ class Uas(Node):
         self.toggle_detection = self.create_client(SetBool, "/ds/mode/toggle_detection")
         self.run_detect = self.create_client(Trigger, "/ds/batch/run_detect")
         self.localize = self.create_client(TBALocalization, f"{self.namespace}/tba_loczn")
+        # What an operator's Foxglove panel publishes: a pixel in the preview
+        # image, plus the two services that say whether clicks are live.
+        self.click = self.create_publisher(
+            PointStamped, f"{self.namespace}/camera/click", RELIABLE_QOS)
+        self.click_point = self.create_client(
+            Trigger, f"{self.namespace}/gimbal/click_mode/point")
+        self.click_off = self.create_client(
+            Trigger, f"{self.namespace}/gimbal/click_mode/off")
 
         self.arming = self.create_client(CommandBool, f"{self.namespace}/cmd/arming")
         self.takeoff_srv = self.create_client(CommandTOL, f"{self.namespace}/cmd/takeoff")
@@ -438,6 +446,39 @@ def command_score(uas: Uas, args) -> int:
     return 0
 
 
+def command_click(uas: Uas, args) -> int:
+    """Click a pixel of the preview image, the way an operator does.
+
+    Sets the click mode first, because a station whose clicks are off is the
+    safe default and a click then changes nothing.
+    """
+    if args.mode == "off":
+        answer = uas.call(uas.click_off, Trigger.Request(), "click_mode/off")
+        print(answer.message if answer else "no click mode service")
+        return 0 if answer and answer.success else 1
+
+    if not args.keep_mode:
+        answer = uas.call(uas.click_point, Trigger.Request(), "click_mode/point")
+        if not (answer and answer.success):
+            print("click mode refused", file=sys.stderr)
+            return 1
+    if not uas.wait_until(lambda: uas.gimbal is not None, 15.0,
+                          "the gimbal's attitude"):
+        return 1
+    before = uas.boresight_depression_deg()
+    point = PointStamped()
+    point.header.frame_id = "preview"
+    point.header.stamp = uas.get_clock().now().to_msg()
+    point.point.x, point.point.y = float(args.u), float(args.v)
+    for _ in range(args.repeat):
+        uas.click.publish(point)
+        uas.pump(0.25)
+    uas.pump(args.settle)
+    after = uas.boresight_depression_deg()
+    print(f"clicked {args.u}, {args.v}: depression {before:.1f} -> {after:.1f} degrees")
+    return 0
+
+
 COMMANDS = {
     "status": command_status,
     "arm": command_arm,
@@ -450,6 +491,7 @@ COMMANDS = {
     "detections": command_detections,
     "published": command_published,
     "score": command_score,
+    "click": command_click,
 }
 
 
@@ -485,6 +527,15 @@ def main() -> int:
     detections.add_argument("--deadline", type=float, default=20.0)
     detections.add_argument("--truth", default=os.environ.get("RESOLVED_TRUTH_FILE", ""),
                             help="what the scenario actually placed")
+    click = sub.add_parser("click")
+    click.add_argument("mode", choices=["point", "off"])
+    click.add_argument("u", type=float, nargs="?", default=320.0)
+    click.add_argument("v", type=float, nargs="?", default=90.0)
+    click.add_argument("--repeat", type=int, default=3)
+    click.add_argument("--keep-mode", action="store_true",
+                       help="click without setting the mode, to see whether a "
+                            "station whose clicks are off really ignores them")
+    click.add_argument("--settle", type=float, default=5.0)
     score = sub.add_parser("score")
     score.add_argument("--deadline", type=float, default=20.0)
     published = sub.add_parser("published")
