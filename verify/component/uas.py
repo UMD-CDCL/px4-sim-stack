@@ -383,6 +383,30 @@ def nearest(truth, latitude: float, longitude: float):
     return closest[0], metres(closest)
 
 
+def command_published(uas: Uas, args) -> int:
+    """Dump the localizations this graph publishes, as one line per box.
+
+    Run on the vehicle and on the ground station and the two lines for one
+    sequence number must match character for character: the ground shows what
+    the vehicle worked out, not its own approximation of it.
+    """
+    seen = {}
+
+    def collect(msg):
+        for index, box in enumerate(msg.uav_target_boxes):
+            fix = box.target_location_altimeter_plane
+            seen[(msg.seq, index)] = (
+                f"{msg.seq}\t{index}\t{fix.latitude:.7f}\t{fix.longitude:.7f}"
+                f"\t{fix.altitude:.2f}\t{box.detection_class or '?'}")
+
+    uas.create_subscription(TargetBoxArray, f"{uas.namespace}/{args.topic}",
+                            collect, RELIABLE_QOS)
+    uas.pump(args.seconds)
+    for key in sorted(seen):
+        print(seen[key])
+    return 0 if seen else 1
+
+
 COMMANDS = {
     "status": command_status,
     "arm": command_arm,
@@ -393,6 +417,7 @@ COMMANDS = {
     "detect": command_detect,
     "capture": command_capture,
     "detections": command_detections,
+    "published": command_published,
 }
 
 
@@ -428,6 +453,12 @@ def main() -> int:
     detections.add_argument("--deadline", type=float, default=20.0)
     detections.add_argument("--truth", default=os.environ.get("RESOLVED_TRUTH_FILE", ""),
                             help="what the scenario actually placed")
+    published = sub.add_parser("published")
+    published.add_argument("--topic", default="target_locations")
+    published.add_argument("--seconds", type=float, default=12.0,
+                           help="how long to collect. Run both sides at once "
+                                "and join on the sequence number: the two are "
+                                "watching one live stream, not one message")
     detections.add_argument("--scene", default=f"/scenes/worlds/{os.environ.get('SCENE', '')}_surface.json",
                             help="the surface that says where the world origin is")
     args = parser.parse_args()
