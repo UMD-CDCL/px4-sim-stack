@@ -51,8 +51,13 @@ export ROS_LOCALHOST_ONLY=0
 # flow controller as well.
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 
+# The ROS setup scripts read variables they have not set, so nounset stops the
+# entry point on the first line of the first one. Nothing below reads a name
+# they leave unset, so relax it for the two lines that need it.
+set +u
 source /opt/ros/humble/setup.bash
 source /home/user/ros2_ws/install/setup.bash
+set -u
 
 # The same surface the vehicles localize against. The camera footprint and the
 # live view projection meet the ground here, so a ground station on another

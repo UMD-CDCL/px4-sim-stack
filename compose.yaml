@@ -92,6 +92,11 @@ x-onboard: &onboard
 x-onboard-env: &onboard-env
   # One source of truth for the airframe of each vehicle. See modules/onboard/entrypoint.sh.
   UAS_FLEET: ${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2}
+  # The same list the simulator renders with. cam_info needs the calibration of
+  # the camera that really produced the picture, and a simulated camera's is its
+  # field of view. See modules/onboard/sim_calibration.py.
+  UAS_GIMBAL_HFOV_DEG: ${UAS_GIMBAL_HFOV_DEG:-27.45 27.45 85.25 25.98}
+  UAS_THERMAL_HFOV_DEG: ${UAS_THERMAL_HFOV_DEG:-29.75 29.75 31.03 29.75}
   <<: *gpu-env
   RTSP_BASE: rtsp://video-router:8554
   # Contract section 2. MAVROS binds 14402 and answers whoever reaches it, so
@@ -104,6 +109,10 @@ x-onboard-env: &onboard-env
   # scenario, and every other scenario scores against the wrong targets.
   GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO:-urban_casualties}.yaml
   RESOLVED_TRUTH_FILE: /scenes/ground_truth_actual.yaml
+  # One more parameter file, loaded after every other. Where this machine names
+  # what only it has, the detector artifacts above all. Put it in the model
+  # directory, which is already mounted. See modules/onboard/models/README.md.
+  ONBOARD_PARAMS_FILE: ${ONBOARD_PARAMS_FILE:-}
 
 services:
 
@@ -341,21 +350,21 @@ services:
   onboard11:
     <<: *onboard
     profiles: [onboard11]
-    hostname: onboard11
     environment:
       <<: *onboard-env
       UAS_NUM: "11"
       MODEL: ${UAS11_MODEL:-}
     # One vehicle is one machine. Sharing the router's network namespace puts
     # the ROS stack and mavlink-router on the same address, which is what the
-    # aircraft does, and lets the router reach MAVROS on 127.0.0.1:14402.
+    # aircraft does, and lets the router reach MAVROS on 127.0.0.1:14402. The
+    # namespace carries the name too, so this service sets no hostname: docker
+    # refuses a container that asks for both.
     network_mode: service:uas11
     depends_on: [uas11]
 
   onboard12:
     <<: *onboard
     profiles: [onboard12]
-    hostname: onboard12
     environment:
       <<: *onboard-env
       UAS_NUM: "12"
@@ -369,7 +378,6 @@ services:
   onboard13:
     <<: *onboard
     profiles: [onboard13]
-    hostname: onboard13
     environment:
       <<: *onboard-env
       UAS_NUM: "13"
@@ -383,7 +391,6 @@ services:
   onboard14:
     <<: *onboard
     profiles: [onboard14]
-    hostname: onboard14
     environment:
       <<: *onboard-env
       UAS_NUM: "14"

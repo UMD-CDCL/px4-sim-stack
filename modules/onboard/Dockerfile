@@ -177,8 +177,8 @@ sys.exit('pyds did not install') if spec is None else print('pyds installed:', s
 RUN set -eux; \
     groupadd -f -g "${HOST_GID}" "${USERNAME}"; \
     useradd -m -d /home/user -u "${HOST_UID}" -g "${HOST_GID}" -s /bin/bash "${USERNAME}"; \
-    mkdir -p "${WORKSPACE_DIR}/src" /models /logs /terrain; \
-    chown -R "${HOST_UID}:${HOST_GID}" /home/user "${WORKSPACE_DIR}" /models /logs /terrain
+    mkdir -p "${WORKSPACE_DIR}/src" /models /logs /terrain /camera; \
+    chown -R "${HOST_UID}:${HOST_GID}" /home/user "${WORKSPACE_DIR}" /models /logs /terrain /camera
 
 # ---------------------------------------------------------------------------
 # The workspace. `ros2_ws` is a named build context, so the sources stay where
@@ -199,7 +199,7 @@ RUN . /opt/ros/humble/setup.sh \
     && colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
 
 USER root
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY entrypoint.sh sim_calibration.py /usr/local/bin/
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 USER ${USERNAME}

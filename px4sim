@@ -286,6 +286,9 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
   ${BOLD}Housekeeping${OFF}
     check               Validate the compose file and lint the docs
     verify [stage]      Run the verification stages. `verify help` lists them.
+    uas <N> <command>   Fly one vehicle and read its nodes: status, arm,
+                        takeoff [m], land, gimbal <pitch>
+    probe <N> [topic]   What that vehicle's ROS graph carries right now
     clean               Remove containers, networks and volumes
     clean-src           Delete the cloned upstream sources in ./src
     nuke                clean and clean-src together
@@ -374,8 +377,12 @@ stop|down)
 	;;
 
 restart)
+	# Recreate, not restart. `docker compose restart` starts the same container
+	# again, so a service restarted after `./px4sim build` keeps running the
+	# image it was created from and the change looks like it did nothing.
 	resolve_services "$@"
-	COMPOSE_PROFILES="$ALL_PROFILES" $DC restart "${SERVICES[@]}"
+	add_fleet_profiles
+	$DC up -d --force-recreate "${SERVICES[@]}"
 	;;
 
 status|ps)
@@ -574,6 +581,34 @@ genscene)
 	;;
 
 verify)   ./verify/run.sh "$@" ;;
+
+uas|probe)
+	# Inside the vehicle's companion, on the vehicle's ROS domain, which is
+	# where its nodes are. The tools live in verify/component and are copied
+	# in rather than mounted, so this works against a container that compose
+	# started with no extra volume.
+	n=$(vehicle_arg "${1:-}"); shift || true
+	add_fleet_profiles
+	container=$($DC ps -q "onboard$n" 2>/dev/null)
+	[ -n "$container" ] || die "onboard$n is not running. Start it: ./px4sim start"
+	tool=uas.py; [ "$cmd" = probe ] && tool=graph_probe.py
+	if [ "$cmd" = probe ] && [ $# -eq 0 ]; then
+		set -- "/uas$n/state" "/uas$n/global_position/global" \
+			"/uas$n/home_position/fix" "/uas$n/camera/camera_info" \
+			"/uas$n/gimbal_control/device/attitude_status" \
+			"/uas$n/gimbal_lidar_50m" "/uas$n/target_detections" \
+			"/uas$n/target_locations" "/uas$n/camera_fov" \
+			"/uas$n/ground_projection"
+	fi
+	[ "$cmd" = uas ] && set -- "$n" "$@"
+	docker cp verify/component/uas.py "$container:/tmp/uas.py" >/dev/null
+	docker cp verify/component/graph_probe.py "$container:/tmp/graph_probe.py" >/dev/null
+	docker exec -e ROS_DOMAIN_ID="$(uas_domain "$n")" "$container" bash -lc '
+		set -e
+		. /opt/ros/humble/setup.bash
+		. /home/user/ros2_ws/install/setup.bash
+		exec python3 /tmp/'"$tool"' "$@"' _ "$@"
+	;;
 
 check)
 	$DC config -q && echo "compose.yaml OK"

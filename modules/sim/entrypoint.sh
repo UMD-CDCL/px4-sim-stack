@@ -61,20 +61,24 @@ trap cleanup EXIT INT TERM
 [ -f "$PX4_DIR/Makefile" ] || die "No PX4 source at $PX4_DIR. Run: make bootstrap"
 
 # ---------------------------------------------------------------- 2. the build
-if [ ! -x "$BUILD_DIR/bin/px4" ] || [ "${FORCE_BUILD:-0}" = "1" ]; then
+# Always, not only when the binary is missing. patches/ changes the gimbal in
+# this tree, so a binary that predates an edit runs the old behaviour and says
+# nothing. ninja finds nothing to do in a few seconds when the tree is built.
+if [ "${FORCE_BUILD:-0}" = "1" ]; then
+	rm -rf "$BUILD_DIR"
+fi
+if [ ! -x "$BUILD_DIR/bin/px4" ]; then
 	log "Building PX4 SITL with $BUILD_JOBS jobs. The first build takes 10 to 20 minutes."
-	if ! make -C "$PX4_DIR" px4_sitl_default -j"$BUILD_JOBS"; then
-		# GCC 13 sometimes hits an internal compiler error on one of the heavy
-		# EKF2 translation units when many compiles run at once. It is not a
-		# source problem, and it does not repeat in the same place. ninja
-		# resumes from where it stopped, so a retry costs only the failed file.
-		retry_jobs=$(( BUILD_JOBS > 4 ? BUILD_JOBS / 2 : 1 ))
-		warn "The build stopped. Retrying once with $retry_jobs jobs."
-		make -C "$PX4_DIR" px4_sitl_default -j"$retry_jobs" \
-			|| die "PX4 failed to build twice. Read the error above."
-	fi
-else
-	log "PX4 binary present. Set FORCE_BUILD=1 to rebuild, or run 'make -C /px4 px4_sitl_default'."
+fi
+if ! make -C "$PX4_DIR" px4_sitl_default -j"$BUILD_JOBS"; then
+	# GCC 13 sometimes hits an internal compiler error on one of the heavy
+	# EKF2 translation units when many compiles run at once. It is not a
+	# source problem, and it does not repeat in the same place. ninja
+	# resumes from where it stopped, so a retry costs only the failed file.
+	retry_jobs=$(( BUILD_JOBS > 4 ? BUILD_JOBS / 2 : 1 ))
+	warn "The build stopped. Retrying once with $retry_jobs jobs."
+	make -C "$PX4_DIR" px4_sitl_default -j"$retry_jobs" \
+		|| die "PX4 failed to build twice. Read the error above."
 fi
 "$BUILD_DIR/bin/px4" -h 2>/dev/null | head -1 || true
 
