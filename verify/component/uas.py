@@ -102,7 +102,14 @@ class Uas(Node):
         # The detector's own services. They sit outside the vehicle namespace,
         # which is where ds_node advertises them.
         self.toggle_detection = self.create_client(SetBool, "/ds/mode/toggle_detection")
-        self.run_detect = self.create_client(Trigger, "/ds/batch/run_detect")
+        # What the detector can be asked for, by the name an operator uses.
+        self.captures = {
+            name: self.create_client(Trigger, path) for name, path in (
+                ("detect", "/ds/batch/run_detect"),
+                ("mosaic", "/ds/capture/mosaic"),
+                ("fiducial", "/ds/capture/fiducial"),
+                ("vlm", "/ds/capture/vlm"),
+                ("snapshot", "/ds/snapshot"))}
         self.localize = self.create_client(TBALocalization, f"{self.namespace}/tba_loczn")
         # What an operator's Foxglove panel publishes: a pixel in the preview
         # image, plus the two services that say whether clicks are live.
@@ -192,6 +199,10 @@ def command_status(uas: Uas, _args) -> int:
         print(f"position    {uas.fix.latitude:.7f}, {uas.fix.longitude:.7f}, "
               f"{uas.fix.altitude:.1f} m")
     print(f"height      {uas.altitude:.1f} m over home")
+    if uas.local:
+        q = uas.local.pose.orientation
+        east, north = Rotation.from_quat([q.x, q.y, q.z, q.w]).apply([1.0, 0.0, 0.0])[:2]
+        print(f"heading     {math.degrees(math.atan2(east, north)) % 360:.0f} degrees from north")
     depression = uas.boresight_depression_deg()
     if depression is not None:
         print(f"gimbal      {depression:.1f} degrees below the horizon, "
@@ -280,7 +291,10 @@ def command_goto(uas: Uas, args) -> int:
         command=MAV_CMD_DO_REPOSITION,
         param1=DEFAULT_GROUND_SPEED,
         param2=CHANGE_MODE,
-        param4=float("nan"),
+        # NaN keeps the heading it has. The gimbal's yaw is locked to the
+        # airframe, so pointing the camera at something means pointing the
+        # vehicle at it first.
+        param4=math.radians(args.heading) if args.heading is not None else float("nan"),
         x=int(round(latitude * DEGREES_TO_INT)),
         y=int(round(longitude * DEGREES_TO_INT)),
         z=float(uas.amsl_for(args.up)))
@@ -315,9 +329,9 @@ def command_detect(uas: Uas, args) -> int:
     return 0 if answer.success else 1
 
 
-def command_capture(uas: Uas, _args) -> int:
-    """Run the detector once on the frames it holds."""
-    answer = uas.call(uas.run_detect, Trigger.Request(), "run_detect")
+def command_capture(uas: Uas, args) -> int:
+    """Ask the detector for one capture of the kind named."""
+    answer = uas.call(uas.captures[args.what], Trigger.Request(), args.what)
     if not answer:
         return 1
     print(answer.message)
@@ -406,10 +420,18 @@ def command_published(uas: Uas, args) -> int:
     the vehicle worked out, not its own approximation of it.
     """
     seen = {}
+    truth = ground_truth(args.truth, args.scene)
 
     def collect(msg):
         for index, box in enumerate(msg.uav_target_boxes):
             fix = box.target_location_altimeter_plane
+            if args.named:
+                # Keyed by the target rather than the message, so a caller
+                # comparing two vehicles has a name to join on.
+                name, error = nearest(truth, fix.latitude, fix.longitude)
+                seen[name] = (f"{name}\t{fix.latitude:.7f}\t{fix.longitude:.7f}"
+                              f"\t{fix.altitude:.2f}\t{error:.2f}")
+                continue
             seen[(msg.seq, index)] = (
                 f"{msg.seq}\t{index}\t{fix.latitude:.7f}\t{fix.longitude:.7f}"
                 f"\t{fix.altitude:.2f}\t{box.detection_class or '?'}")
@@ -526,9 +548,13 @@ def main() -> int:
     goto.add_argument("north", type=float)
     goto.add_argument("up", type=float, help="metres over home")
     goto.add_argument("--deadline", type=float, default=120.0)
+    goto.add_argument("--heading", type=float, default=None,
+                      help="degrees clockwise from north to face on arrival")
     detect = sub.add_parser("detect")
     detect.add_argument("on", choices=["on", "off"])
-    sub.add_parser("capture")
+    capture = sub.add_parser("capture")
+    capture.add_argument("what", nargs="?", default="detect",
+                         choices=["detect", "mosaic", "fiducial", "vlm", "snapshot"])
     detections = sub.add_parser("detections")
     detections.add_argument("--deadline", type=float, default=20.0)
     detections.add_argument("--tsv", action="store_true",
@@ -548,6 +574,12 @@ def main() -> int:
     score.add_argument("--deadline", type=float, default=20.0)
     published = sub.add_parser("published")
     published.add_argument("--topic", default="target_locations")
+    published.add_argument("--named", action="store_true",
+                           help="one line per target, named by the recorded "
+                                "target it landed nearest")
+    published.add_argument("--truth", default=os.environ.get("RESOLVED_TRUTH_FILE", ""))
+    published.add_argument("--scene",
+                           default=f"/scenes/worlds/{os.environ.get('SCENE', '')}_surface.json")
     published.add_argument("--seconds", type=float, default=12.0,
                            help="how long to collect. Run both sides at once "
                                 "and join on the sequence number: the two are "
