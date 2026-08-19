@@ -17,24 +17,17 @@ echo "px4-sim-stack preflight"
 echo ""
 
 # ---------------------------------------------------------------- NVIDIA driver
-# DeepStream 8.0 is validated against driver 570.133. DeepStream 9.0 needs
-# 590.48. The driver sets the ceiling on which DeepStream release can run.
+# The onboard and offboard images are DeepStream 7.1, which needs driver
+# 535.183 or later. A driver below the release does not degrade: CUDA fails to
+# initialize and the container stops at its first call.
 if command -v nvidia-smi >/dev/null 2>&1; then
 	drv=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1)
 	gpu=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
 	vram=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader | head -1)
 	ok "GPU: $gpu ($vram), driver $drv"
-	# Which release the driver allows, and which one the stack will therefore
-	# build. Reported rather than left to the reader, because the two used to
-	# disagree silently whenever the repository moved to another machine.
-	# One call answers both lines, so nvidia-smi runs once.
 	major=${drv%%.*}
-	if [ "$major" -lt 570 ]; then
-		bad "driver $drv is below 570.133. DeepStream 8.0 will not start."
-	else
-		eval "$(./scripts/ds-select.sh)"
-		ok "DeepStream $DS_VERSION: $DS_REASON"
-		ok "perception builds $DS_IMAGE"
+	if [ "$major" -lt 535 ]; then
+		bad "driver $drv is below 535.183. DeepStream 7.1 will not start."
 	fi
 else
 	bad "nvidia-smi not found. Install the NVIDIA driver."
@@ -120,13 +113,24 @@ sed -i "/^DISPLAY=/d" .env
 ok ".env host values set (HOST_UID=$(id -u) HOST_GID=$(id -g))"
 
 # --------------------------------------------------------------- source trees
-for d in src/PX4-Autopilot src/ros2_ws; do
-	if [ -d "$d" ]; then ok "$d present"; else note "$d missing. Run: make bootstrap"; fi
-done
+if [ -d src/PX4-Autopilot ]; then
+	ok "src/PX4-Autopilot present"
+else
+	note "src/PX4-Autopilot missing. Run: ./px4sim setup"
+fi
+# The flight code. The onboard and offboard images build it from here, and a
+# missing checkout fails the build rather than the run.
+ws=${ROS2_WS_DIR:-../ros2_ws}
+if [ -d "$ws/src/5g_drone" ]; then
+	ok "$ws/src/5g_drone present"
+else
+	note "$ws/src/5g_drone missing. The onboard and offboard images build it.
+        Check it out, or set ROS2_WS_DIR in .env."
+fi
 
 echo ""
 if [ "$fail" -gt 0 ]; then
-	echo "${RED}$fail check(s) failed.${OFF} Fix them before you run make up."
+	echo "${RED}$fail check(s) failed.${OFF} Fix them before you start the stack."
 	exit 1
 fi
-echo "${GRN}Ready.${OFF} $warn warning(s). Next: make bootstrap, then make build, then make up."
+echo "${GRN}Ready.${OFF} $warn warning(s). Next: ./px4sim setup, then ./px4sim build, then ./px4sim start."

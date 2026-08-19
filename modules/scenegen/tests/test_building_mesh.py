@@ -86,6 +86,25 @@ def test_extrude() -> None:
     check("the south wall faces south", abs(normal[1] + 1.0) < 1e-9, str(normal))
 
 
+def test_slab() -> None:
+    print("floor slab")
+    top = building_mesh.roof_at(SQUARE, [HOLE], 9.0)
+    shell = building_mesh.slab_shell(SQUARE, [HOLE], 9.0, 0.3)
+    check("the slab hangs at its level and is that thick",
+          float(shell[:, :, 2].max()) == 9.0
+          and abs(float(shell[:, :, 2].min()) - 8.7) < 1e-9,
+          f"z {shell[:, :, 2].min()}..{shell[:, :, 2].max()}")
+    underside = shell[shell[:, :, 2].max(axis=1) == 8.7]
+    check("the underside covers the footprint, hole cut out",
+          abs(building_mesh.triangle_area_m2(underside[:, :, :2])
+              - (100.0 - 4.0)) < 1e-6,
+          f"{building_mesh.triangle_area_m2(underside[:, :, :2]):.2f}")
+    normals = building_mesh.face_normals(underside)
+    check("the underside faces down", bool((normals[:, 2] < -0.99).all()))
+    check("the top faces up",
+          bool((building_mesh.face_normals(top)[:, 2] > 0.99).all()))
+
+
 def test_subdivide() -> None:
     print("subdivision")
     roof, _ = building_mesh.extrude(L_SHAPE, [], 0.0, 5.0)
@@ -149,6 +168,7 @@ def test_placed_footprint() -> None:
 def main() -> int:
     test_triangulate()
     test_extrude()
+    test_slab()
     test_subdivide()
     test_placed_footprint()
     failed = [name for name, ok, _ in CHECKS if not ok]

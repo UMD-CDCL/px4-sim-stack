@@ -2,7 +2,7 @@
 # Seed the settings on first start, then run QGroundControl.
 set -euo pipefail
 
-VIDEO_URL=${QGC_VIDEO_URL:-rtsp://video-router:8554/gimbal}
+VIDEO_URL=${QGC_VIDEO_URL:-rtsp://video-router:8554/rgb11}
 LISTEN_PORT=${QGC_UDP_PORT:-14550}
 
 # QGroundControl 5 stores settings under the organization name "QGroundControl".
@@ -37,7 +37,7 @@ seed_settings "$HOME/.config/QGroundControl.org/QGroundControl.ini"
 
 # Make the advertised URLs work verbatim inside this container.
 #
-# Everything this stack prints uses host addresses: rtsp://localhost:8554/gimbal
+# Everything this stack prints uses host addresses: rtsp://localhost:8554/rgb11
 # is what `px4sim endpoints`, the README and the video player all show. Typed
 # into QGroundControl's video settings that address fails, because in here
 # localhost is QGroundControl itself and the video router is a different

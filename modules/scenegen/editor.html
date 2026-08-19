@@ -274,13 +274,15 @@ const KINDS = {
   },
   building: {
     key: "buildings", prefix: "b_manual_", shape: "box", heading: "yaw_deg",
-    copy: ["length_m", "width_m", "yaw_deg", "height_m", "model_uri"],
+    copy: ["length_m", "width_m", "yaw_deg", "height_m", "model_uri",
+           "extruded", "levels"],
     keepFetched: true,
     reshape: applyBuildingBox,    // the outline rides along with every edit
     title: b => b.name || b.id,   // the map gives a building a real name
     blank: () => ({ length_m: 14, width_m: 10, yaw_deg: 0, height_m: 6,
                     height_source: "manual", name: "", map_height_m: null,
                     map_height_source: "", outline_m: [], holes_m: [],
+                    extruded: true, levels: [],
                     source: "manual", model_uri: null, enabled: true }),
     draw: drawBuilding, hit: hitBuilding, panel: buildingPanel,
   },
@@ -430,7 +432,10 @@ function drawVertices(points, color) {
 }
 
 function drawBuilding(b, ref, selected, single) {
-  ctx.strokeStyle = b.enabled ? "#62d98c" : "#777";
+  // A floor draws blue. Its footprint looks the same as a box from
+  // above, so the color is what separates the two on the map.
+  const color = !b.enabled ? "#777" : b.extruded ? "#62d98c" : "#63c7d9";
+  ctx.strokeStyle = color;
   ctx.setLineDash(b.enabled ? [] : [lw(6), lw(5)]);
   ctx.lineWidth = lw(selected ? 2.4 : 1.2);
   if (b.outline_m.length > 2) {
@@ -444,7 +449,7 @@ function drawBuilding(b, ref, selected, single) {
     polyPath(corners(b.east_m, b.north_m, b.length_m, b.width_m, b.yaw_deg));
     ctx.stroke();
     if (single) drawHandles(b.east_m, b.north_m, b.length_m, b.width_m,
-                            b.yaw_deg, "#62d98c");
+                            b.yaw_deg, color);
   }
   ctx.setLineDash([]);
 }
@@ -728,7 +733,11 @@ function stampAt(e, n) {
   pushUndo();
   const spec = KINDS[stampRef.kind];
   const props = {};
-  spec.copy.forEach(field => { props[field] = source[field]; });
+  // A copy owns its lists: sharing a building's levels would edit both.
+  spec.copy.forEach(field => {
+    props[field] = Array.isArray(source[field]) ? source[field].slice()
+                                                : source[field];
+  });
   // A pool-draw source copies as a pool draw: the copy's own id draws its own
   // model, so a stamped grove varies the way an area fill does.
   if (spec.shape === "polygon")
@@ -873,17 +882,40 @@ function vehiclePanel(v, ref) {
   ];
 }
 
+// "8, 16" to [8, 16]: the levels the user typed, in order and without
+// repeats, which is what scene_model.building_levels makes of them.
+function parseLevels(text) {
+  const levels = text.split(",").map(part => parseFloat(part))
+                     .filter(value => Number.isFinite(value));
+  return [...new Set(levels)].sort((a, b) => a - b);
+}
+
 function buildingPanel(b, ref) {
+  const floor = !b.extruded;
   const fields = [
     numberField(`height m (source: ${b.height_source})`, b.height_m, 0.5,
                 x => { b.height_m = x; b.height_source = "manual"; }),
     row(numberField("length m", b.length_m, 0.5, x => setSize(ref, { length: x })),
         numberField("width m", b.width_m, 0.5, x => setSize(ref, { width: x }))),
     numberField("yaw deg", b.yaw_deg, 1, x => setHeading(ref, x)),
-    modelUriField(b, "model uri (empty = extruded mesh)",
-                  "model://… replaces the mesh"),
-    enabledField(b, "include in the world"),
+    checkField("floor only: a slab at each level, no walls", floor,
+               v => { b.extruded = !v;
+                      b.levels = v ? (b.levels.length ? b.levels : [b.height_m])
+                                   : []; },
+               { refresh: true }),
   ];
+  if (floor)
+    fields.push(
+      textField("level altitudes m, comma separated", b.levels.join(", "),
+                v => { b.levels = parseLevels(v); },
+                { refresh: true, placeholder: "8, 16, 24" }),
+      note(`A level is one horizontal surface at that altitude above the
+            scene origin, not above the ground under it. The building gets
+            no walls and never touches the terrain.`));
+  fields.push(
+    modelUriField(b, "model uri (empty = the generated mesh)",
+                  "model://… replaces the mesh"),
+    enabledField(b, "include in the world"));
   if (b.map_height_m != null)
     fields.push(button(`Reset height to map (${b.map_height_m} m)`, () => {
       pushUndo();
@@ -978,6 +1010,16 @@ const GROUP_FIELDS = [
                             ["bus", "bus"]],
                   uniform(m => objectOf(m).cls) ?? "",
                   v => multi.forEach(m => { objectOf(m).cls = v; }),
+                  { skipEmpty: true }) },
+  { kinds: ["building"], build: () =>
+      selectField("shape", [["", "mixed - leave as is"],
+                            ["extruded", "extruded box"],
+                            ["floor", "floor only, one level at its height"]],
+                  uniform(m => objectOf(m).extruded ? "extruded" : "floor") ?? "",
+                  v => multi.forEach(m => { const b = objectOf(m);
+                                            b.extruded = v === "extruded";
+                                            b.levels = b.extruded ? []
+                                                                  : [b.height_m]; }),
                   { skipEmpty: true }) },
   { kinds: ["building"], build: () =>
       bulkNumber("height m", 0.5, m => objectOf(m).height_m,
@@ -1488,6 +1530,10 @@ async function init() {
   // before anything reads it.
   Object.values(KINDS).forEach(spec => {
     if (!scene[spec.key]) scene[spec.key] = [];
+  });
+  scene.buildings.forEach(b => {   // a scene from before floors
+    if (b.extruded === undefined) b.extruded = true;
+    if (!b.levels) b.levels = [];
   });
   scene.targets.forEach(t => {   // a scene from before terrain-relative heights
     if (t.agl_m === undefined) t.agl_m = t.alt_m ?? null;

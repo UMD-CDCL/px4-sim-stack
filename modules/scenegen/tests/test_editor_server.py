@@ -99,6 +99,17 @@ def test_finish_flow(directory: Path) -> None:
     check("save still works before finish",
           status == 200 and saved["fiducial"]["east_m"] == 7.0)
 
+    scene["buildings"].append({
+        "id": "b_manual_1", "east_m": 0.0, "north_m": 0.0, "length_m": 10.0,
+        "width_m": 10.0, "yaw_deg": 0.0, "height_m": 6.0,
+        "extruded": False, "levels": [4.0, 8.0]})
+    status, _ = post(PORT_FINISH, "/save", json.dumps(scene).encode())
+    saved_floor = scene_model.load_scene(directory / "scene.json").buildings[0]
+    check("a floor and its levels survive the save",
+          status == 200 and saved_floor.extruded is False
+          and saved_floor.levels == [4.0, 8.0],
+          f"extruded {saved_floor.extruded}, levels {saved_floor.levels}")
+
     status, body = post(PORT_FINISH, "/finish", b"")
     check("finish is accepted", status == 200 and b"ok" in body)
     thread.join(timeout=5)

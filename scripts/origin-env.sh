@@ -5,8 +5,7 @@
 # scenario carries home_* and fiducial_* lines, and every world file carries
 # <spherical_coordinates>. This script reads the scenario first and falls
 # back to the world, so SCENE and SCENARIO in .env carry the origin with
-# them and no coordinate is written twice. px4sim evals the output, the same
-# pattern as ds-select.sh.
+# them and no coordinate is written twice. px4sim evals the output.
 #
 #   origin-env.sh <scenario> [<scene>]
 #

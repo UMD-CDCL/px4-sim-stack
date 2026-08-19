@@ -11,7 +11,7 @@
   with no error.
 
   Scenario targets are not in this file. spawn_scenario.py adds them at run
-  time, so one scene serves many test cases. See docs/scenarios.md.
+  time, so one scene serves many test cases. See docs/development.md.
 -->
 <sdf version="1.9">
   <world name="recon_field">

@@ -7,7 +7,7 @@
 # Ingest options for a producer:
 #   RTSP  rtspclientsink location=rtsp://video-router:8554/<name>   (what sim uses)
 #   RTMP  rtmpsink location=rtmp://video-router:1935/<name>
-#   RTP   set a path source to udp+rtp://0.0.0.0:<port>, see nadir_rtp below
+#   RTP   set a path source to udp+rtp://0.0.0.0:<port>, see pilot_rtp below
 #
 # Read options for a consumer:
 #   RTSP     rtsp://video-router:8554/<name>
@@ -70,39 +70,24 @@ pathDefaults:
 
 paths:
   # --------------------------------------------------------- from the vehicle
-  # The gimbal camera. sim publishes this over RTSP.
-  gimbal:
-    source: publisher
-
-  # The fixed nadir camera.
-  nadir:
-    source: publisher
-
-  # ------------------------------------------------------- from perception
-  # DeepStream draws boxes and serves its own RTSP. There is one deepstream-app
-  # process for each camera, each with its own server, and the router pulls both
-  # in so consumers keep one address for every stream.
+  # The vehicles publish over RTSP and name their own mounts, one full stream
+  # and one low-rate stream for each camera, with the UAS number appended:
   #
-  # The port follows the camera order, not the camera name: 8554 belongs to
-  # PERCEPTION_CAMERA and 8555 to PERCEPTION_CAMERA_2. Swap those two variables
-  # and these two names swap with them.
+  #   v2   pilot<N>  pilotl<N>  thermal<N>  thermall<N>
+  #   v3   rgb<N>    rgbl<N>    pilot<N>    pilotl<N>    thermal<N>  thermall<N>
   #
-  # sourceOnDemand means the router only connects when something asks, so with
-  # ANNOTATED_STREAMS=0 these paths simply stay empty instead of erroring.
-  nadir_annotated:
-    source: rtsp://perception:8554/ds-test
-    sourceOnDemand: true
-    sourceOnDemandStartTimeout: 20s
+  # docs/uas-contract.md fixes those names. They are not listed here because
+  # the list would have to change with the fleet, and all_others below already
+  # accepts a publisher. Add a named path when you want one to be the record.
 
-  gimbal_annotated:
-    source: rtsp://perception:8555/ds-test
-    sourceOnDemand: true
-    sourceOnDemandStartTimeout: 20s
+  # No annotated stream is served here. ds_node draws its boxes as ROS
+  # annotations beside the image, which is what the aircraft does, so a second
+  # video path would be a picture nothing on the aircraft produces.
 
   # --------------------------------------------------------------- examples
   # A real camera that sends plain RTP, with no RTSP server of its own.
-  # Point the camera at video-router UDP 8100 and read rtsp://.../nadir_rtp.
-  # nadir_rtp:
+  # Point the camera at video-router UDP 8100 and read rtsp://.../pilot_rtp.
+  # pilot_rtp:
   #   source: udp+rtp://0.0.0.0:8100
 
   # Anything else a producer invents. Remove this to enforce the named list.

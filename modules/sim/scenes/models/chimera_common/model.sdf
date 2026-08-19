@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  chimera_common - the frame, the gimbal mechanism and the two rangefinders.
+
+  chimera_v2 and chimera_v3 merge this model whole and then add the cameras
+  they carry. Nothing includes it directly into a world.
+
+  The cameras are not here because their field of view is a property of the
+  vehicle, not of the mark: uas13 and uas14 are both v2 and carry different
+  lenses. The sim entrypoint renders one airframe model for each vehicle and
+  fills the field of view in there.
+
+  Payload:
+    gimbal              two axis mount, roll and pitch, from model://gimbal
+    gimbal rangefinder  50 m laser along the gimbal boresight
+    body rangefinder    200 m laser, fixed, points down
+
+  Two names in this file are not free choices. PX4's Gazebo bridge subscribes
+  to a fixed topic for the rangefinder it reads:
+
+    /world/<world>/model/<model>/link/lidar_sensor_link/sensor/lidar/scan
+
+  So that link must be lidar_sensor_link and that sensor must be lidar. Rename
+  either one and PX4 reports no distance sensor, with no error message. The
+  gimbal rangefinder carries other names on purpose, because PX4 must not read
+  it: gimbal_rangefinder.py sends it as MAVLink sensor id 1.
+
+  No sensor anywhere in this airframe declares a <topic>. The default topic
+  carries the model instance name, so uas11 and uas12 do not collide.
+  streams.conf matches on it.
+-->
+<sdf version='1.9'>
+  <model name='chimera_common'>
+    <self_collide>false</self_collide>
+
+    <!-- Frame, motors, IMU, magnetometer, barometer, GPS. -->
+    <include merge='true'>
+      <uri>model://x500</uri>
+    </include>
+
+    <!-- ===================================================== gimbal mount -->
+    <!--
+      The include pose puts the gimbal camera where the deployed airframe
+      carries it: 0.205 m forward of base_link and 0.081 m below it, which is
+      the offset MAVInsight records in sensors/d4_gimbal.yaml. The airframe
+      models put their gimbal camera at that same point. Every footprint,
+      ground projection and localization check the simulator runs measures the
+      airframe this file describes, so a gimbal in the wrong place turns into a
+      constant position error that reads as a calibration fault.
+
+      Work the number back from the camera, not from the mount. The gimbal
+      model leaves every link at its own origin and carries the geometry in the
+      sensor poses, so with the gimbal centred the camera sensor sits at the
+      include pose plus Rz(pi) * (-0.074, 0, -0.162), which is
+      (+0.074, 0, -0.162). The include pose below is the difference.
+    -->
+    <include merge='true'>
+      <uri>model://gimbal</uri>
+      <pose>0.131 0 0.081 0 0 3.14</pose>
+    </include>
+    <joint name="GimbalAttachJoint" type="fixed">
+      <parent>base_link</parent>
+      <child>cgo3_mount_link</child>
+    </joint>
+
+    <!-- ================================================= gimbal rangefinder -->
+    <!--
+      Same boresight, moved 0.025 m to the left of the camera. That is the
+      offset MAVInsight records in sensors/d4_rangefinder.yaml, against the
+      gimbal frame. camera_link is yawed pi from the gimbal frame, so left
+      there is -y here. A gpu_lidar reports range along its own +X.
+    -->
+    <link name="gimbal_lidar_link">
+      <pose relative_to="camera_link">-0.074 -0.025 -0.162 0 0 3.14</pose>
+      <inertial>
+        <mass>0.001</mass>
+        <inertia>
+          <ixx>0.000001</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.000001</iyy><iyz>0</iyz>
+          <izz>0.000001</izz>
+        </inertia>
+      </inertial>
+      <sensor name='gimbal_lidar' type='gpu_lidar'>
+        <gz_frame_id>gimbal_lidar_link</gz_frame_id>
+        <update_rate>10</update_rate>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0</min_angle>
+              <max_angle>0</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0</min_angle>
+              <max_angle>0</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.2</min>
+            <max>50.0</max>
+            <resolution>0.01</resolution>
+          </range>
+        </ray>
+        <always_on>1</always_on>
+        <visualize>false</visualize>
+      </sensor>
+    </link>
+    <joint name="gimbal_lidar_joint" type="fixed">
+      <parent>camera_link</parent>
+      <child>gimbal_lidar_link</child>
+    </joint>
+
+    <!-- =================================================== body rangefinder -->
+    <!-- The visible LW20 body. -->
+    <include merge='true'>
+      <uri>model://LW20</uri>
+      <pose relative_to="base_link">0 0 -0.079 0 1.57 0</pose>
+    </include>
+    <joint name="lidar_model_joint" type="fixed">
+      <parent>base_link</parent>
+      <child>lw20_link</child>
+      <pose relative_to="base_link">0 0 0 0 0 0</pose>
+    </joint>
+
+    <!-- The ray PX4 reads. It becomes MAVLink DISTANCE_SENSOR id 0. -->
+    <link name="lidar_sensor_link">
+      <pose relative_to="base_link">0 0 -0.05 0 1.57 0</pose>
+      <inertial>
+        <mass>0.001</mass>
+        <inertia>
+          <ixx>0.00001</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.00001</iyy><iyz>0</iyz>
+          <izz>0.00001</izz>
+        </inertia>
+      </inertial>
+      <sensor name='lidar' type='gpu_lidar'>
+        <gz_frame_id>lidar_sensor_link</gz_frame_id>
+        <pose>0 0 0 3.14 0 0</pose>
+        <update_rate>50</update_rate>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0</min_angle>
+              <max_angle>0</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0</min_angle>
+              <max_angle>0</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.1</min>
+            <max>200.0</max>
+            <resolution>0.01</resolution>
+          </range>
+        </ray>
+        <always_on>1</always_on>
+        <visualize>false</visualize>
+      </sensor>
+    </link>
+    <joint name="lidar_sensor_joint" type="fixed">
+      <parent>base_link</parent>
+      <child>lidar_sensor_link</child>
+    </joint>
+
+  </model>
+</sdf>

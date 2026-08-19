@@ -15,6 +15,7 @@ by hand from those inputs.
 from __future__ import annotations
 
 import math
+import os
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import json
 
 import numpy as np
+import shapely
 import yaml
 from PIL import Image
 
@@ -36,9 +38,28 @@ import scene_model
 import sources
 import terrain_mesh
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "modules" / "ros"
-                       / "stacks" / "baseline" / "sim_bridge"))
-from sim_bridge import scene_surface  # noqa: E402 - path set just above
+# The reader of what this writes is umd_uas/terrain.py in the flight code, and
+# that tree is a checkout outside this repository. The ray checks below run
+# against the real reader when it is there, and report themselves as skipped
+# when it is not, so this file still runs in the scenegen container.
+def _flight_code_dir() -> Path:
+    """The workspace that holds 5g_drone. ROS2_WS_DIR names it, as in .env."""
+    named = os.environ.get("ROS2_WS_DIR")
+    if named:
+        return Path(named)
+    here = Path(__file__).resolve()
+    # tests -> scenegen -> modules -> the repository, then beside it.
+    if len(here.parents) > 3:
+        return here.parents[3].parent / "ros2_ws"
+    return Path("/ros2_ws")
+
+
+sys.path.insert(0, str(_flight_code_dir() / "src" / "5g_drone"))
+try:
+    from umd_uas import terrain  # noqa: E402 - path set just above
+except ImportError as exc:  # pragma: no cover - depends on the checkout
+    terrain = None
+    TERRAIN_REASON = str(exc)
 
 CENTER_LAT, CENTER_LON = 38.9869, -76.9426
 SIDE_M = 200.0
@@ -130,7 +151,20 @@ def make_synthetic_scene(data_dir: Path) -> scene_model.SceneSpec:
                 width_m=8.0, yaw_deg=0.0, height_m=5.0),
             scene_model.Building(
                 id="b_eq2", east_m=82.0, north_m=70.0, length_m=8.0,
-                width_m=8.0, yaw_deg=0.0, height_m=5.0)],
+                width_m=8.0, yaw_deg=0.0, height_m=5.0),
+            # Two floors of a structure that has no walls: 20 x 20 slabs
+            # at 8 m and 16 m over open terrain, on one footprint.
+            scene_model.Building(
+                id="b_floors", east_m=0.0, north_m=-60.0, length_m=20.0,
+                width_m=20.0, yaw_deg=0.0, height_m=5.0, extruded=False,
+                levels=[8.0, 16.0]),
+            # A deck over the podium, on the podium's own footprint. A
+            # floor merges with nothing, so the 6 m podium roof stays
+            # under it.
+            scene_model.Building(
+                id="b_deck", east_m=-70.0, north_m=-20.0, length_m=30.0,
+                width_m=14.0, yaw_deg=0.0, height_m=12.0, extruded=False,
+                levels=[12.0])],
         vehicles=[scene_model.Vehicle(
             id="v_1", cls="car", east_m=10.0, north_m=5.0, length_m=4.5,
             width_m=1.9, heading_deg=45.0, source="manual"),
@@ -380,11 +414,12 @@ def test_buildings(scenes_dir: Path) -> None:
     geometries = root.findall("c:library_geometries/c:geometry", ns)
     geometry_ids = [g.get("id") for g in geometries]
     check("one geometry per merged building, the outside one dropped",
-          len(geometries) == 6
+          len(geometries) == 8
           and "b_outside-geometry" not in geometry_ids
           and "b_tower-geometry" not in geometry_ids
           and "b_eq2-geometry" not in geometry_ids
-          and "b_podium-geometry" in geometry_ids,
+          and "b_podium-geometry" in geometry_ids
+          and "b_floors-geometry" in geometry_ids,
           str(geometry_ids))
     for geometry in geometries:
         groups = geometry.findall("c:mesh/c:triangles", ns)
@@ -409,46 +444,93 @@ def test_buildings(scenes_dir: Path) -> None:
                                  sep=" ").size
     check("per-vertex normals match the vertex count",
           normal_count == positions.size)
+    floor_z = np.fromstring(arrays["b_floors-positions-array"].text,
+                            sep=" ").reshape(-1, 3)[:, 2]
+    check("a floor is slabs at its levels and nothing reaches the ground",
+          abs(floor_z.max() - 16.0) < 1e-3
+          and abs(floor_z.min() - (8.0 - build_world.FLOOR_THICKNESS_M)) < 1e-3
+          and sorted(set(np.round(floor_z, 2)))
+          == [8.0 - build_world.FLOOR_THICKNESS_M, 8.0,
+              16.0 - build_world.FLOOR_THICKNESS_M, 16.0],
+          f"z {sorted(set(np.round(floor_z, 2)))}")
 
     viz = json.loads(
         (scenes_dir / "worlds" / "synthtest_buildings.json").read_text())
-    check("viz payload format", viz["format"] == "scenegen-buildings/1"
+    check("viz payload format", viz["format"] == build_world.BUILDINGS_FORMAT
           and viz["frame"] == "map")
     entries = {b["id"]: b for b in viz["buildings"]}
-    check("viz carries one entry per merged building",
-          sorted(entries) == ["b_court", "b_edge", "b_eq1", "b_lshape",
-                              "b_podium", "b_test"],
+    check("viz carries one entry per building, the outside one dropped",
+          sorted(entries) == ["b_court", "b_deck", "b_edge", "b_eq1", "b_eq2",
+                              "b_floors", "b_lshape", "b_podium", "b_test",
+                              "b_tower"],
           str(sorted(entries)))
 
-    def roof_area(entry: dict) -> float:
-        triangles = np.array(entry["roof"]["points"]).reshape(-1, 3, 3)
-        return building_mesh.triangle_area_m2(triangles[:, :, :2])
+    def footprint_area(entry: dict) -> float:
+        return building_mesh.triangle_area_m2(
+            building_mesh.triangulate(entry["footprint"], entry["holes"]))
 
-    check("L roof area is the L, not its bounding box",
-          abs(roof_area(entries["b_lshape"]) - 256.0) < 1.0,
-          f"{roof_area(entries['b_lshape']):.1f}")
-    check("courtyard roof area excludes the hole",
-          abs(roof_area(entries["b_court"]) - 240.0) < 1.0,
-          f"{roof_area(entries['b_court']):.1f}")
+    def level_heights(entry: dict) -> list:
+        return [level["z"] for level in entry["levels"]]
+
+    check("L footprint is the L, not its bounding box",
+          abs(footprint_area(entries["b_lshape"]) - 256.0) < 1.0,
+          f"{footprint_area(entries['b_lshape']):.1f}")
+    check("courtyard footprint excludes the hole",
+          abs(footprint_area(entries["b_court"]) - 240.0) < 1.0,
+          f"{footprint_area(entries['b_court']):.1f}")
     check("the straddling building keeps only its inside half",
-          abs(roof_area(entries["b_edge"]) - 100.0) < 0.5,
-          f"{roof_area(entries['b_edge']):.1f}")
-    merged = np.array(entries["b_podium"]["roof"]["points"]).reshape(-1, 3, 3)
-    check("the merged building's roof is the union footprint",
-          abs(roof_area(entries["b_podium"]) - 420.0) < 1.0,
-          f"{roof_area(entries['b_podium']):.1f}")
-    tower_part = merged[np.isclose(merged[:, :, 2], 20.0).all(axis=1)]
-    check("the tower part of the envelope rides at its own 20 m",
-          abs(building_mesh.triangle_area_m2(tower_part[:, :, :2]) - 100.0) < 0.5,
-          f"{building_mesh.triangle_area_m2(tower_part[:, :, :2]):.1f}")
-    check("equal-height overlap yields one roof, not two",
-          abs(roof_area(entries["b_eq1"]) - 96.0) < 0.5,
-          f"{roof_area(entries['b_eq1']):.1f}")
-    edge_points = np.array(entries["b_edge"]["roof"]["points"]
-                           + entries["b_edge"]["walls"]["points"])
-    check("no clipped vertex pokes past the square",
-          float(edge_points[:, 0].max()) <= 100.0 + 0.01,
-          f"max east {edge_points[:, 0].max():.2f}")
+          abs(footprint_area(entries["b_edge"]) - 100.0) < 0.5,
+          f"{footprint_area(entries['b_edge']):.1f}")
+    check("the merged tower and podium split the union footprint",
+          abs(footprint_area(entries["b_podium"]) - 320.0) < 1.0
+          and abs(footprint_area(entries["b_tower"]) - 100.0) < 0.5
+          and level_heights(entries["b_podium"]) == [6.0]
+          and level_heights(entries["b_tower"]) == [20.0],
+          f"{footprint_area(entries['b_podium']):.1f} at "
+          f"{level_heights(entries['b_podium'])}")
+    check("equal-height overlap is cut once, not drawn twice",
+          abs(footprint_area(entries["b_eq1"])
+              + footprint_area(entries["b_eq2"]) - 96.0) < 0.5,
+          f"{footprint_area(entries['b_eq1']):.1f} + "
+          f"{footprint_area(entries['b_eq2']):.1f}")
+    check("an unmarked building is extruded with one level, its roof",
+          entries["b_test"]["extruded"] is True
+          and level_heights(entries["b_test"]) == [7.0],
+          str(entries["b_test"]["levels"]))
+    check("a floor carries its levels and says it is not extruded",
+          entries["b_floors"]["extruded"] is False
+          and level_heights(entries["b_floors"]) == [8.0, 16.0],
+          str(entries["b_floors"]["levels"]))
+    check("a floor over a building leaves the roof under it alone",
+          level_heights(entries["b_deck"]) == [12.0]
+          and level_heights(entries["b_podium"]) == [6.0]
+          and abs(footprint_area(entries["b_deck"]) - 420.0) < 1.0,
+          f"deck {footprint_area(entries['b_deck']):.1f}")
+    check("rings are open and rounded to the centimeter",
+          all(ring[0] != ring[-1] and len(point) == 2
+              and all(round(value, 2) == value for value in point)
+              for entry in viz["buildings"]
+              for ring in [entry["footprint"], *entry["holes"]]
+              for point in ring))
+    check("no ring repeats a vertex or crosses itself",
+          all(len({tuple(p) for p in ring}) == len(ring)
+              for entry in viz["buildings"]
+              for ring in [entry["footprint"], *entry["holes"]])
+          and all(shapely.Polygon(entry["footprint"], entry["holes"]).is_valid
+                  for entry in viz["buildings"]))
+    check("no footprint vertex pokes past the square",
+          max(abs(value) for entry in viz["buildings"]
+              for ring in [entry["footprint"], *entry["holes"]]
+              for point in ring for value in point) <= 100.01)
+    check("every level wears a satellite color",
+          all(len(level["color"]) == 3
+              and all(0.0 <= channel <= 1.0 for channel in level["color"])
+              for entry in viz["buildings"] for level in entry["levels"]))
+    sampled = entries["b_test"]["levels"][0]["color"]
+    check("the synthetic satellite color lands on the roof, JPEG noise aside",
+          all(abs(sampled[i] - [90 / 255, 120 / 255, 80 / 255][i]) < 0.02
+              for i in range(3)),
+          str(sampled))
     surface_data = json.loads(
         (scenes_dir / "worlds" / "synthtest_surface.json").read_text())
     largest = max(abs(value) for b in surface_data["buildings"]
@@ -456,28 +538,119 @@ def test_buildings(scenes_dir: Path) -> None:
                   for point in ring for value in point)
     check("surface footprints stay inside the square", largest <= 100.01,
           f"max |coordinate| {largest:.2f}")
-    check("a satellite color pairs with every roof vertex",
-          all(len(b["roof"]["points"]) % 3 == 0
-              and len(b["roof"]["colors"]) == len(b["roof"]["points"])
-              for b in viz["buildings"]))
-    sampled = entries["b_test"]["roof"]["colors"][0]
-    check("the synthetic satellite color lands on the roof, JPEG noise aside",
-          all(abs(sampled[i] - [90 / 255, 120 / 255, 80 / 255][i]) < 0.02
-              for i in range(3)),
-          str(sampled))
+    check("the surface carries the scene anchor",
+          surface_data["format"] == build_world.SURFACE_FORMAT
+          and surface_data["origin_lla"] == [CENTER_LAT, CENTER_LON, ORIGIN_ALT],
+          str(surface_data.get("origin_lla")))
+    check("the Foxglove payload carries the same anchor",
+          viz["origin_lla"] == surface_data["origin_lla"],
+          str(viz.get("origin_lla")))
+    stacked = [b for b in surface_data["buildings"]
+               if b["roof_z"] in (8.0, 16.0)]
+    check("the surface writes one entry per level, on the same footprint",
+          len(stacked) == 2
+          and stacked[0]["footprint"] == stacked[1]["footprint"]
+          and sorted(b["roof_z"] for b in stacked) == [8.0, 16.0],
+          str([b["roof_z"] for b in stacked]))
 
-    surface = scene_surface.SceneSurface.load(
+    if terrain is None:
+        check("the flight code reads this surface", True,
+              f"skipped: {TERRAIN_REASON}. Set ROS2_WS_DIR to run the ray checks.")
+        return
+
+    tile = terrain.TerrainTile.load(
         str(scenes_dir / "worlds" / "synthtest_surface.json"))
-    down = (0.0, 0.0, -1.0)
-    courtyard = surface.intersect((60.0, 40.0, 50.0), down, 200.0)
+    down = np.array([[0.0, 0.0, -1.0]])
+
+    def surface_hit(origin):
+        """Where a ray straight down from `origin` meets the tile, or None."""
+        distance = tile.intersect_batch(origin, down, np.array([200.0]))[0]
+        if not np.isfinite(distance):
+            return None
+        return (origin[0], origin[1], origin[2] - distance)
+
+    courtyard = surface_hit((60.0, 40.0, 50.0))
     check("a ray into the courtyard reaches the terrain",
           courtyard is not None and abs(courtyard[2]) < 0.05, str(courtyard))
-    ring = surface.intersect((55.0, 40.0, 50.0), down, 200.0)
+    ring = surface_hit((55.0, 40.0, 50.0))
     check("a ray onto the courtyard ring lands on the 10 m roof",
           ring is not None and abs(ring[2] - 10.0) < 0.01, str(ring))
-    notch = surface.intersect((-25.0, -55.0, 50.0), down, 200.0)
+    notch = surface_hit((-25.0, -55.0, 50.0))
     check("a ray into the L notch reaches the terrain",
           notch is not None and abs(notch[2]) < 0.05, str(notch))
+    top_floor = surface_hit((0.0, -60.0, 50.0))
+    lower_floor = surface_hit((0.0, -60.0, 12.0))
+    under_floors = surface_hit((0.0, -60.0, 5.0))
+    check("stacked floors resolve to the nearest one under the ray",
+          top_floor is not None and abs(top_floor[2] - 16.0) < 0.01
+          and lower_floor is not None and abs(lower_floor[2] - 8.0) < 0.01
+          and under_floors is not None and abs(under_floors[2]) < 0.05,
+          f"{top_floor}, {lower_floor}, {under_floors}")
+    deck = surface_hit((-80.0, -20.0, 50.0))
+    under_deck = surface_hit((-80.0, -20.0, 10.0))
+    check("a floor over a roof keeps both surfaces",
+          deck is not None and abs(deck[2] - 12.0) < 0.01
+          and under_deck is not None and abs(under_deck[2] - 6.0) < 0.01,
+          f"{deck}, {under_deck}")
+
+
+def test_footprint_cleaning() -> None:
+    print("payload footprints are simple at the precision they ship at")
+    # A 10 x 10 square with a 6 m spur 4 mm thick. Rounding to the
+    # centimeter the payload writes puts the spur's three vertices on one
+    # line and repeats a point, which is exactly what an envelope remnant
+    # of two nearly aligned footprints does.
+    spur = shapely.Polygon([(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0),
+                            (0.0, 5.002), (-6.0, 5.001), (0.0, 4.998)])
+    raw = build_world._rounded_ring(
+        build_world._oriented_rings(spur)[0])
+    check("the raw rounded ring repeats a vertex",
+          len({tuple(p) for p in raw}) != len(raw), str(len(raw)))
+    pieces = build_world._emitted_parts(spur)
+    rings = [build_world._rounded_ring(build_world._oriented_rings(p)[0])
+             for p in pieces]
+    check("the emitted ring drops the spur and repeats nothing",
+          len(pieces) == 1 and abs(pieces[0].area - 100.0) < 1e-6
+          and len({tuple(p) for p in rings[0]}) == len(rings[0]),
+          f"{len(pieces)} pieces, area {pieces[0].area:.3f}" if pieces else "none")
+    # Cleaning a shape that pinches in two writes one entry for each half,
+    # the way a footprint the square cuts in two already does.
+    bowtie = shapely.Polygon([(0.0, 0.0), (10.0, 0.0), (10.0, 4.999),
+                              (20.0, 5.0), (20.0, 10.0), (10.0, 10.0),
+                              (10.0, 5.001), (0.0, 5.0)])
+    halves = build_world._emitted_parts(bowtie)
+    check("a shape that pinches in two emits both halves",
+          len(halves) == 2
+          and abs(sum(piece.area for piece in halves) - 100.0) < 0.1,
+          f"{[round(piece.area, 2) for piece in halves]}")
+
+
+def test_building_defaults() -> None:
+    print("buildings from before floors")
+    plain = scene_model.Building(id="b_plain", east_m=0.0, north_m=0.0,
+                                 length_m=10.0, width_m=10.0, yaw_deg=0.0,
+                                 height_m=6.0)
+    check("a building is extruded and states no levels of its own",
+          plain.extruded and plain.levels == [])
+    check("its one level is its roof over the ground under it",
+          scene_model.building_levels(plain, 3.0) == [9.0],
+          str(scene_model.building_levels(plain, 3.0)))
+    floor = scene_model.Building(id="b_floor", east_m=0.0, north_m=0.0,
+                                 length_m=10.0, width_m=10.0, yaw_deg=0.0,
+                                 height_m=6.0, extruded=False,
+                                 levels=[16.0, 4.0, 4.0])
+    check("stated levels ignore the ground, sort and lose duplicates",
+          scene_model.building_levels(floor, 3.0) == [4.0, 16.0],
+          str(scene_model.building_levels(floor, 3.0)))
+    older = json.loads(scene_model.SceneSpec(
+        name="older", center_lat=CENTER_LAT, center_lon=CENTER_LON,
+        side_m=SIDE_M, origin_alt_m=ORIGIN_ALT, buildings=[plain]).to_json())
+    older["buildings"][0].pop("extruded")
+    older["buildings"][0].pop("levels")
+    reloaded = scene_model.SceneSpec.from_json(json.dumps(older))
+    check("a scene.json from before floors still loads",
+          reloaded.buildings[0].extruded
+          and reloaded.buildings[0].levels == [])
 
 
 def test_flatten_modes() -> None:
@@ -637,6 +810,8 @@ def main() -> int:
         test_terrain(scenes_dir)
         test_buildings(scenes_dir)
         test_trees(scenes_dir)
+        test_footprint_cleaning()
+        test_building_defaults()
         test_flatten_modes()
         test_scenario(scenes_dir, tmp)
         test_legacy_alt_key()

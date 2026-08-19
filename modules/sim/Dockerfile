@@ -70,12 +70,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libglvnd0 libgl1 libglx0 libegl1 libgles2 \
       libxext6 libx11-6 libxrandr2 libxi6 libxcursor1 libxinerama1 \
       mesa-utils x11-utils \
+      gettext-base \
       python3-yaml \
-      python3-paho-mqtt \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
-# The video streamer. One camera in, one H.264 stream out, for each camera.
+# The video streamer. One camera in, one H.265 stream out, for each stream.
 # ---------------------------------------------------------------------------
 COPY gz_video_streamer /src/gz_video_streamer
 RUN cmake -S /src/gz_video_streamer -B /src/gz_video_streamer/build \
@@ -105,8 +105,9 @@ RUN if getent passwd ${UID} >/dev/null; then \
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY px4-rcS /opt/sim/px4-rcS
 COPY hold-stream-rates.sh /opt/sim/hold-stream-rates.sh
-COPY frame_clock.py /opt/sim/frame_clock.py
-RUN chmod +x /usr/local/bin/entrypoint.sh /opt/sim/frame_clock.py \
+COPY gimbal_rangefinder.py /opt/sim/gimbal_rangefinder.py
+RUN chmod +x /usr/local/bin/entrypoint.sh /opt/sim/gimbal_rangefinder.py \
+      /opt/sim/hold-stream-rates.sh \
     && chmod 0644 /opt/sim/px4-rcS
 
 USER dev

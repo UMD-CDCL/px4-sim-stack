@@ -149,6 +149,19 @@ def extrude(outer: list, holes: list, base_z: float,
             extrude_walls(outer, holes, base_z, top_z))
 
 
+def slab_shell(outer: list, holes: list, top_z: float,
+               thickness_m: float) -> np.ndarray:
+    """The rim and the underside of a floor slab, (n, 3, 3).
+
+    A floor hangs in the air, so it is seen from the side and from below
+    as well as from above. roof_at gives the top face; this closes the
+    solid under it. Each underside triangle runs backwards, which turns
+    its normal down, toward the only side that sees it."""
+    base_z = top_z - thickness_m
+    return np.concatenate([extrude_walls(outer, holes, base_z, top_z),
+                           roof_at(outer, holes, base_z)[:, ::-1]])
+
+
 def face_normals(triangles: np.ndarray) -> np.ndarray:
     """Per-vertex normals for flat shading, (3n, 3): each vertex takes its
     face normal. dartsim requires normals to match the vertex count."""

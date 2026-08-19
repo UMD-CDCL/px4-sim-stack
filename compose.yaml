@@ -18,6 +18,90 @@ x-ids: &ids
   UID: ${HOST_UID:-1000}
   GID: ${HOST_GID:-1000}
 
+# One mavlink-router for each vehicle. They differ only in the UAS number and
+# the companion address, so everything else lives here.
+x-mavlink-router: &mavlink-router
+  build:
+    context: ./modules/mavlink-router
+  image: px4simstack/mavlink-router:1
+  restart: unless-stopped
+
+x-mavlink-router-env: &mavlink-router-env
+  # The UDP server PX4 pushes into. Every router has its own namespace, so
+  # every router can use the same port. See modules/sim/px4-rcS.
+  PX4_UPLINK_PORT: "14545"
+  # Where the offboard endpoint sends. The default is the simnet gateway, which
+  # is this host, so a ground mavlink-router listening on 14561 to 14569 picks
+  # the fleet up exactly as it does in the field.
+  GCS_ADDRESS: ${GCS_ADDRESS:-${SIMNET_PREFIX:-10.200.142}.210}
+  # QGroundControl autoconnects on 14550. Empty removes that endpoint.
+  QGC_ADDRESS: ${QGC_ADDRESS:-${SIMNET_PREFIX:-10.200.142}.224}
+  KEEPALIVE: ${KEEPALIVE:-1}
+
+# The onboard computer for each simulated vehicle. One container for each,
+# because each binds MAVLink port 14402 and runs its own ROS domain. UAS_NUM is
+# the whole identity: the entrypoint derives the MAVLink system id, the /uas<N>
+# namespace, domain 6<N> and the d<N> and uas<N> frame prefixes from it.
+#
+# Each one shares its vehicle router's network namespace, so a vehicle is one
+# machine with one address and the router reaches MAVROS on loopback.
+#
+# UAS_FLEET has to agree with the model for each UAS number: uas11 and uas12
+# are v3, uas13 and uas14 are v2. Set UAS1<N>_MODEL to override one
+# vehicle. ds_node reads the mount that
+# modules/sim/scenes/models/chimera_v<n>/streams.conf serves for that model:
+# rgb<N> on a v3 airframe and pilot<N> on a v2.
+x-onboard: &onboard
+  build:
+    context: ./modules/onboard
+    additional_contexts:
+      # Where 5g_drone, cdcl_umd_msgs and MAVInsight are checked out. colcon
+      # builds them into the image, so nothing is mounted at run time.
+      ros2_ws: ${ROS2_WS_DIR:-../ros2_ws}
+    args:
+      <<: *ids
+      # DeepStream 7.1 is the last Ubuntu 22.04 release, and 22.04 is what ROS 2
+      # Humble needs. The Dockerfile stops a build on any other base.
+      DS_VERSION: ${DS_VERSION_ONBOARD:-7.1}
+  image: px4simstack/onboard:${DS_VERSION_ONBOARD:-7.1}
+  runtime: nvidia
+  ipc: host
+  stop_grace_period: 20s
+  volumes:
+    # Detector and classifier artifacts from scripts/convert_to_engine.py.
+    # config/param_files/sim/onboard_sim_params.yaml names them. nvinfer builds
+    # the TensorRT engine next to the ONNX on the first run, which takes 1 to 3
+    # minutes and stays on this volume afterwards.
+    - ${ONBOARD_MODEL_DIR:-./modules/onboard/models}:/models
+    - ./logs/onboard:/logs
+    # Terrain surfaces from `px4sim genscene`. The entry point links the one
+    # for SCENE into /terrain, which is where tf_loc reads its cache from.
+    - ./modules/sim/scenes:/scenes:ro
+  # The world origin, so sim_ground_truth can put the scenario's targets on the
+  # Earth. It reads PX4_HOME_LAT, _LON and _ALT and refuses to guess without
+  # them, which leaves the vehicle with no ground truth and no verdicts. Same
+  # file the sim and the ground station read. See scripts/origin-env.sh.
+  env_file:
+    - path: ./.origin.env
+      required: false
+  depends_on: [video-router]
+
+x-onboard-env: &onboard-env
+  # One source of truth for the airframe of each vehicle. See modules/onboard/entrypoint.sh.
+  UAS_FLEET: ${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2}
+  <<: *gpu-env
+  RTSP_BASE: rtsp://video-router:8554
+  # Contract section 2. MAVROS binds 14402 and answers whoever reaches it, so
+  # the router pushes and MAVROS never dials out.
+  FCU_URL: ${FCU_URL:-udp://:14402@:14550}
+  CUDA_CACHE_PATH: /models/.nv-compute
+  SCENE: ${SCENE:-recon_field}
+  # What sim_ground_truth scores against, the same pair the ground station
+  # reads. Without them the node takes its own defaults, which name one
+  # scenario, and every other scenario scores against the wrong targets.
+  GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO:-urban_casualties}.yaml
+  RESOLVED_TRUTH_FILE: /scenes/ground_truth_actual.yaml
+
 services:
 
   # -------------------------------------------------------------------------
@@ -43,28 +127,31 @@ services:
       PX4_DIR: /px4
       SCENES_DIR: /scenes
       SCENE: ${SCENE:-recon_field}
-      VEHICLE: ${VEHICLE:-x500_recon}
+      # The fleet, in UAS number order. One PX4 SITL instance for each entry,
+      # started as `px4 -i <index>`, which gives MAV_SYS_ID = index + 1.
+      # The fields of view are degrees and belong to the vehicle: uas13 and uas14
+      # are both v2 and carry different lenses. See .env.example.
+      UAS_FLEET: ${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2}
+      UAS_GIMBAL_HFOV_DEG: ${UAS_GIMBAL_HFOV_DEG:-27.45 27.45 85.25 25.98}
+      UAS_THERMAL_HFOV_DEG: ${UAS_THERMAL_HFOV_DEG:-29.75 29.75 31.03 29.75}
+      UAS_DOWN_HFOV_DEG: ${UAS_DOWN_HFOV_DEG:-25.98 25.98 25.98 25.98}
+      UAS_SPACING_M: ${UAS_SPACING_M:-1}
       SCENARIO: ${SCENARIO:-}
       GZ_GUI: ${GZ_GUI:-0}
       VIDEO_SINK_BASE: rtsp://video-router:8554
-      # The streamer probes the H.264 encoders and takes the first that works,
-      # so a GPU whose driver has dropped the older NVENC presets falls through
-      # to the current element instead of publishing nothing. Set this to a
-      # GStreamer fragment to name the encoder yourself and skip the probe.
+      # The streamer probes the encoders and takes the first that works, H.265
+      # before H.264, so a GPU whose driver has dropped the older NVENC presets
+      # falls through instead of publishing nothing. Set these to name the
+      # encoder yourself and skip the probe.
       VIDEO_ENCODER: ${VIDEO_ENCODER:-}
-      # Frame capture times go here. RTSP cannot carry them, and every
-      # localized detection depends on them. See modules/sim/frame_clock.py.
-      MQTT_HOST: message-bus
-      MQTT_PORT: "1883"
-      FRAME_CLOCK: "1"
-      # PX4 pushes telemetry to this fixed address, so a hub restart does not
-      # strand the link. See modules/sim/px4-rcS.
-      MAVLINK_HUB_IP: 172.28.0.11
-      MAVLINK_HUB_PORT: "14545"
-      # PX4 reads these directly. See docs/interfaces.md.
+      VIDEO_PARSER: ${VIDEO_PARSER:-h264parse}
+      # PX4 pushes telemetry to a fixed address, so a router restart does not
+      # strand the link. uas<N> is at <base><N>. See modules/sim/px4-rcS.
+      MAVLINK_ROUTER_IP_BASE: ${SIMNET_PREFIX:-10.200.142}.2
+      MAVLINK_ROUTER_PORT: "14545"
+      # PX4 reads these directly. See docs/interfaces.md. The entrypoint sets
+      # PX4_SIM_MODEL and PX4_GZ_MODEL_POSE for each vehicle.
       PX4_SYS_AUTOSTART: ${AIRFRAME:-4019}
-      PX4_SIM_MODEL: gz_${VEHICLE:-x500_recon}
-      PX4_GZ_STANDALONE: "1"
       PX4_SIM_SPEED_FACTOR: ${SIM_SPEED_FACTOR:-1}
       # PX4_HOME_LAT, PX4_HOME_LON and PX4_HOME_ALT come from .origin.env,
       # below. They are scene data, and a copy here would be a second origin
@@ -90,42 +177,311 @@ services:
       - ${XAUTH_FILE:-./.xauth}:/tmp/.docker.xauth
     networks:
       simnet:
-        ipv4_address: 172.28.0.10
+        ipv4_address: ${SIMNET_PREFIX:-10.200.142}.220
     depends_on:
       video-router:
-        condition: service_started
-      message-bus:
         condition: service_started
     stop_grace_period: 20s
 
   # -------------------------------------------------------------------------
-  # mavlink-hub - the MAVLink contract. Every consumer talks to this service,
-  # never to PX4 directly. Swap `sim` for a real airframe and nothing
-  # downstream changes.
+  # uas11 to uas19 - the MAVLink contract, one router for each vehicle. Every
+  # consumer talks to a router, never to PX4. Swap `sim` for a real airframe
+  # and nothing downstream changes.
+  #
+  # Each one is its own container because each one binds TCP 5760 and pushes to
+  # port 14402, which only separate network namespaces allow. That is also how
+  # the aircraft is built.
+  #
+  # ./px4sim turns UAS_FLEET into the profile list, so a fleet of four starts
+  # uas11 to uas14. The onboard container for a vehicle shares this container's
+  # network namespace, so the companion endpoint is plain loopback and
+  # main.conf.template needs no address of ours at all.
   # -------------------------------------------------------------------------
-  mavlink-hub:
-    build:
-      context: ./modules/mavlink-hub
-    image: px4simstack/mavlink-hub:1
-    hostname: mavlink-hub
+  uas11:
+    <<: *mavlink-router
+    profiles: [uas11]
+    hostname: uas11
     environment:
-      PX4_HOST: 172.28.0.10   # sim
-      PX4_PORT: "18570"
-      QGC_HOST: 172.28.0.14   # qgc
-      QGC_PORT: "14550"
-      EXTRA_GCS_IP: ${HOST_GCS_IP:-}
-      # The keepalive injects a GCS heartbeat so PX4 learns where to send
-      # telemetry. See docs/interfaces.md for why this is needed.
-      KEEPALIVE: "1"
+      <<: *mavlink-router-env
+      UAS_NUM: "11"
     ports:
-      - "5760:5760"        # MAVLink over TCP, for MAVSDK and pymavlink
-      - "14550:14550/udp"  # a GCS on the host can bind this
-      - "14552:14552/udp"  # free slot for mission tooling
+      - "5761:5760"      # MAVLink over TCP, for MAVSDK and pymavlink
+      # onboard11 borrows this network namespace and cannot publish a port
+      # of its own, so its Foxglove bridge is published here. 8765 stays
+      # free for the ground station.
+      - "8771:8765"
     networks:
       simnet:
-        ipv4_address: 172.28.0.11
-    restart: unless-stopped
+        ipv4_address: ${SIMNET_PREFIX:-10.200.142}.211
 
+  uas12:
+    <<: *mavlink-router
+    profiles: [uas12]
+    hostname: uas12
+    environment:
+      <<: *mavlink-router-env
+      UAS_NUM: "12"
+    ports:
+      - "5762:5760"      # MAVLink over TCP, for MAVSDK and pymavlink
+      # onboard12 borrows this network namespace and cannot publish a port
+      # of its own, so its Foxglove bridge is published here. 8765 stays
+      # free for the ground station.
+      - "8772:8765"
+    networks:
+      simnet:
+        ipv4_address: ${SIMNET_PREFIX:-10.200.142}.212
+
+  uas13:
+    <<: *mavlink-router
+    profiles: [uas13]
+    hostname: uas13
+    environment:
+      <<: *mavlink-router-env
+      UAS_NUM: "13"
+    ports:
+      - "5763:5760"      # MAVLink over TCP, for MAVSDK and pymavlink
+      # onboard13 borrows this network namespace and cannot publish a port
+      # of its own, so its Foxglove bridge is published here. 8765 stays
+      # free for the ground station.
+      - "8773:8765"
+    networks:
+      simnet:
+        ipv4_address: ${SIMNET_PREFIX:-10.200.142}.213
+
+  uas14:
+    <<: *mavlink-router
+    profiles: [uas14]
+    hostname: uas14
+    environment:
+      <<: *mavlink-router-env
+      UAS_NUM: "14"
+    ports:
+      - "5764:5760"      # MAVLink over TCP, for MAVSDK and pymavlink
+      # onboard14 borrows this network namespace and cannot publish a port
+      # of its own, so its Foxglove bridge is published here. 8765 stays
+      # free for the ground station.
+      - "8774:8765"
+    networks:
+      simnet:
+        ipv4_address: ${SIMNET_PREFIX:-10.200.142}.214
+
+  uas15:
+    <<: *mavlink-router
+    profiles: [uas15]
+    hostname: uas15
+    environment:
+      <<: *mavlink-router-env
+      UAS_NUM: "15"
+    ports:
+      - "5765:5760"      # MAVLink over TCP, for MAVSDK and pymavlink
+    networks:
+      simnet:
+        ipv4_address: ${SIMNET_PREFIX:-10.200.142}.215
+
+  uas16:
+    <<: *mavlink-router
+    profiles: [uas16]
+    hostname: uas16
+    environment:
+      <<: *mavlink-router-env
+      UAS_NUM: "16"
+    ports:
+      - "5766:5760"      # MAVLink over TCP, for MAVSDK and pymavlink
+    networks:
+      simnet:
+        ipv4_address: ${SIMNET_PREFIX:-10.200.142}.216
+
+  uas17:
+    <<: *mavlink-router
+    profiles: [uas17]
+    hostname: uas17
+    environment:
+      <<: *mavlink-router-env
+      UAS_NUM: "17"
+    ports:
+      - "5767:5760"      # MAVLink over TCP, for MAVSDK and pymavlink
+    networks:
+      simnet:
+        ipv4_address: ${SIMNET_PREFIX:-10.200.142}.217
+
+  uas18:
+    <<: *mavlink-router
+    profiles: [uas18]
+    hostname: uas18
+    environment:
+      <<: *mavlink-router-env
+      UAS_NUM: "18"
+    ports:
+      - "5768:5760"      # MAVLink over TCP, for MAVSDK and pymavlink
+    networks:
+      simnet:
+        ipv4_address: ${SIMNET_PREFIX:-10.200.142}.218
+
+  uas19:
+    <<: *mavlink-router
+    profiles: [uas19]
+    hostname: uas19
+    environment:
+      <<: *mavlink-router-env
+      UAS_NUM: "19"
+    ports:
+      - "5769:5760"      # MAVLink over TCP, for MAVSDK and pymavlink
+    networks:
+      simnet:
+        ipv4_address: ${SIMNET_PREFIX:-10.200.142}.219
+
+  # -------------------------------------------------------------------------
+  # onboard11 to onboard14 - the 5g_drone and MAVInsight stack, one container
+  # for each vehicle. Profile onboard<N>. This is what the router's onboard
+  # endpoint feeds, and it is the flight code the aircraft runs.
+  # -------------------------------------------------------------------------
+  onboard11:
+    <<: *onboard
+    profiles: [onboard11]
+    hostname: onboard11
+    environment:
+      <<: *onboard-env
+      UAS_NUM: "11"
+      MODEL: ${UAS11_MODEL:-}
+    # One vehicle is one machine. Sharing the router's network namespace puts
+    # the ROS stack and mavlink-router on the same address, which is what the
+    # aircraft does, and lets the router reach MAVROS on 127.0.0.1:14402.
+    network_mode: service:uas11
+    depends_on: [uas11]
+
+  onboard12:
+    <<: *onboard
+    profiles: [onboard12]
+    hostname: onboard12
+    environment:
+      <<: *onboard-env
+      UAS_NUM: "12"
+      MODEL: ${UAS12_MODEL:-}
+    # One vehicle is one machine. Sharing the router's network namespace puts
+    # the ROS stack and mavlink-router on the same address, which is what the
+    # aircraft does, and lets the router reach MAVROS on 127.0.0.1:14402.
+    network_mode: service:uas12
+    depends_on: [uas12]
+
+  onboard13:
+    <<: *onboard
+    profiles: [onboard13]
+    hostname: onboard13
+    environment:
+      <<: *onboard-env
+      UAS_NUM: "13"
+      MODEL: ${UAS13_MODEL:-}
+    # One vehicle is one machine. Sharing the router's network namespace puts
+    # the ROS stack and mavlink-router on the same address, which is what the
+    # aircraft does, and lets the router reach MAVROS on 127.0.0.1:14402.
+    network_mode: service:uas13
+    depends_on: [uas13]
+
+  onboard14:
+    <<: *onboard
+    profiles: [onboard14]
+    hostname: onboard14
+    environment:
+      <<: *onboard-env
+      UAS_NUM: "14"
+      MODEL: ${UAS14_MODEL:-}
+    # One vehicle is one machine. Sharing the router's network namespace puts
+    # the ROS stack and mavlink-router on the same address, which is what the
+    # aircraft does, and lets the router reach MAVROS on 127.0.0.1:14402.
+    network_mode: service:uas14
+    depends_on: [uas14]
+
+  # -------------------------------------------------------------------------
+  # offboard - the ground station, one container for the whole fleet. Profile
+  # offboard. It is the mirror of the onboard containers: the same image
+  # shape, the same workspace, and MAVROS from apt.
+  #
+  # UAS_FLEET is the whole identity, the way UAS_NUM is for a vehicle. The
+  # entry point turns it into the vehicle numbers and the airframe models, so
+  # the fleet is written once, in .env, and the ground station follows it.
+  #
+  # It runs a listening MAVROS, a MAVInsight frame tree, a preview ds_node and
+  # the viz nodes for each vehicle, plus one Foxglove bridge, one ground truth
+  # publisher and one HIL dispatcher for all of them. Domain 60 throughout.
+  #
+  # The published 1456x ports are where the vehicle routers push. A simulated
+  # vehicle sends to 14550 + N with N from 11, so the range is 14561 to 14569
+  # and the real fleet keeps 14551 to 14559. GCS_ADDRESS
+  # defaults to the simnet gateway, which is this host, so the fleet reaches
+  # the ground station through these. Set GCS_ADDRESS=${SIMNET_PREFIX:-10.200.142}.210 to take the
+  # direct path on simnet instead and leave the host out of it.
+  # -------------------------------------------------------------------------
+  offboard:
+    profiles: [offboard]
+    build:
+      context: ./modules/offboard
+      additional_contexts:
+        # Where 5g_drone, cdcl_umd_msgs and MAVInsight are checked out. colcon
+        # builds them into the image, so nothing is mounted at run time.
+        ros2_ws: ${ROS2_WS_DIR:-../ros2_ws}
+      args:
+        <<: *ids
+        # DeepStream 7.1 is the last Ubuntu 22.04 release, and 22.04 is what
+        # ROS 2 Humble needs. The Dockerfile stops a build on any other base.
+        DS_VERSION: ${DS_VERSION_OFFBOARD:-7.1}
+    image: px4simstack/offboard:${DS_VERSION_OFFBOARD:-7.1}
+    hostname: offboard
+    runtime: nvidia
+    ipc: host
+    stop_grace_period: 20s
+    environment:
+      <<: [*gpu-env, *x11-env]
+      UAS_FLEET: ${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2}
+      # ds_node reads the LOW RATE mount of each gimbal camera, which is what
+      # crosses the radio link on the aircraft: rgbl<N> on a v3, pilotl<N> on
+      # a v2.
+      RTSP_BASE: rtsp://video-router:8554
+      SCENE: ${SCENE:-recon_field}
+      # What sim_ground_truth scores against. The scenario says where each
+      # casualty was asked to go; the resolved file says where Gazebo put it,
+      # and wins where it exists.
+      GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO:-urban_casualties}.yaml
+      RESOLVED_TRUTH_FILE: /scenes/ground_truth_actual.yaml
+      CUDA_CACHE_PATH: /logs/.nv-compute
+    # The world origin, so the ground truth lands where the scene put it. Same
+    # file the sim reads. See scripts/origin-env.sh.
+    env_file:
+      - path: ./.origin.env
+        required: false
+    volumes:
+      # Read only, and only the ground truth node and the terrain link read it.
+      - ./modules/sim/scenes:/scenes:ro
+      - ./logs/offboard:/logs
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ${XAUTH_FILE:-./.xauth}:/tmp/.docker.xauth
+    ports:
+      - "8765:8765"                      # Foxglove bridge
+      - "14561-14569:14561-14569/udp"    # the simulated fleet, into ground-router
+    networks:
+      simnet:
+        ipv4_address: ${SIMNET_PREFIX:-10.200.142}.210
+    depends_on: [video-router]
+
+  # -------------------------------------------------------------------------
+  # ground-router - the ground station's mavlink-router, from
+  # chimera-deploy/local/main.conf. Every vehicle arrives on 14550 + N and
+  # leaves to loopback: 14401 for QGroundControl and 1440<N+1> for that
+  # vehicle's MAVROS.
+  #
+  # It shares the offboard container's network namespace, because those
+  # endpoints are loopback ones and MAVROS binds them there. That is also why
+  # the ports above are published on offboard and not here.
+  # -------------------------------------------------------------------------
+  ground-router:
+    <<: *mavlink-router
+    profiles: [offboard]
+    entrypoint: ["/bin/sh", "/opt/ground-router/entrypoint.sh"]
+    environment:
+      UAS_FLEET: ${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2}
+    volumes:
+      - ./modules/offboard/mavlink-router:/opt/ground-router:ro
+    network_mode: "service:offboard"
+    depends_on: [offboard]
   # -------------------------------------------------------------------------
   # video-router - the video contract. Every camera enters here and leaves as
   # RTSP. Downstream modules know stream names, not encoders or transports.
@@ -144,24 +500,7 @@ services:
       - "9997:9997"        # HTTP API, used by `px4sim streams`
     networks:
       simnet:
-        ipv4_address: 172.28.0.12
-    restart: unless-stopped
-
-  # -------------------------------------------------------------------------
-  # message-bus - the detection contract. DeepStream publishes here. Any ROS
-  # stack, or no ROS stack, can subscribe.
-  # -------------------------------------------------------------------------
-  message-bus:
-    image: eclipse-mosquitto:2
-    hostname: message-bus
-    volumes:
-      - ./modules/message-bus/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-    ports:
-      - "1883:1883"
-      - "9001:9001"        # MQTT over websockets, for browser tools
-    networks:
-      simnet:
-        ipv4_address: 172.28.0.13
+        ipv4_address: ${SIMNET_PREFIX:-10.200.142}.222
     restart: unless-stopped
 
   # -------------------------------------------------------------------------
@@ -181,6 +520,10 @@ services:
     ipc: host
     environment:
       <<: [*gpu-env, *x11-env]
+      # The stream QGC shows. The image defaults to a name no vehicle serves
+      # any more, and the fleet numbers its streams. uas11's gimbal camera is
+      # rgb11 on a v3 and pilot11 on a v2.
+      QGC_VIDEO_URL: ${QGC_VIDEO_URL:-rtsp://video-router:8554/rgb11}
     # Joystick passthrough. QGroundControl reads game controllers through SDL,
     # which opens /dev/input/event*. The bind mount brings the nodes in, the
     # cgroup rule lets the container open input devices (char major 13), and
@@ -200,8 +543,8 @@ services:
       - ${XAUTH_FILE:-./.xauth}:/tmp/.docker.xauth
     networks:
       simnet:
-        ipv4_address: 172.28.0.14
-    depends_on: [mavlink-hub, video-router]
+        ipv4_address: ${SIMNET_PREFIX:-10.200.142}.224
+    depends_on: [video-router]
 
   # -------------------------------------------------------------------------
   # qgc-dev - a Qt build environment with the QGC source bind-mounted.
@@ -232,192 +575,7 @@ services:
       - ${XAUTH_FILE:-./.xauth}:/tmp/.docker.xauth
     networks:
       simnet:
-        ipv4_address: 172.28.0.15
-
-  # -------------------------------------------------------------------------
-  # ros - the autonomy stack. It sees RTSP and MAVLink. It does not see
-  # Gazebo, and it does not link against PX4.
-  # Profile: ros
-  # -------------------------------------------------------------------------
-  ros:
-    profiles: [ros]
-    build:
-      context: ./modules/ros
-      args:
-        <<: *ids
-        ROS_DISTRO: ${ROS_DISTRO:-jazzy}
-    image: px4simstack/ros:${ROS_DISTRO:-jazzy}
-    hostname: ros
-    runtime: nvidia
-    ipc: host
-    stdin_open: true
-    tty: true
-    environment:
-      <<: [*gpu-env, *x11-env]
-      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
-      ROS_STACK: ${ROS_STACK:-baseline}
-      # The whole drone interface, in three variables.
-      FCU_URL: udp://:14555@mavlink-hub:14551
-      RTSP_BASE: rtsp://video-router:8554
-      MQTT_HOST: message-bus
-      # Gimbal frame handling. GIMBAL_SOURCE is auto, setpoint or status.
-      # The offsets are the constant the scene_tf diagnostic reports.
-      # Camera fields of view, radians. Trim nadir without touching gimbal.
-      # An estimate must land within this many metres of a target to count.
-      SCORING_GATE_M: ${SCORING_GATE_M:-2.0}
-      GIMBAL_HFOV: ${GIMBAL_HFOV:-2.0}
-      NADIR_HFOV: ${NADIR_HFOV:-1.74}
-      # The grid each camera image is sampled to before it is laid on the
-      # ground plane. The launch file holds the defaults: 480x270 for the
-      # gimbal, 240x135 for the nadir. GROUND_IMAGE_SIZE sets both cameras
-      # at once, the per-camera variables each set one. 1920x1080 is 2.07
-      # million points and 33 MB, which held a core at full load and
-      # delivered nothing.
-      GROUND_IMAGE_SIZE: ${GROUND_IMAGE_SIZE:-}
-      GROUND_IMAGE_SIZE_GIMBAL: ${GROUND_IMAGE_SIZE_GIMBAL:-}
-      GROUND_IMAGE_SIZE_NADIR: ${GROUND_IMAGE_SIZE_NADIR:-}
-      GROUND_IMAGE_RATE: ${GROUND_IMAGE_RATE:-1.0}
-      # The rtsp_camera H.264 decoder element. nvh264dec is the NVDEC option.
-      RTSP_DECODER: ${RTSP_DECODER:-avdec_h264}
-      # foxglove_bridge send buffer, bytes. The default 10 MB is smaller than
-      # one ground projection cloud, and over the limit the bridge drops the
-      # channel without logging anything.
-      FOXGLOVE_SEND_BUFFER: ${FOXGLOVE_SEND_BUFFER:-209715200}
-      # The same pair the perception service uses. detections_bridge scales
-      # boxes from this space into the live image size, so a mismatch corrects
-      # itself instead of putting every box in the wrong place.
-      DS_WIDTH: ${DS_WIDTH:-1920}
-      DS_HEIGHT: ${DS_HEIGHT:-1080}
-      # Per camera corrections, as "camera=WxH", comma separated. Use this when
-      # one camera's boxes land correctly and the other's do not, which happens
-      # when the two DeepStream sources report in different spaces. Measure it
-      # with scripts/check-annotation-scale.py. Example:
-      #   DS_COORD_OVERRIDES=nadir=1280x720
-      DS_COORD_OVERRIDES: ${DS_COORD_OVERRIDES:-}
-      # Nadir mounting against base_link, metres and degrees. Trim these if the
-      # downward image is not square with the airframe.
-      NADIR_X: ${NADIR_X:-0.10}
-      NADIR_Y: ${NADIR_Y:-0.0}
-      NADIR_Z: ${NADIR_Z:--0.06}
-      NADIR_ROLL: ${NADIR_ROLL:-0.0}
-      NADIR_PITCH: ${NADIR_PITCH:-90.0}
-      NADIR_YAW: ${NADIR_YAW:-0.0}
-      # Where the gimbal orientation comes from: auto, setpoint or status.
-      GIMBAL_SOURCE: ${GIMBAL_SOURCE:-auto}
-      # What a click on the gimbal image does: roi, point or off.
-      CLICK_MODE: ${CLICK_MODE:-roi}
-      GIMBAL_OFFSET_ROLL: ${GIMBAL_OFFSET_ROLL:-0.0}
-      GIMBAL_OFFSET_PITCH: ${GIMBAL_OFFSET_PITCH:-0.0}
-      GIMBAL_OFFSET_YAW: ${GIMBAL_OFFSET_YAW:-0.0}
-      GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO:-urban_casualties}.yaml
-      # Ground truth marker rate, hertz. 10 keeps the projected markers smooth.
-      GROUND_TRUTH_RATE: ${GROUND_TRUTH_RATE:-10}
-      # Whose verdicts color the truth bubbles, comma separated. The nadir
-      # camera sees most of the scene from above, so counting it marks every
-      # target in its view as a miss even while only the gimbal hunts.
-      GROUND_TRUTH_CAMERAS: ${GROUND_TRUTH_CAMERAS:-gimbal}
-      # How a detection ray becomes a ground position: "plane" uses a flat
-      # plane at the takeoff altitude, "scene" follows the terrain and the
-      # roofs from worlds/<SCENE>_surface.json, written by scenegen build.
-      LOCALIZATION_MODE: ${LOCALIZATION_MODE:-plane}
-      SCENE: ${SCENE:-recon_field}
-      RESOLVED_TRUTH_FILE: /scenes/ground_truth_actual.yaml
-      # Which camera feeds detection and localization. The nadir camera
-      # looks straight down, which is what an overhead search wants, and
-      # it needs no gimbal pointing to work.
-      PERCEPTION_CAMERA: ${PERCEPTION_CAMERA:-nadir}
-      PERCEPTION_CAMERA_2: ${PERCEPTION_CAMERA_2:-gimbal}
-      # FIDUCIAL_ENABLED and FIDUCIAL_SURVEYED_* come from .origin.env, below:
-      # the scenario carries the surveyed point and turns the correction on.
-      # Only the measured half is a property of this pipeline, so only that
-      # half lives in .env. See docs/interfaces.md.
-      FIDUCIAL_MEASURED_LAT: ${FIDUCIAL_MEASURED_LAT:-0.0}
-      FIDUCIAL_MEASURED_LON: ${FIDUCIAL_MEASURED_LON:-0.0}
-      FIDUCIAL_MEASURED_ALT: ${FIDUCIAL_MEASURED_ALT:-0.0}
-    # The surveyed marker, written by ./px4sim from the scenario. Same file
-    # the sim reads its origin from. See scripts/origin-env.sh.
-    env_file:
-      - path: ./.origin.env
-        required: false
-    volumes:
-      - ./modules/ros/stacks:/stacks
-      - ./src/ros2_ws:/ws
-      # Diagnostics that need a ROS graph, so they run in here rather than on
-      # the host. check-annotation-scale.py lives here.
-      - ./scripts:/scripts:ro
-      # Ground truth for scoring, read only. This is the one simulator file the
-      # ROS side reads, and only the evaluation node touches it. Nothing in the
-      # flight path depends on it, and on real hardware you do not run that node.
-      - ./modules/sim/scenes:/scenes:ro
-      - ./logs/ros:/home/dev/.ros
-      - /tmp/.X11-unix:/tmp/.X11-unix
-      - ${XAUTH_FILE:-./.xauth}:/tmp/.docker.xauth
-    ports:
-      - "8765:8765"        # Foxglove bridge
-    networks:
-      simnet:
-        ipv4_address: 172.28.0.16
-    depends_on: [mavlink-hub, video-router, message-bus]
-
-  # -------------------------------------------------------------------------
-  # perception - DeepStream inference. RTSP in, annotated RTSP and MQTT
-  # detections out. It has no ROS dependency.
-  # Profile: perception
-  # -------------------------------------------------------------------------
-  perception:
-    profiles: [perception]
-    build:
-      context: ./modules/perception
-      args:
-        DS_IMAGE: ${DS_IMAGE:-nvcr.io/nvidia/deepstream:8.0-samples-multiarch}
-    # DS_TAG follows DS_IMAGE, so DeepStream 8.0 and 9.0 build to two names.
-    # Sharing one name lets a release change overwrite the image already built,
-    # and the only symptom is a container that stops at the first CUDA call.
-    # Both front doors set the pair from scripts/ds-select.sh.
-    image: px4simstack/perception:${DS_TAG:-ds8}
-    hostname: perception
-    runtime: nvidia
-    environment:
-      <<: *gpu-env
-      DS_CONFIG: ${DS_CONFIG:-camera_detector.txt}
-      # msgconv.txt turns these into the sensor ids that tag each payload,
-      # which is how the ROS side tells the two cameras apart.
-      PERCEPTION_CAMERA: ${PERCEPTION_CAMERA:-nadir}
-      RTSP_IN: rtsp://video-router:8554/${PERCEPTION_CAMERA:-nadir}
-      # The second camera. Each camera gets its own deepstream-app process,
-      # and the payload's sensorId says which one a detection came from.
-      RTSP_IN_2: rtsp://video-router:8554/${PERCEPTION_CAMERA_2:-gimbal}
-      PERCEPTION_CAMERA_2: ${PERCEPTION_CAMERA_2:-gimbal}
-      # Which cameras get a boxes-burned-in RTSP stream, served as
-      # <camera>_annotated by the video router. A comma separated list of
-      # camera names; 1 or all turns every camera on, 0 turns every camera
-      # off. Default is the gimbal alone: QGC displays gimbal_annotated, and
-      # Foxglove draws its own boxes over the plain streams. Each enabled
-      # camera costs one H.264 encode on the GPU.
-      ANNOTATED_STREAMS: ${ANNOTATED_STREAMS:-gimbal}
-      # The resolution each pipeline works in. Keep it equal to the camera
-      # resolution: nvstreammux then neither scales down, which would throw
-      # away detail before the detector sees it, nor up, which would cost
-      # bandwidth for no new information. It is also the coordinate space the
-      # boxes come back in, and the ros service reads the same pair.
-      DS_WIDTH: ${DS_WIDTH:-1920}
-      DS_HEIGHT: ${DS_HEIGHT:-1080}
-      MQTT_HOST: message-bus
-      MQTT_PORT: "1883"
-      MQTT_TOPIC: perception/detections
-      # The CUDA JIT cache lands in the persisted perception-cache volume.
-      CUDA_CACHE_PATH: /root/.cache/nv-compute
-      CUDA_CACHE_MAXSIZE: "1073741824"
-    volumes:
-      - ./modules/perception/configs:/opt/perception/configs
-      - ./modules/perception/app:/opt/perception/app
-      - ./modules/perception/models:/opt/perception/models
-      - ./logs/perception:/opt/perception/logs
-      - perception-cache:/root/.cache
-    networks:
-      simnet:
-        ipv4_address: 172.28.0.17
-    depends_on: [video-router, message-bus]
+        ipv4_address: ${SIMNET_PREFIX:-10.200.142}.225
 
   # -------------------------------------------------------------------------
   # scenegen - builds a Gazebo scene from real map data: satellite imagery,
@@ -448,7 +606,7 @@ services:
       - "8090:8090"
     networks:
       simnet:
-        ipv4_address: 172.28.0.19
+        ipv4_address: ${SIMNET_PREFIX:-10.200.142}.229
 
   # -------------------------------------------------------------------------
   # xrce-agent - the uXRCE-DDS bridge. This puts PX4 uORB topics directly on
@@ -459,31 +617,38 @@ services:
   xrce-agent:
     profiles: [xrce]
     build:
-      context: ./modules/ros
-      dockerfile: Dockerfile.xrce
+      context: ./modules/xrce-agent
       args:
         XRCE_AGENT_REF: ${XRCE_AGENT_REF:-v2.4.2}
     image: px4simstack/xrce-agent:${XRCE_AGENT_REF:-v2.4.2}
     hostname: xrce-agent
     environment:
-      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
+      # The domain the uORB topics appear on. A vehicle holds 60 + N, so 71 is
+      # uas11. An agent on another domain publishes where nothing listens.
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-71}
     command: ["MicroXRCEAgent", "udp4", "-p", "8888"]
     networks:
       simnet:
-        ipv4_address: 172.28.0.18
+        ipv4_address: ${SIMNET_PREFIX:-10.200.142}.228
 
 networks:
   simnet:
     driver: bridge
     ipam:
       config:
-        # A fixed subnet keeps the PX4 broadcast address predictable and keeps
-        # the range clear of the usual corporate VPN ranges.
-        - subnet: 172.28.0.0/16
+        # The addressing the fleet flies, in its own block: the ground station
+        # is .210 where the real one is .60, uas<N> is .2<N> where the real one
+        # is .6<N>, and simulator infrastructure sits at .220 upwards. So an
+        # address reads as its real counterpart, and no simulated machine can
+        # ever claim a real machine's address. See docs/uas-contract.md.
+        #
+        # The ADDRESSES deconflict. The SUBNET does not: a bridge on this range
+        # shadows the whole real range on a host that is itself on the radio
+        # network, .60 to .64 included. Set SIMNET_PREFIX to 172.28.0 there.
+        - subnet: ${SIMNET_PREFIX:-10.200.142}.0/24
 
 volumes:
   sim-ccache:
   sim-fuel:
   qgc-config:
   qgc-dev-ccache:
-  perception-cache:

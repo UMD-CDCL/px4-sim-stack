@@ -23,10 +23,24 @@ option is to make the data match the label, by subscribing to vehicle_attitude
 in GZGimbal and dividing it out before publishing, which is more faithful to
 the MAVLink gimbal protocol but a larger change.
 
-px4-sim-stack does not need this patch. Its scene_tf node treats the report as
-earth referenced and divides the vehicle attitude out itself, which is why
-gimbal_reference defaults to "earth". Apply this if you want PX4 itself to be
-honest, then set gimbal_reference to "vehicle".
+READ THIS BEFORE YOU TRUST THE PATCH.
+
+The consumer in this stack is MAVInsight. It builds d<N>_gimbal_frame_ref from
+the LOCK bits of this same message (models/vehicle.py) and then applies the
+reported quaternion to that frame (models/sensor.py). It reads no other flag.
+DEVICE_FLAGS_YAW_IN_VEHICLE_FRAME is 32 and DEVICE_FLAGS_YAW_IN_EARTH_FRAME is
+64, while the lock bits are 4, 8 and 16, so neither the stock label nor the one
+below reaches that code.
+
+GZGimbal sets no lock bit at all. MAVInsight therefore keeps the reference frame
+equal to the body frame, and the absolute report is composed onto the vehicle
+attitude a second time. So this patch removes the lie, and by itself it does not
+correct the frame tree. To do that, the report must also carry ROLL_LOCK,
+PITCH_LOCK and YAW_LOCK, which is what an earth referenced attitude means to
+that reader.
+
+Read from the code, not measured in flight. Check d<N>_gimbal_frame against the
+vehicle heading before you trust either version.
 
     cd src/PX4-Autopilot
     git apply ../../patches/px4-gzgimbal-frame.patch

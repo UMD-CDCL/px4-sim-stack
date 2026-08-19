@@ -1,12 +1,16 @@
 #!/bin/sh
 # PX4 startup for px4-sim-stack.
 #
-# This runs the stock PX4 startup unchanged, then adds one MAVLink link.
-# It is passed to PX4 with `px4 -s`, so the PX4 source tree stays clean and
+# This runs the stock PX4 startup unchanged, then adds two MAVLink links. It is
+# passed to PX4 with `px4 -s`, so the PX4 source tree stays clean and
 # `git status` in src/PX4-Autopilot shows only your own work.
 #
+# px4_instance comes from px4-alias.sh, which the stock rcS sources. Every port
+# below is derived from it, because all the vehicles share one container and one
+# network namespace.
+#
 # ---------------------------------------------------------------------------
-# Why the extra link exists
+# Why the router link exists
 #
 # PX4's own ground station link is `mavlink start -x -u 18570 -r 4000000 -f`.
 # That is a UDP server with no configured peer. It learns the peer from the
@@ -15,38 +19,53 @@
 #   mavlink_receiver.cpp: the peer is recorded only when
 #   get_client_source_initialized() is false, and nothing ever clears it.
 #
-# mavlink-router connects to PX4 from an ephemeral source port. So when the
-# hub container restarts, its source port changes, PX4 keeps sending to the old
-# one, and telemetry stops with no error on either side. Restarting the hub
-# would mean restarting the simulator.
+# mavlink-router connects to PX4 from an ephemeral source port. So when a router
+# container restarts, its source port changes, PX4 keeps sending to the old one,
+# and telemetry stops with no error on either side.
 #
 # The -t flag sets the partner address up front, which marks the address as
 # initialized. This link pushes to a fixed address and port, so:
 #
 #   - PX4 speaks first, and no handshake is needed.
-#   - The hub can restart as often as you like. PX4 keeps sending to the same
-#     address, and the hub relearns PX4 from the first packet.
-#   - The simulator can restart. The hub is a server on this port and waits.
+#   - A router can restart as often as you like. PX4 keeps sending to the same
+#     address, and the router relearns PX4 from the first packet.
+#   - The simulator can restart. The router is a server on this port and waits.
 #
-# MAVLINK_HUB_IP and MAVLINK_HUB_PORT come from the container environment.
+# MAVLINK_ROUTER_IP and MAVLINK_ROUTER_PORT come from the container
+# environment, one pair for each vehicle.
 # ---------------------------------------------------------------------------
 
 . etc/init.d-posix/rcS
 
-mavlink start -x -u 14569 -o ${MAVLINK_HUB_PORT} -t ${MAVLINK_HUB_IP} -r 4000000 -f
+router_port=$((14569 + px4_instance))
+rangefinder_port=$((14590 + px4_instance))
+
+mavlink start -x -u $router_port -o ${MAVLINK_ROUTER_PORT} -t ${MAVLINK_ROUTER_IP} -r 4000000 -f
 
 # The rates PX4's own ground station link uses. Without these the position and
 # attitude messages arrive too slowly for a smooth QGroundControl display.
-mavlink stream -r 50 -s POSITION_TARGET_LOCAL_NED -u 14569
-mavlink stream -r 50 -s LOCAL_POSITION_NED -u 14569
-mavlink stream -r 50 -s GLOBAL_POSITION_INT -u 14569
-mavlink stream -r 50 -s ATTITUDE -u 14569
-mavlink stream -r 50 -s ATTITUDE_QUATERNION -u 14569
-mavlink stream -r 50 -s ATTITUDE_TARGET -u 14569
-mavlink stream -r 50 -s SERVO_OUTPUT_RAW_0 -u 14569
-mavlink stream -r 20 -s RC_CHANNELS -u 14569
-mavlink stream -r 10 -s OPTICAL_FLOW_RAD -u 14569
-mavlink stream -r 10 -s DISTANCE_SENSOR -u 14569
+mavlink stream -r 50 -s POSITION_TARGET_LOCAL_NED -u $router_port
+mavlink stream -r 50 -s LOCAL_POSITION_NED -u $router_port
+mavlink stream -r 50 -s GLOBAL_POSITION_INT -u $router_port
+mavlink stream -r 50 -s ATTITUDE -u $router_port
+mavlink stream -r 50 -s ATTITUDE_QUATERNION -u $router_port
+mavlink stream -r 50 -s ATTITUDE_TARGET -u $router_port
+mavlink stream -r 50 -s SERVO_OUTPUT_RAW_0 -u $router_port
+mavlink stream -r 20 -s RC_CHANNELS -u $router_port
+mavlink stream -r 10 -s OPTICAL_FLOW_RAD -u $router_port
+
+# The MAVROS topics the contract names, at rates their readers can use.
+#
+# All four are in the default normal-mode set, three of them at 0.5 to 4 Hz.
+# MAVInsight reads altitude and home position on every pose it builds, and the
+# compass heading comes out of VFR_HUD, so the default rates leave a frame tree
+# that lags the aircraft. DISTANCE_SENSOR carries both rangefinders: id 0 is the
+# body laser from the PX4 Gazebo bridge, id 1 the gimbal laser that
+# gimbal_rangefinder.py injects below.
+mavlink stream -r 10 -s DISTANCE_SENSOR -u $router_port
+mavlink stream -r 10 -s ALTITUDE -u $router_port
+mavlink stream -r 10 -s VFR_HUD -u $router_port
+mavlink stream -r  1 -s HOME_POSITION -u $router_port
 
 # The gimbal setpoint, and the mount orientation as a second opinion.
 #
@@ -58,12 +77,22 @@ mavlink stream -r 10 -s DISTANCE_SENSOR -u 14569
 # message PX4 fills from the gimbal IMU and mislabels as vehicle relative. See
 # patches/px4-gzgimbal-frame.patch. Requesting these two gives the frame tree a
 # source that does not need that lie undone.
-mavlink stream -r 20 -s GIMBAL_DEVICE_SET_ATTITUDE -u 14569
-mavlink stream -r 20 -s MOUNT_ORIENTATION -u 14569
+mavlink stream -r 20 -s GIMBAL_DEVICE_SET_ATTITUDE -u $router_port
+mavlink stream -r 20 -s MOUNT_ORIENTATION -u $router_port
 
 # The device report itself, at the rate the patched gimbal produces it
 # (patches/px4-gzgimbal-rate.patch, 50 Hz). The default stream rate
 # delivered one report every few seconds, which left the camera frame
-# seconds stale while the gimbal stabilized. scene_tf prefers this report
-# whenever it is fresh, and undoes the mislabeled frame it carries.
-mavlink stream -r 50 -s GIMBAL_DEVICE_ATTITUDE_STATUS -u 14569
+# seconds stale while the gimbal stabilized.
+mavlink stream -r 50 -s GIMBAL_DEVICE_ATTITUDE_STATUS -u $router_port
+
+# ---------------------------------------------------------------------------
+# The gimbal rangefinder link.
+#
+# gimbal_rangefinder.py sends DISTANCE_SENSOR into this one and PX4 republishes
+# it on the router link as sensor id 1. Minimal mode keeps the link almost
+# silent; the one stream it needs is the read-back that tells the bridge PX4
+# already owns uORB instance 0. See modules/sim/gimbal_rangefinder.py.
+# ---------------------------------------------------------------------------
+mavlink start -x -u $rangefinder_port -r 40000 -m minimal
+mavlink stream -r 2 -s DISTANCE_SENSOR -u $rangefinder_port

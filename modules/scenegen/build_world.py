@@ -7,15 +7,18 @@ Outputs, all into modules/sim/scenes/ (SCENES_DIR):
   worlds/<name>.sdf                     the world. <world name> equals the
                                         file name; the sim entrypoint
                                         refuses a mismatch.
-  worlds/<name>_surface.json            terrain heights and roof polygons,
-                                        for scene-based localization
-                                        (sim_bridge/scene_surface.py)
-  worlds/<name>_buildings.json          building triangles with satellite
-                                        colors, for the Foxglove 3D panel
-                                        (sim_bridge/scene_buildings.py)
+  worlds/<name>_surface.json            terrain heights and roof polygons
+                                        anchored at a WGS84 origin, for
+                                        terrain and building localization
+                                        (umd_uas/terrain.py in 5g_drone)
+  worlds/<name>_buildings.json          building footprints, their surface
+                                        heights and satellite colors, for
+                                        the Foxglove 3D panel
+                                        (mavinsight buildings_viz)
   models/<name>_terrain/                textured terrain mesh model
-  models/<name>_buildings/              extruded buildings, roofs textured
-                                        with the same satellite image
+  models/<name>_buildings/              extruded buildings and floor slabs,
+                                        roofs textured with the same
+                                        satellite image
   scenarios/<name>_casualties.yaml      always; spawn_scenario.py places
                                         the targets at run time, so they
                                         can change with no sim restart
@@ -53,6 +56,11 @@ import geo
 import scene_model
 import terrain_mesh
 
+# Scene-data payload formats. The surface carries a WGS84 anchor from
+# format 3 on; an unanchored file cannot be placed by a vehicle.
+SURFACE_FORMAT = "scenegen-surface/3"
+BUILDINGS_FORMAT = "scenegen-buildings/2"
+
 # ------------------------------------------------------------------- tunables
 # Where a detected vehicle's model comes from when the scene does not name
 # one. Chosen per vehicle by a stable hash, so a rebuild keeps its choices.
@@ -85,7 +93,7 @@ FIDUCIAL_COLOR = "1 0.45 0.05 1"
 # separate ones from the air. Roofs carry the satellite texture instead.
 BUILDING_GRAY_RANGE = (0.55, 0.72)
 # Roof triangles split down to this edge length before the Foxglove
-# payload samples a satellite color at each vertex. The world mesh stays
+# payload averages a satellite color over them. The world mesh stays
 # coarse; only the sampling density rides on this.
 ROOF_SAMPLE_EDGE_M = 8.0
 # A building keeps only what stands inside the scene square: the terrain
@@ -99,6 +107,9 @@ OVERLAP_MIN_AREA_M2 = 1.0
 # Envelope remnants under this area are slivers of numeric noise, not
 # roofs.
 MIN_ROOF_PIECE_M2 = 0.05
+# A floor is a slab, not a plane. With no thickness it disappears edge on
+# and a camera beside it sees nothing.
+FLOOR_THICKNESS_M = 0.3
 
 
 def _pose(x: float, y: float, z: float, yaw_rad: float = 0.0) -> str:
@@ -114,14 +125,19 @@ def _wall_rgba(building_id: str) -> tuple[float, float, float, float]:
 @dataclass
 class PlacedBuilding:
     """One enabled building grounded in the scene: the placed footprint
-    clipped to the scene square, and the base at the lowest ground under
-    it so no wall floats on a slope. A footprint the square cuts in two
-    carries one ring pair per piece. Meshes live in BuildingCluster."""
+    clipped to the scene square, the base at the lowest ground under it
+    so no wall floats on a slope, and the scene z of every horizontal
+    surface it carries. A footprint the square cuts in two carries one
+    ring pair per piece. Meshes live in BuildingCluster."""
     building: scene_model.Building
     polygon: shapely.Geometry
     pieces: list                      # [(outer ring, holes), ...], rings open
     base_z: float
-    roof_z: float
+    levels: list                      # scene z of each surface, lowest first
+
+    @property
+    def top_z(self) -> float:
+        return self.levels[-1]
 
 
 @dataclass
@@ -129,13 +145,14 @@ class BuildingCluster:
     """Overlapping extruded buildings merged into one visual building:
     one wall gray, and the roofs cut to the upper envelope, so a typical
     building mapped as several overlapping parts shows exactly one roof
-    surface over every point, at the height of its tallest part there."""
+    surface over every point, at the height of its tallest part there.
+
+    A floor and any building with levels of its own merge with nothing.
+    Stacked surfaces over one point are the whole point there, and an
+    envelope would cut away everything under the highest one."""
     id: str
-    name: str
     wall_rgba: tuple
-    roof: np.ndarray                  # (n, 3, 3) triangles, per-part heights
-    walls: np.ndarray
-    holes: int
+    members: list                     # [(PlacedBuilding, [exposed part, ...])]
 
 
 def _polygon_parts(geometry) -> list:
@@ -184,15 +201,23 @@ def place_buildings(scene: scene_model.SceneSpec, grid,
         samples += [[part.centroid.x, part.centroid.y] for part in parts]
         base = min(_ground_at(grid, meta, east, north, origin_alt)
                    for east, north in samples)
-        placed.append(PlacedBuilding(building, polygon, pieces, base,
-                                     base + building.height_m))
+        placed.append(PlacedBuilding(
+            building, polygon, pieces, base,
+            scene_model.building_levels(building, base)))
     return placed, dropped
 
 
-def cluster_buildings(placed: list[PlacedBuilding]) -> list[BuildingCluster]:
-    """Group the extruded buildings into overlap clusters and mesh each.
+def _merges(entry: PlacedBuilding) -> bool:
+    """Whether this building joins an overlap cluster. Only a plain box
+    does: one surface, so an envelope can leave one roof over a point
+    without losing anything."""
+    return entry.building.extruded and len(entry.levels) == 1
 
-    Members sort by (roof height, id), and each roof keeps only the part
+
+def cluster_buildings(placed: list[PlacedBuilding]) -> list[BuildingCluster]:
+    """Group the buildings into overlap clusters and cut their roofs.
+
+    Members sort by (top height, id), and each roof keeps only the part
     no later member's footprint covers: the upper envelope, with equal
     heights broken deterministically by id. Walls stay full height; a
     wall segment inside a taller neighbor is enclosed by it and never
@@ -208,8 +233,9 @@ def cluster_buildings(placed: list[PlacedBuilding]) -> list[BuildingCluster]:
 
     for i in range(len(meshed)):
         for j in range(i + 1, len(meshed)):
-            if meshed[i].polygon.intersection(meshed[j].polygon).area \
-                    > OVERLAP_MIN_AREA_M2:
+            if _merges(meshed[i]) and _merges(meshed[j]) \
+                    and meshed[i].polygon.intersection(
+                        meshed[j].polygon).area > OVERLAP_MIN_AREA_M2:
                 parent[find(i)] = find(j)
 
     groups: dict[int, list[PlacedBuilding]] = {}
@@ -218,33 +244,48 @@ def cluster_buildings(placed: list[PlacedBuilding]) -> list[BuildingCluster]:
 
     clusters = []
     for members in groups.values():
-        members.sort(key=lambda entry: (entry.roof_z, entry.building.id))
+        members.sort(key=lambda entry: (entry.top_z, entry.building.id))
         cluster_id = min(entry.building.id for entry in members)
-        name = next((entry.building.name for entry in members
-                     if entry.building.name), "")
-        roofs, walls = [], []
-        holes = 0
+        exposed_members = []
         for index, entry in enumerate(members):
             covering = [m.polygon for m in members[index + 1:]
                         if m.polygon.intersects(entry.polygon)]
             exposed = entry.polygon.difference(shapely.union_all(covering)) \
                 if covering else entry.polygon
-            for part in _polygon_parts(exposed):
-                if part.area < MIN_ROOF_PIECE_M2:
-                    continue
-                outer, hole_rings = _oriented_rings(part)
-                roofs.append(building_mesh.roof_at(outer, hole_rings,
-                                                   entry.roof_z))
-            for outer, hole_rings in entry.pieces:
-                walls.append(building_mesh.extrude_walls(
-                    outer, hole_rings, entry.base_z, entry.roof_z))
-                holes += len(hole_rings)
-        empty = np.zeros((0, 3, 3))
-        clusters.append(BuildingCluster(
-            cluster_id, name, _wall_rgba(cluster_id),
-            np.concatenate(roofs) if roofs else empty,
-            np.concatenate(walls) if walls else empty, holes))
+            exposed_members.append((entry, [
+                part for part in _polygon_parts(exposed)
+                if part.area >= MIN_ROOF_PIECE_M2]))
+        clusters.append(BuildingCluster(cluster_id, _wall_rgba(cluster_id),
+                                        exposed_members))
     return sorted(clusters, key=lambda cluster: cluster.id)
+
+
+def cluster_mesh(cluster: BuildingCluster) -> tuple[np.ndarray, np.ndarray, int]:
+    """(roof triangles, wall triangles, courtyard holes) of one cluster.
+
+    Every level gets a horizontal surface. An extruded building carries
+    walls from the ground to its top level; a floor carries a thin rim
+    and underside at each level instead, so it hangs over the terrain
+    and closes nothing in under it."""
+    roofs, walls = [], []
+    holes = 0
+    for entry, parts in cluster.members:
+        for part in parts:
+            outer, hole_rings = _oriented_rings(part)
+            roofs += [building_mesh.roof_at(outer, hole_rings, z)
+                      for z in entry.levels]
+        for outer, hole_rings in entry.pieces:
+            if entry.building.extruded:
+                walls.append(building_mesh.extrude_walls(
+                    outer, hole_rings, entry.base_z, entry.top_z))
+            else:
+                walls += [building_mesh.slab_shell(outer, hole_rings, z,
+                                                   FLOOR_THICKNESS_M)
+                          for z in entry.levels]
+            holes += len(hole_rings)
+    empty = np.zeros((0, 3, 3))
+    return (np.concatenate(roofs) if roofs else empty,
+            np.concatenate(walls) if walls else empty, holes)
 
 
 def _include(name: str, uri: str, pose: str) -> str:
@@ -266,7 +307,7 @@ def _roof_above(placed: list[PlacedBuilding], east: float,
     """The top of the highest building whose footprint covers the point,
     in scene z. None when no building stands there."""
     point = shapely.Point(east, north)
-    tops = [entry.roof_z for entry in placed if entry.polygon.covers(point)]
+    tops = [entry.top_z for entry in placed if entry.polygon.covers(point)]
     return max(tops) if tops else None
 
 
@@ -283,6 +324,12 @@ def _floor_z(placed: list[PlacedBuilding], grid, meta, origin_alt: float,
     return floor
 
 
+def _origin_lla(scene: scene_model.SceneSpec) -> list:
+    """Where scene ENU (0, 0, 0) sits on the Earth."""
+    return [round(scene.center_lat, 7), round(scene.center_lon, 7),
+            round(scene.origin_alt_m, 2)]
+
+
 def _rounded_ring(ring: list) -> list:
     return [[round(east, 2), round(north, 2)] for east, north in ring]
 
@@ -291,10 +338,21 @@ def surface_json(scene: scene_model.SceneSpec, placed: list[PlacedBuilding],
                  grid, meta) -> str:
     """The localization surface: terrain heights and roof polygons, scene z.
 
-    sim_bridge/scene_surface.py reads this to intersect detection rays with
-    the scene instead of a flat plane. Walls are absent on purpose: the
-    surface holds only what a camera above looks down onto. A building with
-    a model override keeps its footprint roof, the best height on record.
+    A localizer reads this to intersect detection rays with the scene
+    instead of a flat plane. Walls are absent on purpose: the surface holds
+    only what a camera above looks down onto. A building with a model
+    override keeps its footprint roof, the best height on record.
+
+    One entry per level, so a building with several floors writes the
+    same footprint at each height. A reader takes the nearest surface
+    the ray descends onto, so the stack resolves with no format change.
+
+    `origin_lla` puts the square on the Earth. Coordinates in the file are
+    ENU meters from that point, and heights are meters above its altitude.
+    A vehicle knows only where its own ENU frame started, which on an
+    aircraft is wherever it booted, so without this anchor it cannot place
+    the data. The simulator hid the problem because it makes PX4 home equal
+    the scene center.
     """
     origin_alt = scene.origin_alt_m
     n = meta["grid_n"]
@@ -303,10 +361,12 @@ def surface_json(scene: scene_model.SceneSpec, placed: list[PlacedBuilding],
     buildings = [{
         "footprint": _rounded_ring(outer),
         "holes": [_rounded_ring(ring) for ring in holes],
-        "roof_z": round(entry.roof_z, 2),
-    } for entry in placed for outer, holes in entry.pieces]
+        "roof_z": round(level_z, 2),
+    } for entry in placed for outer, holes in entry.pieces
+        for level_z in entry.levels]
     return json.dumps({
-        "format": "scenegen-surface/2",
+        "format": SURFACE_FORMAT,
+        "origin_lla": _origin_lla(scene),
         "side_m": meta["side_m"],
         "grid_n": n,
         "row0": meta.get("row0", "south"),
@@ -386,7 +446,8 @@ def tree_instances(scene: scene_model.SceneSpec) -> list[dict]:
 def build_world_sdf(scene: scene_model.SceneSpec, placed: list[PlacedBuilding],
                     grid, meta) -> tuple[str, dict]:
     origin_alt = scene.origin_alt_m
-    counts = {"buildings": 0, "building_overrides": 0, "vehicles": 0}
+    counts = {"extruded": 0, "floors": 0, "levels": 0,
+              "building_overrides": 0, "vehicles": 0}
 
     building_includes = []
     for entry in placed:
@@ -397,7 +458,8 @@ def build_world_sdf(scene: scene_model.SceneSpec, placed: list[PlacedBuilding],
                       entry.base_z, math.radians(entry.building.yaw_deg))))
             counts["building_overrides"] += 1
         else:
-            counts["buildings"] += 1
+            counts["extruded" if entry.building.extruded else "floors"] += 1
+            counts["levels"] += len(entry.levels)
 
     vehicle_includes = []
     for vehicle in scene.vehicles:
@@ -453,7 +515,7 @@ def build_world_sdf(scene: scene_model.SceneSpec, placed: list[PlacedBuilding],
                           rim_ground + FIDUCIAL_THICKNESS_M / 2.0 + 0.005)
 
     buildings_model = ""
-    if counts["buildings"]:
+    if counts["extruded"] or counts["floors"]:
         buildings_model = _include(f"{scene.name}_buildings",
                                    f"model://{scene.name}_buildings",
                                    _pose(0.0, 0.0, 0.0))
@@ -606,8 +668,9 @@ def write_buildings_model(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
                           clusters: list[BuildingCluster], scene_data_dir: Path,
                           scenes_dir: Path) -> dict:
     """The merged buildings as one static model: satellite-textured
-    envelope roofs, one flat wall gray per cluster. Returns numbers for
-    the build report."""
+    envelope roofs and floor tops, one flat wall gray per cluster over
+    the walls and the floor undersides. Returns numbers for the build
+    report."""
     model_name = f"{scene.name}_buildings"
     model_dir = _texture_dir(scenes_dir, model_name, scene, scene_data_dir)
 
@@ -615,14 +678,17 @@ def write_buildings_model(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
                                   texture="../materials/textures/satellite.jpg")]
     geometries = []
     triangles = 0
+    courtyard_holes = 0
     for cluster in clusters:
+        roof, walls, holes = cluster_mesh(cluster)
+        courtyard_holes += holes
         wall_id = f"{cluster.id}-wall"
         materials.append(collada.Material(id=wall_id, rgba=cluster.wall_rgba))
-        roof_points = cluster.roof.reshape(-1, 3)
-        wall_points = cluster.walls.reshape(-1, 3)
+        roof_points = roof.reshape(-1, 3)
+        wall_points = walls.reshape(-1, 3)
         positions = np.concatenate([roof_points, wall_points])
-        normals = np.concatenate([building_mesh.face_normals(cluster.roof),
-                                  building_mesh.face_normals(cluster.walls)])
+        normals = np.concatenate([building_mesh.face_normals(roof),
+                                  building_mesh.face_normals(walls)])
         # A footprint on the fetch margin can poke past the imagery crop.
         # Clamped coordinates smear the edge pixel over the overhang;
         # wrapped ones would paint the far side of the image onto the roof.
@@ -631,7 +697,7 @@ def write_buildings_model(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
             0.0, 1.0)
         uvs = np.concatenate([roof_uvs, np.zeros((wall_points.shape[0], 2))])
         indices = np.arange(positions.shape[0]).reshape(-1, 3)
-        roof_count = cluster.roof.shape[0]
+        roof_count = roof.shape[0]
         geometries.append(collada.Geometry(
             id=cluster.id, positions=positions, normals=normals, uvs=uvs,
             groups=[("satellite", indices[:roof_count]),
@@ -643,42 +709,83 @@ def write_buildings_model(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
                        f"Buildings of the {scene.name} scene, extruded from map "
                        f"footprints with the satellite image over the roofs. "
                        f"Generated by modules/scenegen.")
-    return {"holes": sum(cluster.holes for cluster in clusters),
-            "triangles": triangles}
+    return {"holes": courtyard_holes, "triangles": triangles}
+
+
+def _emitted_parts(part) -> list:
+    """One polygon as the payload carries it: the rings rounded to the
+    centimeter the file writes, then cleaned.
+
+    The rounding is what makes the cleaning necessary. An envelope
+    remnant can carry two vertices a few millimeters apart, and at
+    centimeter precision they land on one point and leave a spur that
+    doubles back along itself. building_mesh cleans a footprint the same
+    way before it clips ears, so the world mesh never met this; a reader
+    that triangulates the ring itself would. Cleaning can pinch a shape
+    into separate pieces, so this returns a list.
+    """
+    rounded = shapely.Polygon(
+        _rounded_ring(part.exterior.coords[:-1]),
+        [_rounded_ring(ring.coords[:-1]) for ring in part.interiors])
+    return [piece for piece in _polygon_parts(rounded.buffer(0))
+            if piece.area >= MIN_ROOF_PIECE_M2]
+
+
+def _footprint_color(image: np.ndarray, frame: geo.GeoFrame,
+                     scene: scene_model.SceneSpec, outer: list,
+                     holes: list) -> list:
+    """The mean satellite color over one footprint: what the imagery
+    shows where the surface stands. The footprint is triangulated and
+    subdivided first, so a large roof samples its whole area instead of
+    its corners, and a courtyard contributes nothing."""
+    points = building_mesh.subdivide(
+        building_mesh.roof_at(outer, holes, 0.0),
+        ROOF_SAMPLE_EDGE_M).reshape(-1, 3)[:, :2]
+    if not points.size:
+        points = np.array(outer)
+    pixels = terrain_mesh.imagery_pixels(frame, scene.imagery, points)
+    columns = np.clip(pixels[:, 0].astype(int), 0, image.shape[1] - 1)
+    rows = np.clip(pixels[:, 1].astype(int), 0, image.shape[0] - 1)
+    return [round(float(channel), 3)
+            for channel in image[rows, columns].mean(axis=0) / 255.0]
 
 
 def buildings_viz_json(scene: scene_model.SceneSpec, frame: geo.GeoFrame,
                        clusters: list[BuildingCluster],
                        scene_data_dir: Path) -> str:
-    """The Foxglove payload: building triangles in the map frame, roofs
-    with a satellite color per vertex, walls in their flat gray.
-    sim_bridge/scene_buildings.py turns this into markers; nothing else
-    reads it. Buildings only, on purpose: the 3D panel shows the drone's
-    surroundings, not the vehicle props."""
+    """The Foxglove payload: every building as a footprint in the map
+    frame and the height of each horizontal surface it carries, with the
+    satellite color that surface wears. The reader builds the geometry,
+    so a floor draws as a slab and an extruded building as a solid down
+    to the ground. MAVInsight's buildings_viz turns this into markers;
+    nothing else reads it. Buildings only, on purpose: the 3D panel shows
+    the drone's surroundings, not the vehicle props.
+
+    Rings are open, simple, counterclockwise outside and clockwise for a
+    hole. `origin_lla` anchors the map frame the same way the surface
+    file does, for a viewer whose frame origin is not the scene center. A
+    footprint the square cuts in two writes one entry per piece, and the
+    later pieces number their id, so an id names exactly one shape."""
     image = np.asarray(
         Image.open(scene_data_dir / scene.imagery["file"]).convert("RGB"))
     entries = []
     for cluster in clusters:
-        roof_points = building_mesh.subdivide(
-            cluster.roof, ROOF_SAMPLE_EDGE_M).reshape(-1, 3)
-        pixels = terrain_mesh.imagery_pixels(frame, scene.imagery,
-                                             roof_points[:, :2])
-        columns = np.clip(pixels[:, 0].astype(int), 0, image.shape[1] - 1)
-        rows = np.clip(pixels[:, 1].astype(int), 0, image.shape[0] - 1)
-        roof_colors = image[rows, columns] / 255.0
-        wall_points = cluster.walls.reshape(-1, 3)
-        entries.append({
-            "id": cluster.id,
-            "name": cluster.name,
-            "roof": {"points": [[round(float(v), 2) for v in p]
-                                for p in roof_points],
-                     "colors": [[round(float(c), 3) for c in color]
-                                for color in roof_colors]},
-            "walls": {"points": [[round(float(v), 2) for v in p]
-                                 for p in wall_points],
-                      "color": [round(c, 3) for c in cluster.wall_rgba[:3]]}})
-    return json.dumps({"format": "scenegen-buildings/1", "frame": "map",
-                       "buildings": entries})
+        for entry, parts in cluster.members:
+            shapes = [shape for part in parts for shape in _emitted_parts(part)]
+            for index, shape in enumerate(shapes):
+                outer, holes = _oriented_rings(shape)
+                color = _footprint_color(image, frame, scene, outer, holes)
+                entries.append({
+                    "id": entry.building.id if index == 0
+                    else f"{entry.building.id}#{index + 1}",
+                    "name": entry.building.name,
+                    "extruded": entry.building.extruded,
+                    "footprint": _rounded_ring(outer),
+                    "holes": [_rounded_ring(ring) for ring in holes],
+                    "levels": [{"z": round(level_z, 2), "color": color}
+                               for level_z in entry.levels]})
+    return json.dumps({"format": BUILDINGS_FORMAT, "frame": "map",
+                       "origin_lla": _origin_lla(scene), "buildings": entries})
 
 
 def run(scene_data_dir: Path, scenes_dir: Path) -> int:
@@ -757,9 +864,10 @@ def run(scene_data_dir: Path, scenes_dir: Path) -> int:
               f"terrain    {mesh_stats['vertices']} vertices, "
               f"{mesh_stats['triangles']} triangles, "
               f"z {mesh_stats['z_min']} to {mesh_stats['z_max']} m",
-              f"buildings  {counts['buildings']} extruded into "
-              f"{len(clusters)} merged buildings "
-              f"({building_stats['holes']} courtyard holes, "
+              f"buildings  {counts['extruded']} extruded and "
+              f"{counts['floors']} floors into {len(clusters)} merged "
+              f"buildings ({counts['levels']} levels, "
+              f"{building_stats['holes']} courtyard holes, "
               f"{building_stats['triangles']} triangles), "
               f"{counts['building_overrides']} model overrides, "
               f"{dropped_outside} outside the square dropped",
@@ -775,12 +883,11 @@ def run(scene_data_dir: Path, scenes_dir: Path) -> int:
     if abs(mesh_stats["z_min"]) > 5 or abs(mesh_stats["z_max"]) > 5:
         report.append("")
         report.append(f"NOTE: terrain spans {mesh_stats['z_min']} to "
-                      f"{mesh_stats['z_max']} m around the origin. With "
-                      "LOCALIZATION_MODE=plane the ROS localizers project "
-                      "onto a flat plane at the takeoff altitude; expect "
-                      "offsets over ground far above or below the takeoff "
-                      "point. LOCALIZATION_MODE=scene reads the surface "
-                      "file instead and follows the terrain and the roofs.")
+                      f"{mesh_stats['z_max']} m around the origin. Without "
+                      "the surface file a localization ray meets a flat "
+                      "plane, so expect offsets over ground far above or "
+                      "below the takeoff point. tf_loc reads this surface "
+                      "and follows the terrain and the roofs instead.")
     text = "\n".join(report)
     (scene_data_dir / "build_report.txt").write_text(text + "\n")
     print(text)

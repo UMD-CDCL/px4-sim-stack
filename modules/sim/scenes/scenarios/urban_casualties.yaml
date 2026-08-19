@@ -9,7 +9,7 @@ description: Six people around the blocks, two of them out of sight from above.
 #
 # A Fuel URI downloads on first use and then comes from the cache volume.
 # To use your own mesh, put it in modules/sim/scenes/models/<name>/ and write
-# uri: model://<name>. See docs/scenarios.md.
+# uri: model://<name>. See docs/development.md.
 
 entities:
   # ------------------------------------------------ in the open, easy targets

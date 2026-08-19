@@ -1,23 +1,53 @@
 #!/usr/bin/env bash
 # Start order: build PX4 if necessary, start the Gazebo server, start the
-# camera encoders, place the scenario targets, then hand the terminal to the
-# PX4 shell.
+# camera encoders, place the scenario targets, then start one PX4 SITL instance
+# for each vehicle in the fleet.
+#
+# Every vehicle shares this container, because PX4 finds Gazebo over
+# gz-transport, which discovers its peers with UDP multicast. One container
+# keeps that on the loopback where it always works.
 set -euo pipefail
 
 PX4_DIR=${PX4_DIR:-/px4}
 SCENES_DIR=${SCENES_DIR:-/scenes}
 SCENE=${SCENE:-recon_field}
-VEHICLE=${VEHICLE:-x500_recon}
+# One entry for each vehicle, in UAS number order. uas11 is the first.
+# The camera fields of view are degrees, and they belong to the vehicle rather
+# than to the mark: uas13 and uas14 are both v2 and carry different lenses.
+# .env.example says where each number came from.
+UAS_FLEET=${UAS_FLEET:-"chimera_v3 chimera_v3 chimera_v2 chimera_v2"}
+# Simulated vehicles are numbered from 11, so they never take a system id, a
+# port, a DDS domain or an address from a real one. Do not set this to 0: PX4
+# instance 0 puts our rangefinder link on 14590, which its own offboard link
+# already holds, and that link then fails to start.
+UAS_BASE=${UAS_BASE:-10}
+UAS_GIMBAL_HFOV_DEG=${UAS_GIMBAL_HFOV_DEG:-"27.45 27.45 85.25 25.98"}
+UAS_THERMAL_HFOV_DEG=${UAS_THERMAL_HFOV_DEG:-"29.75 29.75 31.03 29.75"}
+UAS_DOWN_HFOV_DEG=${UAS_DOWN_HFOV_DEG:-"25.98 25.98 25.98 25.98"}
+UAS_SPACING_M=${UAS_SPACING_M:-1}
 SCENARIO=${SCENARIO:-}
 GZ_GUI=${GZ_GUI:-0}
 BUILD_JOBS=${BUILD_JOBS:-$(nproc)}
 VIDEO_SINK_BASE=${VIDEO_SINK_BASE:-rtsp://video-router:8554}
+MAVLINK_ROUTER_IP_BASE=${MAVLINK_ROUTER_IP_BASE:-10.200.142.2}
+MAVLINK_ROUTER_PORT=${MAVLINK_ROUTER_PORT:-14545}
+LOG_DIR=/px4-logs
 BUILD_DIR=$PX4_DIR/build/px4_sitl_default
 MERGED=/tmp/scenes
+STREAM_CONF_DIR=/tmp/streams
 
 log()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[33m    %s\033[0m\n' "$*"; }
 die()  { printf '\033[31m!!! %s\033[0m\n' "$*" >&2; exit 1; }
+
+read -r -a FLEET <<< "$UAS_FLEET"
+read -r -a GIMBAL_HFOV <<< "$UAS_GIMBAL_HFOV_DEG"
+read -r -a THERMAL_HFOV <<< "$UAS_THERMAL_HFOV_DEG"
+read -r -a DOWN_HFOV <<< "$UAS_DOWN_HFOV_DEG"
+[ ${#FLEET[@]} -ge 1 ] || die "UAS_FLEET is empty. Give one model name for each vehicle."
+[ ${#FLEET[@]} -le 9 ] || die "UAS_FLEET has ${#FLEET[@]} vehicles. The simulator numbers them 11 to 19."
+
+radians() { awk -v deg="$1" 'BEGIN { printf "%.6f", deg * atan2(0, -1) / 180 }'; }
 
 children=()
 cleanup() {
@@ -91,7 +121,45 @@ fi
 
 WORLD_FILE="$MERGED/worlds/$SCENE.sdf"
 [ -f "$WORLD_FILE" ] || die "No world named '$SCENE'. Available: $(cd "$MERGED/worlds" && ls *.sdf | sed 's/\.sdf//' | tr '\n' ' ')"
-[ -d "$MERGED/models/$VEHICLE" ] || die "No vehicle model named '$VEHICLE' in $MERGED/models"
+
+# One airframe model for each vehicle, rendered from the mark's template. The
+# camera field of view is the reason: it belongs to the vehicle, and SDF has no
+# way to override a sensor from outside the file that declares it. PX4 spawns
+# ${PX4_GZ_MODELS}/<model>/model.sdf and names the entity <model>_<instance>,
+# so uas11 becomes the Gazebo model uas11_10.
+for index in "${!FLEET[@]}"; do
+	model=${FLEET[$index]}
+	template="$SCENES_DIR/models/$model/model.sdf"
+	[ -f "$template" ] || die "No vehicle model named '$model' in $SCENES_DIR/models"
+
+	uas_num=$((UAS_BASE + index + 1))
+	rendered="$MERGED/models/uas$uas_num"
+	rm -rf "$rendered"
+	mkdir -p "$rendered"
+
+	GIMBAL_HFOV_RAD=$(radians "${GIMBAL_HFOV[$index]:-${GIMBAL_HFOV[0]}}")
+	THERMAL_HFOV_RAD=$(radians "${THERMAL_HFOV[$index]:-${THERMAL_HFOV[0]}}")
+	DOWN_HFOV_RAD=$(radians "${DOWN_HFOV[$index]:-${DOWN_HFOV[0]}}")
+	export GIMBAL_HFOV_RAD THERMAL_HFOV_RAD DOWN_HFOV_RAD
+	envsubst '${GIMBAL_HFOV_RAD} ${THERMAL_HFOV_RAD} ${DOWN_HFOV_RAD}' \
+		< "$template" > "$rendered/model.sdf"
+	printf '<?xml version="1.0"?>\n<model><name>uas%s</name><version>1.0</version>\n<sdf version="1.9">model.sdf</sdf>\n<description>%s for uas%s, rendered by the sim entrypoint.</description>\n</model>\n' \
+		"$uas_num" "$model" "$uas_num" > "$rendered/model.config"
+
+	# The template itself carries ${...} where a number belongs, so take it out
+	# of the model path. Only the rendered copies are spawnable.
+	rm -f "$MERGED/models/$model"
+
+	# An airframe merges chimera_common, which merges x500, the gimbal and the
+	# LW20. A model that libsdformat cannot expand does not fail loudly: PX4
+	# asks Gazebo to spawn it, Gazebo declines, and the vehicle simply never
+	# appears. Expanding it here turns that into one message.
+	if ! sdf_errors=$(gz sdf -p "$rendered/model.sdf" 2>&1 >/dev/null); then
+		warn "uas$uas_num: Gazebo cannot expand $model. It will not spawn."
+		warn "$sdf_errors"
+	fi
+done
+unset GIMBAL_HFOV_RAD THERMAL_HFOV_RAD DOWN_HFOV_RAD
 
 # PX4 addresses the world by the name inside the file, not by the file name.
 # A mismatch produces a silent hang, so check it here.
@@ -101,7 +169,7 @@ if [ "$world_name" != "$SCENE" ]; then
 fi
 
 # ------------------------------------------------------- 4. the Gazebo server
-log "Starting Gazebo Harmonic, world '$SCENE'"
+log "Starting Gazebo Harmonic, world '$SCENE', ${#FLEET[@]} vehicles"
 gz sim -r -s -v "${GZ_VERBOSE:-1}" "$WORLD_FILE" &
 children+=($!)
 
@@ -124,36 +192,47 @@ if [ "$GZ_GUI" = "1" ]; then
 fi
 
 # ------------------------------------------------------ 5. the camera encoders
-STREAMS_FILE="$SCENES_DIR/models/$VEHICLE/streams.conf"
-if [ -f "$STREAMS_FILE" ]; then
+mkdir -p "$STREAM_CONF_DIR"
+for index in "${!FLEET[@]}"; do
+	model=${FLEET[$index]}
+	# Simulated vehicles are 11 upwards, so a simulator can fly beside the real
+	# fleet without taking a system id from it. PX4 gives MAV_SYS_ID =
+	# instance + 1, so the instance is UAS_NUM - 1.
+	export UAS_NUM=$((UAS_BASE + index + 1))
+	export GZ_MODEL="uas${UAS_NUM}_$((UAS_NUM - 1))"
+
+	template="$SCENES_DIR/models/$model/streams.conf"
+	if [ ! -f "$template" ]; then
+		warn "No streams.conf for '$model'. uas$UAS_NUM publishes no video."
+		continue
+	fi
+
+	# streams.conf names the stream after the vehicle and matches the Gazebo
+	# model instance, so one file serves every vehicle of that model.
+	conf="$STREAM_CONF_DIR/uas$UAS_NUM.conf"
+	envsubst '${UAS_NUM} ${GZ_MODEL}' < "$template" > "$conf"
+
 	args=(--sink-base "$VIDEO_SINK_BASE")
-	while read -r name regex bitrate fps; do
+	while read -r name regex bitrate fps width height; do
 		case "${name:-}" in ''|\#*) continue ;; esac
-		args+=(--stream "name=$name,regex=$regex,bitrate=${bitrate:-4000},fps=${fps:-30}")
-	done < "$STREAMS_FILE"
+		spec="name=$name,regex=$regex,bitrate=${bitrate:-4000},fps=${fps:-30}"
+		case "${width:--}" in -|'') ;; *) spec="$spec,width=$width,height=$height" ;; esac
+		args+=(--stream "$spec")
+	done < "$conf"
+
 	# The streamer probes the encoders and takes the first that works. Set
-	# VIDEO_ENCODER to a GStreamer fragment to skip that and name your own:
-	#   VIDEO_ENCODER='x264enc tune=zerolatency speed-preset=ultrafast bitrate=4000'
+	# VIDEO_ENCODER to a GStreamer fragment to skip that and name your own, and
+	# VIDEO_PARSER to the parser that fragment's output needs:
+	#   VIDEO_ENCODER='x264enc tune=zerolatency bitrate=4000' VIDEO_PARSER=h264parse
 	if [ -n "${VIDEO_ENCODER:-}" ]; then
-		args+=(--encoder "$VIDEO_ENCODER")
+		args+=(--encoder "$VIDEO_ENCODER" --parser "${VIDEO_PARSER:-h264parse}")
 	fi
 
-	# The capture-time side channel. RTSP carries no usable capture time, so
-	# the streamer reports one datagram for each frame and this forwards them
-	# to the message bus. See modules/sim/frame_clock.py.
-	if [ "${FRAME_CLOCK:-1}" = "1" ]; then
-		log "Starting the frame clock on udp/${FRAME_CLOCK_PORT:-5599}"
-		python3 /opt/sim/frame_clock.py --port "${FRAME_CLOCK_PORT:-5599}" &
-		children+=($!)
-		args+=(--frame-clock "127.0.0.1:${FRAME_CLOCK_PORT:-5599}")
-	fi
-
-	log "Starting the camera encoders from $(basename "$STREAMS_FILE")"
+	log "Starting the uas$UAS_NUM camera encoders from $model/streams.conf"
 	gz_video_streamer "${args[@]}" &
 	children+=($!)
-else
-	warn "No streams.conf for '$VEHICLE'. This vehicle publishes no video."
-fi
+done
+unset UAS_NUM GZ_MODEL
 
 # -------------------------------------------------------- 6. the scenario props
 if [ -n "$SCENARIO" ] && [ -f "$SCENES_DIR/scenarios/$SCENARIO.yaml" ]; then
@@ -165,35 +244,75 @@ elif [ -n "$SCENARIO" ]; then
 	warn "No scenario file at $SCENES_DIR/scenarios/$SCENARIO.yaml"
 fi
 
-# --------------------------------------------------------------- 7. PX4 itself
-# PX4 runs in standalone mode: Gazebo already exists, so PX4 spawns the vehicle
-# into the running world and attaches its bridge.
-mkdir -p /px4-logs
-ln -sfn /px4-logs "$BUILD_DIR/rootfs/log" 2>/dev/null || true
-
-log "Starting PX4 SITL: model $PX4_SIM_MODEL, airframe $PX4_SYS_AUTOSTART"
-echo "    Uplink to the hub: ${MAVLINK_HUB_IP:-unset}:${MAVLINK_HUB_PORT:-unset}"
-echo "    The pxh> console is this container's terminal."
-echo "    Attach with: make px4-console      Detach with: Ctrl-P Ctrl-Q"
-cd "$BUILD_DIR/rootfs"
-
-# -s runs our startup script instead of the stock one. Ours sources the stock
-# script first, then adds the link that pushes to the hub. See px4-rcS for why.
+# --------------------------------------------------------------- 7. the fleet
+# PX4 runs in standalone mode: Gazebo already exists, so each instance spawns
+# its own vehicle into the running world and attaches its bridge.
 #
-# PX4 needs the trailing rootfs path when you give it -s. PX4 links etc/ into
-# the working directory from that path. It falls back to its own build
-# directory only without -s. With -s and no path, px4-rcS cannot find the
-# stock rcS.
-PX4_RCS=${PX4_RCS:-/opt/sim/px4-rcS}
-if [ -f "$PX4_RCS" ] && [ -n "${MAVLINK_HUB_IP:-}" ]; then
-	# PX4 drops the boot-time stream rates when a ground station joins the
-	# link, which starves the camera frame. See hold-stream-rates.sh.
+# `px4 -i <instance>` gives MAV_SYS_ID = instance + 1 and names the Gazebo model
+# <model>_<instance>, which is the whole of the identity contract.
+#
+# uas11 keeps the container's terminal, so `./px4sim console` still reaches a
+# pxh> prompt. Every other vehicle runs with -d and logs to a file.
+start_vehicle() {
+	local index=$1 uas_num=$2 model=$3
+	# PX4 sets MAV_SYS_ID to the instance plus one, so the instance is the
+	# vehicle number minus one. With UAS_BASE at 10 that is 10 upwards, and the
+	# fleet's own instances 0 to 8 stay free.
+	local instance=$((uas_num - 1))
+	local work="$BUILD_DIR/rootfs/$instance"
+
+	mkdir -p "$work" "$LOG_DIR/uas$uas_num"
+	ln -sfn "$LOG_DIR/uas$uas_num" "$work/log" 2>/dev/null || true
+
+	export PX4_SIM_MODEL="gz_uas$uas_num"
+	export PX4_GZ_STANDALONE=1
+	export PX4_GZ_MODEL_POSE="0,$(echo "$index * $UAS_SPACING_M" | bc),0,0,0,0"
+	export MAVLINK_ROUTER_IP="${MAVLINK_ROUTER_IP_BASE}${uas_num}"
+	export MAVLINK_ROUTER_PORT
+
+	# PX4 needs the trailing rootfs path when you give it -s. PX4 links etc/
+	# into the working directory from that path. It falls back to its own build
+	# directory only without -s, and with -s and no path px4-rcS cannot find the
+	# stock rcS.
+	local px4=("$BUILD_DIR/bin/px4" -i "$instance" -w "$work")
+	[ "$index" = 0 ] || px4+=(-d)
+	px4+=(-s "${PX4_RCS:-/opt/sim/px4-rcS}" "$BUILD_DIR/etc")
+
 	if [ "${HOLD_STREAM_RATES:-1}" = "1" ] && [ -x /opt/sim/hold-stream-rates.sh ]; then
-		PX4_RCS="$PX4_RCS" PX4_BUILD_DIR="$BUILD_DIR" \
-			/opt/sim/hold-stream-rates.sh &
+		# PX4 drops the boot-time stream rates when a ground station joins the
+		# link, which starves the camera frame. See hold-stream-rates.sh.
+		PX4_RCS="${PX4_RCS:-/opt/sim/px4-rcS}" PX4_BUILD_DIR="$BUILD_DIR" \
+			PX4_INSTANCE="$instance" /opt/sim/hold-stream-rates.sh &
+		children+=($!)
 	fi
-	exec "$BUILD_DIR/bin/px4" -s "$PX4_RCS" "$BUILD_DIR/etc"
-fi
-warn "No PX4_RCS or no MAVLINK_HUB_IP. Using the stock PX4 startup."
-warn "Telemetry then depends on the hub keepalive, and a hub restart needs a sim restart."
-exec "$BUILD_DIR/bin/px4"
+
+	if [ "${GIMBAL_RANGEFINDER:-1}" = "1" ]; then
+		# The gimbal laser reaches MAVROS as gimbal_lidar_50m only if it arrives
+		# as DISTANCE_SENSOR id 1. See modules/sim/gimbal_rangefinder.py.
+		python3 /opt/sim/gimbal_rangefinder.py \
+			--world "$SCENE" --model "uas${uas_num}_${instance}" --sysid "$uas_num" \
+			--px4-port $((14590 + instance)) \
+			>> "$LOG_DIR/uas$uas_num/gimbal-rangefinder.log" 2>&1 &
+		children+=($!)
+	fi
+
+	if [ "$index" = 0 ]; then
+		log "Starting uas$uas_num: $model, system id $uas_num, router ${MAVLINK_ROUTER_IP}:${MAVLINK_ROUTER_PORT}"
+		echo "    The pxh> console for uas$uas_num is this container's terminal."
+		echo "    Attach with: ./px4sim console      Detach with: Ctrl-P Ctrl-Q"
+		cd "$work"
+		exec "${px4[@]}"
+	fi
+
+	log "Starting uas$uas_num: $model, system id $uas_num, router ${MAVLINK_ROUTER_IP}:${MAVLINK_ROUTER_PORT}"
+	echo "    Log: logs/px4/uas$uas_num/px4.log"
+	( cd "$work" && "${px4[@]}" >> "$LOG_DIR/uas$uas_num/px4.log" 2>&1 ) &
+	children+=($!)
+	# Each instance spawns its model through the same Gazebo service. Let one
+	# finish before the next asks.
+	sleep "${UAS_START_DELAY_S:-4}"
+}
+
+for index in $(seq $(( ${#FLEET[@]} - 1 )) -1 0); do
+	start_vehicle "$index" $((UAS_BASE + index + 1)) "${FLEET[$index]}"
+done

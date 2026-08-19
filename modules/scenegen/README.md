@@ -80,9 +80,9 @@ those lines falls back to the world's own `<spherical_coordinates>`.
 ./px4sim scenario              # place the targets, no restart
 ```
 
-The ros service reads the fiducial values when it starts. After you
-switch to a scenario with a different fiducial, restart it:
-`./px4sim restart ros`.
+The companion and the ground station link the scene's surface at start.
+After a change of scene, recreate them:
+`docker compose up -d --force-recreate onboard11 offboard`.
 
 ## The editor
 
@@ -121,6 +121,12 @@ Everything is graphical. You never edit a file to fix the scene.
   removes a hand-placed building and excludes an OSM one, whose map data
   cannot be fetched again without recreating the scene; the panel
   checkbox puts it back.
+- **Floor only** in the building panel makes the building a set of
+  floors: no walls, no contact with the ground, and one thin slab at
+  each altitude in the list below the checkbox. Type more than one
+  altitude, separated by commas, to stack floors over the terrain. A
+  floor draws blue on the map. The group panel turns a whole selection
+  into floors at one time.
 - `+ Target`: click to place a ground-truth casualty (green circle with
   its name). Drag to move it; the panel sets name, model, the floor it
   stands on (the terrain, or the building under it when snapped), an
@@ -161,9 +167,9 @@ mesh with that model.
 
 The Foxglove 3D panel shows the same buildings. The build writes
 `worlds/<name>_buildings.json`, and the `scene_buildings` node publishes
-it as one latched MarkerArray on `/scene/buildings`, with the roofs in
-their satellite colors. Buildings only: vehicle props stay out of the
-panel on purpose.
+it as one latched MarkerArray on `/scene/buildings`. Each level wears
+the mean satellite color of the footprint under it. Buildings only:
+vehicle props stay out of the panel on purpose.
 
 Footprints that overlap merge into one building. The map often draws a
 tower and its podium as separate overlapping outlines; merged, they get
@@ -178,6 +184,65 @@ building has no map height and no button.
 A scene fetched before courtyard support holds no holes in `scene.json`.
 `create --force` refetches the footprints, but it also discards your
 edits, so keep the scene as it is unless a courtyard matters.
+
+### Floors
+
+A building is a box from the ground to its roof, or a set of floors. A
+floor has no walls and never touches the ground. It is one thin slab at
+each altitude you give it. Only the horizontal surfaces are important
+for localization, so a structure with several storeys can be a stack of
+floors over the terrain.
+
+`extruded` in `scene.json` selects between the two. A building with
+`extruded` true is a box, and `height_m` gives its one level, the roof
+over the ground under the footprint. A building with `extruded` false is
+a set of floors, and `levels` gives the altitude of each slab. A level
+altitude is scene z: meters above the scene origin, not meters above the
+ground under it. This is the same z the surface file and the world use.
+
+A building from before floors has neither field. It loads as an extruded
+building with one level, and it builds as it did before.
+
+Floors merge with nothing. Two boxes that overlap become one building
+with one roof over each point, but two floors over one point are the
+purpose of a floor, so the build keeps each of them.
+
+## The localization surface
+
+`worlds/<name>_surface.json` is what a localizer intersects a detection
+ray with, in place of a flat plane. It holds the terrain height grid and
+one horizontal roof polygon for each level of each building, with
+courtyard holes cut out. Walls stay out: the surface holds only what a
+camera above looks down onto, so a ray aimed at a wall lands on the
+terrain behind it.
+
+A building with several levels writes the same footprint one time for
+each level, at that level's height. Both readers take the nearest
+surface below the ray, so a stack of floors needs no change to the
+format.
+
+The file carries `origin_lla`, the point on the Earth that scene ENU
+(0, 0, 0) sits at. Every coordinate in the file is ENU meters from that
+point, and every height is meters above its altitude. The anchor is what
+makes the file usable off the simulator. A vehicle knows only where its
+own ENU frame started, which on an aircraft is wherever it booted, and
+without the anchor it cannot place the data. The simulator hid the
+problem because it makes PX4 home equal the scene center.
+
+One reader: `umd_uas/terrain.py` in 5g_drone, on the vehicle and on the
+ground. The entry point of each container links the surface for `SCENE`
+into `TERRAIN_DIR`, and `tf_loc` and the footprint node read it from
+there.
+
+The format is `scenegen-surface/3`. Format 3 adds `origin_lla` to format
+2 and changes nothing else.
+
+`worlds/<name>_buildings.json`, the Foxglove payload, is
+`scenegen-buildings/2`. Format 2 replaces the triangle lists of format 1
+with a footprint, its holes, and the height and color of each level. The
+reader makes the geometry, so a box draws down to the ground and a floor
+draws as a slab in the air. The file carries the same `origin_lla`
+anchor as the surface.
 
 ## Trees
 

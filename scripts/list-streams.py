@@ -46,8 +46,8 @@ def main() -> int:
 
     if live == 0:
         print()
-        print("  Nothing is publishing. The simulator supplies gimbal and nadir,")
-        print("  so check it with:  ./px4sim logs sim")
+        print("  Nothing is publishing. Every vehicle stream comes from the")
+        print("  simulator, so check it with:  ./px4sim logs sim")
     return 0
 
 

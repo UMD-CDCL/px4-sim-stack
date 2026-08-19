@@ -99,6 +99,13 @@ class Building:
     name: str = ""
     outline_m: list = field(default_factory=list)   # [[east, north], ...] closed
     holes_m: list = field(default_factory=list)     # inner rings, same shape
+    # A floor building is horizontal surfaces alone: no walls, and it
+    # never reaches the ground. levels holds those surfaces in scene z,
+    # meters above the origin altitude, the same z the surface file and
+    # the world use. Empty means one level, the roof at height_m over the
+    # ground under the footprint, which is every scene from before floors.
+    extruded: bool = True
+    levels: list = field(default_factory=list)      # [scene z, ...]
     source: str = "osm"
     model_uri: str | None = None  # a higher-detail stand-in replaces the box
     enabled: bool = True
@@ -287,8 +294,8 @@ def area_tree_points(area: TreeArea) -> list:
 
 
 def scoreable_name(name: str) -> str:
-    """The ROS ground-truth scorer counts only entity names that carry
-    "person" or "casualty" (sim_bridge/ground_truth.py). Fix any other."""
+    """The ground-truth publisher counts only entity names that carry
+    "person" or "casualty" (umd_uas/sim_ground_truth.py). Fix any other."""
     return name if ("casualty" in name or "person" in name) else f"casualty_{name}"
 
 
@@ -428,6 +435,19 @@ def placed_footprint(building: Building) -> tuple[list, list]:
             placed_hole.reverse()
         holes.append(placed_hole)
     return outer, holes
+
+
+def building_levels(building: Building, base_z: float) -> list[float]:
+    """The building's horizontal surfaces, scene z, lowest first.
+
+    base_z is the ground under the footprint, which the roof of an
+    extruded building stands on. A building that states its own levels
+    ignores it: a floor hangs at the altitude it names, whatever the
+    terrain does under it.
+    """
+    if building.levels:
+        return sorted({float(z) for z in building.levels})
+    return [base_z + building.height_m]
 
 
 def vegetation_from_osm(raw_trees: list, raw_areas: list, frame,

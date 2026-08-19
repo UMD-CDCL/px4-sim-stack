@@ -34,9 +34,11 @@ modules/sim/scenes/scenarios/*_casualties.yaml
 !modules/sim/scenes/worlds/recon_field.sdf
 !modules/sim/scenes/scenarios/urban_casualties.yaml
 
-# Seeded from the DeepStream image on first start, and the TensorRT engine is
-# rebuilt for each GPU, driver and TensorRT version. Neither belongs in git.
-modules/perception/models/Primary_Detector/
+# The detector weights, and the TensorRT engine nvinfer builds next to them.
+# The engine is rebuilt for each GPU, driver and TensorRT version, so neither
+# belongs in git. ONBOARD_MODEL_DIR names the directory.
+modules/onboard/models/*
+!modules/onboard/models/README.md
 *.engine
 
 # Written by ./px4sim: the origin of the current scene and scenario,

@@ -1,0 +1,54 @@
+# mavlink-router configuration for one simulated vehicle.
+#
+# Taken from chimera-deploy/remote/main.conf.template, which is what runs on a
+# Chimera companion computer. envsubst fills in UAS_NUM, GCS_ADDRESS,
+# ONBOARD_ADDRESS and PX4_UPLINK_PORT.
+#
+# Two endpoints differ from the aircraft, and both differ because the aircraft
+# is not here:
+#
+#   - The aircraft reads the autopilot from [UartEndpoint alpha] on
+#     /dev/ttyTHS1. There is no serial port, so PX4 SITL pushes into a UDP
+#     server instead. See modules/sim/px4-rcS for why PX4 speaks first.
+#   - The aircraft sends the onboard endpoint to 127.0.0.1, because MAVROS runs
+#     in the same network namespace. Here the companion stack is another
+#     container, so the address is a parameter. The port stays 14402, and every
+#     vehicle uses it, because every container has its own namespace.
+#
+# Everything the contract fixes is unchanged: port 14550 + UAS_NUM for the ground
+# station, 14402 for the companion, TCP 5760 for tools, and AllowSrcSysIn on
+# both filtered endpoints. The entrypoint appends one more endpoint when
+# QGC_ADDRESS is set, because QGroundControl autoconnects on 14550 and nothing
+# else in this stack pushes there.
+
+[General]
+TcpServerPort = 5760
+ReportStats = false
+DebugLogLevel = info
+
+[UdpEndpoint px4]
+Mode = Server
+Address = 0.0.0.0
+Port = ${PX4_UPLINK_PORT}
+
+[UdpEndpoint alpha]
+Mode = Normal
+Address = ${GCS_ADDRESS}
+Port = ${GCS_PORT}
+AllowSrcSysIn = ${UAS_NUM},255
+
+[UdpEndpoint ros]
+Mode = Normal
+Address = ${ONBOARD_ADDRESS}
+Port = 14402
+AllowSrcSysIn = ${UAS_NUM},255
+
+# A private endpoint for keepalive.py. It gets its own port so the heartbeat
+# never competes with a real client, and it reads only HEARTBEAT back. 14599 is
+# clear of 14551 to 14559, which is what the ground station endpoint above
+# resolves to across the fleet.
+[UdpEndpoint keepalive]
+Mode = Server
+Address = 127.0.0.1
+Port = 14599
+AllowMsgIdOut = 0

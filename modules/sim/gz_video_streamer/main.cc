@@ -1,4 +1,4 @@
-// gz_video_streamer - Gazebo camera topics to H.264 video streams.
+// gz_video_streamer - Gazebo camera topics to H.265 video streams.
 //
 // This program subscribes to gz-transport image topics, encodes each one with
 // GStreamer, and publishes it to the video router. It is a plain gz-transport
@@ -8,17 +8,16 @@
 // PX4 ships a similar plugin, but that one binds to the first camera it finds.
 // This program handles one stream for each camera.
 //
-// It also reports, for every frame it encodes, the wall-clock time at which
-// Gazebo produced that frame. H.264 over RTSP carries no usable capture time:
-// RTCP sender reports do not survive the relay, and DeepStream stamps its
-// output at inference time, tens of milliseconds later. Anything that localizes
-// a detection needs the capture time instead, so the streamer sends it out of
-// band as one small UDP datagram for each frame.
+// The fielded aircraft encodes H.265 CBR with nvv4l2h265enc, so this does the
+// same wherever the machine can. A stream may also carry a width and a height,
+// which rescales the encoder input: one camera render then feeds a full stream
+// and the low-rate stream that crosses the radio link, at one encode each and
+// no second render.
 //
 // Usage:
 //   gz_video_streamer --sink-base rtsp://video-router:8554 \
-//       --frame-clock 127.0.0.1:5599 \
-//       --stream name=gimbal,regex=.*/camera_link/sensor/camera/image$,bitrate=4000,fps=30
+//       --stream name=rgb1,regex=.*/camera_link/sensor/camera/image$,bitrate=8000,fps=15 \
+//       --stream name=rgbl1,regex=.*/camera_link/sensor/camera/image$,bitrate=1000,fps=15,width=640,height=360
 //
 // Copyright (c) 2026. BSD 3-Clause, to match the PX4 plugin it takes its
 // pipeline shape from.
@@ -28,11 +27,6 @@
 
 #include <gz/msgs/image.pb.h>
 #include <gz/transport/Node.hh>
-
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
 
 #include <atomic>
 #include <chrono>
@@ -86,12 +80,12 @@ bool HaveFactory(const char *name) {
 // through the real element and keep only what reaches end of stream. The shape
 // below matches BuildLocked, because negotiation is part of what is being
 // tested and a probe that converts differently answers a different question.
-bool EncoderWorks(const std::string &fragment) {
+bool EncoderWorks(const std::string &fragment, const char *parser) {
   const std::string desc =
       "videotestsrc num-buffers=5 ! video/x-raw,format=RGB,width=640,height=480"
-      " ! queue ! videoconvert n-threads=2 ! videorate drop-only=true"
+      " ! queue ! videoconvert n-threads=2 ! videorate drop-only=true ! videoscale"
       " ! video/x-raw,format={ NV12, I420 },framerate=15/1 ! " +
-      fragment + " ! h264parse ! fakesink";
+      fragment + " ! " + parser + " ! fakesink";
 
   GError *err = nullptr;
   GstElement *pipeline = gst_parse_launch(desc.c_str(), &err);
@@ -114,26 +108,37 @@ bool EncoderWorks(const std::string &fragment) {
 }
 
 // The encoders to try, best first. Each one takes bitrate in kbit/s, which is
-// added when the fragment is built.
+// added when the fragment is built, and names the parser its output needs.
+//
+// H.265 first, because that is what the aircraft sends. The H.264 entries are
+// the floor: an RTSP reader picks its depayloader from the caps it discovers,
+// so a machine with no H.265 encoder still serves every consumer.
 struct EncoderChoice {
   const char *element;
   const char *options;
+  const char *parser;
   bool needs_cuda;
   const char *label;
 };
 
 const EncoderChoice kEncoders[] = {
-    // The current NVENC element. It takes the p1-p7 presets with a separate
+    // The current NVENC elements. They take the p1-p7 presets with a separate
     // tune, which is the interface a recent driver still accepts.
+    {"nvcudah265enc",
+     "gop-size=30 rate-control=cbr tune=low-latency zero-reorder-delay=true b-frames=0",
+     "h265parse", true, "NVENC H.265"},
+    // The older NVENC elements, for a GStreamer that predates the ones above.
+    // Their presets are the deprecated GUIDs, so newer hardware rejects them
+    // and the probe moves on.
+    {"nvh265enc", "gop-size=30", "h265parse", true, "NVENC H.265, legacy element"},
+    {"x265enc", "tune=zerolatency speed-preset=ultrafast key-int-max=30",
+     "h265parse", false, "software H.265"},
     {"nvcudah264enc",
-     "gop-size=30 rate-control=cbr tune=low-latency zero-reorder-delay=true b-frames=0", true,
-     "NVENC"},
-    // The older NVENC element, for a GStreamer that predates the one above.
-    // Its presets are the deprecated GUIDs, so newer hardware rejects it and
-    // the probe moves on.
-    {"nvh264enc", "gop-size=30", true, "NVENC, legacy element"},
-    // The software floor. Always available, and it costs a core per camera.
-    {"x264enc", "tune=zerolatency speed-preset=ultrafast key-int-max=30", false, "software"},
+     "gop-size=30 rate-control=cbr tune=low-latency zero-reorder-delay=true b-frames=0",
+     "h264parse", true, "NVENC H.264"},
+    {"nvh264enc", "gop-size=30", "h264parse", true, "NVENC H.264, legacy element"},
+    {"x264enc", "tune=zerolatency speed-preset=ultrafast key-int-max=30",
+     "h264parse", false, "software H.264"},
 };
 
 std::string EncoderFragment(const EncoderChoice &c, int bitrate_kbps) {
@@ -153,70 +158,23 @@ const char *GstFormatFor(gz::msgs::PixelFormatType t) {
   }
 }
 
-// Sends one datagram for each frame: which camera, which frame, and when it
-// was captured. frame_clock.py forwards these to the message bus.
-class FrameClock {
- public:
-  bool Open(const std::string &hostport) {
-    const auto colon = hostport.rfind(':');
-    if (colon == std::string::npos) return false;
-    const std::string host = hostport.substr(0, colon);
-    const int port = std::atoi(hostport.substr(colon + 1).c_str());
-
-    fd_ = socket(AF_INET, SOCK_DGRAM, 0);
-    if (fd_ < 0) return false;
-    std::memset(&addr_, 0, sizeof(addr_));
-    addr_.sin_family = AF_INET;
-    addr_.sin_port = htons(static_cast<uint16_t>(port));
-    if (inet_aton(host.c_str(), &addr_.sin_addr) == 0) { Close(); return false; }
-    return true;
-  }
-
-  void Close() { if (fd_ >= 0) { ::close(fd_); fd_ = -1; } }
-  bool open() const { return fd_ >= 0; }
-
-  // capture_ns is the wall clock read the moment the image arrived from
-  // Gazebo. The gz header also carries a simulation-time stamp, which is not
-  // the same thing: it drifts from the wall clock whenever the simulation does
-  // not run at real time. TF and MAVROS both work in wall clock, so that is
-  // what travels with the frame. The simulation stamp rides along for anyone
-  // who wants to line frames up against a Gazebo log.
-  void Report(const std::string &stream, uint64_t seq, int64_t capture_ns,
-              int64_t sim_sec, int64_t sim_nsec) {
-    if (fd_ < 0) return;
-    char buf[256];
-    const int n = std::snprintf(
-        buf, sizeof(buf),
-        "{\"stream\":\"%s\",\"seq\":%llu,\"capture_unix_ns\":%lld,"
-        "\"sim_time_ns\":%lld}",
-        stream.c_str(), static_cast<unsigned long long>(seq),
-        static_cast<long long>(capture_ns),
-        static_cast<long long>(sim_sec) * 1000000000LL + sim_nsec);
-    if (n > 0) {
-      ::sendto(fd_, buf, static_cast<size_t>(n), MSG_DONTWAIT,
-               reinterpret_cast<struct sockaddr *>(&addr_), sizeof(addr_));
-    }
-  }
-
- private:
-  int fd_ = -1;
-  struct sockaddr_in addr_ {};
-};
-
 struct Spec {
   std::string name;
   std::string regex;
   std::string url;
   int bitrate_kbps = 4000;
   int fps = 30;
+  // 0 keeps the size the camera renders.
+  int width = 0;
+  int height = 0;
 };
 
 // One camera. It owns a gz subscription and a GStreamer pipeline.
 class Stream {
  public:
-  Stream(Spec spec, std::string encoder, FrameClock *clock)
-      : spec_(std::move(spec)), encoder_(std::move(encoder)),
-        pattern_(spec_.regex), clock_(clock) {}
+  Stream(Spec spec, std::string encoder, std::string parser)
+      : spec_(std::move(spec)), encoder_(std::move(encoder)), parser_(std::move(parser)),
+        pattern_(spec_.regex) {}
 
   ~Stream() { Teardown(); }
 
@@ -297,7 +255,8 @@ class Stream {
       const auto colon = hostport.rfind(':');
       const std::string host = hostport.substr(0, colon);
       const std::string port = hostport.substr(colon + 1);
-      return "rtph264pay config-interval=1 pt=96 ! udpsink sync=false host=" + host +
+      const std::string payloader = parser_ == "h265parse" ? "rtph265pay" : "rtph264pay";
+      return payloader + " config-interval=1 pt=96 ! udpsink sync=false host=" + host +
              " port=" + port;
     }
     std::cerr << "[" << spec_.name << "] unknown sink scheme in " << u
@@ -307,8 +266,8 @@ class Stream {
 
   bool BuildLocked(int width, int height, const char *format) {
     std::ostringstream p;
-    // Two formats rather than one. Pinning I420 suits x264enc and rules out
-    // nvcudah264enc, which takes NV12 in system memory and nothing else;
+    // Two formats rather than one. Pinning I420 suits the software encoders
+    // and rules out the NVENC ones, which take NV12 in system memory only;
     // leaving the format free lets negotiation settle on Y444, and the stream
     // then carries High 4:4:4 Predictive, which no NVDEC decodes. DeepStream
     // reports that as "Feature not supported on this GPU" against the decoder,
@@ -319,9 +278,13 @@ class Stream {
       << " ! queue leaky=downstream max-size-buffers=4"
       << " ! videoconvert n-threads=2"
       << " ! videorate drop-only=true"
-      << " ! video/x-raw,format={ NV12, I420 },framerate=" << spec_.fps << "/1"
-      << " ! " << encoder_
-      << " ! h264parse config-interval=1"
+      << " ! videoscale"
+      << " ! video/x-raw,format={ NV12, I420 },framerate=" << spec_.fps << "/1";
+    if (spec_.width > 0 && spec_.height > 0) {
+      p << ",width=" << spec_.width << ",height=" << spec_.height;
+    }
+    p << " ! " << encoder_
+      << " ! " << parser_ << " config-interval=1"
       << " ! " << SinkFragment();
 
     const std::string desc = p.str();
@@ -347,24 +310,16 @@ class Stream {
       TeardownLocked();
       return false;
     }
-    std::cout << "[" << spec_.name << "] " << width << "x" << height << " " << format
-              << " at " << spec_.fps << " fps -> " << spec_.url << std::endl;
+    std::cout << "[" << spec_.name << "] " << width << "x" << height << " " << format;
+    if (spec_.width > 0 && spec_.height > 0) {
+      std::cout << " scaled to " << spec_.width << "x" << spec_.height;
+    }
+    std::cout << " at " << spec_.fps << " fps -> " << spec_.url << std::endl;
     return true;
   }
 
   void OnImage(const gz::msgs::Image &msg) {
-    // Read the clock first. Everything below this line is encoder work, and
-    // the point of the report is the moment the frame existed, not the moment
-    // we finished with it.
-    const int64_t capture_ns =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::system_clock::now().time_since_epoch())
-            .count();
     ++frames_;
-    if (clock_ != nullptr && clock_->open()) {
-      clock_->Report(spec_.name, SeqOf(msg), capture_ns,
-                     msg.header().stamp().sec(), msg.header().stamp().nsec());
-    }
 
     const char *format = GstFormatFor(msg.pixel_format_type());
     if (format == nullptr) {
@@ -396,20 +351,10 @@ class Stream {
   // Gazebo puts the camera's own frame counter in the header key/value pairs.
   // Prefer it over our own count: it survives a reconnect and it matches what
   // a Gazebo log shows. Fall back to counting if the field is absent.
-  uint64_t SeqOf(const gz::msgs::Image &msg) const {
-    for (int i = 0; i < msg.header().data_size(); ++i) {
-      const auto &kv = msg.header().data(i);
-      if (kv.key() == "seq" && kv.value_size() > 0) {
-        return std::strtoull(kv.value(0).c_str(), nullptr, 10);
-      }
-    }
-    return frames_;
-  }
-
   Spec spec_;
   std::string encoder_;
+  std::string parser_;
   std::regex pattern_;
-  FrameClock *clock_ = nullptr;
   uint64_t frames_ = 0;
   gz::transport::Node node_;
   std::string topic_;
@@ -424,7 +369,7 @@ class Stream {
 
 void Usage() {
   std::cout
-      << "gz_video_streamer - Gazebo cameras to H.264 streams\n\n"
+      << "gz_video_streamer - Gazebo cameras to H.265 streams\n\n"
       << "  --sink-base URL   Base URL. A stream without an explicit url gets\n"
       << "                    <base>/<name>. Example: rtsp://video-router:8554\n"
       << "  --stream SPEC     Repeatable. Comma-separated key=value pairs:\n"
@@ -433,11 +378,11 @@ void Usage() {
       << "                      url      overrides the sink URL\n"
       << "                      bitrate  kbit/s, default 4000\n"
       << "                      fps      default 30\n"
+      << "                      width    rescale before encoding, with height\n"
+      << "                      height   rescale before encoding, with width\n"
       << "  --encoder FRAG    GStreamer encoder fragment. Skips the probe that\n"
-      << "                    picks between nvcudah264enc, nvh264enc and x264enc.\n"
-      << "  --frame-clock H:P Send one UDP datagram for each frame to H:P,\n"
-      << "                    carrying the capture time. Without it nothing\n"
-      << "                    downstream can know when a frame was taken.\n"
+      << "                    picks between the H.265 and H.264 encoders.\n"
+      << "  --parser NAME     Parser for --encoder output. Default h265parse.\n"
       << "  --no-cuda         Force the software encoder.\n";
 }
 
@@ -449,8 +394,8 @@ int main(int argc, char **argv) {
   std::signal(SIGTERM, OnSignal);
 
   std::string sink_base = "rtsp://video-router:8554";
-  std::string frame_clock_addr;
   std::string encoder_override;
+  std::string parser_override = "h265parse";
   bool cuda = true;
   std::vector<Spec> specs;
 
@@ -461,8 +406,8 @@ int main(int argc, char **argv) {
     if (i + 1 >= argc) { std::cerr << "missing value for " << a << std::endl; return 2; }
     const std::string v = argv[++i];
     if (a == "--sink-base") { sink_base = v; continue; }
-    if (a == "--frame-clock") { frame_clock_addr = v; continue; }
     if (a == "--encoder") { encoder_override = v; continue; }
+    if (a == "--parser") { parser_override = v; continue; }
     if (a == "--stream") {
       Spec s;
       for (const auto &kv : ParseKeyValues(v)) {
@@ -471,6 +416,8 @@ int main(int argc, char **argv) {
         else if (kv.first == "url") s.url = kv.second;
         else if (kv.first == "bitrate") s.bitrate_kbps = std::atoi(kv.second.c_str());
         else if (kv.first == "fps") s.fps = std::atoi(kv.second.c_str());
+        else if (kv.first == "width") s.width = std::atoi(kv.second.c_str());
+        else if (kv.first == "height") s.height = std::atoi(kv.second.c_str());
       }
       if (s.name.empty() || s.regex.empty()) {
         std::cerr << "a --stream needs at least name= and regex=" << std::endl;
@@ -498,7 +445,7 @@ int main(int argc, char **argv) {
     for (const auto &c : kEncoders) {
       if (c.needs_cuda && !cuda) continue;
       if (!HaveFactory(c.element)) continue;
-      if (!EncoderWorks(EncoderFragment(c, probe_bitrate))) {
+      if (!EncoderWorks(EncoderFragment(c, probe_bitrate), c.parser)) {
         std::cerr << "encoder: " << c.element
                   << " is installed but cannot encode here, trying the next one" << std::endl;
         continue;
@@ -518,26 +465,15 @@ int main(int argc, char **argv) {
     std::cout << "encoder: " << encoder_override << " (from --encoder)" << std::endl;
   }
 
-  FrameClock clock;
-  if (!frame_clock_addr.empty()) {
-    if (clock.Open(frame_clock_addr)) {
-      std::cout << "frame clock: reporting capture times to " << frame_clock_addr
-                << std::endl;
-    } else {
-      std::cerr << "frame clock: cannot use " << frame_clock_addr
-                << ". Detections will fall back to estimated capture times."
-                << std::endl;
-    }
-  } else {
-    std::cerr << "frame clock: not configured. Detections will fall back to "
-              << "estimated capture times." << std::endl;
-  }
-
   std::vector<std::unique_ptr<Stream>> streams;
   for (auto &s : specs) {
     std::string enc = encoder_override;
-    if (enc.empty()) enc = EncoderFragment(*chosen, s.bitrate_kbps);
-    streams.push_back(std::make_unique<Stream>(s, enc, &clock));
+    std::string parser = parser_override;
+    if (enc.empty()) {
+      enc = EncoderFragment(*chosen, s.bitrate_kbps);
+      parser = chosen->parser;
+    }
+    streams.push_back(std::make_unique<Stream>(s, enc, parser));
   }
 
   gz::transport::Node discovery;
@@ -575,7 +511,6 @@ int main(int argc, char **argv) {
 
   std::cout << "stopping" << std::endl;
   streams.clear();
-  clock.Close();
   gst_deinit();
   return 0;
 }

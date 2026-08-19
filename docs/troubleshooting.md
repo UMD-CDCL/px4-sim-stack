@@ -3,37 +3,25 @@
 Start here:
 
 ```bash
-make preflight     # the host
-docker compose ps  # which containers are up
-make logs S=sim    # the module you suspect
+./px4sim doctor    # the host
+./px4sim status    # which containers are up
+./px4sim logs sim  # the service you suspect
 ```
 
 ## The GPU
 
-### DeepStream exits at once with a driver error
+### A container exits at once with a driver error
 
 DeepStream refuses to start when the driver is older than the release needs.
-
-| DeepStream | Needs driver |
-|---|---|
-| 8.0 | 570.133 |
-| 9.0 | 590.48 |
+DeepStream 7.1 needs driver 535.183.
 
 ```bash
 nvidia-smi --query-gpu=driver_version --format=csv,noheader
 ```
 
-`DS_VERSION=auto` reads that number and picks the newest release the driver
-supports, so this is normally chosen for you. `./px4sim doctor` prints the
-choice and the reason for it.
-
-If you pin `DS_VERSION` or `DS_IMAGE` below the driver's number, you have two
-choices: use the older DeepStream, or update the driver. There is no third
-option, and no container flag works around it. A DeepStream 9.0 image on disk
-does not mean the driver can run it.
-
-Each release builds to its own name, `px4simstack/perception:ds8` and
-`:ds9`, so moving between them rebuilds rather than overwrites.
+There are two answers: use an older DeepStream, or update the driver. No
+container flag works around it, and an image on disk does not mean the driver
+can run it. `./px4sim doctor` reports the driver and says whether it is enough.
 
 ### Gazebo renders on the CPU, and the frame rate is 5
 
@@ -79,42 +67,29 @@ Software encoding works. It costs about one core for each 720p stream.
 
 ### "rm: cannot remove '/tmp/.docker.xauth': Is a directory"
 
-Docker creates a missing bind-mount source as a **directory**. Start a
-container before the cookie file exists and Docker makes a directory in its
-place. Under `/tmp` that directory belongs to root, so removing it needs sudo.
+Docker creates a missing bind-mount source as a **directory**. Start a container
+before the cookie file exists and Docker makes a directory in its place. Under
+`/tmp` that directory belongs to root, so its removal needs sudo.
 
-This stack keeps the cookie at `./.xauth` inside the project for that reason.
-It belongs to you, and `make x11` clears it whatever shape it is in.
-
-If you still have the old root-owned directory from an earlier version:
-
-```bash
-sudo rm -rf /tmp/.docker.xauth
-```
-
-Then check that `XAUTH_FILE=./.xauth` in your `.env`.
+This stack keeps the cookie at `./.xauth` inside the project for that reason. It
+belongs to you, and `./px4sim x11` clears it whatever shape it is in. To remove
+the old root-owned directory from an earlier version, run
+`sudo rm -rf /tmp/.docker.xauth`, then check that `XAUTH_FILE=./.xauth` in your
+`.env`.
 
 ### No window appears
 
 ```bash
-make x11
+./px4sim x11
 echo $DISPLAY          # must not be empty
-ls -l /tmp/.docker.xauth
 docker compose exec sim bash -lc 'xdpyinfo | head -3'
 ```
 
-`make x11` writes the cookie file that the containers mount. Run it again after
-you log out and back in, because the cookie changes.
+`./px4sim x11` writes the cookie file that the containers mount. Run it again
+after you log out and back in, because the cookie changes.
 
 Under Wayland, X11 applications go through XWayland. It works, and GPU
 acceleration is less reliable. An X11 session is the tested path.
-
-### QGroundControl logs "Error loading text-to-speech plug-in speechd"
-
-Cosmetic. It means the spoken alerts are off, because the image has no speech
-dispatcher daemon. Everything else works. Add `speech-dispatcher` to
-`modules/qgc/Dockerfile` and run a daemon in the container if you want the
-voice alerts.
 
 ### The window opens and stays black
 
@@ -133,73 +108,120 @@ Work along the chain, in order.
    ```
    Look for `INFO [commander] Ready for takeoff`.
 
-2. **Is the hub talking to PX4?**
+2. **Is that vehicle's router talking to PX4?**
    ```bash
-   docker compose logs mavlink-hub | grep -i keepalive
+   docker compose logs uas11 | grep -i keepalive
    ```
-   `vehicle traffic seen, the link is up` means the handshake worked.
+   `vehicle traffic seen, the link is up` means telemetry reaches the router.
 
 3. **Is anything on the wire?**
    ```bash
-   docker compose exec mavlink-hub timeout 5 python3 - <<'EOF'
+   timeout 5 python3 - <<'PY'
    import socket
    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-   s.connect(("127.0.0.1", 5760))
+   s.connect(("127.0.0.1", 5761))   # 5750 + N is uas<N>
    print("bytes in 3 s:", len(s.recv(4096)))
-   EOF
+   PY
    ```
 
-4. **Is QGroundControl listening?** It binds UDP 14550 and the hub pushes to it.
-   Two ground stations cannot both bind 14550. Stop one.
+4. **Is QGroundControl listening?** It binds UDP 14550 and every router pushes to
+   it. Two ground stations cannot both bind 14550. Stop one.
 
-If step 2 never reports vehicle traffic, the keepalive is the thing to look at.
-PX4's ground station link is a UDP server that waits for a first packet.
-`KEEPALIVE=0` removes the only thing that sends one.
+If step 2 never reports vehicle traffic, PX4 is not pushing. Check that `sim`
+resolved a router address: its log prints `router 10.200.142.2<N>:14545` as each
+vehicle starts.
 
 ### The vehicle connects, then drops after 10 seconds
 
 Data link loss. PX4's `NAV_DLL_ACT` is 2 in the x500 airframe, which means
 return to launch.
 
-With `KEEPALIVE=1`, the default, this should not happen. With
+With `KEEPALIVE=1`, the default, this does not happen. With
 `KEEPALIVE=bootstrap` it happens as soon as you close QGroundControl, and that
 is the point of that mode.
 
 ### MAVROS reports no connection
 
 ```bash
-docker compose exec ros bash -lc 'ros2 topic echo /mavros/state --once'
+./px4sim topics 11 | grep state
+docker compose exec -e ROS_DOMAIN_ID=71 onboard11 bash -lc \
+  '. /opt/ros/humble/setup.bash; . /home/user/ros2_ws/install/setup.bash; \
+   ros2 topic echo /uas11/state --once'
 ```
 
-`connected: false` means MAVROS cannot reach the hub. Check `FCU_URL`. The
-format matters:
+`connected: false` means the router never reached MAVROS. The two share a
+network namespace, so the router sends to `127.0.0.1:14402` and MAVROS binds it.
+Check both ends:
 
-```
-udp://:14555@mavlink-hub:14551
-     ^bind      ^send to
+```bash
+docker compose logs uas11 | head -40      # the router prints its whole config
+docker compose logs onboard11 | grep -i fcu
 ```
 
-The bind port must be free, and the target must be the hub, not PX4.
+A missing companion is the other half of this. Without the `onboard<N>` profile
+the routers start, PX4 pushes into them, and nothing ever listens. `./px4sim`
+adds that profile from `UAS_FLEET`, so this only happens when compose is called
+directly.
 
 ## Video
+
+### First, ask what is actually live
+
+```bash
+./px4sim streams
+```
+
+```
+  PATH                 STATE     READERS  SOURCE
+  rgb11                online    1        rtspSession
+  rgbl11               online    1        rtspSession
+  thermal11            online    0        rtspSession
+```
+
+`offline` means nobody is publishing, and a player gets a 404 or a timeout.
+Every path comes from the simulator, so they stay offline until Gazebo is up and
+the vehicle has spawned.
+
+### No stream at rtsp://localhost:8554/rgb11
+
+1. **Is the streamer bound to a camera?**
+   ```bash
+   docker compose logs sim | grep -E "bound to|waiting for"
+   ```
+   `waiting for a topic that matches ...` means the pattern found nothing.
+
+2. **Does the topic exist?**
+   ```bash
+   docker compose exec sim gz topic -l | grep image
+   ```
+   No image topics means the vehicle has not spawned, or the model has no
+   camera. The stock PX4 vehicles have no `streams.conf`, so they publish no
+   video by design.
+
+3. **Does the pattern match?** Compare the topic from step 2 against
+   `modules/sim/scenes/models/<model>/streams.conf`. The regex holds the Gazebo
+   model instance, which is `uas<N>_<N-1>`.
+
+4. **Is the router reachable?**
+   ```bash
+   docker compose logs video-router | tail -20
+   ```
 
 ### QGroundControl shows no video
 
 Use the address that works inside its container. Everything this stack prints
 uses host addresses, and inside QGroundControl `localhost` is QGroundControl.
 
-The container now forwards its own loopback to the video router, so both of
-these work:
+The container forwards its own loopback to the video router, so both of these
+work:
 
 ```
-rtsp://localhost:8554/gimbal
-rtsp://video-router:8554/gimbal
+rtsp://localhost:8554/rgb11
+rtsp://video-router:8554/rgb11
 ```
 
 The settings are seeded with the second form on first start, so a fresh
 container needs no configuration at all.
-
-To see what QGroundControl thinks:
 
 ```bash
 docker compose logs qgc | grep -iE "video|gst|rtsp"
@@ -213,11 +235,11 @@ running. `Streaming did not start` means it never reached the server.
 Use `--rtsp-tcp`:
 
 ```bash
-vlc --rtsp-tcp rtsp://localhost:8554/gimbal
+vlc --rtsp-tcp rtsp://localhost:8554/rgb11
 ```
 
-Without it, VLC hands `rtsp://` to its SAT>IP module, which speaks a dialect
-the server rejects. The server says so plainly in its own log:
+Without it, VLC hands `rtsp://` to its SAT>IP module, which speaks a dialect the
+server rejects. The server says so plainly in its own log:
 
 ```
 invalid SETUP path. This typically happens when VLC fails a request,
@@ -227,206 +249,82 @@ and then switches to an unsupported RTSP dialect
 ffmpeg, ffplay, GStreamer and Foxglove all work with no flags. `./px4sim view`
 uses ffplay and already passes the right ones.
 
-### First, ask what is actually live
-
-```bash
-./px4sim streams
-```
-
-```
-  PATH                 STATE     READERS  SOURCE
-  gimbal               online    0        rtspSession
-  gimbal_annotated     offline   0        rtspSource
-  nadir                online    0        rtspSession
-```
-
-`offline` means nobody is publishing, and a player will get a 404 or a timeout.
-`gimbal` and `nadir` come from the simulator, so they stay offline until Gazebo
-is up and the vehicle has spawned. An annotated stream stays offline until the
-perception profile runs with that camera in `ANNOTATED_STREAMS` (default:
-`gimbal`).
-
-### No stream at rtsp://localhost:8554/gimbal
-
-1. **Is the streamer bound to a camera?**
-   ```bash
-   docker compose logs sim | grep -E "bound to|waiting for"
-   ```
-   `waiting for a topic that matches ...` means the pattern found nothing.
-
-2. **Does the topic exist?**
-   ```bash
-   docker compose exec sim gz topic -l | grep image
-   ```
-   No image topics means the vehicle has not spawned, or the model has no
-   camera. The stock PX4 vehicles other than `x500_recon` have no
-   `streams.conf`, so they publish no video by design.
-
-3. **Does the pattern match?** Compare the topic from step 2 against
-   `modules/sim/scenes/models/<vehicle>/streams.conf`. The gimbal pattern
-   assumes the link is `camera_link` and the sensor is `camera`, which is what
-   the upstream gimbal model uses.
-
-4. **Is the router reachable?**
-   ```bash
-   docker compose logs video-router | tail -20
-   ```
-
 ### The stream stutters or lags
 
-- Raise `latency` in the DeepStream source config, or lower it for less delay
-  and more dropped frames.
 - Lower the bitrate in `streams.conf`.
-- Drop the frame rate. The nadir camera runs at 15 fps for this reason.
-- Check the GPU: `nvidia-smi dmon -s u`. An RTX 3070 with 8 GB runs two 720p
-  encoders and TensorRT inference at once, and it has no headroom to spare.
+- Drop the frame rate, or shorten `UAS_FLEET`. A fleet of four is twenty
+  encodes and four detectors.
+- Check the GPU: `nvidia-smi dmon -s u`.
 
-### gimbal_annotated is empty
+## Detections and localization
 
-That path proxies the DeepStream RTSP server. It appears only when
-`perception` is up and has a source, and only when `ANNOTATED_STREAMS`
-names the camera. The default is `gimbal`, so `nadir_annotated` needs
-`ANNOTATED_STREAMS=nadir,gimbal` (or `1` for every camera).
-
-The entrypoint holds each pipeline until the video router reports its camera
-stream ready. The log shows `Waiting for the <camera> stream` during the hold.
-Thus each pipeline connects on the first attempt, and the annotated stream
-comes up seconds after the camera stream. A hold that does not end means the
-camera stream never came up. See "No stream at rtsp://localhost:8554/gimbal"
-above.
+### The detector produces nothing
 
 ```bash
-docker compose ps perception
-docker compose logs perception | grep -i rtsp
+docker compose logs onboard11 | grep -i ds_pipeline
 ```
 
-DeepStream prints `Launched RTSP Streaming at rtsp://localhost:8554/ds-test`
-when its server is ready.
+The first run builds a TensorRT engine next to the ONNX file, which takes 1 to 3
+minutes and says so. It stays in `ONBOARD_MODEL_DIR` afterwards.
 
-## Detections
+After that, check the source. `ds_node` reads the full gimbal RGB stream:
+`rgb<N>` on a v3 and `pilot<N>` on a v2. `UAS_FLEET` and `UAS1<N>_MODEL` decide
+which, and a disagreement with the simulator is silent: the model publishes one
+name while the detector opens the other, so no frame ever arrives.
 
-### The MQTT topic stays silent
+### The boxes are drawn, but nothing is localized
+
+`tf_loc` looks the frame tree up at the message stamp. The tree must be
+continuous and must cover `tf_lookup_timeout_duration_sec` past the newest
+stamp, so a gap in MAVROS telemetry stops localization while the picture keeps
+moving.
 
 ```bash
-mosquitto_sub -h localhost -t 'perception/#' -v
+docker compose logs onboard11 | grep -i tf_loc
 ```
 
-In order of likelihood:
+The frames section of `uas-contract.md` holds the four rules `tf_loc` depends
+on. Frame
+handling is where a plausible wrong answer comes from, and
+[px4-simulated-gimbal.md](px4-simulated-gimbal.md) says how the gimbal frame has
+been got wrong before.
 
-1. **`msg-conv-msg2p-new-api` is not 1.** This is the common one. Without it,
-   `nvmsgconv` waits for per-object metadata that `deepstream-app` never
-   creates, and the payload directory stays empty with no error at all.
-2. **The detector found nothing.** Watch `rtsp://localhost:8554/gimbal_annotated`.
-   No boxes means no messages, which is correct behavior.
-3. **The class filter removes everything.** `config_infer_person.txt` has
-   `filter-out-class-ids=0;1;3`, which keeps only people. Comment it out to see
-   everything.
-4. **The forwarder is not running.** `docker compose logs perception | grep forwarder`.
+### A footprint does not hold the detections inside it
 
-To watch the raw payloads before they are published:
+The footprint node and `tf_loc` must meet the same ground. Both read the terrain
+surface that the entry point links into `TERRAIN_DIR`:
 
 ```bash
-docker compose exec perception sh -c 'ls -t /tmp/ds-payloads | head; cat /tmp/ds-payloads/$(ls -t /tmp/ds-payloads | head -1)'
+docker compose logs onboard11 | grep terrain
 ```
 
-### DeepStream logs "The client is not currently connected" and exits
+`no surface for scene` means every ray meets the flat plane instead. Run
+`./px4sim genscene build --name <scene>` to write `worlds/<scene>_surface.json`.
+A hand-written world has no surface, and the flat plane is the answer for it.
 
-This is the DeepStream 8.0 MQTT adapter, and this stack does not use it. The
-adapter creates its client with `mosquitto_new()`, which selects MQTT 3.1.1,
-and then publishes with `mosquitto_publish_v5()`. Mosquitto answers with a
-protocol error and closes the connection, and the pipeline stops. `new-api=1`
-does not change the code path.
+The other cause is the frame convention. `tf_loc` localizes through the camera
+BODY frame, and a node that projects through the optical leaf must use standard
+optical math. See "Body frames and optical frames" in
+[interfaces.md](interfaces.md).
 
-`[sink1]` in `camera_detector.txt` is therefore disabled, and
-`payload_forwarder.py` does the publishing. If you turned that sink back on,
-turn it off again.
+### The ground station shows no detections
 
-### The annotated RTSP streams serve no frames
-
-Check that both pipelines are alive, since there is one for each camera:
+The vehicle publishes `target_locations/for_air` with the image removed, the
+domain bridge carries it, and `image_rehydrate` refills the image on the ground.
+Check the bridge first:
 
 ```bash
-docker compose logs perception | grep -i "annotated\|rtsp"
-docker compose exec perception bash -lc 'pgrep -a deepstream-app'
+docker compose logs onboard11 | grep -i domain_bridge
+docker compose logs offboard | grep -i domain_bridge
 ```
 
-Two processes should be listed. Each serves `rtsp://perception:<port>/ds-test`,
-8554 for the first camera and 8555 for the second, and the video router
-republishes them as `<camera>_annotated`.
+Both ends must declare the same QoS. A best effort reader matches a reliable
+writer and then discards every repair, which reads as a link that carries
+nothing.
 
-This used to be one batched pipeline that split the cameras again with
-nvstreamdemux, and those demuxed sinks never served a frame. One pipeline for
-each camera replaced it. If a stream is still empty, check that
-`ANNOTATED_STREAMS` names its camera; the default is `gimbal` alone, and
-`1` enables every camera. And remember the router
-pulls them on demand, so nothing connects until something asks for the
-stream.
-
-### Detection boxes sit off the target, in pixel coordinates
-
-Measure it, then correct that camera:
-
-```bash
-docker compose exec ros python3 /scripts/check-annotation-scale.py
-```
-
-It grabs a frame and the detections that belong to it, draws the boxes, and
-reports the scale that would make them fit. A scale near 1.5 means DeepStream
-is reporting in 1280x720 while the image is 1920x1080. Put the answer in
-`.env` and restart the ros service:
-
-```
-DS_COORD_OVERRIDES=nadir=1280x720
-```
-
-`detections_bridge` then scales that camera's boxes into the image and logs
-what it is doing. Correct the cameras separately. The two sources in one
-DeepStream pipeline have been seen reporting in different spaces at the same
-time. That was one batched pipeline feeding two demuxed outputs, and it read
-from the outside as an intermittent fault: identical configuration, and one
-camera correct while the other sat two thirds of the way to the top left.
-
-There is now one pipeline for each camera, each at that camera's resolution, so
-the boxes and the image should already agree and the scale should read 1.00.
-The correction stays available because the failure it fixes is silent.
-
-DeepStream states its coordinate space nowhere in the payload, and neither
-`[streammux]` nor `[tiled-display]` settles it from the outside. Rather than
-guess, the bridge takes the image size from CameraInfo, which is what the image
-panels and the projection maths already use, and scales into it.
-
-This matters beyond the picture. `detection_localizer` casts a ray through the
-box, so a box in the wrong place is a target in the wrong place on the map, and
-`detection_scorer` then counts a correct detection as a miss.
-
-### The image panel is empty, but the topic is listed
-
-Point the panel at `/camera/<name>/image_raw/compressed`. That is the only
-image topic the camera nodes publish: there is no raw topic, because a raw
-1080p stream is about 93 MB/s that the foxglove_bridge websocket cannot
-carry and nothing needs whole.
-
-To confirm the stream is healthy, measure it:
-
-    ros2 topic bw /camera/nadir/image_raw/compressed
-
-The topic publishes only while something subscribes to it, so the `bw`
-subscription itself is what starts it.
-
-`ros2 topic hz` behaves the same way: the hz subscription itself starts the
-stream, so the first reading settles after a second or two.
-
-### The boxes in ROS are in the wrong place
-
-The object string format changed between DeepStream releases. Switch the
-format:
-
-```python
-# in stack.launch.py
-"bbox_format": "ltwh",   # instead of ltrb
-```
-
-Compare a raw payload against the annotated video to see which is right.
+Every container that carries `cdcl_umd_msgs` must run ROS 2 Humble. Jazzy adds a
+field to `sensor_msgs/Range`, which sits inside `TargetBoxArray` before the box
+array, so a mixed pair decodes an empty box list and reports no error.
 
 ## The simulator
 
@@ -440,12 +338,12 @@ ls -la src/PX4-Autopilot/build/px4_sitl_default/bin/px4
 docker compose exec sim id
 ```
 
-The user id inside the container must match yours. `make preflight` sets
+The user id inside the container must match yours. `./px4sim doctor` sets
 `HOST_UID` and `HOST_GID` in `.env`, and the image bakes them in, so rebuild the
 sim image after a change:
 
 ```bash
-make build-sim
+./px4sim build sim
 ```
 
 ### "World file X declares world name Y"
@@ -476,6 +374,10 @@ pxh> param show SIM_GZ_EN_LIDAR
 pxh> listener distance_sensor
 ```
 
+The gimbal rangefinder is the other half. It arrives as sensor id 1 only when
+PX4 already owns id 0, so `gimbal_rangefinder.py` waits for that and logs while
+it waits.
+
 ### A Fuel model does not download
 
 ```bash
@@ -488,29 +390,31 @@ many it did not.
 
 ## Builds
 
-### mavlink-hub restarts, and logs "Invalid IP address"
+### A router restarts, and logs "Invalid IP address"
 
 mavlink-router parses `Address` as an IP literal and rejects a name. Compose
 gives every service a fixed address on `simnet` for that reason. The list is in
 [interfaces.md](interfaces.md).
 
-If you changed `PX4_HOST` or `QGC_HOST` to a name, the entrypoint resolves it,
-and it waits up to 30 seconds for the other container to join the network. An
-address avoids the wait and the failure mode.
-
-After you edit the addresses, recreate the containers. A running container keeps
-the address it was created with:
+After you change the addresses, recreate the containers. A running container
+keeps the address it was created with:
 
 ```bash
 docker compose up -d --force-recreate
 ```
 
-### The mavlink-hub build fails on "Dependency systemd not found"
+### The mavlink-router build fails on "Dependency systemd not found"
 
 Fixed in this repository by passing `-Dsystemdsystemunitdir` to meson. If you
 edited that Dockerfile, put the flag back. The `auto` default makes meson read
 the unit directory out of `systemd.pc`, which Debian bookworm does not ship in
 any package this image installs.
+
+### The onboard or offboard build fails on a missing package
+
+Both images build the workspace at `ROS2_WS_DIR` through a named build context.
+A missing checkout, or a checkout without `src/5g_drone`, fails there. `./px4sim
+doctor` reports it before the build does.
 
 ### One build failure cancels the others
 
@@ -518,24 +422,22 @@ any package this image installs.
 one at a time when you are debugging:
 
 ```bash
-make build-sim
-make build-ros
+./px4sim build sim
+./px4sim build onboard
 ```
 
 ### The image is enormous
 
-The DeepStream image is 33 GB, and that is upstream. The `-samples` tag carries
-sample models and videos. `nvcr.io/nvidia/deepstream:8.0-triton-multiarch` is
-smaller, and it does not ship the TrafficCamNet model this stack uses as its
-default detector. Set `DS_IMAGE` in `.env` after you supply your own model.
-That overrides `DS_VERSION`, and `DS_FLAVOUR=triton-multiarch` keeps the
-release automatic while changing only the flavour.
+The DeepStream image is upstream, and the `-samples` tag carries sample models
+and videos. The onboard and offboard Dockerfiles take `DS_IMAGE_FLAVOR`, so
+`triton-multiarch` builds a smaller image. Pass it in `compose.yaml`, under the
+build `args` of those two services.
 
 ## Starting over
 
 ```bash
-make down                 # containers and network
-make clean                # and the named volumes
-make clean-src            # and the cloned sources
+./px4sim stop             # containers and network
+./px4sim clean            # and the named volumes
+./px4sim clean-src        # and the cloned sources
 docker builder prune -f   # and the build cache
 ```

@@ -2,7 +2,7 @@
 # Clone the upstream sources into ./src at the versions pinned in .env.
 # These trees are yours to edit. The containers build them in place.
 #
-#   ./scripts/bootstrap.sh            px4 and the ROS workspace
+#   ./scripts/bootstrap.sh            px4 and the scenes
 #   ./scripts/bootstrap.sh qgc        add the QGroundControl source
 #   ./scripts/bootstrap.sh all        everything
 set -euo pipefail
@@ -14,7 +14,7 @@ PX4_REF=${PX4_REF:-v1.17.0}
 QGC_REF=${QGC_REF:-v5.0.8}
 WHAT=${1:-default}
 
-mkdir -p src logs/{px4,qgc,ros,perception}
+mkdir -p src logs/{px4,qgc,onboard,offboard}
 
 clone_at() { # url dir ref
 	local url=$1 dir=$2 ref=$3
@@ -32,13 +32,13 @@ if [ "$WHAT" = "default" ] || [ "$WHAT" = "all" ] || [ "$WHAT" = "px4" ]; then
 	clone_at https://github.com/PX4/PX4-Autopilot.git src/PX4-Autopilot "$PX4_REF"
 fi
 
-if [ "$WHAT" = "default" ] || [ "$WHAT" = "all" ] || [ "$WHAT" = "ros" ]; then
-	if [ ! -d src/ros2_ws ]; then
-		echo "==> Creating the ROS 2 workspace at src/ros2_ws"
-		mkdir -p src/ros2_ws/src
-	else
-		echo "==> src/ros2_ws exists. Leaving it alone."
-	fi
+# The flight code is not cloned here. The onboard and offboard images build
+# 5g_drone, cdcl_umd_msgs and MAVInsight from ROS2_WS_DIR, a checkout outside
+# this repository, so it stays where its own git remote put it.
+if [ ! -d "${ROS2_WS_DIR:-../ros2_ws}/src/5g_drone" ]; then
+	echo "==> No 5g_drone at ${ROS2_WS_DIR:-../ros2_ws}/src."
+	echo "    The onboard and offboard images build from there. Check it out,"
+	echo "    or set ROS2_WS_DIR in .env to where it already is."
 fi
 
 if [ "$WHAT" = "all" ] || [ "$WHAT" = "qgc" ]; then

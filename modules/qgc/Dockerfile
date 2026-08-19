@@ -62,6 +62,6 @@ USER dev
 WORKDIR /home/dev
 
 ENV QT_X11_NO_MITSHM=1 \
-    QGC_VIDEO_URL=rtsp://video-router:8554/gimbal
+    QGC_VIDEO_URL=rtsp://video-router:8554/rgb11
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
