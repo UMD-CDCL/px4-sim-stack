@@ -182,6 +182,34 @@ directly.
 Every path comes from the simulator, so they stay offline until Gazebo is up and
 the vehicle has spawned.
 
+### Some streams are online and others never appear
+
+The log says `pipeline error: Could not encode stream` for the ones that are
+missing. A GeForce card allows a small number of encoding sessions at once,
+eight on the cards measured here, and every camera costs one session for its
+full stream and one for its scaled stream. A fleet of four asks for more than
+that, and the streams that ask last are the ones that fail.
+
+Three ways out, cheapest first.
+
+Serve fewer cameras. `UAS_STREAMS` in `.env` says which cameras each vehicle
+serves, and `gimbal` is the one the detector reads. Turn one vehicle up without
+touching the others:
+
+```bash
+UAS_STREAMS="all gimbal gimbal gimbal" ./px4sim start
+```
+
+Encode the scaled streams in software, which is the default. They are 640x360
+and cost little CPU, and it is the same codec either way, so only the full size
+streams take a GPU session. `VIDEO_SCALED_ENCODER=gpu` puts them back.
+
+Lift the limit in the driver. `keylase/nvidia-patch` on GitHub patches
+`libnvidia-encode` on the host to remove the session cap. It is not part of this
+stack: it changes a file the NVIDIA driver installs, it has to be applied again
+after every driver update, and it is the host's decision rather than the
+simulator's. It is the only one of the three that keeps every stream on the GPU.
+
 ### No stream at rtsp://localhost:8554/rgb11
 
 1. **Is the streamer bound to a camera?**

@@ -11,7 +11,8 @@ if [ -z "$container" ]; then
 	return 0
 fi
 
-uas() { ./px4sim uas "$lead" "$@" 2>&1; }
+# Not an assertion: a step that fails still lets the checks below speak.
+uas() { ./px4sim uas "$lead" "$@" 2>&1 || true; }
 
 telemetry=$(./px4sim probe "$lead" 2>/dev/null)
 while IFS=$'\t' read -r topic publishers verdict; do

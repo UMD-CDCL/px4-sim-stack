@@ -336,13 +336,14 @@ def command_detections(uas: Uas, args) -> int:
     if not uas.wait_until(lambda: "msg" in latest, args.deadline, "a detection"):
         return 1
     detection = latest["msg"]
-    print(f"{len(detection.uav_target_boxes)} boxes in seq {detection.seq}, "
-          f"image {len(detection.source_img.data)} bytes")
-    for box in detection.uav_target_boxes:
-        centre = box.target_bbox.center.position
-        print(f"  {box.detection_class or '?'} {box.detection_confidence:.2f} "
-              f"at {centre.x:.0f}, {centre.y:.0f} "
-              f"({box.target_bbox.size_x:.0f} x {box.target_bbox.size_y:.0f} px)")
+    if not args.tsv:
+        print(f"{len(detection.uav_target_boxes)} boxes in seq {detection.seq}, "
+              f"image {len(detection.source_img.data)} bytes")
+        for box in detection.uav_target_boxes:
+            centre = box.target_bbox.center.position
+            print(f"  {box.detection_class or '?'} {box.detection_confidence:.2f} "
+                  f"at {centre.x:.0f}, {centre.y:.0f} "
+                  f"({box.target_bbox.size_x:.0f} x {box.target_bbox.size_y:.0f} px)")
     if not detection.uav_target_boxes:
         return 1
 
@@ -355,10 +356,15 @@ def command_detections(uas: Uas, args) -> int:
         fix = box.target_location_altimeter_plane
         topo = box.target_location_topo
         surface = "terrain" if topo.status.status >= 0 else "flat plane"
+        name, error = nearest(truth, fix.latitude, fix.longitude) if truth else ("", 0.0)
+        if args.tsv:
+            # One line per box, for a caller comparing two vehicles' answers.
+            print(f"{name}\t{fix.latitude:.7f}\t{fix.longitude:.7f}"
+                  f"\t{fix.altitude:.2f}\t{error:.2f}\t{surface}")
+            continue
         line = (f"  localized {fix.latitude:.7f}, {fix.longitude:.7f}, "
                 f"{fix.altitude:.1f} m on the {surface}")
         if truth:
-            name, error = nearest(truth, fix.latitude, fix.longitude)
             line += f"  -> {error:.1f} m from {name}"
         print(line)
     return 0 if answer.localized_boxes.uav_target_boxes else 1
@@ -525,6 +531,8 @@ def main() -> int:
     sub.add_parser("capture")
     detections = sub.add_parser("detections")
     detections.add_argument("--deadline", type=float, default=20.0)
+    detections.add_argument("--tsv", action="store_true",
+                            help="one line per box: target, position, error")
     detections.add_argument("--truth", default=os.environ.get("RESOLVED_TRUTH_FILE", ""),
                             help="what the scenario actually placed")
     click = sub.add_parser("click")

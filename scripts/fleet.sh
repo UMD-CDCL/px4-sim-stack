@@ -36,11 +36,32 @@ gimbal_stream() {
 	v2) echo "pilot$1" ;;
 	esac
 }
-streams_of() {
+# Which cameras a vehicle serves, from UAS_STREAMS. A GPU allows a handful of
+# encoding sessions at once, so a fleet serves its gimbal cameras alone unless
+# it is told otherwise. See .env.example and modules/sim/entrypoint.sh.
+# shellcheck disable=SC2206
+STREAM_CHOICE=(${UAS_STREAMS:-gimbal})
+cameras_of() {
+	local slot=$(( $1 - UAS_BASE - 1 ))
+	local choice=${STREAM_CHOICE[$slot]:-${STREAM_CHOICE[0]:-gimbal}}
+	local gimbal all
 	case "$(mark_of "$1")" in
-	v3) echo "rgb$1 rgbl$1 pilot$1 pilotl$1 thermal$1 thermall$1" ;;
-	v2) echo "pilot$1 pilotl$1 thermal$1 thermall$1" ;;
+	v3) gimbal=rgb;   all="rgb pilot thermal" ;;
+	v2) gimbal=pilot; all="pilot thermal" ;;
+	*)  return 0 ;;
 	esac
+	case "$choice" in
+	all)    echo "$all" ;;
+	gimbal) echo "$gimbal" ;;
+	*)      echo "$choice" | tr ',' ' ' ;;
+	esac
+}
+streams_of() {
+	local camera
+	for camera in $(cameras_of "$1"); do
+		printf '%s%s %sl%s ' "$camera" "$1" "$camera" "$1"
+	done
+	echo
 }
 
 # Everything else a UAS number decides, as arithmetic. Joining strings reads

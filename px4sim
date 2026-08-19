@@ -44,8 +44,8 @@ ALL_PROFILES=$(sed -n 's/^[[:space:]]*profiles:[[:space:]]*\[\(.*\)\][[:space:]]
 # select one run, so `SCENE=forest ./px4sim start` flies another world once
 # and changes no file. The list is short on purpose: a shell that already
 # exports SCENE must not quietly change what everything else does.
-OVERRIDABLE="SCENE SCENARIO UAS_FLEET AIRFRAME COMPOSE_PROFILES GZ_GUI
-             SIM_SPEED_FACTOR"
+OVERRIDABLE="SCENE SCENARIO UAS_FLEET UAS_STREAMS AIRFRAME COMPOSE_PROFILES
+             GZ_GUI SIM_SPEED_FACTOR VIDEO_SCALED_ENCODER"
 for name in $OVERRIDABLE; do
 	if [ -n "${!name+set}" ]; then
 		eval "override_$name=\$$name"
@@ -239,8 +239,13 @@ enter_service() {
 	has_service "$svc" || die "compose.yaml has no service named '$svc'. ./px4sim status lists them."
 	COMPOSE_PROFILES="$ALL_PROFILES" $DC ps --status running --services 2>/dev/null | grep -qx "$svc" \
 		|| die "$svc is not running. Run: ./px4sim start"
+	shift
 	for candidate in bash sh; do
 		if COMPOSE_PROFILES="$ALL_PROFILES" $DC exec -T "$svc" "$candidate" -c 'exit 0' >/dev/null 2>&1; then
+			# With arguments this runs one command and returns its status, so
+			# looking inside a container needs no second way of doing it.
+			[ $# -gt 0 ] && exec env COMPOSE_PROFILES="$ALL_PROFILES" \
+				$DC exec -T "$svc" "$candidate" -c "$*"
 			exec env COMPOSE_PROFILES="$ALL_PROFILES" $DC exec "$svc" "$candidate"
 		fi
 	done
@@ -266,7 +271,7 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     restart [service]   Restart one service, or all of them
     status              What is running, and the addresses to use
     fleet               Every vehicle: model, address, ports, domain, streams
-    logs [service]      Follow the logs
+    logs [opts] [svc]   Follow the logs. `logs --since 5m sim` reads back.
     console             uas${FIRST_UAS}'s PX4 pxh> prompt. Detach with Ctrl-P Ctrl-Q
     px4 [N] <command>   One PX4 command on one vehicle: px4 ${LAST_UAS} commander status
 
@@ -276,7 +281,7 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     router [N]          a vehicle's mavlink-router. Default uas${FIRST_UAS}
     onboard [N]         a vehicle's companion computer. Default uas${FIRST_UAS}
     ground              the ground station
-    shell <service>     any other service
+    shell <svc> [cmd]   any other service, or one command inside it
 
   ${BOLD}Look at the data${OFF}
     streams             Which video streams are live right now
@@ -334,6 +339,11 @@ endpoints() {
 EOF
 }
 
+# bash reads a script as it runs, so editing this file during a long command
+# makes it resume at a shifted offset and fail on a line that is now half of
+# another. A function is parsed in full before any of it runs, so the command
+# below survives an edit to this file while it works.
+main() {
 cmd=${1:-help}
 [ $# -gt 0 ] && shift || true
 
@@ -349,7 +359,26 @@ build)
 	add_fleet_profiles
 	./scripts/x11-allow.sh
 	resolve_services "$@"
-	$DC build "${SERVICES[@]}"
+
+	# ros-base is what onboard and offboard are made of, and compose has no way
+	# to order one build before another, so it is built here when either of
+	# them is. Named on its own it is built on its own, which is how to warm
+	# the cache before a day's work.
+	needs_base=false
+	for svc in "${SERVICES[@]}"; do
+		case "$svc" in onboard* | offboard | ros-base) needs_base=true ;; esac
+	done
+	if [ "$needs_base" = true ]; then
+		COMPOSE_PROFILES=base $DC build ros-base
+	fi
+
+	# Everything but the base. Asking compose to build it again here would be
+	# a second no-op pass over the largest image in the stack.
+	REMAINING=()
+	for svc in "${SERVICES[@]}"; do
+		[ "$svc" = ros-base ] || REMAINING+=("$svc")
+	done
+	[ ${#REMAINING[@]} -gt 0 ] && $DC build "${REMAINING[@]}"
 	;;
 
 x11)      ./scripts/x11-allow.sh ;;
@@ -415,8 +444,21 @@ status|ps)
 	;;
 
 logs)
+	# Any leading option goes to `docker compose logs`, so one command reads a
+	# log live or reads back over it: `./px4sim logs --since 5m onboard11`.
+	# Naming an option replaces the follow, because a command that follows
+	# cannot be read back from.
+	OPTIONS=()
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		-*) OPTIONS+=("$1"); shift
+		    case "${1:-}" in -* | '') ;; *) OPTIONS+=("$1"); shift ;; esac ;;
+		*)  break ;;
+		esac
+	done
+	[ ${#OPTIONS[@]} -eq 0 ] && OPTIONS=(-f --tail=100)
 	resolve_services "$@"
-	COMPOSE_PROFILES="$ALL_PROFILES" $DC logs -f --tail=100 "${SERVICES[@]}"
+	COMPOSE_PROFILES="$ALL_PROFILES" $DC logs "${OPTIONS[@]}" "${SERVICES[@]}"
 	;;
 
 console)
@@ -710,3 +752,6 @@ nuke)
 help|-h|--help) usage ;;
 *)              echo "Unknown command: $cmd"; echo; usage; exit 1 ;;
 esac
+}
+
+main "$@"

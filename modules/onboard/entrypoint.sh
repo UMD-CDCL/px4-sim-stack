@@ -94,6 +94,27 @@ else
 		> "${SITE_PARAMS}"
 fi
 
+# The detector opens its camera once and dies if it is not there. On the
+# aircraft the camera is a local socket that exists at boot; here it is a stream
+# the simulator publishes after Gazebo has loaded the world and placed the
+# scenario, which takes minutes on a large scene. So wait for it, with the tool
+# that wraps the same Discoverer ds_node opens the stream with.
+GIMBAL_STREAM=${GIMBAL_STREAM:-$([ "${MODEL}" = v3 ] && echo "rgb${UAS_NUM}" || echo "pilot${UAS_NUM}")}
+CAMERA_URI="${RTSP_BASE:-rtsp://video-router:8554}/${GIMBAL_STREAM}"
+STREAM_WAIT_S=${STREAM_WAIT_S:-300}
+waited=0
+until gst-discoverer-1.0 -t 5 "${CAMERA_URI}" >/dev/null 2>&1; do
+	if [ "${waited}" -ge "${STREAM_WAIT_S}" ]; then
+		echo "uas${UAS_NUM}: ${CAMERA_URI} never appeared after ${STREAM_WAIT_S}s." >&2
+		echo "The detector will start anyway and fail to open its camera." >&2
+		break
+	fi
+	[ "${waited}" = 0 ] && echo "waiting for ${GIMBAL_STREAM}"
+	sleep 5
+	waited=$((waited + 5))
+done
+[ "${waited}" -gt 0 ] && echo "camera: ${GIMBAL_STREAM} ready after ${waited}s"
+
 if [ "${1:-launch}" = "launch" ]; then
 	shift || true
 	exec ros2 launch umd_uas onboard.launch.py \

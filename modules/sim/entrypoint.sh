@@ -44,6 +44,7 @@ read -r -a FLEET <<< "$UAS_FLEET"
 read -r -a GIMBAL_HFOV <<< "$UAS_GIMBAL_HFOV_DEG"
 read -r -a THERMAL_HFOV <<< "$UAS_THERMAL_HFOV_DEG"
 read -r -a DOWN_HFOV <<< "$UAS_DOWN_HFOV_DEG"
+read -r -a STREAM_CHOICE <<< "${UAS_STREAMS:-gimbal}"
 [ ${#FLEET[@]} -ge 1 ] || die "UAS_FLEET is empty. Give one model name for each vehicle."
 [ ${#FLEET[@]} -le 9 ] || die "UAS_FLEET has ${#FLEET[@]} vehicles. The simulator numbers them 11 to 19."
 
@@ -199,6 +200,19 @@ if [ "$GZ_GUI" = "1" ]; then
 	fi
 fi
 
+# Whether a vehicle serves one camera, given what it was asked for.
+serves() {
+	local choice=$1 camera=$2 gimbal=$3
+	case "$choice" in
+	all)    return 0 ;;
+	gimbal) [ "$camera" = "$gimbal" ]; return ;;
+	esac
+	case ",$choice," in
+	*",$camera,"*) return 0 ;;
+	esac
+	return 1
+}
+
 # ------------------------------------------------------ 5. the camera encoders
 mkdir -p "$STREAM_CONF_DIR"
 for index in "${!FLEET[@]}"; do
@@ -220,13 +234,48 @@ for index in "${!FLEET[@]}"; do
 	conf="$STREAM_CONF_DIR/uas$UAS_NUM.conf"
 	envsubst '${UAS_NUM} ${GZ_MODEL}' < "$template" > "$conf"
 
+	# Which cameras this vehicle serves. A GPU allows a handful of encoding
+	# sessions at once, and a fleet of four asks for more than that, so a
+	# vehicle serves its gimbal camera alone unless it is told otherwise.
+	#   gimbal   what the detector reads: rgb on a v3, pilot on a v2
+	#   all      every camera the model declares
+	#   a list   rgb, pilot or thermal, comma separated
+	choice=${STREAM_CHOICE[$index]:-${STREAM_CHOICE[0]:-gimbal}}
+	case "$model" in
+	*_v3) gimbal_camera=rgb ;;
+	*_v2) gimbal_camera=pilot ;;
+	*)    gimbal_camera= ;;
+	esac
+
 	args=(--sink-base "$VIDEO_SINK_BASE")
+	served=()
 	while read -r name regex bitrate fps width height; do
 		case "${name:-}" in ''|\#*) continue ;; esac
+		# rgb and rgbl are one camera, and so are the other pairs. The vehicle
+		# number is on the end of the name and the l is what marks the scaled
+		# stream, so the camera is what is left.
+		camera=${name%%[0-9]*}
+		camera=${camera%l}
+		serves "$choice" "$camera" "$gimbal_camera" || continue
+
 		spec="name=$name,regex=$regex,bitrate=${bitrate:-4000},fps=${fps:-30}"
-		case "${width:--}" in -|'') ;; *) spec="$spec,width=$width,height=$height" ;; esac
+		case "${width:--}" in
+		-|'') ;;
+		*)  spec="$spec,width=$width,height=$height"
+		    # A scaled stream is small, so it encodes in software without
+		    # troubling the physics loop and leaves a GPU session for a full
+		    # one. Same codec either way.
+		    [ "${VIDEO_SCALED_ENCODER:-software}" = software ] && spec="$spec,encoder=software"
+		    ;;
+		esac
 		args+=(--stream "$spec")
+		served+=("$name")
 	done < "$conf"
+
+	if [ ${#served[@]} -eq 0 ]; then
+		warn "uas$UAS_NUM serves no camera: UAS_STREAMS entry '$choice' matches nothing in $model/streams.conf"
+		continue
+	fi
 
 	# The streamer probes the encoders and takes the first that works. Set
 	# VIDEO_ENCODER to a GStreamer fragment to skip that and name your own, and
@@ -236,7 +285,7 @@ for index in "${!FLEET[@]}"; do
 		args+=(--encoder "$VIDEO_ENCODER" --parser "${VIDEO_PARSER:-h264parse}")
 	fi
 
-	log "Starting the uas$UAS_NUM camera encoders from $model/streams.conf"
+	log "Starting the uas$UAS_NUM camera encoders: ${served[*]}"
 	gz_video_streamer "${args[@]}" &
 	children+=($!)
 done

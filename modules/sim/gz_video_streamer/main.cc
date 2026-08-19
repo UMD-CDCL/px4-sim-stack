@@ -28,6 +28,7 @@
 #include <gz/msgs/image.pb.h>
 #include <gz/transport/Node.hh>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -167,6 +168,11 @@ struct Spec {
   // 0 keeps the size the camera renders.
   int width = 0;
   int height = 0;
+  // A GPU allows a handful of encoding sessions at once and one camera costs
+  // one for each stream it serves, so a fleet runs out long before the CPU
+  // does. A scaled-down stream is small enough to encode in software without
+  // troubling the physics loop, which leaves the sessions for the full ones.
+  bool software = false;
 };
 
 // One camera. It owns a gz subscription and a GStreamer pipeline.
@@ -215,8 +221,17 @@ class Stream {
       GError *err = nullptr;
       gchar *dbg = nullptr;
       gst_message_parse_error(msg, &err, &dbg);
-      std::cerr << "[" << spec_.name << "] pipeline error: "
-                << (err != nullptr ? err->message : "unknown") << std::endl;
+      const std::string reason = err != nullptr ? err->message : "unknown";
+      std::cerr << "[" << spec_.name << "] pipeline error: " << reason << std::endl;
+      // A consumer GPU allows a handful of encoding sessions at once, and one
+      // camera feeding two streams costs two of them. Past the limit every
+      // further stream fails here and simply never appears, which reads as a
+      // camera that is not publishing rather than a GPU that is full.
+      if (reason.find("encode") != std::string::npos) {
+        std::cerr << "[" << spec_.name << "] this GPU may be out of encoding "
+                     "sessions. Fly fewer vehicles, or set VIDEO_ENCODER to a "
+                     "software encoder such as x264enc." << std::endl;
+      }
       if (err != nullptr) g_error_free(err);
       g_free(dbg);
     } else {
@@ -383,7 +398,9 @@ void Usage() {
       << "  --encoder FRAG    GStreamer encoder fragment. Skips the probe that\n"
       << "                    picks between the H.265 and H.264 encoders.\n"
       << "  --parser NAME     Parser for --encoder output. Default h265parse.\n"
-      << "  --no-cuda         Force the software encoder.\n";
+      << "  --no-cuda         Force the software encoder.\n"
+      << "                    A stream may also carry encoder=software, which\n"
+      << "                    keeps the GPU sessions for the full size ones.\n";
 }
 
 }  // namespace
@@ -418,6 +435,7 @@ int main(int argc, char **argv) {
         else if (kv.first == "fps") s.fps = std::atoi(kv.second.c_str());
         else if (kv.first == "width") s.width = std::atoi(kv.second.c_str());
         else if (kv.first == "height") s.height = std::atoi(kv.second.c_str());
+        else if (kv.first == "encoder") s.software = kv.second == "software";
       }
       if (s.name.empty() || s.regex.empty()) {
         std::cerr << "a --stream needs at least name= and regex=" << std::endl;
@@ -465,13 +483,33 @@ int main(int argc, char **argv) {
     std::cout << "encoder: " << encoder_override << " (from --encoder)" << std::endl;
   }
 
+  // The best encoder that needs no GPU, for the streams that asked for one.
+  // Same codec wherever it can be: the bandwidth a consumer sees is the reason
+  // H.265 is first in the table, and it should not change with the encoder.
+  const EncoderChoice *software = nullptr;
+  const bool want_software = std::any_of(
+      specs.begin(), specs.end(), [](const Spec &s) { return s.software; });
+  if (want_software && encoder_override.empty()) {
+    for (const auto &c : kEncoders) {
+      if (c.needs_cuda || !HaveFactory(c.element)) continue;
+      if (!EncoderWorks(EncoderFragment(c, specs.front().bitrate_kbps), c.parser)) continue;
+      software = &c;
+      break;
+    }
+    if (software != nullptr) {
+      std::cout << "encoder: " << software->element << " (" << software->label
+                << ") for the scaled streams" << std::endl;
+    }
+  }
+
   std::vector<std::unique_ptr<Stream>> streams;
   for (auto &s : specs) {
     std::string enc = encoder_override;
     std::string parser = parser_override;
     if (enc.empty()) {
-      enc = EncoderFragment(*chosen, s.bitrate_kbps);
-      parser = chosen->parser;
+      const EncoderChoice *choice = (s.software && software != nullptr) ? software : chosen;
+      enc = EncoderFragment(*choice, s.bitrate_kbps);
+      parser = choice->parser;
     }
     streams.push_back(std::make_unique<Stream>(s, enc, parser));
   }

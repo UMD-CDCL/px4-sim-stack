@@ -57,14 +57,10 @@ x-mavlink-router-env: &mavlink-router-env
 x-onboard: &onboard
   build:
     context: ./modules/onboard
-    additional_contexts:
-      # Where 5g_drone, cdcl_umd_msgs and MAVInsight are checked out. colcon
-      # builds them into the image, so nothing is mounted at run time.
-      ros2_ws: ${ROS2_WS_DIR:-../ros2_ws}
     args:
-      <<: *ids
-      # DeepStream 7.1 is the last Ubuntu 22.04 release, and 22.04 is what ROS 2
-      # Humble needs. The Dockerfile stops a build on any other base.
+      # Which ros-base to derive from. Everything heavy is there, so this image
+      # is its entry point and nothing else. `./px4sim build` builds the base
+      # first. See modules/ros-base/Dockerfile.
       DS_VERSION: ${DS_VERSION_ONBOARD:-7.1}
   image: px4simstack/onboard:${DS_VERSION_ONBOARD:-7.1}
   runtime: nvidia
@@ -117,6 +113,27 @@ x-onboard-env: &onboard-env
 services:
 
   # -------------------------------------------------------------------------
+  # ros-base - what the companion and the ground station are both made of.
+  # Built, never run: DeepStream, ROS 2 Humble, MAVROS and the built ros2_ws,
+  # in one image so the work happens once and one package list is maintained.
+  # -------------------------------------------------------------------------
+  ros-base:
+    profiles: [base]
+    build:
+      context: ./modules/ros-base
+      additional_contexts:
+        # Where 5g_drone, cdcl_umd_msgs and MAVInsight are checked out. colcon
+        # builds them into the image, so nothing is mounted at run time.
+        ros2_ws: ${ROS2_WS_DIR:-../ros2_ws}
+      args:
+        <<: *ids
+        # DeepStream 7.1 is the last Ubuntu 22.04 release, and 22.04 is what
+        # ROS 2 Humble needs. The Dockerfile stops a build on any other base.
+        DS_VERSION: ${DS_VERSION_ONBOARD:-7.1}
+    image: px4simstack/ros-base:${DS_VERSION_ONBOARD:-7.1}
+    command: ["true"]
+
+  # -------------------------------------------------------------------------
   # sim - the vehicle. PX4 SITL, Gazebo Harmonic, the sensors, and the camera
   # encoders. This module owns physics and firmware. It publishes one MAVLink
   # port and one video stream for each camera. Nothing else.
@@ -148,6 +165,12 @@ services:
       UAS_THERMAL_HFOV_DEG: ${UAS_THERMAL_HFOV_DEG:-29.75 29.75 31.03 29.75}
       UAS_DOWN_HFOV_DEG: ${UAS_DOWN_HFOV_DEG:-25.98 25.98 25.98 25.98}
       UAS_SPACING_M: ${UAS_SPACING_M:-1}
+      # Which cameras each vehicle serves. See .env.example.
+      UAS_STREAMS: ${UAS_STREAMS:-gimbal}
+      # A scaled stream encodes in software by default, which keeps the
+      # GPU's encoding sessions for the full size ones and the codec the
+      # same either way. Set to anything else to put both on the GPU.
+      VIDEO_SCALED_ENCODER: ${VIDEO_SCALED_ENCODER:-software}
       SCENARIO: ${SCENARIO:-}
       GZ_GUI: ${GZ_GUI:-0}
       VIDEO_SINK_BASE: rtsp://video-router:8554
@@ -425,14 +448,8 @@ services:
     profiles: [offboard]
     build:
       context: ./modules/offboard
-      additional_contexts:
-        # Where 5g_drone, cdcl_umd_msgs and MAVInsight are checked out. colcon
-        # builds them into the image, so nothing is mounted at run time.
-        ros2_ws: ${ROS2_WS_DIR:-../ros2_ws}
       args:
-        <<: *ids
-        # DeepStream 7.1 is the last Ubuntu 22.04 release, and 22.04 is what
-        # ROS 2 Humble needs. The Dockerfile stops a build on any other base.
+        # See the onboard note above: everything heavy is in ros-base.
         DS_VERSION: ${DS_VERSION_OFFBOARD:-7.1}
     image: px4simstack/offboard:${DS_VERSION_OFFBOARD:-7.1}
     hostname: offboard
