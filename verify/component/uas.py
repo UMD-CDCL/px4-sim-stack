@@ -365,11 +365,15 @@ def command_detections(uas: Uas, args) -> int:
     The detector publishes boxes and tf_loc localizes on request, which is what
     a mission does, so this asks the same way rather than waiting for a mission.
     """
+    # The newest frame, not the first to arrive. A reliable subscription hands
+    # over whatever is queued, and localizing a frame from before the vehicle
+    # settled measures a pose the camera has already left.
     latest = {}
     uas.create_subscription(TargetBoxArray, f"{uas.namespace}/target_detections",
-                            lambda msg: latest.setdefault("msg", msg), RELIABLE_QOS)
+                            lambda msg: latest.__setitem__("msg", msg), RELIABLE_QOS)
     if not uas.wait_until(lambda: "msg" in latest, args.deadline, "a detection"):
         return 1
+    uas.pump(2.0)
     detection = latest["msg"]
     if not args.tsv:
         print(f"{len(detection.uav_target_boxes)} boxes in seq {detection.seq}, "
@@ -539,7 +543,7 @@ def command_fiducial(uas: Uas, args) -> int:
     """
     latest = {}
     uas.create_subscription(TargetBoxArray, f"{uas.namespace}/target_detections",
-                            lambda msg: latest.setdefault("msg", msg), RELIABLE_QOS)
+                            lambda msg: latest.__setitem__("msg", msg), RELIABLE_QOS)
     correction = {}
     uas.create_subscription(TransformStamped, f"{uas.namespace}/fiducial_update",
                             lambda msg: correction.setdefault("msg", msg), RELIABLE_QOS)

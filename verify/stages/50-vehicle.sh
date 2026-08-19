@@ -14,6 +14,8 @@ fi
 # Not an assertion: a step that fails still lets the checks below speak.
 uas() { ./px4sim uas "$lead" "$@" 2>&1 || true; }
 
+vehicle_ready "$lead" || return 0
+
 telemetry=$(./px4sim probe "$lead" 2>/dev/null)
 while IFS=$'\t' read -r topic publishers verdict; do
 	[ -n "$topic" ] || continue
@@ -23,16 +25,19 @@ while IFS=$'\t' read -r topic publishers verdict; do
 	expect_eq "${topic##*/uas$lead/} carries data" data "$verdict"
 done <<< "$telemetry"
 
-# The outline and the drape need the camera to see ground, so put it there.
-uas takeoff 40 >/dev/null
-pointing=$(uas gimbal -60)
+# Over a target the scenario recorded, low and oblique, which is where a
+# detector finds a person. The campus scenario puts casualty_m14 111 m north of
+# the origin, and 20 m short of it at 12 m is a clear view of it.
+uas takeoff 30 >/dev/null
+uas goto "${TARGET_EAST:-0}" "${TARGET_NORTH:-91}" 12 --heading 0 >/dev/null
+pointing=$(uas gimbal -30)
 depression=$(printf '%s' "$pointing" | sed -n 's/^reported depression \([-0-9.]*\).*/\1/p')
 if [ -z "$depression" ]; then
 	fail "the gimbal reports where it points"
 	note "$pointing"
 else
 	# A degree is well inside the slew the report settles to.
-	within=$(python3 -c "print(abs($depression - 60) <= 2.0)")
+	within=$(python3 -c "print(abs($depression - 30) <= 2.0)")
 	expect_eq "the gimbal points where it is told" True "$within"
 fi
 
@@ -42,6 +47,9 @@ for topic in camera_fov ground_projection; do
 done
 
 uas detect on >/dev/null
+# Settle first. A localization taken while the gimbal is still slewing is
+# computed against a pose the camera has already left.
+sleep "${VEHICLE_SETTLE_S:-15}"
 found=$(uas detections)
 boxes=$(printf '%s' "$found" | sed -n 's/^\([0-9]*\) boxes.*/\1/p')
 if [ "${boxes:-0}" -gt 0 ]; then

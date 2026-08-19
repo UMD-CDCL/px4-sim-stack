@@ -39,6 +39,25 @@ await() {
 	return 0
 }
 
+# A stack takes minutes to be ready: Gazebo loads the world, the scenario places
+# its entities, PX4 boots, the streams come up and the detector builds or loads
+# its engines. A stage that starts before that fails on everything and says
+# nothing useful, so every runtime stage waits here first.
+vehicle_ready() {
+	local n=$1 deadline=${2:-600} waited=0
+	while [ "$(./px4sim probe "$n" "/uas$n/state" 2>/dev/null | cut -f3)" != data; do
+		if [ "$waited" -ge "$deadline" ]; then
+			fail "uas$n is answering after ${deadline}s"
+			note "is it started? ./px4sim status, ./px4sim logs onboard$n"
+			return 1
+		fi
+		sleep 10
+		waited=$((waited + 10))
+	done
+	[ "$waited" -gt 0 ] && note "uas$n ready after ${waited}s"
+	return 0
+}
+
 report() {
 	printf '\n%s%s passed, %s failed%s\n' "$BOLD" "$VERIFY_PASS" "$VERIFY_FAIL" "$OFF"
 	[ "$VERIFY_FAIL" -eq 0 ]

@@ -68,11 +68,27 @@ fi
 # is an ideal pinhole at the field of view its airframe was rendered with, so
 # cam_info reads a file written here rather than one of the aircraft's real lens
 # files. config/param_files/sim/onboard_sim_params.yaml names this path.
-read -r -a _gimbal_hfov <<< "${UAS_GIMBAL_HFOV_DEG:-27.45 27.45 85.25 25.98}"
+read -r -a _gimbal_hfov <<< "${UAS_GIMBAL_HFOV_DEG:-56.06 56.06 85.25 25.98}"
+CAMERA_HFOV_DEG=${_gimbal_hfov[$SLOT]:-${_gimbal_hfov[0]}}
+
+# A v3 lens zooms. The simulator crops its camera to the preset the vehicle
+# flies at, so the calibration is the preset's field of view rather than the
+# widest the camera renders. One table says what a preset is, and both read it.
+# shellcheck disable=SC1091
+. /usr/local/bin/zoom.sh
+if [ "${MODEL}" = v3 ] && _preset=$(zoom_preset_of_slot "${SLOT}"); then
+	if _preset_hfov=$(zoom_hfov_deg "${_preset}"); then
+		CAMERA_HFOV_DEG=${_preset_hfov}
+		echo "lens: ${_preset} preset, ${_preset_hfov} degrees"
+	else
+		echo "uas${UAS_NUM} asks for zoom preset '${_preset}', which UAS_ZOOM_PRESETS does not name." >&2
+	fi
+fi
+
 python3 /usr/local/bin/sim_calibration.py \
 	--model "/scenes/models/${AIRFRAME}/model.sdf" \
 	--sensor gimbal_camera \
-	--hfov-deg "${_gimbal_hfov[$SLOT]:-${_gimbal_hfov[0]}}" \
+	--hfov-deg "${CAMERA_HFOV_DEG}" \
 	--out "${CAMERA_DIR:-/camera}/gimbal.yaml"
 
 # The site, worked out from the scene rather than configured. A terrain tile is
@@ -109,13 +125,14 @@ fi
 # The detector opens its camera once and dies if it is not there. On the
 # aircraft the camera is a local socket that exists at boot; here it is a stream
 # the simulator publishes after Gazebo has loaded the world and placed the
-# scenario, which takes minutes on a large scene. So wait for it, with the tool
-# that wraps the same Discoverer ds_node opens the stream with.
+# scenario, which takes minutes on a large scene. So wait until a frame can be
+# pulled from it, with the same GStreamer the detector opens it with.
 GIMBAL_STREAM=${GIMBAL_STREAM:-$([ "${MODEL}" = v3 ] && echo "rgb${UAS_NUM}" || echo "pilot${UAS_NUM}")}
 CAMERA_URI="${RTSP_BASE:-rtsp://video-router:8554}/${GIMBAL_STREAM}"
 STREAM_WAIT_S=${STREAM_WAIT_S:-300}
 waited=0
-until gst-discoverer-1.0 -t 5 "${CAMERA_URI}" >/dev/null 2>&1; do
+until timeout 15 gst-launch-1.0 -q rtspsrc "location=${CAMERA_URI}" latency=100 \
+	! fakesink num-buffers=1 >/dev/null 2>&1; do
 	if [ "${waited}" -ge "${STREAM_WAIT_S}" ]; then
 		echo "uas${UAS_NUM}: ${CAMERA_URI} never appeared after ${STREAM_WAIT_S}s." >&2
 		echo "The detector will start anyway and fail to open its camera." >&2

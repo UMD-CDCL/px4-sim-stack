@@ -106,6 +106,7 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY px4-rcS /opt/sim/px4-rcS
 COPY hold-stream-rates.sh /opt/sim/hold-stream-rates.sh
 COPY gimbal_rangefinder.py /opt/sim/gimbal_rangefinder.py
+COPY zoom.sh /opt/sim/zoom.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh /opt/sim/gimbal_rangefinder.py \
       /opt/sim/hold-stream-rates.sh \
     && chmod 0644 /opt/sim/px4-rcS

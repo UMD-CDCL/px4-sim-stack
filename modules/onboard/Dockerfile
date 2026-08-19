@@ -16,7 +16,7 @@ FROM px4simstack/ros-base:${DS_VERSION}
 ARG USERNAME=user
 
 USER root
-COPY entrypoint.sh sim_calibration.py /usr/local/bin/
+COPY entrypoint.sh sim_calibration.py zoom.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 USER ${USERNAME}

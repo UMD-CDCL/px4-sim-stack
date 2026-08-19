@@ -27,6 +27,10 @@ done
 # quarter of an hour of waiting, and they do not interfere with each other.
 # Getting there is setup, so a vehicle that arrives late still answers the
 # question this stage asks.
+for n in $(fleet_numbers); do
+	vehicle_ready "$n" || return 0
+done
+
 TARGET_EAST=${TARGET_EAST:-0.69}
 TARGET_NORTH=${TARGET_NORTH:-111.23}
 fly() { ./px4sim uas "$@" >/dev/null 2>&1 || true; }

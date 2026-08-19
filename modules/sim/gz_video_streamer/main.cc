@@ -25,11 +25,13 @@
 #include <gst/gst.h>
 #include <gst/app/gstappsrc.h>
 
+#include <gz/msgs/double.pb.h>
 #include <gz/msgs/image.pb.h>
 #include <gz/transport/Node.hh>
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -173,6 +175,14 @@ struct Spec {
   // does. A scaled-down stream is small enough to encode in software without
   // troubling the physics loop, which leaves the sessions for the full ones.
   bool software = false;
+  // The field of view the camera renders, and the topic that asks for a
+  // narrower one. A zoom lens is simulated by cropping the middle out of the
+  // widest view the camera has: gz-sim cannot change a camera's field of view
+  // once the world is loaded, and the picture that comes out of a crop has
+  // genuinely the narrower field of view, which is what the calibration and
+  // every ray cast through it depend on.
+  double hfov_rad = 0.0;
+  std::string zoom_topic;
 };
 
 // One camera. It owns a gz subscription and a GStreamer pipeline.
@@ -186,6 +196,28 @@ class Stream {
 
   const Spec &spec() const { return spec_; }
   bool bound() const { return bound_; }
+
+  // A zoom lens, simulated. The camera renders its widest view and a narrower
+  // one is the middle of it: the fraction kept is the ratio of the tangents of
+  // the half angles, which is what makes the result a real field of view
+  // rather than a smaller picture.
+  void WatchZoom() {
+    if (spec_.zoom_topic.empty() || spec_.hfov_rad <= 0.0) return;
+    node_.Subscribe(spec_.zoom_topic, &Stream::OnZoom, this);
+    std::cout << "[" << spec_.name << "] zoom from " << spec_.zoom_topic
+              << ", widest " << spec_.hfov_rad << " rad" << std::endl;
+  }
+
+  void OnZoom(const gz::msgs::Double &msg) {
+    const double asked = msg.data();
+    if (!(asked > 0.0) || asked > spec_.hfov_rad) {
+      zoom_fraction_ = 1.0;
+    } else {
+      zoom_fraction_ = std::tan(asked / 2.0) / std::tan(spec_.hfov_rad / 2.0);
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    ApplyZoomLocked(source_width_, source_height_);
+  }
 
   // Look for a topic that matches, and subscribe to the first one.
   bool TryBind(const std::vector<std::string> &topics) {
@@ -293,10 +325,16 @@ class Stream {
       << " ! queue leaky=downstream max-size-buffers=4"
       << " ! videoconvert n-threads=2"
       << " ! videorate drop-only=true"
+      << " ! videocrop name=zoom"
       << " ! videoscale"
       << " ! video/x-raw,format={ NV12, I420 },framerate=" << spec_.fps << "/1";
     if (spec_.width > 0 && spec_.height > 0) {
       p << ",width=" << spec_.width << ",height=" << spec_.height;
+    } else if (!spec_.zoom_topic.empty()) {
+      // A cropped picture is smaller, and a stream whose size changes when the
+      // operator zooms is one every consumer has to renegotiate. Pin it to what
+      // the camera renders and let the scaler put the crop back.
+      p << ",width=" << width << ",height=" << height;
     }
     p << " ! " << encoder_
       << " ! " << parser_ << " config-interval=1"
@@ -314,6 +352,10 @@ class Stream {
     if (err != nullptr) g_error_free(err);
 
     appsrc_ = gst_bin_get_by_name(GST_BIN(pipeline_), "src");
+    zoom_ = gst_bin_get_by_name(GST_BIN(pipeline_), "zoom");
+    source_width_ = width;
+    source_height_ = height;
+    ApplyZoomLocked(width, height);
     GstCaps *caps = gst_caps_new_simple(
         "video/x-raw", "format", G_TYPE_STRING, format, "width", G_TYPE_INT, width, "height",
         G_TYPE_INT, height, "framerate", GST_TYPE_FRACTION, spec_.fps, 1, nullptr);
@@ -367,6 +409,18 @@ class Stream {
   // Prefer it over our own count: it survives a reconnect and it matches what
   // a Gazebo log shows. Fall back to counting if the field is absent.
   Spec spec_;
+  // Kept so a zoom that arrives between frames can be applied at once.
+  void ApplyZoomLocked(int width, int height) {
+    if (zoom_ == nullptr || width <= 0 || height <= 0) return;
+    const int side = static_cast<int>(width * (1.0 - zoom_fraction_) / 2.0) & ~1;
+    const int end = static_cast<int>(height * (1.0 - zoom_fraction_) / 2.0) & ~1;
+    g_object_set(zoom_, "left", side, "right", side, "top", end, "bottom", end, nullptr);
+  }
+
+  GstElement *zoom_ = nullptr;
+  std::atomic<double> zoom_fraction_{1.0};
+  int source_width_ = 0;
+  int source_height_ = 0;
   std::string encoder_;
   std::string parser_;
   std::regex pattern_;
@@ -436,6 +490,8 @@ int main(int argc, char **argv) {
         else if (kv.first == "width") s.width = std::atoi(kv.second.c_str());
         else if (kv.first == "height") s.height = std::atoi(kv.second.c_str());
         else if (kv.first == "encoder") s.software = kv.second == "software";
+        else if (kv.first == "hfov") s.hfov_rad = std::atof(kv.second.c_str());
+        else if (kv.first == "zoom_topic") s.zoom_topic = kv.second;
       }
       if (s.name.empty() || s.regex.empty()) {
         std::cerr << "a --stream needs at least name= and regex=" << std::endl;
@@ -512,6 +568,7 @@ int main(int argc, char **argv) {
       parser = choice->parser;
     }
     streams.push_back(std::make_unique<Stream>(s, enc, parser));
+    streams.back()->WatchZoom();
   }
 
   gz::transport::Node discovery;

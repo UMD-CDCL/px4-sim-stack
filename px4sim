@@ -129,6 +129,10 @@ resolve_origin
 # nothing else. UAS_FLEET is the single place the fleet size is written.
 # shellcheck disable=SC1091
 . ./scripts/fleet.sh
+# shellcheck disable=SC1091
+. ./scripts/zoom.sh
+# shellcheck disable=SC1091
+. ./scripts/zoom.sh
 
 # A vehicle is named by its UAS number, 11 upwards. A single digit is its place
 # in UAS_FLEET, which is how that line reads, so `1` and `11` both reach the
@@ -304,6 +308,7 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
                         takeoff [m], land, gimbal <pitch>
     probe <N> [topic]   What that vehicle's ROS graph carries right now
     snap <stream>       Save one frame of a live stream to look at
+    zoom <N> <preset>   Set a v3 lens: narrow, mid or wide
     clean               Remove containers, networks and volumes
     clean-src           Delete the cloned upstream sources in ./src
     nuke                clean and clean-src together
@@ -646,6 +651,40 @@ genscene)
 	;;
 
 verify)   ./verify/run.sh "$@" ;;
+
+zoom)
+	# A v3 lens zooms by cropping the middle out of the widest view its camera
+	# renders, so this is what the operator's preset does to the picture. The
+	# calibration cam_info publishes follows UAS_ZOOM, which is read at start,
+	# so change that and restart to move both together.
+	n=$(vehicle_arg "${1:-}")
+	preset=${2:?name a preset: $UAS_ZOOM_PRESETS}
+	hfov=$(zoom_hfov_deg "$preset") || die "No zoom preset '$preset'. This lens has: $UAS_ZOOM_PRESETS"
+	[ "$(mark_of "$n")" = v3 ] || die "uas$n is a $(mark_of "$n"), and only a v3 lens zooms."
+	add_fleet_profiles
+	$DC exec -T sim gz topic -t "/uas$n/camera/zoom" -m gz.msgs.Double \
+		-p "data: $(python3 -c "import math; print(math.radians($hfov))")"
+	say "uas$n lens at $preset, $hfov degrees"
+	warn "The picture changes now. cam_info still publishes the UAS_ZOOM preset"
+	warn "until the companion restarts, so set UAS_ZOOM to keep the two together."
+	;;
+
+zoom)
+	# A v3 lens zooms by cropping the middle out of the widest view its camera
+	# renders, so this is what the operator's preset does to the picture. The
+	# calibration cam_info publishes follows UAS_ZOOM, which is read at start,
+	# so change that and restart to move both together.
+	n=$(vehicle_arg "${1:-}")
+	preset=${2:?name a preset from: $UAS_ZOOM_PRESETS}
+	hfov=$(zoom_hfov_deg "$preset") || die "No zoom preset '$preset'. This lens has: $UAS_ZOOM_PRESETS"
+	[ "$(mark_of "$n")" = v3 ] || die "uas$n is a $(mark_of "$n"), and only a v3 lens zooms."
+	add_fleet_profiles
+	$DC exec -T sim gz topic -t "/uas$n/camera/zoom" -m gz.msgs.Double \
+		-p "data: $(python3 -c "import math; print(math.radians($hfov))")"
+	say "uas$n lens at $preset, $hfov degrees"
+	warn "The picture changes now. cam_info still publishes the UAS_ZOOM preset"
+	warn "until the companion restarts, so set UAS_ZOOM to keep the two together."
+	;;
 
 snap)
 	# One frame of a live stream, saved where the caller asked. The sim

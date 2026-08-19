@@ -13,6 +13,8 @@ if [ -z "$(COMPOSE_PROFILES="uas$lead,onboard$lead" docker compose ps -q "onboar
 fi
 uas() { ./px4sim uas "$lead" "$@" 2>&1 || true; }
 
+vehicle_ready "$lead" || return 0
+
 # A mosaic frame is only added when its corner rays all reach the ground and it
 # covers ground the mosaic does not already hold, so this flies a short line
 # looking straight down rather than capturing from one place.

@@ -45,6 +45,8 @@ read -r -a GIMBAL_HFOV <<< "$UAS_GIMBAL_HFOV_DEG"
 read -r -a THERMAL_HFOV <<< "$UAS_THERMAL_HFOV_DEG"
 read -r -a DOWN_HFOV <<< "$UAS_DOWN_HFOV_DEG"
 read -r -a STREAM_CHOICE <<< "${UAS_STREAMS:-gimbal}"
+# shellcheck disable=SC1091
+. /opt/sim/zoom.sh
 [ ${#FLEET[@]} -ge 1 ] || die "UAS_FLEET is empty. Give one model name for each vehicle."
 [ ${#FLEET[@]} -le 9 ] || die "UAS_FLEET has ${#FLEET[@]} vehicles. The simulator numbers them 11 to 19."
 
@@ -200,6 +202,14 @@ if [ "$GZ_GUI" = "1" ]; then
 	fi
 fi
 
+# The mark of an airframe, which decides what it carries.
+mark_of_model() {
+	case "$1" in
+	*_v3) echo v3 ;;
+	*_v2) echo v2 ;;
+	esac
+}
+
 # Whether a vehicle serves one camera, given what it was asked for.
 serves() {
 	local choice=$1 camera=$2 gimbal=$3
@@ -241,6 +251,7 @@ for index in "${!FLEET[@]}"; do
 	#   all      every camera the model declares
 	#   a list   rgb, pilot or thermal, comma separated
 	choice=${STREAM_CHOICE[$index]:-${STREAM_CHOICE[0]:-gimbal}}
+	gimbal_hfov_rad=$(radians "${GIMBAL_HFOV[$index]:-${GIMBAL_HFOV[0]}}")
 	case "$model" in
 	*_v3) gimbal_camera=rgb ;;
 	*_v2) gimbal_camera=pilot ;;
@@ -259,6 +270,14 @@ for index in "${!FLEET[@]}"; do
 		serves "$choice" "$camera" "$gimbal_camera" || continue
 
 		spec="name=$name,regex=$regex,bitrate=${bitrate:-4000},fps=${fps:-30}"
+		# A zoom lens, on the camera that has one. gz-sim cannot change a
+		# camera's field of view once the world is loaded, so the camera
+		# renders its widest and the streamer crops the middle out for a
+		# narrower one. The crop is a real field of view, which is what the
+		# calibration and every ray cast through it depend on.
+		if [ "$camera" = "$gimbal_camera" ] && [ "$(mark_of_model "$model")" = v3 ]; then
+			spec="$spec,hfov=${gimbal_hfov_rad},zoom_topic=/uas${UAS_NUM}/camera/zoom"
+		fi
 		case "${width:--}" in
 		-|'') ;;
 		*)  spec="$spec,width=$width,height=$height"
@@ -288,6 +307,20 @@ for index in "${!FLEET[@]}"; do
 	log "Starting the uas$UAS_NUM camera encoders: ${served[*]}"
 	gz_video_streamer "${args[@]}" &
 	children+=($!)
+
+	# The lens starts at a preset. The streamer crops the camera to it, and the
+	# companion writes the calibration for the same preset, so the picture and
+	# the intrinsics agree from the first frame.
+	if [ "$(mark_of_model "$model")" = v3 ] && preset=$(zoom_preset_of_slot "$index"); then
+		if hfov=$(zoom_hfov_deg "$preset"); then
+			zoom_topic=/uas${UAS_NUM}/camera/zoom
+			( sleep 5; gz topic -t "$zoom_topic" -m gz.msgs.Double \
+				-p "data: $(radians "$hfov")" >/dev/null 2>&1 ) &
+			log "uas$UAS_NUM lens at the $preset preset, $hfov degrees"
+		else
+			warn "uas$UAS_NUM asks for zoom preset '$preset', which UAS_ZOOM_PRESETS does not name."
+		fi
+	fi
 done
 unset UAS_NUM GZ_MODEL
 
