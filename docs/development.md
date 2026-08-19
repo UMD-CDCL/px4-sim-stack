@@ -494,13 +494,14 @@ fixed deadline then gives up on a vehicle that is flying perfectly well.
 
 On an RTX 3070 with 16 cores, flying the campus scene.
 
-| | Four vehicles, eight streams | Four vehicles, twelve streams |
-|---|---|---|
-| Real time factor | about 0.4 | 0.07 to 0.24 |
-| Closest box to its recorded target | 0.2 m | 4.7 to 6.1 m |
-| Two vehicles over one target | 0.27 m | 5.3 m |
-| Localizations reaching the ground | every one, unchanged | every one, unchanged |
-| Gimbal pointing | within half a degree | within half a degree |
+| | One vehicle, two streams | Four, eight streams | Four, twelve streams |
+|---|---|---|---|
+| Real time factor | near 1 | about 0.4 | 0.07 to 0.24 |
+| Closest box to its recorded target | 0.7 m | 0.2 m | 4.7 to 6.1 m |
+| Two vehicles over one target | n/a | 0.27 m | 5.3 m |
+| Localizations reaching the ground | every one, unchanged | every one, unchanged | every one, unchanged |
+| Gimbal pointing | within half a degree | within half a degree | within half a degree |
+| Terrain drawn against the surface file | 31.9 m of relief against 31.9 m | | |
 
 The accuracy figures move with the load and not with the code. Everything that
 rests on a timestamp loosens as the simulation falls behind real time: the pose
@@ -513,6 +514,34 @@ they catch; the distance inside that is reported rather than graded.
 Four things do not move: what reaches the ground, whether it reaches it
 unchanged, where the gimbal points, and whether a ray lands on terrain or on
 the flat plane.
+
+### The scene in the 3D panel
+
+Two nodes draw what the vehicle flies over, both from the files a ray is
+localized against, so the panel and the localization cannot show different
+ground.
+
+| Node | Topic | Reads |
+|---|---|---|
+| `terrain_viz` | `/viz/scene/terrain` | the terrain mesh and the satellite image over it |
+| `buildings_viz` | `/viz/scene/buildings` | the roofs, one surface for each floor |
+
+Foxglove draws a triangle list and no texture, so the terrain is coloured by
+sampling the satellite image at each vertex and the panel interpolates between
+them. The detail is the mesh's rather than the image's: a stride of one over a
+600 m scene samples every 4.7 m, which is a road and a roof and a field, and
+not a car. `terrain_stride` takes one vertex in every few for a lighter
+message, at a quarter of the triangles for each step.
+
+The mesh is read rather than the surface file because it already carries the
+texture coordinates. The imagery is a slippy tile mosaic, and placing a point
+in it needs a georeference the built scene no longer ships.
+
+Both place the scene against the vehicle's home fix, and both need
+`geoid_height_m` to do it: the scene is anchored above mean sea level and a fix
+is above the ellipsoid, so without it the whole scene is drawn a geoid
+separation off the ground, 33 m in Maryland. The simulator works it out per
+scene and the entry point exports it.
 
 ## Speed and determinism
 

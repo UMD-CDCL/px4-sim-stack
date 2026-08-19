@@ -12,8 +12,26 @@ cd "$(dirname "$(readlink -f "$0")")/.."
 
 # shellcheck disable=SC1091
 . ./verify/lib.sh
+
+# The same configuration the front door reads, and in the same order: the file
+# says what the stack is, and the environment overrides it for one run. Without
+# this a stage measures the built-in defaults and reports on a fleet that is
+# not flying.
+if [ -f .env ]; then
+	for name in SCENE SCENARIO UAS_FLEET UAS_STREAMS UAS_ZOOM; do
+		if [ -n "${!name+set}" ]; then eval "override_$name=\$$name"; fi
+	done
+	# shellcheck disable=SC1091
+	set -a; . ./.env; set +a
+	for name in SCENE SCENARIO UAS_FLEET UAS_STREAMS UAS_ZOOM; do
+		holder="override_$name"
+		if [ -n "${!holder+set}" ]; then export "$name=${!holder}"; fi
+	done
+fi
 # shellcheck disable=SC1091
 . ./scripts/fleet.sh
+# shellcheck disable=SC1091
+. ./scripts/zoom.sh
 
 # The number in each file name is the order, and nothing else reads it.
 stage_files() { ls verify/stages/*.sh; }

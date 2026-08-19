@@ -96,6 +96,10 @@ python3 /usr/local/bin/sim_calibration.py \
 # ellipsoid; GeoidEval says how far apart those are here, and mavros already
 # installs the datasets it reads.
 SITE_PARAMS=${SITE_PARAMS:-/camera/site.yaml}
+# The panel places the scene against the vehicle's home fix, which is a height
+# above the ellipsoid, while the scene is anchored above mean sea level. Unset,
+# the terrain and the buildings are drawn a geoid separation off the ground.
+export GEOID_HEIGHT_M=0.0
 if [ -f "${SURFACE}" ]; then
 	geoid_height=$(python3 -c "
 import json, subprocess, sys
@@ -105,6 +109,7 @@ print(subprocess.run(['GeoidEval'], input=f'{latitude} {longitude}',
 	printf '/**/*:\n  ros__parameters:\n    localization.geoid_height_m: %s\n' \
 		"${geoid_height}" > "${SITE_PARAMS}"
 	echo "site: geoid height ${geoid_height} m"
+	export GEOID_HEIGHT_M="${geoid_height}"
 else
 	printf '/**/*:\n  ros__parameters:\n    localization.geoid_height_m: 0.0\n' \
 		> "${SITE_PARAMS}"

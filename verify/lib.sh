@@ -10,6 +10,10 @@ stage() { VERIFY_CURRENT=$1; printf '\n%s== %s ==%s\n' "$BOLD" "$1" "$OFF"; }
 pass()  { VERIFY_PASS=$((VERIFY_PASS + 1)); printf '  %sok  %s%s\n' "$GRN" "$OFF" "$*"; }
 fail()  { VERIFY_FAIL=$((VERIFY_FAIL + 1)); printf '  %sFAIL%s %s\n' "$RED" "$OFF" "$*"; }
 note()  { printf '       %s%s%s\n' "$DIM" "$*" "$OFF"; }
+# A stage that does not apply to this stack is not a failure. A fleet of one
+# has nothing to say about two vehicles agreeing, and saying so as a failure
+# would make the default run always report one.
+skip()  { printf '  %s--  %s%s\n' "$DIM" "$OFF" "$*"; }
 
 expect() {
 	local what=$1; shift

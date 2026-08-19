@@ -13,7 +13,8 @@
 # "agrees" and "does not share a ground", not a measure of the best it does.
 
 if [ "$UAS_COUNT" -lt 2 ]; then
-	fail "this fleet has one vehicle. Fly two or more: UAS_FLEET='chimera_v3 chimera_v2' ./px4sim start"
+	skip "this fleet has one vehicle, and this asks what two make of one target"
+	note "fly more: UAS_FLEET='chimera_v3 chimera_v3 chimera_v2 chimera_v2' ./px4sim start"
 	return 0
 fi
 for n in $(fleet_numbers); do

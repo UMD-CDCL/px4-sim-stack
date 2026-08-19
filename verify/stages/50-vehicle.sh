@@ -46,6 +46,30 @@ for topic in camera_fov ground_projection; do
 	expect_eq "$topic is published with ground in view" data "$verdict"
 done
 
+# The 3D panel gets the scene from the same files a ray is localized against,
+# so the ground it draws has to be that ground: the right shape, at the right
+# height, in colours that came from the satellite image. A scene drawn a geoid
+# separation above the aircraft is published exactly as convincingly.
+drawn=$(uas scene /viz/scene/terrain)
+if printf '%s' "$drawn" | grep -q '^fault'; then
+	fail "the panel draws the ground the rays are cast at"
+	note "$(printf '%s' "$drawn" | grep '^fault' | tr '\n' ' ')"
+elif printf '%s' "$drawn" | grep -q '^triangles'; then
+	pass "the panel draws the ground the rays are cast at: $(printf '%s' "$drawn" | tr '\n' ' ')"
+else
+	fail "the panel draws the ground the rays are cast at"
+	note "$(printf '%s' "$drawn" | tail -2)"
+fi
+
+# The buildings are roofs, so they stand above the terrain and carry more
+# relief than it does. Only that they are drawn is checked here; where they
+# stand is buildings_viz's own business and the same offset as the terrain.
+if ./px4sim uas "$lead" scene /viz/scene/buildings 2>/dev/null | grep -q '^triangles'; then
+	pass "the panel draws the scene's buildings"
+else
+	fail "the panel draws the scene's buildings"
+fi
+
 uas detect on >/dev/null
 # Settle first. A localization taken while the gimbal is still slewing is
 # computed against a pose the camera has already left.

@@ -38,11 +38,19 @@ from std_srvs.srv import SetBool, Trigger
 from sensor_msgs.msg import NavSatFix
 from rosidl_runtime_py.utilities import get_message
 from std_msgs.msg import Float32
+from visualization_msgs.msg import Marker, MarkerArray
 
 SENSOR_QOS = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
                         history=HistoryPolicy.KEEP_LAST, depth=1)
 RELIABLE_QOS = QoSProfile(reliability=ReliabilityPolicy.RELIABLE,
                           history=HistoryPolicy.KEEP_LAST, depth=10)
+# How far the drawn scene may sit from where the surface file puts it. The fix
+# and the scene are anchored in different vertical datums, and getting that
+# wrong moves the whole scene by a geoid separation, 33 m here.
+SCENE_HEIGHT_TOLERANCE_M = 5.0
+# Colours closer together than this came from a default, not from an image.
+FLAT_COLOUR = 0.02
+
 LATCHED_QOS = QoSProfile(reliability=ReliabilityPolicy.RELIABLE,
                          durability=DurabilityPolicy.TRANSIENT_LOCAL,
                          history=HistoryPolicy.KEEP_LAST, depth=1)
@@ -575,6 +583,53 @@ def command_fiducial(uas: Uas, args) -> int:
     return 0
 
 
+def command_scene(uas: Uas, args) -> int:
+    """Check the scene the 3D panel is given.
+
+    A marker array either arrives or it does not, and that is all a topic probe
+    can say. What matters is whether the ground it draws is the ground: the
+    right shape, at the right height, in colours that came from an image. A
+    terrain drawn flat, or a geoid separation above the aircraft, is published
+    exactly as convincingly as a correct one.
+    """
+    arrived = {}
+    uas.create_subscription(MarkerArray, args.topic,
+                            lambda msg: arrived.setdefault("msg", msg), LATCHED_QOS)
+    if not uas.wait_until(lambda: "msg" in arrived, args.deadline, args.topic):
+        return 1
+
+    drawn = [m for m in arrived["msg"].markers if m.type == Marker.TRIANGLE_LIST]
+    points = [p for marker in drawn for p in marker.points]
+    colours = [c for marker in drawn for c in marker.colors]
+    if not points:
+        print(f"{args.topic} carries no triangles", file=sys.stderr)
+        return 1
+
+    # The surface file is what a ray is localized against, so the drawn ground
+    # has to be that same ground.
+    grid = [z for row in json.load(open(args.surface))["terrain_z"] for z in row]
+    relief = max(grid) - min(grid)
+    drawn_relief = max(p.z for p in points) - min(p.z for p in points)
+    height = statistics.median(p.z for p in points) - statistics.median(grid)
+    spread = statistics.pstdev([c.r for c in colours]) if colours else 0.0
+
+    print(f"triangles\t{len(points) // 3}")
+    print(f"height\t{height:+.1f}")
+    print(f"relief\t{drawn_relief:.1f}\t{relief:.1f}")
+    print(f"colour\t{spread:.3f}")
+
+    faults = []
+    if abs(height) > SCENE_HEIGHT_TOLERANCE_M:
+        faults.append(f"drawn {height:+.1f} m from the surface file")
+    if abs(drawn_relief - relief) > SCENE_HEIGHT_TOLERANCE_M:
+        faults.append(f"relief {drawn_relief:.1f} m against {relief:.1f} m")
+    if spread < FLAT_COLOUR:
+        faults.append("one colour, so no image reached it")
+    for fault in faults:
+        print(f"fault\t{fault}", file=sys.stderr)
+    return 1 if faults else 0
+
+
 COMMANDS = {
     "status": command_status,
     "arm": command_arm,
@@ -589,6 +644,7 @@ COMMANDS = {
     "score": command_score,
     "click": command_click,
     "fiducial": command_fiducial,
+    "scene": command_scene,
 }
 
 
@@ -639,6 +695,11 @@ def main() -> int:
                        help="click without setting the mode, to see whether a "
                             "station whose clicks are off really ignores them")
     click.add_argument("--settle", type=float, default=5.0)
+    scene = sub.add_parser("scene")
+    scene.add_argument("topic", nargs="?", default="/viz/scene/terrain")
+    scene.add_argument("--surface",
+                       default=f"/scenes/worlds/{os.environ.get('SCENE', '')}_surface.json")
+    scene.add_argument("--deadline", type=float, default=30.0)
     fiducial = sub.add_parser("fiducial")
     fiducial.add_argument("--deadline", type=float, default=20.0)
     score = sub.add_parser("score")
