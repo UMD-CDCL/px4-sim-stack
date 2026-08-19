@@ -461,6 +461,28 @@ and videos. The onboard and offboard Dockerfiles take `DS_IMAGE_FLAVOR`, so
 `triton-multiarch` builds a smaller image. Pass it in `compose.yaml`, under the
 build `args` of those two services.
 
+### The ground station hears nothing, and a node logs open_and_lock_file failed
+
+```
+[RTPS_TRANSPORT_SHM Error] Failed init_port fastrtps_port25031:
+open_and_lock_file failed
+```
+
+Fast DDS keeps its shared memory in `/dev/shm`, and these containers share the
+host's, so a segment outlives the container that made it. A few hundred pile up
+over a day of restarts until a new participant cannot lock a port, and the
+ground station stops hearing anything while every container still looks healthy.
+
+```bash
+ls /dev/shm | grep -c fastrtps
+```
+
+`./px4sim stop` releases the ones nobody has open. To clear them by hand:
+
+```bash
+./px4sim stop
+```
+
 ## Starting over
 
 ```bash

@@ -45,9 +45,9 @@ await() {
 # nothing useful, so every runtime stage waits here first.
 vehicle_ready() {
 	local n=$1 deadline=${2:-600} waited=0
-	while [ "$(./px4sim probe "$n" "/uas$n/state" 2>/dev/null | cut -f3)" != data; do
+	while [ "$(./px4sim probe "$n" "/uas$n/state" 2>/dev/null | cut -f3)" != data ]; do
 		if [ "$waited" -ge "$deadline" ]; then
-			fail "uas$n is answering after ${deadline}s"
+			fail "uas$n answers after ${deadline}s"
 			note "is it started? ./px4sim status, ./px4sim logs onboard$n"
 			return 1
 		fi

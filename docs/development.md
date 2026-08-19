@@ -357,6 +357,32 @@ To force the software encoder, add `--no-cuda`, or set an explicit fragment:
 gz_video_streamer --encoder "x264enc tune=zerolatency bitrate=2000" ...
 ```
 
+### The v3 zoom
+
+A v3 carries a zoom lens. gz-sim cannot change a camera's field of view once
+the world is loaded, so the camera renders the widest view the lens reaches and
+a narrower preset is the middle of it. The streamer crops to the field of view
+asked for on `/uas<N>/camera/zoom`, keeping the fraction that is the ratio of
+the tangents of the half angles, which is what makes the result a real field of
+view rather than a smaller picture. The stream keeps its size, so no consumer
+renegotiates when the operator zooms.
+
+`scripts/zoom.sh` is the one table of what the presets are, measured from the
+calibration files in 5g_drone. The simulator reads it to crop the camera and
+the companion reads it to write the calibration, so the two cannot disagree
+about what `mid` means.
+
+```bash
+UAS_ZOOM="mid mid - -"        # the preset each vehicle boots at, - for a v2
+./px4sim zoom 11 wide         # change the picture while it flies
+```
+
+`./px4sim zoom` moves the picture alone. The calibration follows `UAS_ZOOM`,
+which is read when the companion starts, so change that and restart to move
+both together. A crop is soft, because it is fewer pixels stretched back: the
+geometry is right and the detail is not. Render the camera larger in the
+airframe model to buy that back.
+
 ## The flight code
 
 5g_drone, cdcl_umd_msgs and MAVInsight are not in this repository. `ROS2_WS_DIR`
@@ -431,6 +457,38 @@ Stop the released `qgc` container first, or two ground stations compete for UDP
 version must match the one that release of QGroundControl expects. Look at
 `.github/workflows/linux.yml` in the source tree, then set `QT_VERSION` in
 `.env`.
+
+## Verification
+
+`./px4sim verify` runs every stage. Four need nothing running, four fly the
+stack.
+
+| Stage | What it establishes |
+|---|---|
+| `airframes` | Every fleet airframe expands, with the links and sensors the flight code reads |
+| `contract` | compose.yaml agrees with the fleet arithmetic: addresses, ports, domains, filters |
+| `units` | The terrain rays, the roofs and the ground the fleet shares |
+| `localize` | A hardcoded box lands where the geometry says, on the plane and on a roof |
+| `vehicle` | Telemetry, the gimbal, the outline, the drape, and a localized target |
+| `ground` | The ground station shows what the vehicle worked out, not its own version |
+| `fleet` | Every vehicle over one target reports one position for it |
+| `captures` | The mosaic is drawn, the fiducial surveys, the VLM frame crosses the link |
+
+The stages that fly are written against `./px4sim uas`, which flies a vehicle
+through the interfaces the aircraft uses: MAVROS for flight, the 5g_drone
+topics for the gimbal, the detector's own services for a capture. A check that
+passes there is a check of the flight code.
+
+Two things a stage has to do or it measures nothing. It waits for the stack,
+because Gazebo loads the world, the scenario places its entities, PX4 boots,
+the streams come up and the detector builds its engines, which is minutes. And
+it settles before it asks: a localization taken while the gimbal is still
+slewing is computed against a pose the camera has already left, and one of
+those in a sample makes two vehicles look fifteen metres apart.
+
+A wait follows progress rather than the wall clock. Four vehicles with twelve
+streams and four detectors run this machine at a fraction of real time, and a
+fixed deadline then gives up on a vehicle that is flying perfectly well.
 
 ## Speed and determinism
 

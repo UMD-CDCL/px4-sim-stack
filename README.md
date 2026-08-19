@@ -122,6 +122,32 @@ already plugged in.
 ./px4sim clean                # remove containers, networks and volumes
 ```
 
+Fly a vehicle and see what its nodes make of it:
+
+```bash
+./px4sim uas 11 takeoff 40    # status, arm, takeoff, goto, land
+./px4sim uas 11 gimbal -30    # degrees below the horizon
+./px4sim uas 11 detect on     # continuous detection, off until asked
+./px4sim uas 11 detections    # what it found, and where that landed
+./px4sim uas 11 capture mosaic   # mosaic, fiducial, vlm, snapshot
+./px4sim probe 11             # what its ROS graph carries right now
+./px4sim probe ground         # the same, on the ground station
+./px4sim zoom 11 wide         # a v3 lens: narrow, mid or wide
+./px4sim snap rgb11           # one frame of a stream, to look at
+```
+
+## Verification
+
+```bash
+./px4sim verify               # every stage
+./px4sim verify help          # what the stages are
+./px4sim verify airframes     # one of them
+```
+
+The first four stages need nothing running. `vehicle`, `ground`, `fleet` and
+`captures` fly the stack and say so if it is not up. What each one measured
+last is in [docs/development.md](docs/development.md).
+
 Start a subset by naming the profiles:
 
 ```bash
@@ -140,6 +166,8 @@ name here.
 | The targets | Edit a file in `modules/sim/scenes/scenarios/` | [docs/development.md](docs/development.md) |
 | The airframe or its sensors | Edit `modules/sim/scenes/models/chimera_v2` or `chimera_v3` | [docs/development.md](docs/development.md) |
 | The fleet | `UAS_FLEET=` in `.env` | [docs/uas-contract.md](docs/uas-contract.md) |
+| Which cameras each vehicle serves | `UAS_STREAMS=` in `.env` | [docs/troubleshooting.md](docs/troubleshooting.md) |
+| The zoom preset a v3 lens flies at | `UAS_ZOOM=` in `.env` | [docs/development.md](docs/development.md) |
 | PX4 itself | Edit `src/PX4-Autopilot`, then restart `sim` | [docs/development.md](docs/development.md) |
 | The flight code | Edit the tree at `ROS2_WS_DIR`, then rebuild | [docs/development.md](docs/development.md) |
 | QGroundControl itself | `./scripts/bootstrap.sh qgc`, then the `qgc-dev` profile | [docs/development.md](docs/development.md) |

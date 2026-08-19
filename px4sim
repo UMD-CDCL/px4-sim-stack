@@ -418,6 +418,19 @@ start|up|core)
 stop|down)
 	say "Stopping everything"
 	COMPOSE_PROFILES="$ALL_PROFILES" $DC down --remove-orphans
+
+	# Fast DDS keeps its shared memory in /dev/shm, and these containers share
+	# the host's, so a segment outlives the container that made it. They pile
+	# up a few hundred at a time until a new participant cannot lock a port and
+	# the ground station quietly stops hearing anything. Only the ones nobody
+	# has open are removed, so another stack on this machine is left alone.
+	leaked=0
+	for segment in /dev/shm/fastrtps_*; do
+		[ -e "$segment" ] || continue
+		fuser -s "$segment" 2>/dev/null && continue
+		rm -f "$segment" && leaked=$((leaked + 1))
+	done
+	[ "$leaked" -gt 0 ] && echo "  released $leaked shared memory segments"
 	;;
 
 restart)
@@ -731,11 +744,20 @@ uas|probe)
 	[ "$cmd" = uas ] && set -- "$n" "$@"
 	docker cp verify/component/uas.py "$container:/tmp/uas.py" >/dev/null
 	docker cp verify/component/graph_probe.py "$container:/tmp/graph_probe.py" >/dev/null
-	docker exec -e ROS_DOMAIN_ID="$domain" "$container" bash -lc '
+	docker cp verify/component/udp-only.xml "$container:/tmp/udp-only.xml" >/dev/null
+	# DDS writes its own warnings to stdout, so a caller reading the answer
+	# gets them mixed into it. The probe answers in three tab separated fields
+	# and nothing else does, so that is what comes back.
+	# DDS writes its own warnings to stdout, so a caller reading the answer
+	# gets them mixed into it. The probe answers in three tab separated fields
+	# and nothing else does, so that is what comes back.
+	probe_answer() { if [ "$cmd" = probe ]; then awk -F'\t' 'NF == 3'; else cat; fi; }
+	docker exec -e ROS_DOMAIN_ID="$domain" \
+		-e FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/udp-only.xml "$container" bash -lc '
 		set -e
 		. /opt/ros/humble/setup.bash
 		. /home/user/ros2_ws/install/setup.bash
-		exec python3 /tmp/'"$tool"' "$@"' _ "$@"
+		exec python3 /tmp/'"$tool"' "$@"' _ "$@" | probe_answer
 	;;
 
 check)

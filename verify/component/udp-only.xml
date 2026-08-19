@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Shared memory for a tool that runs for ten seconds and exits.
+
+     Fast DDS keeps its shared memory in /dev/shm, and these containers share
+     the host's, so a segment outlives the process that made it. The
+     verification calls a tool hundreds of times in a run, which leaves
+     hundreds of segments behind, until a new participant cannot lock a port
+     and the stack quietly stops hearing itself.
+
+     The nodes under test keep shared memory, which is what they use in
+     earnest. The tools that watch them do not need it. -->
+<profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <transport_descriptors>
+    <transport_descriptor>
+      <transport_id>udp_only</transport_id>
+      <type>UDPv4</type>
+    </transport_descriptor>
+  </transport_descriptors>
+  <participant profile_name="udp_only_participant" is_default_profile="true">
+    <rtps>
+      <userTransports>
+        <transport_id>udp_only</transport_id>
+      </userTransports>
+      <useBuiltinTransports>false</useBuiltinTransports>
+    </rtps>
+  </participant>
+</profiles>
