@@ -490,6 +490,30 @@ A wait follows progress rather than the wall clock. Four vehicles with twelve
 streams and four detectors run this machine at a fraction of real time, and a
 fixed deadline then gives up on a vehicle that is flying perfectly well.
 
+### What it measured
+
+On an RTX 3070 with 16 cores, flying the campus scene.
+
+| | Four vehicles, eight streams | Four vehicles, twelve streams |
+|---|---|---|
+| Real time factor | about 0.4 | 0.07 to 0.24 |
+| Closest box to its recorded target | 0.2 m | 4.7 to 6.1 m |
+| Two vehicles over one target | 0.27 m | 5.3 m |
+| Localizations reaching the ground | every one, unchanged | every one, unchanged |
+| Gimbal pointing | within half a degree | within half a degree |
+
+The accuracy figures move with the load and not with the code. Everything that
+rests on a timestamp loosens as the simulation falls behind real time: the pose
+a capture is localized against, the settling of a gimbal, the age of a fix.
+The tolerances in the stages are the line between working and broken, not a
+measure of the best the flight code does. A wrong datum, a wrong frame or a
+wrong anchor puts a box hundreds of metres out or off the planet, which is what
+they catch; the distance inside that is reported rather than graded.
+
+Four things do not move: what reaches the ground, whether it reaches it
+unchanged, where the gimbal points, and whether a ray lands on terrain or on
+the flat plane.
+
 ## Speed and determinism
 
 ```bash

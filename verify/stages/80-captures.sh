@@ -26,8 +26,12 @@ for north in 100 130 160 190; do
 	uas capture mosaic >/dev/null
 done
 
-added=$(./px4sim logs --since 5m "onboard$lead" 2>/dev/null | grep -c 'frame added to mosaic' || true)
-if [ "$added" -gt 0 ]; then
+# The node's own tally, not a count of lines in a window: a run that takes
+# longer than the window ages the lines out and reads as a mosaic that took
+# nothing while it was drawing one.
+added=$(./px4sim logs --since 30m "onboard$lead" 2>/dev/null |
+	sed -n 's/.*added_to_mosaic=\([0-9]*\).*/\1/p' | tail -1)
+if [ "${added:-0}" -gt 0 ]; then
 	pass "the mosaic took $added frames from the flight"
 else
 	fail "the mosaic took a frame from the flight"
