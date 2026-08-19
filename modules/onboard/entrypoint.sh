@@ -75,13 +75,32 @@ python3 /usr/local/bin/sim_calibration.py \
 	--hfov-deg "${_gimbal_hfov[$SLOT]:-${_gimbal_hfov[0]}}" \
 	--out "${CAMERA_DIR:-/camera}/gimbal.yaml"
 
+# The site, worked out from the scene rather than configured. A terrain tile is
+# anchored above mean sea level and a NavSatFix altitude is above the WGS84
+# ellipsoid; GeoidEval says how far apart those are here, and mavros already
+# installs the datasets it reads.
+SITE_PARAMS=${SITE_PARAMS:-/camera/site.yaml}
+if [ -f "${SURFACE}" ]; then
+	geoid_height=$(python3 -c "
+import json, subprocess, sys
+latitude, longitude, _ = json.load(open('${SURFACE}'))['origin_lla']
+print(subprocess.run(['GeoidEval'], input=f'{latitude} {longitude}',
+                     capture_output=True, text=True).stdout.strip())")
+	printf '/**/*:\n  ros__parameters:\n    localization.geoid_height_m: %s\n' \
+		"${geoid_height}" > "${SITE_PARAMS}"
+	echo "site: geoid height ${geoid_height} m"
+else
+	printf '/**/*:\n  ros__parameters:\n    localization.geoid_height_m: 0.0\n' \
+		> "${SITE_PARAMS}"
+fi
+
 if [ "${1:-launch}" = "launch" ]; then
 	shift || true
 	exec ros2 launch umd_uas onboard.launch.py \
 		uas:="${UAS_NUM}" \
 		model:="${MODEL}" \
 		sim:=true \
-		params:="${ONBOARD_PARAMS_FILE:-}" \
+		params:="${SITE_PARAMS}${ONBOARD_PARAMS_FILE:+,${ONBOARD_PARAMS_FILE}}" \
 		"$@"
 fi
 

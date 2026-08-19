@@ -12,9 +12,13 @@ Runs inside that vehicle's companion container, on its ROS domain:
 """
 
 import argparse
+import json
 import math
+import os
 import sys
 import time
+
+import yaml
 
 import numpy as np
 import pymap3d as pm
@@ -25,8 +29,11 @@ from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
                        ReliabilityPolicy)
 
 from geometry_msgs.msg import PoseStamped
+from cdcl_umd_msgs.msg import TargetBoxArray
+from cdcl_umd_msgs.srv import TBALocalization
 from mavros_msgs.msg import Altitude, GimbalDeviceAttitudeStatus, HomePosition, State
 from mavros_msgs.srv import CommandBool, CommandInt, CommandTOL, SetMode
+from std_srvs.srv import SetBool, Trigger
 from sensor_msgs.msg import NavSatFix
 from std_msgs.msg import Float32
 
@@ -91,6 +98,11 @@ class Uas(Node):
         self.gimbal_reassert = self.create_publisher(
             Float32, f"{self.namespace}/reassert_gimbal_cmd", RELIABLE_QOS)
         self.reposition = self.create_client(CommandInt, f"{self.namespace}/cmd/command_int")
+        # The detector's own services. They sit outside the vehicle namespace,
+        # which is where ds_node advertises them.
+        self.toggle_detection = self.create_client(SetBool, "/ds/mode/toggle_detection")
+        self.run_detect = self.create_client(Trigger, "/ds/batch/run_detect")
+        self.localize = self.create_client(TBALocalization, f"{self.namespace}/tba_loczn")
 
         self.arming = self.create_client(CommandBool, f"{self.namespace}/cmd/arming")
         self.takeoff_srv = self.create_client(CommandTOL, f"{self.namespace}/cmd/takeoff")
@@ -280,6 +292,97 @@ def command_goto(uas: Uas, args) -> int:
     return 0 if reached else 1
 
 
+def command_detect(uas: Uas, args) -> int:
+    """Start or stop continuous detection.
+
+    The detector runs its pipeline from the first frame but detects nothing
+    until this is on: a mission turns it on, and a bare stack leaves it off.
+    """
+    answer = uas.call(uas.toggle_detection, SetBool.Request(data=args.on == "on"),
+                      "toggle_detection")
+    if not answer:
+        return 1
+    print(answer.message or ("on" if args.on == "on" else "off"))
+    return 0 if answer.success else 1
+
+
+def command_capture(uas: Uas, _args) -> int:
+    """Run the detector once on the frames it holds."""
+    answer = uas.call(uas.run_detect, Trigger.Request(), "run_detect")
+    if not answer:
+        return 1
+    print(answer.message)
+    return 0 if answer.success else 1
+
+
+def command_detections(uas: Uas, args) -> int:
+    """Report one detection message, and where its boxes localize.
+
+    The detector publishes boxes and tf_loc localizes on request, which is what
+    a mission does, so this asks the same way rather than waiting for a mission.
+    """
+    latest = {}
+    uas.create_subscription(TargetBoxArray, f"{uas.namespace}/target_detections",
+                            lambda msg: latest.setdefault("msg", msg), RELIABLE_QOS)
+    if not uas.wait_until(lambda: "msg" in latest, args.deadline, "a detection"):
+        return 1
+    detection = latest["msg"]
+    print(f"{len(detection.uav_target_boxes)} boxes in seq {detection.seq}, "
+          f"image {len(detection.source_img.data)} bytes")
+    for box in detection.uav_target_boxes:
+        centre = box.target_bbox.center.position
+        print(f"  {box.detection_class or '?'} {box.detection_confidence:.2f} "
+              f"at {centre.x:.0f}, {centre.y:.0f} "
+              f"({box.target_bbox.size_x:.0f} x {box.target_bbox.size_y:.0f} px)")
+    if not detection.uav_target_boxes:
+        return 1
+
+    answer = uas.call(uas.localize, TBALocalization.Request(un_localized=detection),
+                      "tba_loczn")
+    if not answer:
+        return 1
+    truth = ground_truth(args.truth, args.scene)
+    for box in answer.localized_boxes.uav_target_boxes:
+        fix = box.target_location_altimeter_plane
+        topo = box.target_location_topo
+        surface = "terrain" if topo.status.status >= 0 else "flat plane"
+        line = (f"  localized {fix.latitude:.7f}, {fix.longitude:.7f}, "
+                f"{fix.altitude:.1f} m on the {surface}")
+        if truth:
+            name, error = nearest(truth, fix.latitude, fix.longitude)
+            line += f"  -> {error:.1f} m from {name}"
+        print(line)
+    return 0 if answer.localized_boxes.uav_target_boxes else 1
+
+
+def ground_truth(path: str, scene_surface: str):
+    """Where the scenario really put its targets, as WGS84 positions.
+
+    The simulator records the pose it achieved for every entity, in metres from
+    the world origin, and the scene surface says where that origin is.
+    """
+    if not (path and os.path.exists(path) and os.path.exists(scene_surface)):
+        return []
+    origin = json.load(open(scene_surface))["origin_lla"]
+    placed = yaml.safe_load(open(path)) or {}
+    truth = []
+    for entity in placed.get("entities", []):
+        east, north, up = entity["pose"]
+        latitude, longitude, _ = pm.enu2geodetic(east, north, up, *origin, deg=True)
+        truth.append((entity["name"], latitude, longitude))
+    return truth
+
+
+def nearest(truth, latitude: float, longitude: float):
+    """The closest recorded target, and how far away it is on the ground."""
+    def metres(entry):
+        east, north, _ = pm.geodetic2enu(latitude, longitude, 0.0,
+                                         entry[1], entry[2], 0.0, deg=True)
+        return math.hypot(east, north)
+    closest = min(truth, key=metres)
+    return closest[0], metres(closest)
+
+
 COMMANDS = {
     "status": command_status,
     "arm": command_arm,
@@ -287,6 +390,9 @@ COMMANDS = {
     "land": command_land,
     "gimbal": command_gimbal,
     "goto": command_goto,
+    "detect": command_detect,
+    "capture": command_capture,
+    "detections": command_detections,
 }
 
 
@@ -315,6 +421,15 @@ def main() -> int:
     goto.add_argument("north", type=float)
     goto.add_argument("up", type=float, help="metres over home")
     goto.add_argument("--deadline", type=float, default=120.0)
+    detect = sub.add_parser("detect")
+    detect.add_argument("on", choices=["on", "off"])
+    sub.add_parser("capture")
+    detections = sub.add_parser("detections")
+    detections.add_argument("--deadline", type=float, default=20.0)
+    detections.add_argument("--truth", default=os.environ.get("RESOLVED_TRUTH_FILE", ""),
+                            help="what the scenario actually placed")
+    detections.add_argument("--scene", default=f"/scenes/worlds/{os.environ.get('SCENE', '')}_surface.json",
+                            help="the surface that says where the world origin is")
     args = parser.parse_args()
 
     rclpy.init()

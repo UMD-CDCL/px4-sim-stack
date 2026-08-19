@@ -289,6 +289,7 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     uas <N> <command>   Fly one vehicle and read its nodes: status, arm,
                         takeoff [m], land, gimbal <pitch>
     probe <N> [topic]   What that vehicle's ROS graph carries right now
+    snap <stream>       Save one frame of a live stream to look at
     clean               Remove containers, networks and volumes
     clean-src           Delete the cloned upstream sources in ./src
     nuke                clean and clean-src together
@@ -581,6 +582,20 @@ genscene)
 	;;
 
 verify)   ./verify/run.sh "$@" ;;
+
+snap)
+	# One frame of a live stream, saved where the caller asked. The sim
+	# container is on the video network and carries gstreamer, so nothing
+	# else needs either.
+	stream=${1:?name a stream, e.g. rgb$FIRST_UAS}
+	out=${2:-./logs/$stream.jpg}
+	add_fleet_profiles
+	$DC exec -T sim sh -c 'cat > /tmp/snap.sh' < verify/component/snap.sh
+	$DC exec -T sim sh /tmp/snap.sh "$stream" /tmp/snap.jpg >/dev/null
+	mkdir -p "$(dirname "$out")"
+	docker cp "$($DC ps -q sim):/tmp/snap.jpg" "$out" >/dev/null
+	say "$out"
+	;;
 
 uas|probe)
 	# Inside the vehicle's companion, on the vehicle's ROS domain, which is
