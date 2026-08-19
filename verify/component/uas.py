@@ -28,7 +28,7 @@ from scipy.spatial.transform import Rotation
 from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
                        ReliabilityPolicy)
 
-from geometry_msgs.msg import PointStamped, PoseStamped
+from geometry_msgs.msg import PointStamped, PoseStamped, TransformStamped
 from cdcl_umd_msgs.msg import TargetBoxArray
 from cdcl_umd_msgs.srv import TBALocalization
 from mavros_msgs.msg import Altitude, GimbalDeviceAttitudeStatus, HomePosition, State
@@ -507,6 +507,40 @@ def command_click(uas: Uas, args) -> int:
     return 0
 
 
+def command_fiducial(uas: Uas, args) -> int:
+    """Localize one box as the fiducial marker, and read back the correction.
+
+    A real fiducial capture goes to a human, who marks the marker in the image.
+    This stands in for that: it takes a frame the detector has already produced,
+    marks it as the fiducial, and asks for the same localization the human's
+    answer would ask for. What comes back is the survey that moves the whole
+    fleet's frame.
+    """
+    latest = {}
+    uas.create_subscription(TargetBoxArray, f"{uas.namespace}/target_detections",
+                            lambda msg: latest.setdefault("msg", msg), RELIABLE_QOS)
+    correction = {}
+    uas.create_subscription(TransformStamped, f"{uas.namespace}/fiducial_update",
+                            lambda msg: correction.setdefault("msg", msg), RELIABLE_QOS)
+    if not uas.wait_until(lambda: "msg" in latest, args.deadline, "a frame to mark"):
+        return 1
+
+    marked = latest["msg"]
+    marked.fiducial_marker = True
+    marked.uav_target_boxes = list(marked.uav_target_boxes)[:1]
+    if not marked.uav_target_boxes:
+        print("the frame carried no box to mark", file=sys.stderr)
+        return 1
+    uas.call(uas.localize, TBALocalization.Request(un_localized=marked), "tba_loczn")
+
+    if not uas.wait_until(lambda: "msg" in correction, 10.0, "a fiducial correction"):
+        return 1
+    moved = correction["msg"].transform.translation
+    print(f"{correction['msg'].header.frame_id} -> {correction['msg'].child_frame_id}"
+          f"\t{moved.x:.2f}\t{moved.y:.2f}\t{moved.z:.2f}")
+    return 0
+
+
 COMMANDS = {
     "status": command_status,
     "arm": command_arm,
@@ -520,6 +554,7 @@ COMMANDS = {
     "published": command_published,
     "score": command_score,
     "click": command_click,
+    "fiducial": command_fiducial,
 }
 
 
@@ -570,6 +605,8 @@ def main() -> int:
                        help="click without setting the mode, to see whether a "
                             "station whose clicks are off really ignores them")
     click.add_argument("--settle", type=float, default=5.0)
+    fiducial = sub.add_parser("fiducial")
+    fiducial.add_argument("--deadline", type=float, default=20.0)
     score = sub.add_parser("score")
     score.add_argument("--deadline", type=float, default=20.0)
     published = sub.add_parser("published")

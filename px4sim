@@ -486,10 +486,10 @@ px4)
 		--instance $((n - 1)) "$@"
 	;;
 
-shell|sh)          enter_service "${1:-sim}" ;;
-sim|qgc|ground)    enter_service "$cmd" ;;
-router)            n=$(vehicle_arg "${1:-}"); enter_service "uas$n" ;;
-onboard)           n=$(vehicle_arg "${1:-}"); enter_service "onboard$n" ;;
+shell|sh)          enter_service "${1:-sim}" "${@:2}" ;;
+sim|qgc|ground)    enter_service "$cmd" "$@" ;;
+router)            n=$(vehicle_arg "${1:-}"); shift || true; enter_service "uas$n" "$@" ;;
+onboard)           n=$(vehicle_arg "${1:-}"); shift || true; enter_service "onboard$n" "$@" ;;
 
 streams)
 	say "Video paths"
