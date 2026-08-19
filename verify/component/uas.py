@@ -35,6 +35,7 @@ from mavros_msgs.msg import Altitude, GimbalDeviceAttitudeStatus, HomePosition, 
 from mavros_msgs.srv import CommandBool, CommandInt, CommandTOL, SetMode
 from std_srvs.srv import SetBool, Trigger
 from sensor_msgs.msg import NavSatFix
+from rosidl_runtime_py.utilities import get_message
 from std_msgs.msg import Float32
 
 SENSOR_QOS = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -407,6 +408,36 @@ def command_published(uas: Uas, args) -> int:
     return 0 if seen else 1
 
 
+def command_score(uas: Uas, args) -> int:
+    """What this graph makes of the detections against the known targets.
+
+    The vehicle scores what it localized and the ground station scores what
+    reached it, so the same numbers on both sides mean the ground is not
+    approximating the vehicle's answer.
+    """
+    values = {}
+    uas.pump(3.0)  # discovery, or the type lookup below finds nothing
+    known = dict(uas.get_topic_names_and_types())
+    wanted = ("detection_precision", "detection_recall", "position_error")
+    for topic in wanted:
+        full = f"{uas.namespace}/{topic}"
+        types = known.get(full)
+        if not types:
+            continue
+        uas.create_subscription(
+            get_message(types[0]), full,
+            (lambda name: lambda msg: values.setdefault(name, msg.data))(topic),
+            RELIABLE_QOS)
+    uas.wait_until(lambda: len(values) >= len(wanted), args.deadline, "a score")
+    if not values:
+        print("nothing scored", file=sys.stderr)
+        return 1
+    for topic in wanted:
+        if topic in values:
+            print(f"{topic}\t{values[topic]:.4f}")
+    return 0
+
+
 COMMANDS = {
     "status": command_status,
     "arm": command_arm,
@@ -418,6 +449,7 @@ COMMANDS = {
     "capture": command_capture,
     "detections": command_detections,
     "published": command_published,
+    "score": command_score,
 }
 
 
@@ -453,6 +485,8 @@ def main() -> int:
     detections.add_argument("--deadline", type=float, default=20.0)
     detections.add_argument("--truth", default=os.environ.get("RESOLVED_TRUTH_FILE", ""),
                             help="what the scenario actually placed")
+    score = sub.add_parser("score")
+    score.add_argument("--deadline", type=float, default=20.0)
     published = sub.add_parser("published")
     published.add_argument("--topic", default="target_locations")
     published.add_argument("--seconds", type=float, default=12.0,

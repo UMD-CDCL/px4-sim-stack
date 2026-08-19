@@ -193,6 +193,15 @@ add_fleet_profiles() {
 	fi
 }
 
+# Which services join another's network namespace, read from the compose file
+# so a new one is never missed.
+namespace_borrowers() {
+	awk -v owner="service:$1" '
+		/^  [a-z0-9_-]+:[[:space:]]*$/ { service = $1; sub(/:$/, "", service) }
+		$1 == "network_mode:" { mode = $2; gsub(/"/, "", mode)
+		                        if (mode == owner) print service }' compose.yaml
+}
+
 need_sources() {
 	[ -d src/PX4-Autopilot ] || die "No PX4 source. Run: ./px4sim setup"
 }
@@ -381,8 +390,21 @@ restart)
 	# Recreate, not restart. `docker compose restart` starts the same container
 	# again, so a service restarted after `./px4sim build` keeps running the
 	# image it was created from and the change looks like it did nothing.
+	#
+	# A service that lends its network namespace takes its borrowers with it: a
+	# recreated container gets a new namespace and the old one is left holding
+	# nothing but loopback, which reads as a running container that hears
+	# nobody. See network_mode in compose.yaml.
 	resolve_services "$@"
 	add_fleet_profiles
+	for owner in "${SERVICES[@]}"; do
+		for borrower in $(namespace_borrowers "$owner"); do
+			case " ${SERVICES[*]} " in
+			*" $borrower "*) ;;
+			*) SERVICES+=("$borrower") ;;
+			esac
+		done
+	done
 	$DC up -d --force-recreate "${SERVICES[@]}"
 	;;
 

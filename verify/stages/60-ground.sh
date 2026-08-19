@@ -38,3 +38,13 @@ else
 	fi
 fi
 rm -rf "$work"
+
+# The verdicts are recomputed on the ground rather than sent, so both sides
+# have to reach them. The numbers are running averages over whatever each side
+# has seen, so they are close rather than equal: the localizations behind them
+# are what must match exactly, and they are checked above.
+for side in "$lead" ground; do
+	scored=$(./px4sim uas "$side" score 2>/dev/null | wc -l)
+	name=$([ "$side" = ground ] && echo "the ground station" || echo "uas$lead")
+	expect_eq "$name scores the detections against the known targets" 3 "$scored"
+done
