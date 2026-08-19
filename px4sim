@@ -733,7 +733,13 @@ uas|probe)
 		domain=$(uas_domain "$n")
 	fi
 	tool=uas.py; [ "$cmd" = probe ] && tool=graph_probe.py
-	if [ "$cmd" = probe ] && [ $# -eq 0 ]; then
+	# The default list stands in when no topic is named. An option is not a
+	# topic, so `probe 11 --deadline 5` still gets the list.
+	named_a_topic=false
+	for argument in "$@"; do
+		case "$argument" in -*) ;; *) named_a_topic=true ;; esac
+	done
+	if [ "$cmd" = probe ] && [ "$named_a_topic" = false ]; then
 		set -- "/uas$n/state" "/uas$n/global_position/global" \
 			"/uas$n/home_position/fix" "/uas$n/camera/camera_info" \
 			"/uas$n/gimbal_control/device/attitude_status" \

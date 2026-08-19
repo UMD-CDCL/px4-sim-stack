@@ -78,10 +78,13 @@ fi
 # The VLM frame is the one image the radio carries, so watch the ground for it
 # while the vehicle is asked for one.
 if [ -n "$(COMPOSE_PROFILES=offboard docker compose ps -q offboard 2>/dev/null)" ]; then
+	# Watch the ground before asking the vehicle, and watch long enough: a
+	# saturated machine takes its time between the capture and the image
+	# arriving on the other side of the bridge.
 	arrival=$(mktemp)
-	./px4sim probe ground /casualty_image/compressed/vlm >"$arrival" 2>/dev/null &
+	./px4sim probe ground --deadline 60 /casualty_image/compressed/vlm >"$arrival" 2>/dev/null &
 	watcher=$!
-	sleep 8
+	sleep 10
 	uas capture vlm >/dev/null
 	wait "$watcher" 2>/dev/null || true
 	expect_eq "the VLM image reaches the ground" data "$(cut -f3 "$arrival" | tail -1)"

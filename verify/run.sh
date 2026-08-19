@@ -2,7 +2,11 @@
 # Verification stages, in the order that finds a fault soonest. ./px4sim verify
 # runs this. It reads the same fleet definition the front door does, so a
 # vehicle number, a port and a domain mean here exactly what they mean there.
-set -euo pipefail
+# Not -e, and not pipefail. A stage measures things, and a tool that answers
+# "no" is an answer rather than a fault: under -e a probe that found nothing
+# ended the whole run silently, part way through, with no report. A stage says
+# what it found through pass and fail, and nothing else decides.
+set -u
 
 cd "$(dirname "$(readlink -f "$0")")/.."
 

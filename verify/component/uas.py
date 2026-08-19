@@ -15,6 +15,7 @@ import argparse
 import json
 import math
 import os
+import statistics
 import sys
 import time
 
@@ -445,17 +446,21 @@ def command_published(uas: Uas, args) -> int:
     the vehicle worked out, not its own approximation of it.
     """
     seen = {}
+    samples = {}
     truth = ground_truth(args.truth, args.scene)
 
     def collect(msg):
         for index, box in enumerate(msg.uav_target_boxes):
             fix = box.target_location_altimeter_plane
             if args.named:
-                # Keyed by the target rather than the message, so a caller
-                # comparing two vehicles has a name to join on.
+                # Every sample of a target, kept by name so a caller comparing
+                # two vehicles has something to join on. The median goes out
+                # rather than the last: a single frame taken while the gimbal
+                # moved is metres out, and one of those should not decide what
+                # a vehicle thinks a target's position is.
                 name, error = nearest(truth, fix.latitude, fix.longitude)
-                seen[name] = (f"{name}\t{fix.latitude:.7f}\t{fix.longitude:.7f}"
-                              f"\t{fix.altitude:.2f}\t{error:.2f}")
+                samples.setdefault(name, []).append(
+                    (fix.latitude, fix.longitude, fix.altitude, error))
                 continue
             seen[(msg.seq, index)] = (
                 f"{msg.seq}\t{index}\t{fix.latitude:.7f}\t{fix.longitude:.7f}"
@@ -464,9 +469,13 @@ def command_published(uas: Uas, args) -> int:
     uas.create_subscription(TargetBoxArray, f"{uas.namespace}/{args.topic}",
                             collect, RELIABLE_QOS)
     uas.pump(args.seconds)
+    for name, taken in sorted(samples.items()):
+        middle = [statistics.median(value) for value in zip(*taken)]
+        print(f"{name}\t{middle[0]:.7f}\t{middle[1]:.7f}"
+              f"\t{middle[2]:.2f}\t{middle[3]:.2f}\t{len(taken)}")
     for key in sorted(seen):
         print(seen[key])
-    return 0 if seen else 1
+    return 0 if (seen or samples) else 1
 
 
 def command_score(uas: Uas, args) -> int:

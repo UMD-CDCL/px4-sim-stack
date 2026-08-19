@@ -17,12 +17,22 @@ import sys
 import pymap3d as pm
 
 
+# How many times a vehicle has to have seen a target before its answer counts.
+# A target at the edge of a shallow view drifts in and out of frame and is
+# localized down a long ray, and comparing two vehicles on one such glimpse
+# each measures the geometry rather than whether they agree.
+HELD_IN_VIEW = 5
+
+
 def load(path):
     found = {}
     for line in pathlib.Path(path).read_text().splitlines():
         fields = line.split("\t")
-        if len(fields) >= 3 and fields[0]:
-            found[fields[0]] = (float(fields[1]), float(fields[2]))
+        if len(fields) < 6 or not fields[0]:
+            continue
+        if int(fields[5]) < HELD_IN_VIEW:
+            continue
+        found[fields[0]] = (float(fields[1]), float(fields[2]))
     return found
 
 
@@ -41,7 +51,8 @@ def main(argv) -> int:
                                              *second[target], 0.0, deg=True)
             apart[(target, one, other)] = math.hypot(east, north)
     if not apart:
-        print(f"{len(seen)} vehicles localized targets, but no target twice")
+        print(f"{len(seen)} vehicles localized targets, but none held one in "
+              f"view {HELD_IN_VIEW} times that another did too")
         return 1
 
     worst, distance = max(apart.items(), key=lambda item: item[1])

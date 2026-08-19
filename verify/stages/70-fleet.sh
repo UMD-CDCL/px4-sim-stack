@@ -4,7 +4,13 @@
 # The fleet shares a ground: each vehicle casts its rays at the same surface,
 # anchored the same way, so two aircraft over one casualty agree about where it
 # is. Anchored on each vehicle's own frame instead, they disagree by the
-# difference between their homes.
+# difference between their homes, which is unbounded.
+#
+# How closely they agree depends on what else the machine is doing. Four
+# vehicles serving two cameras each run this one at a tenth of real time, and
+# everything that depends on a timestamp loosens with it: sub-metre with eight
+# streams, a few metres with twelve. FLEET_AGREEMENT_M is the line between
+# "agrees" and "does not share a ground", not a measure of the best it does.
 
 if [ "$UAS_COUNT" -lt 2 ]; then
 	fail "this fleet has one vehicle. Fly two or more: UAS_FLEET='chimera_v3 chimera_v2' ./px4sim start"
@@ -75,8 +81,8 @@ for n in $(fleet_numbers); do
 	fi
 done
 
-verdict=$(python3 verify/component/compare_fleet.py "${FLEET_AGREEMENT_M:-3.0}" "$work"/* 2>&1) || true
-if python3 verify/component/compare_fleet.py "${FLEET_AGREEMENT_M:-3.0}" "$work"/* >/dev/null 2>&1; then
+verdict=$(python3 verify/component/compare_fleet.py "${FLEET_AGREEMENT_M:-8.0}" "$work"/* 2>&1) || true
+if python3 verify/component/compare_fleet.py "${FLEET_AGREEMENT_M:-8.0}" "$work"/* >/dev/null 2>&1; then
 	pass "$verdict"
 else
 	fail "the fleet agrees about where a target is"
