@@ -10,8 +10,8 @@
 FROM ubuntu:24.04
 
 ARG QGC_REF=v5.0.8
-ARG UID=1000
-ARG GID=1000
+ARG HOST_UID=1000
+ARG HOST_GID=1000
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8
@@ -44,16 +44,16 @@ RUN curl -fsSL -o /tmp/qgc.AppImage \
     && rm -f /tmp/qgc.AppImage
 
 # The serial group lets QGroundControl reach a USB radio if you pass one in.
-RUN if getent passwd ${UID} >/dev/null; then \
-      userdel -rf "$(getent passwd ${UID} | cut -d: -f1)" || true; \
+RUN if getent passwd ${HOST_UID} >/dev/null; then \
+      userdel -rf "$(getent passwd ${HOST_UID} | cut -d: -f1)" || true; \
     fi \
-    && groupadd -f -g ${GID} dev \
-    && useradd -m -u ${UID} -g ${GID} -G dialout -s /bin/bash dev \
+    && groupadd -f -g ${HOST_GID} dev \
+    && useradd -m -u ${HOST_UID} -g ${HOST_GID} -G dialout -s /bin/bash dev \
     # Docker seeds a new named volume from the image, ownership included. A
     # mount point that the image does not have becomes a root-owned volume that
     # QGroundControl cannot write its settings into.
     && mkdir -p /home/dev/.config /home/dev/Documents/QGroundControl \
-    && chown -R ${UID}:${GID} /home/dev
+    && chown -R ${HOST_UID}:${HOST_GID} /home/dev
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh

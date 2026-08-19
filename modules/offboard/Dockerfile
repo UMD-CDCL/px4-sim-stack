@@ -35,8 +35,8 @@ ENV NVIDIA_VISIBLE_DEVICES=all
 ENV GIO_USE_PROXY_RESOLVER=dummy
 
 ARG USERNAME=user
-ARG UID=1000
-ARG GID=1000
+ARG HOST_UID=1000
+ARG HOST_GID=1000
 ARG WORKSPACE_DIR=/home/user/ros2_ws
 # px4_msgs is not released to apt, and models/vehicle.py and models/sensor.py in
 # MAVInsight import it at module level.
@@ -110,6 +110,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ENV LANG=en_US.UTF-8
 
+# The DeepStream image records ffmpeg and codec packages as installed and ships
+# none of their shared objects. That leaves cv2 unimportable, which takes
+# image_geometry with it, and so every node that localizes. Reinstall whatever
+# the OpenCV module cannot find, repeatedly, because each restored library
+# names further ones. The import at the end fails the build if it is still
+# broken, rather than leaving a vehicle that starts and localizes nothing.
+RUN set -eu; \
+    apt-get update; \
+    while missing=$(ldd /usr/lib/python3/dist-packages/cv2*.so \
+                    | awk '/not found/ {print $1}' | sort -u); [ -n "$missing" ]; do \
+      packages=$(for lib in $missing; do dpkg -S "$lib" | cut -d: -f1; done | sort -u); \
+      apt-get install -y --reinstall $packages; \
+    done; \
+    rm -rf /var/lib/apt/lists/*; \
+    python3 -c "import cv2"
+
+
 # MAVROS refuses to convert between AMSL and ellipsoid height without these.
 RUN /opt/ros/humble/lib/mavros/install_geographiclib_datasets.sh
 
@@ -147,12 +164,10 @@ sys.exit('pyds did not install') if spec is None else print('pyds installed:', s
 # always fails during a build even when the install is correct.
 
 RUN set -eux; \
-    groupadd -f -g "${GID}" "${USERNAME}"; \
-    useradd -m -d /home/user -u "${UID}" -g "${GID}" -s /bin/bash "${USERNAME}"; \
-    echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/offboard; \
-    chmod 0440 /etc/sudoers.d/offboard; \
+    groupadd -f -g "${HOST_GID}" "${USERNAME}"; \
+    useradd -m -d /home/user -u "${HOST_UID}" -g "${HOST_GID}" -s /bin/bash "${USERNAME}"; \
     mkdir -p "${WORKSPACE_DIR}/src" /logs /terrain; \
-    chown -R "${UID}:${GID}" /home/user "${WORKSPACE_DIR}" /logs /terrain
+    chown -R "${HOST_UID}:${HOST_GID}" /home/user "${WORKSPACE_DIR}" /logs /terrain
 
 # ---------------------------------------------------------------------------
 # The workspace. `ros2_ws` is a named build context, so the sources stay where
@@ -162,9 +177,9 @@ RUN git clone --depth 1 --branch "${PX4_MSGS_REF}" \
       https://github.com/PX4/px4_msgs.git "${WORKSPACE_DIR}/src/px4_msgs" \
     && rm -rf "${WORKSPACE_DIR}/src/px4_msgs/.git"
 
-COPY --from=ros2_ws --chown=${UID}:${GID} src ${WORKSPACE_DIR}/src
+COPY --from=ros2_ws --chown=${HOST_UID}:${HOST_GID} src ${WORKSPACE_DIR}/src
 
-RUN chown -R "${UID}:${GID}" "${WORKSPACE_DIR}"
+RUN chown -R "${HOST_UID}:${HOST_GID}" "${WORKSPACE_DIR}"
 
 USER ${USERNAME}
 WORKDIR ${WORKSPACE_DIR}

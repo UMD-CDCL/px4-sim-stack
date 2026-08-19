@@ -111,6 +111,10 @@ mkdir -p "$MERGED/models" "$MERGED/worlds"
 export PX4_GZ_MODELS="$MERGED/models"
 export PX4_GZ_WORLDS="$MERGED/worlds"
 export GZ_SIM_RESOURCE_PATH="$MERGED/models:$MERGED/worlds:${GZ_SIM_RESOURCE_PATH:-}"
+# gz-sim resolves model:// through a callback it installs itself. The `gz sdf`
+# command line has no callback and reads SDF_PATH instead, so without this the
+# check below reports every airframe as unspawnable while the vehicle spawns.
+export SDF_PATH="$MERGED/models"
 export PX4_GZ_WORLD="$SCENE"
 
 # Our server plugin list. It matches PX4's, minus the single-camera streamer

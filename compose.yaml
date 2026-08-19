@@ -15,8 +15,11 @@ x-x11-env: &x11-env
   QT_X11_NO_MITSHM: "1"
 
 x-ids: &ids
-  UID: ${HOST_UID:-1000}
-  GID: ${HOST_GID:-1000}
+  # Named HOST_UID, not UID. A build argument reaches every RUN as an
+  # environment variable, and a variable named UID shadows the one bash
+  # sets, which makes a root-only install script refuse to run as root.
+  HOST_UID: ${HOST_UID:-1000}
+  HOST_GID: ${HOST_GID:-1000}
 
 # One mavlink-router for each vehicle. They differ only in the UAS number and
 # the companion address, so everything else lives here.

@@ -10,8 +10,8 @@
 
 FROM ubuntu:24.04
 
-ARG UID=1000
-ARG GID=1000
+ARG HOST_UID=1000
+ARG HOST_GID=1000
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -45,14 +45,14 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 
 # The container writes into bind-mounted repo directories, so it runs as
 # the host user or the output belongs to root.
-RUN if getent passwd ${UID} >/dev/null; then \
-      userdel -rf "$(getent passwd ${UID} | cut -d: -f1)" || true; \
+RUN if getent passwd ${HOST_UID} >/dev/null; then \
+      userdel -rf "$(getent passwd ${HOST_UID} | cut -d: -f1)" || true; \
     fi \
-    && groupadd -f -g ${GID} dev \
-    && useradd -m -u ${UID} -g ${GID} -s /bin/bash dev
+    && groupadd -f -g ${HOST_GID} dev \
+    && useradd -m -u ${HOST_UID} -g ${HOST_GID} -s /bin/bash dev
 
 COPY . /app
-RUN chown -R ${UID}:${GID} /app
+RUN chown -R ${HOST_UID}:${HOST_GID} /app
 
 USER dev
 WORKDIR /app

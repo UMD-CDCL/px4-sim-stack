@@ -127,42 +127,8 @@ resolve_origin
 # The fleet decides which routers run. One router for each vehicle, selected by
 # the profile of its own name, so a fleet of four starts uas11 to uas14 and
 # nothing else. UAS_FLEET is the single place the fleet size is written.
-FLEET=(${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2})
-UAS_COUNT=${#FLEET[@]}
-# A simulated vehicle is its real counterpart plus ten, so vehicle 1 of the
-# fleet is uas11. Keep this equal to UAS_BASE in modules/sim/entrypoint.sh.
-UAS_BASE=${UAS_BASE:-10}
-FIRST_UAS=$((UAS_BASE + 1))
-LAST_UAS=$((UAS_BASE + UAS_COUNT))
-fleet_numbers() { seq "$FIRST_UAS" "$LAST_UAS"; }
-
-# The airframe of one vehicle, and what it serves. The mark decides the stream
-# names: a v3 carries a gimbal camera and a down camera, a v2 carries the gimbal
-# alone and serves it under the down camera's name. See section 3 of
-# docs/uas-contract.md and modules/sim/scenes/models/<model>/streams.conf.
-model_of() {
-	local slot=$(( ${1:-0} - UAS_BASE - 1 ))
-	[ "$slot" -ge 0 ] && echo "${FLEET[$slot]:-}"
-	return 0
-}
-mark_of() {
-	case "$(model_of "$1")" in
-	*_v3) echo v3 ;;
-	*_v2) echo v2 ;;
-	esac
-}
-gimbal_stream() {
-	case "$(mark_of "$1")" in
-	v3) echo "rgb$1" ;;
-	v2) echo "pilot$1" ;;
-	esac
-}
-streams_of() {
-	case "$(mark_of "$1")" in
-	v3) echo "rgb$1 rgbl$1 pilot$1 pilotl$1 thermal$1 thermall$1" ;;
-	v2) echo "pilot$1 pilotl$1 thermal$1 thermall$1" ;;
-	esac
-}
+# shellcheck disable=SC1091
+. ./scripts/fleet.sh
 
 # A vehicle is named by its UAS number, 11 upwards. A single digit is its place
 # in UAS_FLEET, which is how that line reads, so `1` and `11` both reach the
@@ -319,6 +285,7 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
 
   ${BOLD}Housekeeping${OFF}
     check               Validate the compose file and lint the docs
+    verify [stage]      Run the verification stages. `verify help` lists them.
     clean               Remove containers, networks and volumes
     clean-src           Delete the cloned upstream sources in ./src
     nuke                clean and clean-src together
@@ -334,22 +301,22 @@ endpoints() {
 	local n prefix=${SIMNET_PREFIX:-10.200.142}
 	for n in $(fleet_numbers); do
 		printf '    uas%-3s %-12s %s.2%s   sysid %s   domain %s   tcp %s   udp %s\n' \
-			"$n" "$(model_of "$n")" "$prefix" "$n" "$n" "$((60 + n))" \
-			"$((5750 + n))" "$((14550 + n))"
+			"$n" "$(model_of "$n")" "$prefix" "$n" "$n" "$(uas_domain "$n")" \
+			"$(uas_tcp_port "$n")" "$(uas_gcs_port "$n")"
 	done
 	cat <<EOF
 
-  ${BOLD}MAVLink${OFF}     udp://<gcs>:$((14550 + FIRST_UAS)) upwards   the ground station endpoint, from GCS_ADDRESS
+  ${BOLD}MAVLink${OFF}     udp://<gcs>:$(uas_gcs_port "$FIRST_UAS") upwards   the ground station endpoint, from GCS_ADDRESS
               udp://<qgc>:14550         QGroundControl autoconnect, from QGC_ADDRESS
               udp://127.0.0.1:14402     the 5g_drone companion, inside the vehicle
-              tcp://localhost:$((5750 + FIRST_UAS)) upwards   MAVSDK, pymavlink
+              tcp://localhost:$(uas_tcp_port "$FIRST_UAS") upwards   MAVSDK, pymavlink
   ${BOLD}Video${OFF}       rtsp://localhost:8554/rgb<N>      v3 gimbal camera, 1920x1080
               rtsp://localhost:8554/pilot<N>    v3 down camera, v2 gimbal camera, 1920x1080
               rtsp://localhost:8554/thermal<N>  640x512
               ${DIM}Append l for the low-rate stream: rgbl<N>, pilotl<N>, thermall<N>, all 640x360 except thermal.${OFF}
               http://localhost:8889/$(gimbal_stream "$FIRST_UAS")       ${DIM}(WebRTC, browser)${OFF}
   ${BOLD}Foxglove${OFF}    ws://localhost:8765       the ground station, every vehicle
-              ws://localhost:$((8760 + FIRST_UAS))       uas$FIRST_UAS's own bridge, ${DIM}8760 + N, for a vehicle that has a companion${OFF}
+              ws://localhost:$(uas_foxglove_port "$FIRST_UAS")       uas$FIRST_UAS's own bridge, ${DIM}8760 + N, for a vehicle that has a companion${OFF}
 
 EOF
 }
@@ -491,7 +458,7 @@ view)
 topics)
 	# A vehicle holds ROS domain 60 + N and its companion sources the
 	# workspace in its entry point, which `exec` does not run. So both are
-	# given here. The ground station is domain 70 in the offboard container.
+	# given here. The ground station is domain $GROUND_DOMAIN in the offboard container.
 	n=$(vehicle_arg "${1:-}")
 	has_service "onboard$n" || die "compose.yaml defines no onboard$n, so uas$n has no ROS stack."
 	COMPOSE_PROFILES="$ALL_PROFILES" $DC exec -e ROS_DOMAIN_ID=$((60 + n)) "onboard$n" bash -lc \
@@ -565,11 +532,11 @@ fleet)
 		printf '  %suas%s%s  %s   %s.2%s\n' \
 			"$BOLD" "$n" "$OFF" "$(model_of "$n")" "$prefix" "$n"
 		printf '    mavlink   system id %s   udp %s to the ground station   tcp://localhost:%s\n' \
-			"$n" "$((14550 + n))" "$((5750 + n))"
+			"$n" "$(uas_gcs_port "$n")" "$(uas_tcp_port "$n")"
 		printf '    ros       domain %s   namespace /uas%s   frames d%s_ and uas%s_\n' \
-			"$((60 + n))" "$n" "$n" "$n"
+			"$(uas_domain "$n")" "$n" "$n" "$n"
 		if has_service "onboard$n"; then
-			printf '    foxglove  ws://localhost:%s\n' "$((8760 + n))"
+			printf '    foxglove  ws://localhost:%s\n' "$(uas_foxglove_port "$n")"
 			printf '    compose   uas%s and onboard%s\n' "$n" "$n"
 		else
 			printf '    foxglove  none. compose.yaml defines no onboard%s\n' "$n"
@@ -584,7 +551,7 @@ ${DIM}  Video is rtsp://localhost:8554/<name>, or http://localhost:8889/<name> i
   excepted: it is 640x512 both ways.
 
   The ground station holds every vehicle at once: ws://localhost:8765, ROS
-  domain 70, MAVLink in on $((14550 + FIRST_UAS)) upwards.${OFF}
+  domain $GROUND_DOMAIN, MAVLink in on $(uas_gcs_port "$FIRST_UAS") upwards.${OFF}
 EOF
 	;;
 
@@ -605,6 +572,8 @@ genscene)
 	# --service-ports exposes 8090 so `genscene edit` reaches the browser.
 	COMPOSE_PROFILES="scenegen" exec $DC run --rm --service-ports scenegen "$@"
 	;;
+
+verify)   ./verify/run.sh "$@" ;;
 
 check)
 	$DC config -q && echo "compose.yaml OK"

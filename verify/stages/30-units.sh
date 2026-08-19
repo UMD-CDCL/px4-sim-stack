@@ -1,0 +1,28 @@
+# shellcheck shell=bash
+# The pure arithmetic: terrain rays, roofs and the ground the fleet shares
+#
+# These run against the sources as built into the companion image, so they check
+# the code the vehicle will actually run rather than a copy on this host.
+
+onboard_image=px4simstack/onboard:${DS_VERSION_ONBOARD:-7.1}
+workspace=${ROS2_WS_DIR:-../ros2_ws}
+
+if ! docker image inspect "$onboard_image" >/dev/null 2>&1; then
+	fail "$onboard_image is not built. Run ./px4sim build onboard"
+	return 0
+fi
+
+output=$(docker run --rm --entrypoint bash \
+	-v "$(readlink -f "$workspace")/src/5g_drone:/src:ro" "$onboard_image" -c '
+		source /opt/ros/humble/setup.bash
+		source /home/user/ros2_ws/install/setup.bash
+		cd /src && python3 -m pytest test/test_terrain.py test/test_ground_frame.py -q 2>&1
+	' 2>&1) || true
+
+summary=$(printf '%s' "$output" | grep -oE '[0-9]+ (passed|failed)[^,]*' | tr '\n' ' ')
+if printf '%s' "$output" | grep -qE '^[0-9]+ passed'; then
+	pass "terrain and ground frame: ${summary% }"
+else
+	fail "terrain and ground frame: ${summary:-no result}"
+	note "$(printf '%s' "$output" | grep -E '^FAILED' | head -5)"
+fi

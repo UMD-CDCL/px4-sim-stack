@@ -7,8 +7,8 @@ FROM ubuntu:24.04
 
 ARG PX4_REF=v1.17.0
 ARG GZ_DISTRO=harmonic
-ARG UID=1000
-ARG GID=1000
+ARG HOST_UID=1000
+ARG HOST_GID=1000
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -88,11 +88,11 @@ RUN cmake -S /src/gz_video_streamer -B /src/gz_video_streamer/build \
 # A user whose id matches the host, so the bind-mounted PX4 build output does
 # not end up owned by root.
 # ---------------------------------------------------------------------------
-RUN if getent passwd ${UID} >/dev/null; then \
-      userdel -rf "$(getent passwd ${UID} | cut -d: -f1)" || true; \
+RUN if getent passwd ${HOST_UID} >/dev/null; then \
+      userdel -rf "$(getent passwd ${HOST_UID} | cut -d: -f1)" || true; \
     fi \
-    && groupadd -f -g ${GID} dev \
-    && useradd -m -u ${UID} -g ${GID} -s /bin/bash dev \
+    && groupadd -f -g ${HOST_GID} dev \
+    && useradd -m -u ${HOST_UID} -g ${HOST_GID} -s /bin/bash dev \
     && echo 'dev ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/dev \
     && chmod 0440 /etc/sudoers.d/dev \
     # Create the named-volume mount points here, owned by dev. Docker seeds a
@@ -100,7 +100,7 @@ RUN if getent passwd ${UID} >/dev/null; then \
     # out of the image and docker makes an empty root-owned volume instead,
     # which fails the build with "ccache: error: Permission denied".
     && mkdir -p /home/dev/.ccache /home/dev/.gz \
-    && chown -R ${UID}:${GID} /home/dev
+    && chown -R ${HOST_UID}:${HOST_GID} /home/dev
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY px4-rcS /opt/sim/px4-rcS
