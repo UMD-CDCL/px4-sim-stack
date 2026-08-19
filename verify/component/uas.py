@@ -51,6 +51,8 @@ SETTLE_POLL_S = 0.2
 # PX4 drops out of OFFBOARD when setpoints stop arriving, and refuses to enter
 # it until a few have. 20 Hz is the rate the flight code streams at.
 ARRIVED_M = 2.0
+# Movement that counts as getting closer rather than as noise.
+PROGRESS_M = 0.5
 # MAV_CMD_DO_REPOSITION, with the frame whose altitude is metres over home.
 # This is the "fly here" a ground station sends, and it needs no setpoint
 # stream, which is what the vehicle's MAVROS is built to carry.
@@ -162,16 +164,29 @@ class Uas(Node):
         while time.monotonic() < end:
             rclpy.spin_once(self, timeout_sec=0.05)
 
-    def wait_until(self, ready, deadline_s: float, what: str) -> bool:
+    def wait_until(self, ready, deadline_s: float, what: str, remaining=None) -> bool:
         """Poll for a condition and say which way it went. Every wait here says
         what it is waiting for, so a stack that never gets there names the step
-        instead of stopping silently."""
+        instead of stopping silently.
+
+        `remaining` returns how far there is to go. While that keeps falling the
+        deadline is pushed back, because the answer is coming: a busy simulator
+        runs at a fraction of real time, and a wall clock deadline then gives up
+        on a vehicle that is flying perfectly well, only slowly.
+        """
         end = time.monotonic() + deadline_s
+        closest = None
         while time.monotonic() < end:
             rclpy.spin_once(self, timeout_sec=SETTLE_POLL_S)
             if ready():
                 return True
-        print(f"gave up waiting for {what} after {deadline_s:.0f}s", file=sys.stderr)
+            if remaining is not None:
+                left = remaining()
+                if closest is None or left < closest - PROGRESS_M:
+                    closest = left
+                    end = time.monotonic() + deadline_s
+        print(f"gave up waiting for {what} after {deadline_s:.0f}s without progress",
+              file=sys.stderr)
         return False
 
     def call(self, client, request, what: str):
@@ -232,7 +247,8 @@ def command_takeoff(uas: Uas, args) -> int:
         print("takeoff refused")
         return 1
     reached = uas.wait_until(lambda: uas.altitude >= args.height * 0.9,
-                             args.deadline, f"{args.height} m over home")
+                             args.deadline, f"{args.height} m over home",
+                             remaining=lambda: max(0.0, args.height - uas.altitude))
     print(f"height {uas.altitude:.1f} m")
     return 0 if reached else 1
 
@@ -308,8 +324,13 @@ def command_goto(uas: Uas, args) -> int:
         return math.dist((here.x, here.y, here.z),
                          (args.east, args.north, args.up)) <= ARRIVED_M
 
+    def distance_to_go():
+        here = uas.local.pose.position
+        return math.dist((here.x, here.y, here.z), (args.east, args.north, args.up))
+
     reached = uas.wait_until(arrived, args.deadline,
-                             f"{args.east}, {args.north}, {args.up}")
+                             f"{args.east}, {args.north}, {args.up}",
+                             remaining=distance_to_go)
     here = uas.local.pose.position
     print(f"at {here.x:.1f} east, {here.y:.1f} north, {here.z:.1f} up from home")
     return 0 if reached else 1
