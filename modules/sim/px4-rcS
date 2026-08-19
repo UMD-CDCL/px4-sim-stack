@@ -74,9 +74,10 @@ mavlink stream -r  1 -s HOME_POSITION -u $router_port
 # *relative to the airframe*, which is what a camera frame needs.
 #
 # GIMBAL_DEVICE_ATTITUDE_STATUS, the one that does stream by default, is the
-# message PX4 fills from the gimbal IMU and mislabels as vehicle relative. See
-# patches/px4-gzgimbal-frame.patch. Requesting these two gives the frame tree a
-# source that does not need that lie undone.
+# message PX4 fills from the gimbal IMU. Stock, it carries no lock flag and an
+# earth referenced quaternion, which builds a wrong camera frame. See
+# patches/px4-gzgimbal-frame.patch, which is what makes it usable. These two are
+# a second opinion on the same angles.
 mavlink stream -r 20 -s GIMBAL_DEVICE_SET_ATTITUDE -u $router_port
 mavlink stream -r 20 -s MOUNT_ORIENTATION -u $router_port
 

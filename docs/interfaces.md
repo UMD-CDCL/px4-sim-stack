@@ -305,9 +305,11 @@ aircraft incorrectly.
 `d<N>_base_link` is ENU, so heading is `(90 - yaw_deg) mod 360`.
 
 The gimbal report needs more care than that, and
-[px4-simulated-gimbal.md](px4-simulated-gimbal.md) holds the whole argument. Two
-sections of it decide whether a camera frame is right: PX4 labels an absolute
-attitude as vehicle relative, and the vehicle attitude divides off the LEFT.
+[px4-simulated-gimbal.md](px4-simulated-gimbal.md) holds the whole argument. The
+lock flags of GIMBAL_DEVICE_ATTITUDE_STATUS say which frame its quaternion is
+measured against, and MAVInsight builds `d${N}_gimbal_frame_ref` from them.
+Stock GZGimbal sends no lock flag, and `patches/px4-gzgimbal-frame.patch` is
+what makes it send what a real gimbal sends.
 
 ### Timestamps
 

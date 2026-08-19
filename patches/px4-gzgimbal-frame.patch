@@ -1,62 +1,200 @@
-Fix the frame the simulated gimbal claims to report in.
+Make the simulated gimbal report its attitude the way a real one does.
 
 PX4's simulated gimbal builds its attitude from the gimbal IMU in Gazebo:
 
     src/modules/simulation/gz_bridge/GZGimbal.cpp, gimbalIMUCallback()
         _q_gimbal = q_ENU_to_NED * q_gimbal_FLU * q_FLU_to_FRD.inversed();
 
-A Gazebo IMU reports orientation relative to the world, so that quaternion is
-absolute. publishDeviceAttitude() then labels it:
+A Gazebo IMU reports orientation against the world, so that quaternion holds the
+camera attitude in the earth frame. publishDeviceAttitude() then sends it with
+one flag and nothing else:
 
         gimbal_att.device_flags = DEVICE_FLAGS_YAW_IN_VEHICLE_FRAME;
 
-which tells every consumer the yaw is relative to the airframe. Anything that
-believes the flag composes the value onto the vehicle attitude and applies that
-attitude twice. Yaw the aircraft 90 degrees and the camera appears to swing
-180. QGroundControl shows the gimbal turning twice as far as it does, and any
-projection from the camera lands in the wrong place at any heading but zero.
-Roll and pitch are affected the same way, and only yaw is obvious because
-aircraft fly close to level.
+Two things are wrong there. The label says vehicle frame while the data is earth
+frame. Worse, the report carries no ROLL_LOCK, PITCH_LOCK or YAW_LOCK bit, and
+those bits are how the MAVLink specification tells a consumer which frame the
+quaternion is in:
 
-This changes the label to match the data. It is the one line fix. The other
-option is to make the data match the label, by subscribing to vehicle_attitude
-in GZGimbal and dividing it out before publishing, which is more faithful to
-the MAVLink gimbal protocol but a larger change.
+    GIMBAL_DEVICE_ATTITUDE_STATUS, mavlink common.xml
+      If the flag GIMBAL_DEVICE_FLAGS_YAW_LOCK is set, then they are relative to
+      absolute North (earth frame), else they are relative to the vehicle
+      heading (vehicle frame).
 
-READ THIS BEFORE YOU TRUST THE PATCH.
+A real gimbal sends the lock bits of the mode it is in. PX4 commands ROLL_LOCK
+and PITCH_LOCK by default (src/modules/gimbal/output.h, _absolute_angle), the
+Chimera flight code commands the same 12, and the device reports 12 back. The
+consumer builds the reference frame from those bits, then applies the quaternion
+to that frame.
+
+This patch makes GZGimbal do the three things a real device does.
+
+1. Report the lock bits of the last setpoint. GZGimbal already keeps them in
+   _gimbal_device_flags and did nothing with them.
+2. Set YAW_IN_EARTH_FRAME with YAW_LOCK, and YAW_IN_VEHICLE_FRAME without it.
+   The specification tells a new implementation to set one of the two.
+3. Move the quaternion into the frame those flags declare, with the airframe
+   attitude from vehicle_attitude:
+
+       YAW_LOCK                       earth frame    report q as it is
+       ROLL_LOCK or PITCH_LOCK only   vehicle frame  divide the heading off
+       no lock bit                    airframe       divide the attitude off
+
+   The division is on the LEFT. An earth referenced attitude is the airframe
+   attitude followed by the rotation of the gimbal, q_abs = q_vehicle * q_rel,
+   so q_rel = conj(q_vehicle) * q_abs.
+
+The patch also fills delta_yaw, the yaw between the earth frame and the vehicle
+frame. That value lets a consumer move the report from one frame to the other.
+
+WHAT THIS DOES NOT DO.
+
+The joints still ride on the airframe. GZGimbal writes the setpoint angles onto
+Gazebo joint controllers, so the simulated gimbal holds nothing against the
+horizon, whatever the flags say. The lock bits report the mode that was
+commanded, as on a real device. The quaternion reports where the camera is, and
+that comes from the IMU, so a frame built from this report is correct even while
+the gimbal fails to hold the horizon. docs/px4-simulated-gimbal.md has the rest.
 
 The consumer in this stack is MAVInsight. It builds d<N>_gimbal_frame_ref from
-the LOCK bits of this same message (models/vehicle.py) and then applies the
-reported quaternion to that frame (models/sensor.py). It reads no other flag.
-DEVICE_FLAGS_YAW_IN_VEHICLE_FRAME is 32 and DEVICE_FLAGS_YAW_IN_EARTH_FRAME is
-64, while the lock bits are 4, 8 and 16, so neither the stock label nor the one
-below reaches that code.
+the lock bits in models/vehicle.py, then applies the quaternion to that frame in
+models/sensor.py. With the flags above, the camera frame it builds is exact.
+MAVInsight needed one fix of its own for the YAW_LOCK case: its earth reference
+frame was aligned with ENU, and the MAVLink earth frame is NED, so the camera
+frame came out 90 degrees off. That is a fault against real hardware too.
 
-GZGimbal sets no lock bit at all. MAVInsight therefore keeps the reference frame
-equal to the body frame, and the absolute report is composed onto the vehicle
-attitude a second time. So this patch removes the lie, and by itself it does not
-correct the frame tree. To do that, the report must also carry ROLL_LOCK,
-PITCH_LOCK and YAW_LOCK, which is what an earth referenced attitude means to
-that reader.
-
-Read from the code, not measured in flight. Check d<N>_gimbal_frame against the
-vehicle heading before you trust either version.
+Read from the code and proved with arithmetic, not measured in flight. Check
+d<N>_gimbal_frame against the vehicle heading before you trust it.
 
     cd src/PX4-Autopilot
     git apply ../../patches/px4-gzgimbal-frame.patch
 
+--- a/src/modules/simulation/gz_bridge/GZGimbal.hpp
++++ b/src/modules/simulation/gz_bridge/GZGimbal.hpp
+@@ -9,6 +9,7 @@
+ #include <uORB/topics/vehicle_command.h>
+ #include <uORB/topics/vehicle_command_ack.h>
+ #include <uORB/topics/gimbal_controls.h>
++#include <uORB/topics/vehicle_attitude.h>
+ #include <uORB/topics/parameter_update.h>
+ #include <uORB/Publication.hpp>
+ #include <uORB/Subscription.hpp>
+@@ -41,6 +42,7 @@
+ 
+ 	uORB::Subscription _gimbal_device_set_attitude_sub{ORB_ID(gimbal_device_set_attitude)};
+ 	uORB::Subscription _gimbal_controls_sub{ORB_ID(gimbal_controls)};
++	uORB::Subscription _vehicle_attitude_sub{ORB_ID(vehicle_attitude)};
+ 	uORB::SubscriptionCallbackWorkItem _vehicle_command_sub{this, ORB_ID(vehicle_command)};
+ 
+ 	uORB::Publication<gimbal_device_attitude_status_s> _gimbal_device_attitude_status_pub{ORB_ID(gimbal_device_attitude_status)};
+@@ -75,7 +77,10 @@
+ 	float _mnt_range_yaw = 0.0f;
+ 	int32_t _mnt_mode_out = 0;
+ 
++	// Camera attitude in the earth frame, from the gimbal IMU.
+ 	matrix::Quatf _q_gimbal = matrix::Quatf(1.0f, 0.0f, 0.0f, 0.0f);
++	// Airframe attitude in the earth frame, from the last estimate.
++	matrix::Quatf _q_vehicle = matrix::Quatf(1.0f, 0.0f, 0.0f, 0.0f);
+ 	float _gimbal_rate[3] = {NAN};
+ 
+ 	// Device information attributes
+@@ -129,6 +134,15 @@
+ 	void publishDeviceInfo();
+ 	/// @brief Broadcast gimbal device attitude status message.
+ 	void publishDeviceAttitude();
++	/// @brief Read the airframe attitude, and hold the last one while no new estimate arrives.
++	/// @return rotation from the airframe FRD body frame to the NED earth frame
++	matrix::Quatf vehicleAttitude();
++	/// @brief Compute the frame that the reported attitude is measured against, which the
++	/// lock flags of the report declare.
++	/// @param lock_flags ROLL_LOCK, PITCH_LOCK and YAW_LOCK bits of the report
++	/// @param q_vehicle airframe attitude in the NED earth frame
++	/// @return rotation from the reference frame to the NED earth frame
++	static matrix::Quatf attitudeReferenceFrame(const uint16_t lock_flags, const matrix::Quatf &q_vehicle);
+ 	/// @brief Compute joint position setpoint taking into account both desired position and velocity. Then publish the command using the specified gazebo node.
+ 	/// @param publisher Gazebo node that will publish the setpoint
+ 	/// @param att_stp desired joint attitude [rad]
 --- a/src/modules/simulation/gz_bridge/GZGimbal.cpp
 +++ b/src/modules/simulation/gz_bridge/GZGimbal.cpp
-@@ -214,7 +214,11 @@ void GZGimbal::publishDeviceAttitude()
+@@ -214,17 +214,79 @@
  
  	gimbal_att.target_system = 0; // Broadcast
  	gimbal_att.target_component = 0; // Broadcast
 -	gimbal_att.device_flags = gimbal_device_attitude_status_s::DEVICE_FLAGS_YAW_IN_VEHICLE_FRAME;
-+	// _q_gimbal comes from the gimbal IMU, which Gazebo reports relative to
-+	// the world, so this attitude is absolute rather than vehicle relative.
-+	// Labelling it as vehicle relative makes every consumer apply the vehicle
+-	_q_gimbal.copyTo(gimbal_att.q);
++
++	// Report the axis locks that the last setpoint asked for, which is what a
++	// MAVLink gimbal device does: the report gives the mode the device is in.
++	// GIMBAL_DEVICE_FLAGS is one MAVLink enum, so the setpoint bits and the
++	// report bits are the same numbers.
++	const uint16_t lock_flags = (uint16_t)(_gimbal_device_flags &
++					       (gimbal_device_attitude_status_s::DEVICE_FLAGS_ROLL_LOCK |
++						gimbal_device_attitude_status_s::DEVICE_FLAGS_PITCH_LOCK |
++						gimbal_device_attitude_status_s::DEVICE_FLAGS_YAW_LOCK));
++
++	// Say the frame of the report again in the flags that state it directly.
++	// The specification tells a new implementation to set one of the two.
++	const uint16_t frame_flag = (lock_flags & gimbal_device_attitude_status_s::DEVICE_FLAGS_YAW_LOCK) ?
++				    gimbal_device_attitude_status_s::DEVICE_FLAGS_YAW_IN_EARTH_FRAME :
++				    gimbal_device_attitude_status_s::DEVICE_FLAGS_YAW_IN_VEHICLE_FRAME;
++
++	gimbal_att.device_flags = (uint16_t)(lock_flags | frame_flag);
++
++	// _q_gimbal comes from the gimbal IMU, which Gazebo measures against the
++	// world, so it holds the camera attitude in the earth frame. The report
++	// must give that attitude in the frame the flags above declare, or a
++	// consumer that builds the frame from the flags applies the airframe
 +	// attitude a second time.
-+	gimbal_att.device_flags = gimbal_device_attitude_status_s::DEVICE_FLAGS_YAW_IN_EARTH_FRAME;
- 	_q_gimbal.copyTo(gimbal_att.q);
++	const matrix::Quatf q_vehicle = vehicleAttitude();
++	const matrix::Quatf q_reference = attitudeReferenceFrame(lock_flags, q_vehicle);
++	const matrix::Quatf q_report = q_reference.inversed() * _q_gimbal;
++
++	q_report.copyTo(gimbal_att.q);
  	gimbal_att.angular_velocity_x = _gimbal_rate[0];
  	gimbal_att.angular_velocity_y = _gimbal_rate[1];
+ 	gimbal_att.angular_velocity_z = _gimbal_rate[2];
++	// The yaw between the earth frame and the vehicle frame, which lets a
++	// consumer move the report from one to the other. The rates stay in the
++	// gimbal body axes, so the rate that goes with it is not known here.
++	gimbal_att.delta_yaw = matrix::Eulerf(q_vehicle).psi();
++	gimbal_att.delta_yaw_velocity = NAN;
+ 	gimbal_att.failure_flags = 0;
+ 	gimbal_att.timestamp = hrt_absolute_time();
+ 
+ 	_gimbal_device_attitude_status_pub.publish(gimbal_att);
+ }
+ 
++matrix::Quatf GZGimbal::vehicleAttitude()
++{
++	vehicle_attitude_s vehicle_attitude;
++
++	if (_vehicle_attitude_sub.copy(&vehicle_attitude)) {
++		_q_vehicle = matrix::Quatf(vehicle_attitude.q);
++	}
++
++	// Holds the last estimate. Before the first one it is the identity, which
++	// makes the earth frame and the airframe one frame.
++	return _q_vehicle;
++}
++
++matrix::Quatf GZGimbal::attitudeReferenceFrame(const uint16_t lock_flags, const matrix::Quatf &q_vehicle)
++{
++	if (lock_flags & gimbal_device_attitude_status_s::DEVICE_FLAGS_YAW_LOCK) {
++		// Yaw is held against North, so the report is in the earth frame.
++		return matrix::Quatf();
++	}
++
++	if (lock_flags != 0) {
++		// Roll or pitch is held against the horizon while yaw follows the
++		// airframe. That is the MAVLink vehicle frame: the earth frame turned
++		// by the heading of the airframe, and level.
++		return matrix::Quatf(matrix::Eulerf(0.0f, 0.0f, matrix::Eulerf(q_vehicle).psi()));
++	}
++
++	// No axis is held, so every axis is measured against the airframe.
++	return q_vehicle;
++}
++
+ void GZGimbal::publishJointCommand(gz::transport::Node::Publisher &publisher, const float att_stp, const float rate_stp,
+ 				   float &last_stp, const float min_stp, const float max_stp, const float dt)
+ {

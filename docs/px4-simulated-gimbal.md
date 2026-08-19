@@ -4,7 +4,8 @@ How PX4's simulated gimbal behaves over the MAVLink gimbal protocol v2, and how
 to command it so that it points where you intend. The gimbal is `GZGimbal.cpp`
 in PX4's gz_bridge, driving the CGO3 model that the `gz_x500_gimbal` airframe
 carries. Each behavior below differs from what the protocol promises, and each
-one produces plausible wrong pointing instead of an error.
+one produces plausible wrong pointing instead of an error. Two of them have a
+patch here that corrects them.
 
 The flight code does not accommodate the simulator, so every accommodation is
 here: two patches against PX4, the model in
@@ -52,31 +53,62 @@ attitude, which the simulation executes correctly.
 To hold the simulated gimbal on a world point, recompute the vehicle-relative
 attitude as the vehicle moves, and send it as an attitude rather than as an ROI.
 
-## It reports an absolute attitude labeled vehicle relative
+## It reported an absolute attitude with no lock flag
 
 GZGimbal builds GIMBAL_DEVICE_ATTITUDE_STATUS from the gimbal IMU, and a Gazebo
-IMU reports orientation against the world. The quaternion is therefore absolute,
-but the message flags claim DEVICE_FLAGS_YAW_IN_VEHICLE_FRAME. A consumer that
-believes the flag composes the vehicle attitude onto an attitude that already
-holds it, and the camera appears to turn twice as far as it does.
+IMU reports orientation against the world. The quaternion is therefore earth
+referenced. The stock message says the opposite, because it sets
+DEVICE_FLAGS_YAW_IN_VEHICLE_FRAME and no other bit.
 
-`patches/px4-gzgimbal-frame.patch` corrects the label at the source. That patch
-alone does not correct the frame tree, and the head of the patch file says why:
-MAVInsight builds the gimbal reference frame from the LOCK bits of the same
-message and reads no frame flag, and GZGimbal sets no lock bit. So the reference
-frame stays the body frame and the absolute report is composed onto the vehicle
-attitude a second time.
+The label is only half of the fault. The MAVLink specification puts the frame of
+the quaternion in the ROLL_LOCK, PITCH_LOCK and YAW_LOCK bits, and the stock
+report sets none of them. MAVInsight builds `d<N>_gimbal_frame_ref` from those
+bits (`models/vehicle.py`), then applies the quaternion to that frame
+(`models/sensor.py`). With no lock bit the reference frame stays the body frame,
+so the earth referenced report goes onto the airframe attitude a second time.
 
-A consumer that reads the report itself can recover the vehicle-relative part by
-dividing the vehicle attitude off the LEFT:
+`patches/px4-gzgimbal-frame.patch` makes GZGimbal report what a real gimbal
+reports. It sends the lock bits of the last setpoint, it sets
+YAW_IN_VEHICLE_FRAME or YAW_IN_EARTH_FRAME to agree with them, and it moves the
+quaternion into the frame those flags declare. PX4 asks for ROLL_LOCK and
+PITCH_LOCK by default, and the Chimera flight code asks for the same two, so the
+usual report is flags 44: the lock bits 12, plus 32 for the vehicle frame. The
+quaternion then holds the camera attitude against a level frame at the airframe
+heading, which is what the aircraft gimbal sends.
+
+The arithmetic, with the airframe at roll 20, pitch 10, yaw 40 degrees and the
+camera 30 degrees down and 25 degrees right of the nose. That yaw is more than
+the two-axis mount can make, and it is here to move all three axes:
+
+| the report | flags | the camera frame MAVInsight builds |
+|---|---|---|
+| stock | 32 | 44.0 degrees away from the truth |
+| patched | 44 | exact |
+
+Across 2000 random attitudes the stock error reached 180 degrees, and the
+patched error stayed at zero.
+
+The patch does not make the simulated gimbal hold the horizon. The lock bits
+report the mode that was commanded, as a real device does, while the quaternion
+reports where the camera is. So the report now shows the roll and pitch error
+that the first section describes.
+
+MAVInsight took one fix with this. Its earth reference frame, which the YAW_LOCK
+bit selects, was aligned with ENU. The MAVLink earth frame is NED, so a yaw
+locked report built a camera frame 90 degrees off. A region of interest sets
+YAW_LOCK, and a real gimbal has the same fault, so the fix is not a simulator
+accommodation. `models/frame_utils.py` now holds `R_enu_nwu` for that turn.
+
+A consumer that wants the joint angles must still divide, and it divides on the
+LEFT:
 
 ```
-q_rel = conj(q_vehicle) * q_abs
+q_rel = conj(q_reference) * q_camera
 ```
 
-An absolute attitude is the vehicle attitude followed by the gimbal's own
-rotation, `q_abs = q_vehicle * q_rel`, which is where that comes from. Dividing
-on the right instead leaves `q_vehicle * q_rel * conj(q_vehicle)`, a
+An earth referenced attitude is the airframe attitude followed by the rotation
+of the gimbal, `q_abs = q_vehicle * q_rel`, which is where that comes from.
+Dividing on the right instead leaves `q_vehicle * q_rel * conj(q_vehicle)`, a
 conjugation: the same rotation through the same angle, about an axis turned by
 the vehicle heading. That has a distinctive signature. Conjugation maps identity
 to identity, so a **centred gimbal looks perfect at every heading** and the
@@ -100,17 +132,17 @@ decide.
 
 ## Do not mix the report with the EKF attitude
 
-The report comes from simulation ground truth. The vehicle attitude you divide
-out comes from the EKF, which is an estimate, and its heading error reached 16
-degrees in flight here. The division above therefore moves the whole EKF heading
-error into the derived vehicle-relative orientation.
+The quaternion starts as simulation ground truth, but the patched report is
+measured against the airframe, and the airframe attitude comes from the EKF.
+GZGimbal reads `vehicle_attitude`, whose heading error reached 16 degrees in
+flight here, and divides it off before it sends the report.
 
-The absolute camera orientation is safe: composing the EKF vehicle attitude back
-on cancels the error exactly, so earth-frame projections stay correct. The
-vehicle-relative half is not safe, and a command computed from it misses by the
-EKF error. Since the joints track the last setpoint exactly, the last commanded
-attitude is the true joint state. Build a new vehicle-relative command from your
-own last command, not from the report divided by the EKF.
+The camera frame in the world is safe. MAVInsight multiplies the same estimate
+back on, so the error cancels exactly and earth-frame projections stay correct.
+The vehicle-relative half is not safe, and a command computed from it misses by
+the EKF error. Since the joints track the last setpoint exactly, the last
+commanded attitude is the true joint state. Build a new vehicle-relative command
+from your own last command, not from the report.
 
 `GIMBAL_DEVICE_SET_ATTITUDE` would carry the joint setpoint whoever commanded
 it, but MAVROS does not translate that message, so it cannot cover a gimbal
@@ -154,8 +186,8 @@ a link back to the profile default when a ground station appears on it.
 |---|---|
 | Executes commands vehicle relative, flags ignored | Send a vehicle-relative attitude, lock flags clear |
 | Computes an ROI attitude once, earth referenced | Re-command the point yourself as the vehicle moves |
-| Reports an absolute attitude flagged vehicle relative, with no lock bit | Apply the frame patch, and check the gimbal frame against the vehicle heading |
-| Reports truth while the EKF estimates | Build earth-frame poses from the report, build command state from your own setpoints |
+| Reported an absolute attitude with no lock bit | Apply the frame patch, then check the gimbal frame against the vehicle heading |
+| Measures the patched report against the EKF airframe attitude | Build earth-frame poses from the report, build command state from your own setpoints |
 | Runs its cycle at 5 Hz | Apply the rate patch, and stream the report at 50 Hz |
 
 To apply the patches, from `src/PX4-Autopilot`:

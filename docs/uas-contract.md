@@ -177,6 +177,22 @@ parameter must hold six numbers, x y z roll pitch yaw. The rotation goes through
 REP 103 optical leaf. The gimbal reference frame is `<frame_name>_ref`, and the
 vehicle publishes it, not the gimbal.
 
+`d${N}_gimbal_frame_ref` comes from the lock flags of
+`GIMBAL_DEVICE_ATTITUDE_STATUS`, because those flags say which frame the gimbal
+measures its attitude against:
+
+| lock flags | the reference frame |
+|---|---|
+| YAW_LOCK | the earth frame, level, x axis North |
+| ROLL_LOCK or PITCH_LOCK, no YAW_LOCK | the vehicle frame, level, x axis at the airframe heading |
+| none | the body frame |
+
+MAVLink gives the earth frame in NED, so its x axis is North, which is 90
+degrees from the x axis of this ENU tree. The Chimera gimbal commands ROLL_LOCK
+and PITCH_LOCK, so the middle row is the usual one. A gimbal that sends no lock
+flag leaves the reference frame equal to the body frame, and the camera frame is
+then wrong at every attitude except level and facing North.
+
 The fiducial correction is the ROOT, and its edge points down the tree:
 `fiducial -> home_position`. `tf_loc` looks up a non-fiducial detection through
 `d${N}_fiducial_offset` and a fiducial frame through `uas${N}_home_position`.
