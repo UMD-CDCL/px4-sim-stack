@@ -148,6 +148,8 @@ class Uas(Node):
             Trigger, f"{self.namespace}/gimbal/click_mode/point")
         self.click_off = self.create_client(
             Trigger, f"{self.namespace}/gimbal/click_mode/off")
+        self.click_roi = self.create_client(
+            Trigger, f"{self.namespace}/gimbal/click_mode/roi")
 
         self.arming = self.create_client(CommandBool, f"{self.namespace}/cmd/arming")
         self.takeoff_srv = self.create_client(CommandTOL, f"{self.namespace}/cmd/takeoff")
@@ -581,7 +583,8 @@ def command_click(uas: Uas, args) -> int:
         return 0 if answer and answer.success else 1
 
     if not args.keep_mode:
-        answer = uas.call(uas.click_point, Trigger.Request(), "click_mode/point")
+        client = uas.click_roi if args.mode == "roi" else uas.click_point
+        answer = uas.call(client, Trigger.Request(), f"click_mode/{args.mode}")
         if not (answer and answer.success):
             print("click mode refused", file=sys.stderr)
             return 1
@@ -593,6 +596,13 @@ def command_click(uas: Uas, args) -> int:
     point.header.frame_id = "preview"
     point.header.stamp = uas.get_clock().now().to_msg()
     point.point.x, point.point.y = float(args.u), float(args.v)
+    # A click is RELATIVE: it asks for the clicked pixel to come to the
+    # boresight, so sending it twice moves the camera twice. Waiting for the
+    # subscription is what makes one send enough; repeating it was covering a
+    # discovery race and reading as a pointing error three times the size.
+    if not uas.wait_until(lambda: uas.click.get_subscription_count() > 0, 10.0,
+                          "somebody listening for clicks"):
+        return 1
     for _ in range(args.repeat):
         uas.click.publish(point)
         uas.pump(0.25)
@@ -1029,10 +1039,12 @@ def main() -> int:
     detections.add_argument("--truth", default=os.environ.get("RESOLVED_TRUTH_FILE", ""),
                             help="what the scenario actually placed")
     click = sub.add_parser("click")
-    click.add_argument("mode", choices=["point", "off"])
+    click.add_argument("mode", choices=["point", "roi", "off"])
     click.add_argument("u", type=float, nargs="?", default=320.0)
     click.add_argument("v", type=float, nargs="?", default=90.0)
-    click.add_argument("--repeat", type=int, default=3)
+    click.add_argument("--repeat", type=int, default=1,
+                       help="a click is relative, so more than one moves the "
+                            "camera more than once. Only for testing that.")
     click.add_argument("--keep-mode", action="store_true",
                        help="click without setting the mode, to see whether a "
                             "station whose clicks are off really ignores them")

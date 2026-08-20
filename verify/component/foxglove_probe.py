@@ -15,6 +15,11 @@ Prints one tab separated line per topic: name, schema, and the verdict.
     absent      the bridge does not offer the topic at all
 
 With no topic named it lists every channel the bridge advertises.
+
+With --services it answers the same question about services instead. A Call
+Service panel that names a service the bridge does not offer looks configured
+and fails at the moment the operator presses it. A service is reported and
+never called: calling one moves a gimbal.
 """
 
 import argparse
@@ -49,12 +54,14 @@ def geojson_of(payload: bytes) -> str:
 class Bridge:
     """One connection to a Foxglove bridge."""
 
-    def __init__(self, url, topics, deadline_s, show):
+    def __init__(self, url, topics, deadline_s, show, services_only=False):
         self.url = url
         self.topics = topics
         self.deadline_s = deadline_s
         self.show = show
+        self.services_only = services_only
         self.channels = {}
+        self.services = {}
         self.subscription = {}
         self.seen = {}
         self.payloads = {}
@@ -63,6 +70,9 @@ class Bridge:
         async with websockets.connect(
                 self.url, subprotocols=SUBPROTOCOLS, max_size=None) as socket:
             await self.discover(socket)
+            if self.services_only:
+                return self.topics or sorted(
+                    service["name"] for service in self.services.values())
             wanted = self.topics or sorted(
                 channel["topic"] for channel in self.channels.values())
             await self.subscribe(socket, wanted)
@@ -98,6 +108,12 @@ class Bridge:
         elif message.get("op") == "unadvertise":
             for channel_id in message["channelIds"]:
                 self.channels.pop(channel_id, None)
+        elif message.get("op") == "advertiseServices":
+            for service in message["services"]:
+                self.services[service["id"]] = service
+        elif message.get("op") == "unadvertiseServices":
+            for service_id in message["serviceIds"]:
+                self.services.pop(service_id, None)
 
     async def subscribe(self, socket, wanted):
         self.subscription = {}
@@ -128,6 +144,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("topics", nargs="*")
     parser.add_argument("--url", default="ws://localhost:8765")
+    parser.add_argument("--services", action="store_true",
+                        help="report services rather than topics")
     parser.add_argument("--seconds", type=float, default=8.0,
                         help="how long to wait for a message on each topic")
     parser.add_argument("--show", action="append", default=[],
@@ -135,12 +153,20 @@ def main() -> int:
     arguments = parser.parse_args()
 
     bridge = Bridge(arguments.url, arguments.topics, arguments.seconds,
-                    arguments.show)
+                    arguments.show, arguments.services)
     try:
         wanted = asyncio.run(bridge.run())
     except OSError as error:
         print(f"no Foxglove bridge on {arguments.url}: {error}", file=sys.stderr)
         return 1
+
+    if arguments.services:
+        type_of = {service["name"]: service.get("type", "")
+                   for service in bridge.services.values()}
+        for name in wanted:
+            verdict = "advertised" if name in type_of else "absent"
+            print(f"{name}\t{type_of.get(name, '')}\t{verdict}")
+        return 0
 
     schema_of = {channel["topic"]: channel.get("schemaName", "")
                  for channel in bridge.channels.values()}

@@ -12,6 +12,15 @@
 # streams, a few metres with twelve. FLEET_AGREEMENT_M is the line between
 # "agrees" and "does not share a ground", not a measure of the best it does.
 
+
+# The long one. It flies several legs, so it is not in the default run: the
+# flight stage covers what a change to this stack usually breaks, from one
+# takeoff. Set VERIFY_FULL=1 to include this.
+if [ "${VERIFY_FULL:-0}" != 1 ]; then
+	note "skipped. VERIFY_FULL=1 includes it"
+	return 0
+fi
+
 if [ "$UAS_COUNT" -lt 2 ]; then
 	skip "this fleet has one vehicle, and this asks what two make of one target"
 	note "fly more: UAS_FLEET='chimera_v3 chimera_v3 chimera_v2 chimera_v2' ./px4sim start"
@@ -38,8 +47,13 @@ for n in $(fleet_numbers); do
 	vehicle_ready "$n" || return 0
 done
 
-TARGET_EAST=${TARGET_EAST:-0.69}
-TARGET_NORTH=${TARGET_NORTH:-111.23}
+# The middle of whichever scene's targets are loaded. Written-in coordinates
+# belong to one scene and fly every other one to empty ground.
+read -r scene_east scene_north < <(python3 verify/component/viewpoint.py \
+	"modules/sim/scenes/scenarios/${SCENARIO:-${SCENE}_casualties}.yaml" --centre \
+	2>/dev/null || echo "0 0")
+TARGET_EAST=${TARGET_EAST:-$scene_east}
+TARGET_NORTH=${TARGET_NORTH:-$scene_north}
 fly() { ./px4sim uas "$@" >/dev/null 2>&1 || true; }
 station() {
 	local n=$1 east=$2 north=$3 up=$4 heading=$5 depression=$6

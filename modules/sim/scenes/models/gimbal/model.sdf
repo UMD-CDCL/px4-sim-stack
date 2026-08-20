@@ -75,17 +75,25 @@
       </visual>
     </link>
 
-    <!-- Yaw joint, locked. The Chimera mount is two axis, roll and pitch, and
-         it has no yaw actuator: the camera's azimuth comes from the airframe
-         heading. `umd_uas/gimbal.py` sends flags 12, ROLL_LOCK | PITCH_LOCK,
-         and the missing YAW_LOCK means yaw is commanded in the vehicle frame.
-         Its yaw_angle_min and yaw_angle_max of -180 to +180 clamp that
-         request; they are not a motor.
+    <!-- Yaw joint, locked. The mount modelled here is two axis, roll and
+         pitch, and the camera's azimuth comes from the airframe heading.
+         `umd_uas/gimbal.py` sends flags 12, ROLL_LOCK | PITCH_LOCK, and the
+         missing YAW_LOCK means yaw is commanded in the vehicle frame. Its
+         yaw_angle_min and yaw_angle_max clamp that request; they are not a
+         motor.
 
          Equal limits hold the arm at zero and leave the joint and its
-         controller in place, so PX4 still finds everything it commands. Do not
-         open this axis to make a pointing click work. The aircraft would have
-         to turn, so the simulator must turn too. -->
+         controller in place, so PX4 still finds everything it commands.
+         `patches/px4-gzgimbal-lock.patch` makes GIMBAL_DEVICE_INFORMATION
+         declare the same thing, so a consumer that reads the mount is told
+         there is no yaw axis rather than an infinite one.
+
+         Do not open this axis to make a pointing click work. The aircraft
+         would have to turn, so the simulator must turn too. Opening it means
+         opening three things together: these limits, the yaw capability flags
+         and range in that patch, and yaw_angle_min and yaw_angle_max in the
+         flight code parameters. No evidence in these repositories settles the
+         axis count of the real mount; see docs/px4-simulated-gimbal.md. -->
     <joint name='cgo3_vertical_arm_joint' type='revolute'>
       <child>cgo3_vertical_arm_link</child>
       <parent>cgo3_mount_link</parent>

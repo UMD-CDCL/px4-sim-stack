@@ -73,24 +73,12 @@ vehicle_ready() {
 # that measures a vehicle which never left the ground reports nothing useful,
 # so it restarts the simulator once and tries again.
 flying() {
+	# One way into the air, shared with the front door. `./px4sim fly` handles
+	# a vehicle on its side, an autopilot that rebooted and stopped honouring
+	# the gimbal, and a takeoff that will not climb, and it says which of those
+	# it found. A second copy of that logic here would drift from it.
 	local n=$1 height=${2:-30}
-	if ./px4sim uas "$n" takeoff "$height" >/dev/null 2>&1; then
-		return 0
-	fi
-	note "uas$n would not climb, so the stack is restarted for a clean slate"
-	# The companions go with the simulator. A detector opens its camera once,
-	# and the stream it was reading does not survive a new simulator, so a
-	# companion left running afterwards holds a pipeline that will never see
-	# another frame. Its entry point waits for the camera on the way back up.
-	local number companions=""
-	for number in $(fleet_numbers); do companions="$companions onboard$number"; done
-	./px4sim restart sim >/dev/null 2>&1
-	# shellcheck disable=SC2086
-	./px4sim restart $companions >/dev/null 2>&1
-	for number in $(fleet_numbers); do
-		vehicle_ready "$number" || return 1
-	done
-	./px4sim uas "$n" takeoff "$height" >/dev/null 2>&1
+	./px4sim fly "$n" "$height" >/dev/null 2>&1
 }
 
 report() {

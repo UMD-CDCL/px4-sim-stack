@@ -8,6 +8,13 @@
 // PX4 ships a similar plugin, but that one binds to the first camera it finds.
 // This program handles one stream for each camera.
 //
+// A v3 airframe carries a zoom lens. gz-sim cannot change a camera's field of
+// view once the world is loaded, so the airframe carries one camera for each
+// framing the lens reaches, all on the same mount, and this follows the lens:
+// it reads the narrowest camera that can still show what the lens is asking
+// for and crops the middle out of it for the rest. At a framing the crop is
+// nothing, so the picture is a whole rendering at that field of view.
+//
 // The fielded aircraft encodes H.265 CBR with nvv4l2h265enc, so this does the
 // same wherever the machine can. A stream may also carry a width and a height,
 // which rescales the encoder input: one camera render then feeds a full stream
@@ -31,6 +38,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
 #include <cmath>
 #include <chrono>
 #include <csignal>
@@ -161,6 +169,12 @@ const char *GstFormatFor(gz::msgs::PixelFormatType t) {
   }
 }
 
+// One camera the stream can read from: what it sees, and where it publishes.
+struct Framing {
+  double hfov_rad = 0.0;
+  std::string topic;
+};
+
 struct Spec {
   std::string name;
   std::string regex;
@@ -175,14 +189,18 @@ struct Spec {
   // does. A scaled-down stream is small enough to encode in software without
   // troubling the physics loop, which leaves the sessions for the full ones.
   bool software = false;
-  // The field of view the camera renders, and the topic that asks for a
-  // narrower one. A zoom lens is simulated by cropping the middle out of the
-  // widest view the camera has: gz-sim cannot change a camera's field of view
-  // once the world is loaded, and the picture that comes out of a crop has
-  // genuinely the narrower field of view, which is what the calibration and
-  // every ray cast through it depend on.
+  // The field of view the camera found by `regex` renders, and the topic that
+  // asks for a narrower one. gz-sim cannot change a camera's field of view
+  // once the world is loaded, so a zoom lens is simulated with more than one
+  // camera pointed the same way, plus a crop between them.
   double hfov_rad = 0.0;
   std::string zoom_topic;
+  // The narrower cameras, if the airframe carries any. Each is a whole
+  // rendering of the scene at its own field of view, so a framing that has one
+  // has real detail rather than a handful of pixels stretched back up. A
+  // Gazebo camera renders only while something subscribes to its topic, so the
+  // ones not in use cost nothing.
+  std::vector<Framing> framings;
 };
 
 // One camera. It owns a gz subscription and a GStreamer pipeline.
@@ -190,36 +208,60 @@ class Stream {
  public:
   Stream(Spec spec, std::string encoder, std::string parser)
       : spec_(std::move(spec)), encoder_(std::move(encoder)), parser_(std::move(parser)),
-        pattern_(spec_.regex) {}
+        pattern_(spec_.regex) {
+    // One entry before binding, so a zoom that arrives first has a field of
+    // view to measure itself against. TryBind fills in the topic and the rest.
+    framings_.push_back({spec_.hfov_rad, ""});
+    asked_hfov_rad_ = spec_.hfov_rad;
+  }
 
   ~Stream() { Teardown(); }
 
   const Spec &spec() const { return spec_; }
   bool bound() const { return bound_; }
 
-  // A zoom lens, simulated. The camera renders its widest view and a narrower
-  // one is the middle of it: the fraction kept is the ratio of the tangents of
-  // the half angles, which is what makes the result a real field of view
-  // rather than a smaller picture.
+  // A zoom lens, simulated. The lens asks for a field of view on a Gazebo
+  // topic and this follows it: it reads from the narrowest camera that can
+  // still show that much, and crops the middle out of what that camera renders
+  // for the rest. The fraction kept is the ratio of the tangents of the half
+  // angles, which is what makes the result a real field of view rather than a
+  // smaller picture.
+  //
+  // At a framing the airframe carries a camera for, the crop is nothing at all
+  // and the picture is a whole rendering at that field of view. Between two of
+  // them the wider camera is cropped, so the picture zooms continuously while
+  // the lens travels instead of cutting when it arrives.
   void WatchZoom() {
     if (spec_.zoom_topic.empty() || spec_.hfov_rad <= 0.0) return;
     node_.Subscribe(spec_.zoom_topic, &Stream::OnZoom, this);
     std::cout << "[" << spec_.name << "] zoom from " << spec_.zoom_topic
-              << ", widest " << spec_.hfov_rad << " rad" << std::endl;
+              << ", widest " << spec_.hfov_rad << " rad";
+    for (const auto &f : spec_.framings) {
+      std::cout << ", " << f.hfov_rad << " rad on " << f.topic;
+    }
+    std::cout << std::endl;
   }
 
   void OnZoom(const gz::msgs::Double &msg) {
     const double asked = msg.data();
-    if (!(asked > 0.0) || asked > spec_.hfov_rad) {
-      zoom_fraction_ = 1.0;
-    } else {
-      zoom_fraction_ = std::tan(asked / 2.0) / std::tan(spec_.hfov_rad / 2.0);
+    std::size_t wanted = 0;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      // Framings are held widest first, so the last one that still covers the
+      // request is the narrowest camera that can serve it.
+      for (std::size_t i = 0; i < framings_.size(); ++i) {
+        if (framings_[i].hfov_rad >= asked * kCoverMargin) wanted = i;
+      }
+      asked_hfov_rad_ = asked > 0.0 ? asked : framings_[active_].hfov_rad;
+      ApplyFramingLocked();
     }
-    std::lock_guard<std::mutex> lock(mutex_);
-    ApplyZoomLocked(source_width_, source_height_);
+    Select(wanted);
   }
 
-  // Look for a topic that matches, and subscribe to the first one.
+  // Look for a topic that matches, and subscribe to the first one. That camera
+  // is the widest framing; the narrower ones name their topics outright,
+  // because a model that carries several cameras on one link has already had
+  // to give them names of their own.
   bool TryBind(const std::vector<std::string> &topics) {
     if (bound_) return true;
     for (const auto &t : topics) {
@@ -228,13 +270,62 @@ class Stream {
         std::cerr << "[" << spec_.name << "] subscribe failed: " << t << std::endl;
         return false;
       }
-      topic_ = t;
-      bound_ = true;
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        framings_.clear();
+        framings_.push_back({spec_.hfov_rad, t});
+        for (const auto &f : spec_.framings) {
+          if (f.hfov_rad > 0.0 && !f.topic.empty() && f.hfov_rad < spec_.hfov_rad) {
+            framings_.push_back(f);
+          }
+        }
+        std::sort(framings_.begin(), framings_.end(),
+                  [](const Framing &a, const Framing &b) {
+                    return a.hfov_rad > b.hfov_rad;
+                  });
+        active_ = 0;
+        topic_ = t;
+        bound_ = true;
+        ApplyFramingLocked();
+      }
       std::cout << "[" << spec_.name << "] bound to " << t << std::endl;
       std::cout << "[" << spec_.name << "] publishing to " << spec_.url << std::endl;
       return true;
     }
     return false;
+  }
+
+  // Take the cameras this stream has stopped reading from off the wire, and
+  // give up on one that was asked for and never answered.
+  //
+  // Every subscribe and unsubscribe happens here or in TryBind, on the main
+  // loop, and never while the stream's own lock is held: the frame callback
+  // holds that lock, so dropping a subscription under it would be one thread
+  // waiting on a callback that is waiting on the thread.
+  void ServiceSources() {
+    std::vector<std::string> retiring;
+    std::size_t expired = kNone;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      retiring.swap(retiring_);
+      if (pending_ != kNone && std::chrono::steady_clock::now() >= switch_deadline_) {
+        expired = pending_;
+        pending_ = kNone;
+        // A framing whose topic is misspelt, or whose sensor this model does
+        // not carry, must not be chosen again -- otherwise every zoom command
+        // starts another switch that cannot finish. Zero takes it out of the
+        // running and leaves the stream cropping the camera it has.
+        framings_[expired].hfov_rad = 0.0;
+        retiring.push_back(framings_[expired].topic);
+        ApplyFramingLocked();
+      }
+    }
+    if (expired != kNone) {
+      std::cerr << "[" << spec_.name << "] no frame from "
+                << framings_[expired].topic << " within "
+                << kSwitchTimeout.count() << "s; cropping instead" << std::endl;
+    }
+    for (const auto &topic : retiring) node_.Unsubscribe(topic);
   }
 
   // Restart the pipeline if GStreamer reported an error. The video router can
@@ -389,6 +480,26 @@ class Stream {
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
+    // Which camera a frame came from is not on the message, so a switch is
+    // resolved by timing instead: the new camera is subscribed before the old
+    // one is dropped, and the first frame to arrive after that promotes it.
+    // Both cameras render the same scene from the same mount, so a frame from
+    // either is a true picture at the field of view its own framing names, and
+    // the crop below is set from the framing this frame is treated as. The
+    // worst a mistimed promotion costs is one frame of the previous framing's
+    // detail, never a wrong geometry.
+    if (pending_ != kNone) PromoteLocked();
+    // A framing that renders at a different size than the one the pipeline was
+    // built for needs a new pipeline: appsrc's caps are fixed at build time,
+    // and pushing a buffer of another size into them stalls the stream with no
+    // error anyone sees.
+    if (pipeline_ != nullptr &&
+        (static_cast<int>(msg.width()) != source_width_ ||
+         static_cast<int>(msg.height()) != source_height_)) {
+      std::cout << "[" << spec_.name << "] source is now " << msg.width() << "x"
+                << msg.height() << ", rebuilding the pipeline" << std::endl;
+      TeardownLocked();
+    }
     if (pipeline_ == nullptr) {
       const auto now = std::chrono::steady_clock::now();
       if (now < retry_after_) return;  // Do not rebuild on every frame.
@@ -410,12 +521,80 @@ class Stream {
   // a Gazebo log shows. Fall back to counting if the field is absent.
   Spec spec_;
   // Kept so a zoom that arrives between frames can be applied at once.
+  //
+  // videocrop takes an even number of pixels off each side, so the kept width
+  // is rounded to the nearest even number rather than truncated: at a framing
+  // whose fraction divides the render exactly -- a third of 1920 is 640, a
+  // tenth is 192 -- truncating would keep four pixels too many and put the
+  // picture half a percent wider than the calibration says it is.
   void ApplyZoomLocked(int width, int height) {
     if (zoom_ == nullptr || width <= 0 || height <= 0) return;
-    const int side = static_cast<int>(width * (1.0 - zoom_fraction_) / 2.0) & ~1;
-    const int end = static_cast<int>(height * (1.0 - zoom_fraction_) / 2.0) & ~1;
+    const int side = static_cast<int>(std::lround(width * (1.0 - zoom_fraction_) / 2.0)) & ~1;
+    const int end = static_cast<int>(std::lround(height * (1.0 - zoom_fraction_) / 2.0)) & ~1;
     g_object_set(zoom_, "left", side, "right", side, "top", end, "bottom", end, nullptr);
   }
+
+  // Start reading from another framing's camera. The new one is subscribed
+  // first and the old one is dropped only once a frame has arrived from it, so
+  // the stream never runs out of frames across a switch: a Gazebo camera
+  // renders nothing until it has a subscriber, and the first render after that
+  // takes a frame interval to appear.
+  void Select(std::size_t wanted) {
+    std::string subscribe_to;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (!bound_ || wanted >= framings_.size()) return;
+      if (wanted == active_ || wanted == pending_) return;
+      if (pending_ != kNone) retiring_.push_back(framings_[pending_].topic);
+      pending_ = wanted;
+      switch_deadline_ = std::chrono::steady_clock::now() + kSwitchTimeout;
+      subscribe_to = framings_[wanted].topic;
+    }
+    if (node_.Subscribe(subscribe_to, &Stream::OnImage, this)) return;
+    std::cerr << "[" << spec_.name << "] cannot subscribe to " << subscribe_to
+              << "; cropping instead" << std::endl;
+    std::lock_guard<std::mutex> lock(mutex_);
+    framings_[wanted].hfov_rad = 0.0;
+    if (pending_ == wanted) pending_ = kNone;
+    ApplyFramingLocked();
+  }
+
+  void PromoteLocked() {
+    retiring_.push_back(framings_[active_].topic);
+    active_ = pending_;
+    pending_ = kNone;
+    topic_ = framings_[active_].topic;
+    ApplyFramingLocked();
+    std::cout << "[" << spec_.name << "] framing " << framings_[active_].hfov_rad
+              << " rad from " << topic_ << std::endl;
+  }
+
+  // The crop that turns what the live camera renders into what the lens is
+  // asking for. One place, so a zoom command and a change of camera cannot
+  // leave the two describing different pictures.
+  void ApplyFramingLocked() {
+    const double rendered = framings_[active_].hfov_rad;
+    zoom_fraction_ = (rendered > 0.0 && asked_hfov_rad_ > 0.0)
+        ? std::min(1.0, std::tan(asked_hfov_rad_ / 2.0) / std::tan(rendered / 2.0))
+        : 1.0;
+    ApplyZoomLocked(source_width_, source_height_);
+  }
+
+  // How far past a framing's own field of view the lens may ask before that
+  // framing's camera stops being used. It exists so a value that lands on a
+  // framing to the last bit does not flap between two cameras; the crop is
+  // clamped, so the picture is at worst a fraction of a percent narrower than
+  // asked over that margin.
+  static constexpr double kCoverMargin = 0.999;
+  static constexpr std::size_t kNone = static_cast<std::size_t>(-1);
+  static constexpr std::chrono::seconds kSwitchTimeout{5};
+
+  std::vector<Framing> framings_;
+  double asked_hfov_rad_ = 0.0;
+  std::size_t active_ = 0;
+  std::size_t pending_ = kNone;
+  std::vector<std::string> retiring_;
+  std::chrono::steady_clock::time_point switch_deadline_{};
 
   GstElement *zoom_ = nullptr;
   std::atomic<double> zoom_fraction_{1.0};
@@ -447,8 +626,12 @@ void Usage() {
       << "                      url      overrides the sink URL\n"
       << "                      bitrate  kbit/s, default 4000\n"
       << "                      fps      default 30\n"
-      << "                      width    rescale before encoding, with height\n"
       << "                      height   rescale before encoding, with width\n"
+      << "                      hfov     radians the matched camera renders\n"
+      << "                      zoom_topic  gz.msgs.Double, the field of view\n"
+      << "                                  the lens is asking for\n"
+      << "                      framing  <hfov radians>:<topic> of a narrower\n"
+      << "                               camera on the same mount. Repeatable.\n"
       << "  --encoder FRAG    GStreamer encoder fragment. Skips the probe that\n"
       << "                    picks between the H.265 and H.264 encoders.\n"
       << "  --parser NAME     Parser for --encoder output. Default h265parse.\n"
@@ -492,6 +675,18 @@ int main(int argc, char **argv) {
         else if (kv.first == "encoder") s.software = kv.second == "software";
         else if (kv.first == "hfov") s.hfov_rad = std::atof(kv.second.c_str());
         else if (kv.first == "zoom_topic") s.zoom_topic = kv.second;
+        else if (kv.first == "framing") {
+          // "<hfov radians>:<gz topic>". Repeatable, one for each narrower
+          // camera the airframe carries on the same mount.
+          const auto colon = kv.second.find(':');
+          if (colon == std::string::npos) {
+            std::cerr << "a framing= needs <hfov radians>:<topic>, not "
+                      << kv.second << std::endl;
+            return 2;
+          }
+          s.framings.push_back({std::atof(kv.second.substr(0, colon).c_str()),
+                                kv.second.substr(colon + 1)});
+        }
       }
       if (s.name.empty() || s.regex.empty()) {
         std::cerr << "a --stream needs at least name= and regex=" << std::endl;
@@ -591,6 +786,7 @@ int main(int argc, char **argv) {
 
     for (auto &s : streams) {
       s->ServiceBus();
+      s->ServiceSources();
     }
 
     if (!all_bound && ++quiet_ticks % 15 == 0) {

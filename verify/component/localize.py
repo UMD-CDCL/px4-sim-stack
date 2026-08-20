@@ -11,6 +11,7 @@ Run inside the onboard image: ./px4sim verify localize
 
 import json
 import math
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -43,6 +44,20 @@ FLIGHT_ALTITUDE_M = 50.0
 STAMP = TimeMsg(sec=1000, nanosec=0)
 
 TOLERANCE_M = 0.05
+
+# The size the aircraft calibrates its zoom lens at, and the framings that lens
+# reaches. The table is the stack's own, so the harness and the simulator
+# cannot disagree about what a preset is.
+PREVIEW_SIZE = (640, 360)
+ZOOM_PRESETS = os.environ.get("UAS_ZOOM_PRESETS",
+                              "narrow=6.09 mid=20.13 wide=56.06")
+
+# Where the zoom case puts its target, as a fraction of the tightest framing.
+# Off the boresight in both axes, because a centred target falls on the same
+# pixel whatever the field of view and would pass the test on stale
+# intrinsics. Well inside the frame, because the tightest framing is a tenth
+# of the widest and the target has to stay in all of them.
+ZOOM_TARGET_FRACTION = (0.7, 0.3)
 
 
 def camera_info(width: int, height: int, hfov_deg: float) -> CameraInfo:
@@ -88,6 +103,43 @@ def boresight(azimuth_deg: float, depression_deg: float) -> R:
     yaw = R.from_euler("z", 90.0 - azimuth_deg, degrees=True)
     pitch = R.from_euler("y", depression_deg, degrees=True)
     return yaw * pitch
+
+
+def zoom_presets(table: str):
+    """The preset names and their horizontal fields of view, in the order given."""
+    presets = []
+    for entry in table.split():
+        name, _, degrees = entry.partition("=")
+        if degrees:
+            presets.append((name, float(degrees)))
+    return presets
+
+
+def ground_point_at(info: CameraInfo, camera_at, attitude: R, pixel):
+    """Where one pixel's ray meets the ground plane through the origin."""
+    ray = attitude.apply(np.asarray(body_ray(info, pixel)))
+    camera_at = np.asarray(camera_at, dtype=np.float64)
+    return tuple(camera_at + ray * (-camera_at[2] / ray[2]))
+
+
+def body_ray(info: CameraInfo, pixel):
+    """The camera body ray through one pixel, as tf_loc builds it."""
+    fx, fy, cx, cy = info.k[0], info.k[4], info.k[2], info.k[5]
+    return (1.0, -(pixel[0] - cx) / fx, -(pixel[1] - cy) / fy)
+
+
+def pixel_of(info: CameraInfo, camera_at, attitude: R, target_enu):
+    """Which pixel a world point falls on, for one calibration and one pose.
+
+    The inverse of the ray tf_loc casts: rotate the line of sight into the
+    camera body frame, undo the [z, -x, -y] remap, and scale by the focal
+    length. Written out here so the expected pixel comes from geometry rather
+    than from the node under test.
+    """
+    sight = np.asarray(target_enu, dtype=np.float64) - np.asarray(camera_at, dtype=np.float64)
+    forward, left, up = attitude.inv().apply(sight)
+    fx, fy, cx, cy = info.k[0], info.k[4], info.k[2], info.k[5]
+    return (fx * (-left / forward) + cx, fy * (-up / forward) + cy)
 
 
 def pose_the_vehicle(node, azimuth_deg: float, depression_deg: float,
@@ -254,6 +306,47 @@ def main() -> int:
         record("a box on a roof lands on the roof, not on the ground beside it",
                (*roof_point, roof_z),
                localize(node, detection(centre_pixel, CALIBRATION_SIZE)))
+    node.destroy_node()
+    rclpy.shutdown()
+
+    # 6. The same target, seen at each zoom framing. A preset changes the
+    #    intrinsics, so the target falls on a different pixel in each one and
+    #    has to localize to the same place. Every centred case above passes on
+    #    intrinsics latched at startup, and this one does not.
+    node = build_node(anchor, tempfile.mkdtemp(), ground_altitude_m=anchor[2])
+    camera_at = (0.0, 0.0, FLIGHT_ALTITUDE_M)
+    attitude = boresight(azimuth_deg=0.0, depression_deg=45.0)
+    pose_the_vehicle(node, azimuth_deg=0.0, depression_deg=45.0)
+    presets = zoom_presets(ZOOM_PRESETS)
+    tightest = camera_info(*PREVIEW_SIZE, min(hfov for _, hfov in presets))
+    target_enu = ground_point_at(
+        tightest, camera_at, attitude,
+        [size * fraction for size, fraction in zip(PREVIEW_SIZE, ZOOM_TARGET_FRACTION)])
+    for name, hfov_deg in presets:
+        info = camera_info(*PREVIEW_SIZE, hfov_deg)
+        node.cam_info_cb(info)
+        record(f"a target off the boresight lands in one place at the {name} framing",
+               target_enu,
+               localize(node, detection(pixel_of(info, camera_at, attitude, target_enu),
+                                        PREVIEW_SIZE)))
+    node.destroy_node()
+    rclpy.shutdown()
+
+    # 7. A ray that barely looks under the horizon is not localized at all.
+    #    The gimbal comes up looking forward and the detector reports the
+    #    horizon from the moment it starts, and those detections used to land
+    #    on the map at a place nothing can vouch for.
+    node = build_node(anchor, tempfile.mkdtemp(), ground_altitude_m=anchor[2])
+    node.cam_info_cb(camera_info(*PREVIEW_SIZE, 20.13))
+    for depression_deg, wanted in ((10.0, False), (45.0, True)):
+        pose_the_vehicle(node, azimuth_deg=0.0, depression_deg=depression_deg)
+        landed = localize(node, detection(
+            (PREVIEW_SIZE[0] / 2.0, PREVIEW_SIZE[1] / 2.0), PREVIEW_SIZE))
+        results.append((
+            (landed is not None) == wanted,
+            f"a box {depression_deg:g} degrees below the horizon is "
+            f"{'localized' if wanted else 'ignored'}",
+            "localized" if landed is not None else "not localized"))
     node.destroy_node()
     rclpy.shutdown()
 

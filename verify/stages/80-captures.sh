@@ -6,6 +6,15 @@
 # moves the whole fleet's frame. A VLM frame is a full size picture for a model
 # that does not run on the vehicle, and it is the one image the radio carries.
 
+
+# The long one. It flies several legs, so it is not in the default run: the
+# flight stage covers what a change to this stack usually breaks, from one
+# takeoff. Set VERIFY_FULL=1 to include this.
+if [ "${VERIFY_FULL:-0}" != 1 ]; then
+	note "skipped. VERIFY_FULL=1 includes it"
+	return 0
+fi
+
 lead=$FIRST_UAS
 if [ -z "$(COMPOSE_PROFILES="uas$lead,onboard$lead" docker compose ps -q "onboard$lead" 2>/dev/null)" ]; then
 	fail "uas$lead is not running. Start it: ./px4sim start"
@@ -18,10 +27,28 @@ vehicle_ready "$lead" || return 0
 # A mosaic frame is only added when its corner rays all reach the ground and it
 # covers ground the mosaic does not already hold, so this flies a short line
 # looking straight down rather than capturing from one place.
+# Where the targets are in THIS scene, not in the one this check was written
+# for. A written-in leg is either a long flight to empty ground or a view of
+# nothing: campus puts its casualties about 100 m north of the origin and
+# Lorton puts them within 10 m of it.
+viewpoint=$(python3 verify/component/viewpoint.py \
+	"modules/sim/scenes/scenarios/${SCENARIO:-${SCENE}_casualties}.yaml" \
+	--height "${VERIFY_HEIGHT_M:-20}" --depression "${VERIFY_DEPRESSION_DEG:-45}" \
+	2>/dev/null)
+if [ -z "$viewpoint" ]; then
+	fail "the scenario says where its targets are"
+	return 0
+fi
+
+# A mosaic frame is only added when its corner rays all reach the ground and it
+# covers ground the mosaic does not already hold, so this flies a short line
+# rather than capturing from one place. The line is around the targets of
+# whichever scene is loaded, and it is as short as a mosaic will accept.
+read -r east north up _ <<< "$viewpoint"
 flying "$lead" 40 || fail "uas$lead reaches the air"
 uas detect on >/dev/null
-for north in 100 130 160 190; do
-	uas goto 0 "$north" 40 --heading 0 >/dev/null
+for step in 0 25 50; do
+	uas goto "$east" "$(python3 -c "print($north + $step)")" 40 --heading 0 >/dev/null
 	uas gimbal -85 >/dev/null
 	uas capture mosaic >/dev/null
 done
@@ -51,8 +78,9 @@ done
 
 # Back over the casualties, where there is something to mark and something to
 # hand a vision model.
-uas goto 0 91 12 --heading 0 >/dev/null
-uas gimbal -30 >/dev/null
+read -r view_east view_north view_up view_heading <<< "$viewpoint"
+uas goto "$view_east" "$view_north" "$view_up" --heading "$view_heading" >/dev/null
+uas gimbal "-${VERIFY_DEPRESSION_DEG:-45}" >/dev/null
 
 for what in fiducial vlm; do
 	answer=$(uas capture "$what")

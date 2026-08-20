@@ -1,0 +1,335 @@
+Make the simulated gimbal hold the axes it is told to lock.
+
+PX4's simulated gimbal writes the commanded angles straight onto Gazebo joints
+that ride on the airframe:
+
+    src/modules/simulation/gz_bridge/GZGimbal.cpp, Run()
+        if (pollSetpoint()) {
+                //TODO handle device flags
+                publishJointCommand(...)
+
+That TODO is the whole of it. The device flags are stored and never read, so
+every command runs as a vehicle-relative angle whatever the flags say, and the
+simulated gimbal is a follow mode device on all three axes. A real MAVLink
+gimbal given ROLL_LOCK and PITCH_LOCK holds the horizon while the aircraft
+banks under it, which is what the Chimera flight code asks for on every command
+it sends (`umd_uas/gimbal.py`, flags 12).
+
+The gap is not small. At 20 degrees of bank the simulated camera rolled 20
+degrees with the airframe, so a level horizon in the picture was a lie, an image
+overlay slid off the video, and a pixel cast at the ground landed wrong by the
+whole bank angle. Nothing reported an error.
+
+TWO THINGS HAVE TO BE RIGHT. The frame the setpoint is given in, and the order
+the arms turn in. The first is arithmetic anyone would look for. The second is
+the one that bites.
+
+ONE: THE FRAME.
+
+The lock bits name the frame the setpoint is given in.
+
+    YAW_LOCK                      earth frame
+    ROLL_LOCK or PITCH_LOCK only  vehicle frame: the earth frame turned by
+                                  the heading of the airframe, and level
+    no lock bit                   the airframe itself
+
+The joints turn against the airframe, so the airframe attitude has to come off
+the setpoint before the angles are written. `px4-gzgimbal-frame.patch` already
+named those three frames, for the report:
+
+    report:  q_report = conj(q_reference) * q_camera
+
+This patch is the same arithmetic the other way round, for the command:
+
+    command: q_joint  = conj(q_vehicle) * q_reference * q_setpoint
+
+With no lock bit the reference frame is the airframe, the two conjugates cancel,
+and the joints take the setpoint unchanged. So a follow mode command behaves
+exactly as it did before this patch, and only a locked axis changes.
+
+TWO: THE ORDER THE ARMS TURN IN.
+
+`modules/sim/scenes/models/gimbal/model.sdf` builds the mount as three revolute
+joints in a chain: the vertical arm about the yaw axis, then the horizontal arm
+about the roll axis, then the camera about the pitch axis. The attitude those
+arms build is therefore
+
+    R = Rz(yaw) * Rx(roll) * Ry(pitch)
+
+and the angles that build a wanted attitude have to be read back out of it in
+that same order.
+
+`matrix::Eulerf` reads `Rz * Ry * Rx`, the aerospace order, which puts pitch
+before roll. **The two orders give the same three angles only while roll is
+zero.** Every command this simulator ever saw had roll zero: PX4 commands roll
+zero by default, and the Chimera flight code sends a level horizon on every
+command. So GZGimbal has always read the setpoint in the wrong order and it has
+never once mattered. The first thing to ask these arms for a roll was the frame
+arithmetic above.
+
+Reading a stabilization setpoint in the aerospace order and writing it onto
+these arms misses by up to 40 degrees across the flight envelope, and it misses
+most where the camera is pitched furthest down, which is where this camera
+spends its time. It is not a gain error and it does not halve or trim away: with
+the camera pitched down, a rotation about the roll arm swings the boresight in
+azimuth rather than rolling the picture, because the roll arm turns before the
+camera is pitched. That was measured on the running simulator before it was
+derived: a commanded roll of 2.43 degrees moved the boresight 2.05 degrees in
+azimuth and left the roll almost unchanged.
+
+So the patch reads the joint angles in the chain's own order, in
+`jointAnglesFromAttitude()`, and both the locked path and the plain path use it.
+Checked over 20000 random airframe attitudes with the setpoint the flight code
+sends: the aerospace order leaves up to 40.096 degrees of pointing error, and
+the chain order leaves 1.7e-06 degrees.
+
+The yaw arm never has to move for any of it. For a setpoint of roll zero and
+vehicle-frame yaw zero, the yaw joint this decomposition asks for is zero at
+every airframe attitude, to 8e-15 degrees. A mount with a roll arm and a pitch
+arm holds the horizon exactly, and takes its azimuth from the airframe, which is
+what the Chimera mount is built to do.
+
+WHAT ELSE CHANGES.
+
+1. Stabilization runs every cycle, not only when a setpoint arrives. A locked
+   axis is held against the world, so its joint angle depends on where the
+   airframe is now. A real device stabilizes continuously from its own IMU. The
+   joints are only republished while an axis is locked, so a follow mode command
+   and the RC path keep their old timing exactly.
+
+2. The RC path clears the flags and the stored attitude. It commands the joints
+   themselves, so there is no frame to hold anything against.
+
+3. GIMBAL_DEVICE_INFORMATION now describes this mount. It gains HAS_ROLL_LOCK
+   and HAS_PITCH_LOCK, because the device now really does hold those axes, and
+   it loses HAS_YAW_AXIS, HAS_YAW_FOLLOW and SUPPORTS_INFINITE_YAW, because
+   model.sdf gives the yaw joint equal limits and holds the arm at zero. The
+   reported yaw range becomes 0 to 0 for the same reason, which also clamps the
+   joint command to what the joint can do rather than to plus and minus
+   infinity.
+
+   Nothing in PX4 reads these flags; they are what a consumer reads to learn the
+   mount. `umd_uas/gimbal.py` subscribes to the report and says out loud when
+   the mount declares no yaw axis while its yaw limits allow one, so the axis
+   count is read from the device on both the simulator and the aircraft rather
+   than assumed. If the Chimera mount is ever shown to have a yaw actuator,
+   three things open together: the yaw joint limits in model.sdf, the yaw
+   capability flags and range here, and `yaw_angle_min` and `yaw_angle_max` in
+   the flight code parameters.
+
+WHAT THIS DOES NOT DO.
+
+It does not make the gimbal hold a region of interest. PX4 computes the pointing
+for one once, when the command arrives (`output_mavlink.cpp`, OutputMavlinkV2
+recomputes only on new setpoints), and that is PX4 rather than the simulator: a
+real vehicle with a MAVLink v2 gimbal behaves the same way. Holding a place is
+the flight code's work, and `umd_uas/gimbal.py` does it by re-sending the
+attitude.
+
+It does not add a yaw actuator. An azimuth the mount cannot reach still needs
+the aircraft to turn.
+
+It does not touch the joint controllers. Each one is effort limited at
+cmd_max 0.3 with p_gain 0.8, so a fast bank is still followed with a lag. That
+is a rate limit, not a pointing error.
+
+Apply after px4-gzgimbal-frame.patch, which this one builds on: it uses
+vehicleAttitude() and attitudeReferenceFrame() from that patch. From
+src/PX4-Autopilot:
+
+    git apply ../../patches/px4-gzgimbal-frame.patch
+    git apply ../../patches/px4-gzgimbal-rate.patch
+    git apply ../../patches/px4-gzgimbal-lock.patch
+
+--- a/src/modules/simulation/gz_bridge/GZGimbal.hpp
++++ b/src/modules/simulation/gz_bridge/GZGimbal.hpp
+@@ -81,6 +81,9 @@
+ 	matrix::Quatf _q_gimbal = matrix::Quatf(1.0f, 0.0f, 0.0f, 0.0f);
+ 	// Airframe attitude in the earth frame, from the last estimate.
+ 	matrix::Quatf _q_vehicle = matrix::Quatf(1.0f, 0.0f, 0.0f, 0.0f);
++	// The last commanded attitude, in the frame its own lock flags declare.
++	matrix::Quatf _q_setpoint = matrix::Quatf(1.0f, 0.0f, 0.0f, 0.0f);
++	bool _setpoint_is_attitude = false;
+ 	float _gimbal_rate[3] = {NAN};
+ 
+ 	// Device information attributes
+@@ -100,14 +103,18 @@
+ 	const uint32_t _hardware_version = (_hardware_dev_version & 0xff) << 24 | (_hardware_patch_version & 0xff) << 16 |
+ 					   (_hardware_minor_version & 0xff) << 8 | (_hardware_major_version & 0xff);
+ 	const uint64_t _uid = 0x9a77a55b3c10971f ;
++	// What this mount can do, which is now what it does. The LOCK bits are
++	// here because the joints hold a locked axis against the world, and the
++	// yaw bits are absent because model.sdf pins the yaw joint: a two axis
++	// mount takes its azimuth from the airframe heading. Read this from
++	// GIMBAL_DEVICE_INFORMATION rather than assuming it, on both sides.
+ 	const uint16_t _cap_flags = gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_HAS_NEUTRAL |
+ 				    gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_HAS_ROLL_AXIS |
+ 				    gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_HAS_ROLL_FOLLOW |
++				    gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_HAS_ROLL_LOCK |
+ 				    gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_HAS_PITCH_AXIS |
+ 				    gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_HAS_PITCH_FOLLOW |
+-				    gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_HAS_YAW_AXIS |
+-				    gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_HAS_YAW_FOLLOW |
+-				    gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_SUPPORTS_INFINITE_YAW;
++				    gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_HAS_PITCH_LOCK;
+ 	const uint16_t _custom_cap_flags = 0;
+ 
+ 	// This module act as the gimbal driver. In case of a Mavlink compatible gimbal, the driver is aware of
+@@ -116,8 +123,11 @@
+ 	const float _roll_max = 0.785398f;
+ 	const float _pitch_min = -2.35619f;
+ 	const float _pitch_max = 0.785398f;
+-	const float _yaw_min = NAN; 		// infinite yaw
+-	const float _yaw_max = NAN;		// infinite yaw
++	// The yaw joint of model.sdf has equal limits, so the arm is held at
++	// zero. Reporting the same thing here keeps the report, the clamp and
++	// the model saying one thing. Open all three together, or none.
++	const float _yaw_min = 0.0f;
++	const float _yaw_max = 0.0f;
+ 
+ 	const uint8_t _gimbal_device_id = 1;	// Gimbal is implemented by the same component: options are 1..6
+ 	uint16_t _gimbal_device_flags = 0;  // GIMBAL_DEVICE_FLAGS
+@@ -143,6 +153,15 @@
+ 	/// @param q_vehicle airframe attitude in the NED earth frame
+ 	/// @return rotation from the reference frame to the NED earth frame
+ 	static matrix::Quatf attitudeReferenceFrame(const uint16_t lock_flags, const matrix::Quatf &q_vehicle);
++	/// @brief Read an attitude out as the three joint angles that build it, in the order the
++	/// arms are built: the yaw arm, then the roll arm, then the camera.
++	/// @param q attitude of the camera relative to whatever the arms are mounted on
++	/// @param roll, pitch, yaw joint angles [rad]
++	static void jointAnglesFromAttitude(const matrix::Quatf &q, float &roll, float &pitch, float &yaw);
++	/// @brief Turn the last commanded attitude into joint angles, holding every locked axis
++	/// against the world with the airframe attitude.
++	/// @return true when joint angles were written, which is when an axis is locked
++	bool applyLockedSetpoint();
+ 	/// @brief Compute joint position setpoint taking into account both desired position and velocity. Then publish the command using the specified gazebo node.
+ 	/// @param publisher Gazebo node that will publish the setpoint
+ 	/// @param att_stp desired joint attitude [rad]
+--- a/src/modules/simulation/gz_bridge/GZGimbal.cpp
++++ b/src/modules/simulation/gz_bridge/GZGimbal.cpp
+@@ -73,8 +73,15 @@
+ 
+ 	updateParameters();
+ 
+-	if (pollSetpoint()) {
+-		//TODO handle device flags
++	const bool new_setpoint = pollSetpoint();
++
++	// A locked axis is held against the world, so its joint angle depends on
++	// where the airframe is now and not only on when the setpoint arrived. A
++	// real device stabilizes continuously from its own IMU, so this runs every
++	// cycle while any axis is locked.
++	const bool stabilizing = applyLockedSetpoint();
++
++	if (new_setpoint || stabilizing) {
+ 		publishJointCommand(_gimbal_roll_cmd_publisher, _roll_stp, _roll_rate_stp, _last_roll_stp, _roll_min, _roll_max, dt);
+ 		publishJointCommand(_gimbal_pitch_cmd_publisher, _pitch_stp, _pitch_rate_stp, _last_pitch_stp, _pitch_min, _pitch_max,
+ 				    dt);
+@@ -135,10 +142,12 @@
+ 		gimbal_device_set_attitude_s msg;
+ 
+ 		if (_gimbal_device_set_attitude_sub.copy(&msg)) {
+-			const matrix::Eulerf gimbal_att_stp(matrix::Quatf(msg.q));
+-			_roll_stp = gimbal_att_stp.phi();
+-			_pitch_stp = gimbal_att_stp.theta();
+-			_yaw_stp = gimbal_att_stp.psi();
++			// Keep the quaternion, not only the angles. It is given in the
++			// frame its lock flags declare, and applyLockedSetpoint() is what
++			// turns it into angles for joints that ride on the airframe.
++			_q_setpoint = matrix::Quatf(msg.q);
++			_setpoint_is_attitude = _q_setpoint.isAllFinite();
++			jointAnglesFromAttitude(_q_setpoint, _roll_stp, _pitch_stp, _yaw_stp);
+ 			_roll_rate_stp = msg.angular_velocity_x;
+ 			_pitch_rate_stp = msg.angular_velocity_y;
+ 			_yaw_rate_stp = msg.angular_velocity_z;
+@@ -151,6 +160,10 @@
+ 		gimbal_controls_s msg;
+ 
+ 		if (_gimbal_controls_sub.copy(&msg)) {
++			// The RC path commands the joints themselves, so there is no frame
++			// to hold anything against and nothing to stabilize.
++			_setpoint_is_attitude = false;
++			_gimbal_device_flags = 0;
+ 			// map control inputs from [-1;1] to [min_angle; max_angle] using the range parameters
+ 			_roll_stp = math::constrain(math::radians(msg.control[msg.INDEX_ROLL] * _mnt_range_roll / 2), _roll_min, _roll_max);
+ 			_pitch_stp = math::constrain(math::radians(msg.control[msg.INDEX_PITCH] * _mnt_range_pitch / 2), _pitch_min,
+@@ -287,6 +300,79 @@
+ 	return q_vehicle;
+ }
+ 
++void GZGimbal::jointAnglesFromAttitude(const matrix::Quatf &q, float &roll, float &pitch, float &yaw)
++{
++	// The arms turn in the order model.sdf builds them: the vertical arm about
++	// the yaw axis, then the horizontal arm about the roll axis, then the
++	// camera about the pitch axis. So the attitude they build is
++	//
++	//     R = Rz(yaw) * Rx(roll) * Ry(pitch)
++	//
++	// and the angles that build a wanted attitude have to be read back out of
++	// it in that same order.
++	//
++	// matrix::Eulerf reads Rz * Ry * Rx, the aerospace order, which puts pitch
++	// before roll. The two orders give the same three angles only while roll is
++	// zero. Every command this simulator ever saw had roll zero, because PX4
++	// commands roll zero by default and the Chimera flight code sends a level
++	// horizon, so the difference stayed invisible until the lock flags started
++	// asking for roll.
++	//
++	// The error is not small. Reading a stabilization setpoint in the aerospace
++	// order and writing it onto these arms misses by up to 40 degrees, and it
++	// misses most where the camera is pitched furthest down, which is where the
++	// camera spends its time.
++	//
++	// The five entries of the rotation matrix that this order needs, straight
++	// from the quaternion, so this file needs no header it does not have.
++	const float w = q(0), x = q(1), y = q(2), z = q(3);
++	const float r21 = 2.f * (y * z + w * x);
++	const float r20 = 2.f * (x * z - w * y);
++	const float r22 = 1.f - 2.f * (x * x + y * y);
++	const float r01 = 2.f * (x * y - w * z);
++	const float r11 = 1.f - 2.f * (x * x + z * z);
++
++	roll = asinf(math::constrain(r21, -1.f, 1.f));
++	pitch = atan2f(-r20, r22);
++	yaw = atan2f(-r01, r11);
++}
++
++bool GZGimbal::applyLockedSetpoint()
++{
++	// The MAVLink contract: a lock flag says the axis is commanded against the
++	// world rather than against the airframe. ROLL_LOCK and PITCH_LOCK put the
++	// setpoint in a level frame at the airframe heading, and YAW_LOCK puts it
++	// in the earth frame. The joints turn against the airframe, so the airframe
++	// attitude has to come off before the angles are written, or a banked
++	// aircraft rolls the horizon out of the picture.
++	//
++	// attitudeReferenceFrame() already names that frame for the report. This is
++	// the same arithmetic the other way round:
++	//
++	//     report:  q_report = conj(q_reference) * q_camera
++	//     command: q_joint   = conj(q_vehicle) * q_reference * q_setpoint
++	//
++	// With no lock bit the reference frame is the airframe, the two conjugates
++	// cancel and the joints take the setpoint unchanged, which is what a follow
++	// mode device does and what this file did for every command before.
++	const uint16_t lock_flags = (uint16_t)(_gimbal_device_flags &
++					       (gimbal_device_attitude_status_s::DEVICE_FLAGS_ROLL_LOCK |
++						gimbal_device_attitude_status_s::DEVICE_FLAGS_PITCH_LOCK |
++						gimbal_device_attitude_status_s::DEVICE_FLAGS_YAW_LOCK));
++
++	if (!_setpoint_is_attitude || lock_flags == 0) {
++		return false;
++	}
++
++	const matrix::Quatf q_vehicle = vehicleAttitude();
++	const matrix::Quatf q_reference = attitudeReferenceFrame(lock_flags, q_vehicle);
++
++	jointAnglesFromAttitude(matrix::Quatf(q_vehicle.inversed() * q_reference * _q_setpoint),
++				_roll_stp, _pitch_stp, _yaw_stp);
++
++	return true;
++}
++
+ void GZGimbal::publishJointCommand(gz::transport::Node::Publisher &publisher, const float att_stp, const float rate_stp,
+ 				   float &last_stp, const float min_stp, const float max_stp, const float dt)
+ {

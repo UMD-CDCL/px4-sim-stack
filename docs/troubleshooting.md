@@ -356,6 +356,38 @@ array, so a mixed pair decodes an empty box list and reports no error.
 
 ## The simulator
 
+### The vehicle is on its side, or will not climb
+
+A test that ends badly leaves the vehicle tipped over. Nothing reports it: every
+ROS topic still carries data, the graph is complete, and the next takeoff simply
+never climbs.
+
+```bash
+./px4sim fly 11              # into the air from whatever state it is in
+./px4sim fly 11 25 clean     # respawn the world first, whatever the state
+./px4sim place               # put the fleet back upright, and stop there
+```
+
+`fly` measures how far the vehicle leans, respawns it if that is more than 20
+degrees, takes the gimbal back, then climbs. It retries once with a respawn if
+it will not.
+
+`place` restarts the simulator, because nothing smaller is honest: PX4 owns the
+vehicle's dynamics and drives the Gazebo model every step, so moving the entity
+underneath it is overwritten within a step.
+
+### The gimbal ignores every command, and the state says it is in control
+
+The autopilot forgets who holds the gimbal when it reboots, and the manager
+status still names the old owner. `gimbal/state` reads `primary=<vehicle>` while
+nothing moves.
+
+```bash
+ros2 topic pub --once /uas11/reassert_gimbal_cmd std_msgs/msg/Float32 "{data: -361.0}"
+```
+
+`./px4sim fly` sends that on every takeoff, so it does not arise there.
+
 ### PX4 rebuilds on every start
 
 The build output goes to `src/PX4-Autopilot/build/`, on the host. If it

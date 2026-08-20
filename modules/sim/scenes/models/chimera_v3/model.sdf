@@ -7,10 +7,15 @@
   one model for each vehicle, because the lens differs from vehicle to vehicle.
   The values come from UAS_GIMBAL_HFOV_DEG, UAS_THERMAL_HFOV_DEG and
   UAS_DOWN_HFOV_DEG. The calibration files in
-  5g_drone/config/camera_calibration_files/ stay the authority; .env.example
-  says where each number came from.
+  5g_drone/config/camera_calibration_files/ stay the authority for the
+  fixed-lens cameras; .env.example says where each number came from.
 
-  Streams: rgb<N> and rgbl<N> from the gimbal camera,
+  The gimbal camera is three cameras, one for each framing the zoom lens
+  reaches, from UAS_ZOOM_PRESETS in scripts/zoom.sh. Widest first: the widest
+  is the one the fixed-lens naming already calls gimbal_camera, so nothing
+  that reads a v2 or a thermal camera changes.
+
+  Streams: rgb<N> and rgbl<N> from whichever gimbal camera the lens is on,
            pilot<N> and pilotl<N> from the down-facing camera,
            thermal<N> and thermall<N> from the thermal camera.
   See streams.conf.
@@ -40,6 +45,63 @@
         <gz_frame_id>gimbal_camera_link</gz_frame_id>
         <camera>
           <horizontal_fov>${GIMBAL_HFOV_RAD}</horizontal_fov>
+          <image>
+            <format>R8G8B8</format>
+            <width>1920</width>
+            <height>1080</height>
+          </image>
+          <clip>
+            <near>0.05</near>
+            <far>3000</far>
+          </clip>
+        </camera>
+        <always_on>1</always_on>
+        <update_rate>15</update_rate>
+        <visualize>false</visualize>
+      </sensor>
+
+      <!-- The rest of the zoom lens. gz-sim cannot change a camera's field of
+           view once the world is loaded, so the lens is one camera for each
+           framing it reaches, all on this mount and all rendering full size.
+           gz_video_streamer reads whichever one covers what the lens is
+           asking for and crops between them, so a framing has real detail
+           rather than a tenth of the picture stretched back up.
+
+           A Gazebo camera renders only while something subscribes to its
+           topic, so the framings not in use cost nothing. The idle pilot and
+           thermal cameras on this airframe are the same arrangement.
+
+           The topics are named outright rather than left to default, because
+           several cameras on one link is exactly where a default name is
+           worth not guessing at. UAS_NUM makes them unique per vehicle.
+           Widest first, so 2 is the second widest framing and 3 the third.
+           The entry point fills all of this in; see modules/sim/entrypoint.sh
+           and scripts/zoom.sh. -->
+      <sensor name="gimbal_camera_2" type="camera">
+        <gz_frame_id>gimbal_camera_link</gz_frame_id>
+        <topic>/uas${UAS_NUM}/camera/framing/2</topic>
+        <camera>
+          <horizontal_fov>${GIMBAL_HFOV_2_RAD}</horizontal_fov>
+          <image>
+            <format>R8G8B8</format>
+            <width>1920</width>
+            <height>1080</height>
+          </image>
+          <clip>
+            <near>0.05</near>
+            <far>3000</far>
+          </clip>
+        </camera>
+        <always_on>1</always_on>
+        <update_rate>15</update_rate>
+        <visualize>false</visualize>
+      </sensor>
+
+      <sensor name="gimbal_camera_3" type="camera">
+        <gz_frame_id>gimbal_camera_link</gz_frame_id>
+        <topic>/uas${UAS_NUM}/camera/framing/3</topic>
+        <camera>
+          <horizontal_fov>${GIMBAL_HFOV_3_RAD}</horizontal_fov>
           <image>
             <format>R8G8B8</format>
             <width>1920</width>

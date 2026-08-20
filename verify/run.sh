@@ -33,6 +33,21 @@ fi
 # shellcheck disable=SC1091
 . ./scripts/zoom.sh
 
+# What is FLYING wins over what is configured. A stage that reads .env while a
+# different world is loaded measures the wrong scene: it flies to coordinates
+# the running world has nothing at, which reads as a broken vehicle rather than
+# as a stale setting. The simulator holds the scene it was started with, and
+# Gazebo's own world name confirms it.
+running_scene=$(docker exec "$(docker compose ps -q sim 2>/dev/null)" \
+	sh -c 'echo "$SCENE"' 2>/dev/null | tr -d '\r')
+if [ -n "$running_scene" ] && [ "$running_scene" != "${SCENE:-}" ]; then
+	printf '%b\n' "${BOLD}The simulator is flying '${running_scene}', not '${SCENE:-unset}'.${OFF}"
+	printf '    Checking what is flying. To change it: ./px4sim scene %s\n' "${SCENE:-}"
+	SCENE=$running_scene
+	SCENARIO=${running_scene}_casualties
+	export SCENE SCENARIO
+fi
+
 # The number in each file name is the order, and nothing else reads it.
 stage_files() { ls verify/stages/*.sh; }
 stage_name()  { basename "$1" .sh | cut -d- -f2-; }

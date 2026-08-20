@@ -26,6 +26,7 @@ fi
 # start` is what proves the baked image agrees.
 installed=/home/user/ros2_ws/install/umd_uas/lib/python3.10/site-packages/umd_uas
 output=$(docker run --rm --entrypoint bash \
+	-e UAS_ZOOM_PRESETS="$UAS_ZOOM_PRESETS" \
 	-v ./verify:/verify:ro -v ./modules/sim/scenes:/scenes:ro \
 	-v "$(readlink -f "${ROS2_WS_DIR:-../ros2_ws}")/src/5g_drone/umd_uas:$installed:ro" \
 	"$onboard_image" -c "

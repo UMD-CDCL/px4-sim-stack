@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Write the calibration of a simulated camera, from the model that renders it.
 
-cam_info publishes CameraInfo from a YAML calibration, and the aircraft's files
-describe real lenses. A simulated camera is an ideal pinhole at whatever field
-of view its airframe was rendered with, so its calibration is derived here
-rather than stored: a real lens file would give a pinhole render a real lens's
-distortion, and every ray would leave the image slightly bent.
+cam_info and the zoom node both publish CameraInfo from a YAML calibration, and
+the aircraft's files describe real lenses. A simulated camera is an ideal
+pinhole at whatever field of view its airframe was rendered with, so its
+calibration is derived here rather than stored: a real lens file would give a
+pinhole render a real lens's distortion, and every ray would leave the image
+slightly bent.
 
 The image size comes from the airframe model and the field of view from the
-same list the simulator renders with, so neither is written down twice.
+same list the simulator renders with, so neither is written down twice. A zoom
+lens is one call for each framing it reaches, because each framing is its own
+camera rendering at its own field of view.
 """
 
 import argparse
@@ -29,13 +32,13 @@ def image_size(model_sdf: str, sensor: str) -> tuple[int, int]:
     raise SystemExit(f"{model_sdf} declares no camera sensor named '{sensor}'")
 
 
-def calibration(width: int, height: int, hfov_deg: float) -> dict:
+def calibration(width: int, height: int, hfov_deg: float, name: str) -> dict:
     focal = (width / 2.0) / math.tan(math.radians(hfov_deg) / 2.0)
     centre_x, centre_y = width / 2.0, height / 2.0
     return {
         "image_width": width,
         "image_height": height,
-        "camera_name": "simulated",
+        "camera_name": name,
         "distortion_model": "plumb_bob",
         "camera_matrix": {"rows": 3, "cols": 3, "data": [
             focal, 0.0, centre_x, 0.0, focal, centre_y, 0.0, 0.0, 1.0]},
@@ -78,6 +81,9 @@ def main() -> None:
                              "draws a preview against a full size calibration "
                              "puts every annotation in the wrong place.")
     parser.add_argument("--height", type=int, default=0)
+    parser.add_argument("--name", default="simulated",
+                        help="camera_name in the file. A zoom lens is one "
+                             "optic per framing, so name the framing.")
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
 
@@ -88,8 +94,8 @@ def main() -> None:
     if args.width and args.height:
         width, height = args.width, args.height
     with open(args.out, "w", encoding="utf-8") as handle:
-        handle.write(as_yaml(calibration(width, height, args.hfov_deg)))
-    print(f"camera: {args.sensor} {width}x{height} at {args.hfov_deg} degrees -> {args.out}")
+        handle.write(as_yaml(calibration(width, height, args.hfov_deg, args.name)))
+    print(f"camera: {args.name} {width}x{height} at {args.hfov_deg} degrees -> {args.out}")
 
 
 if __name__ == "__main__":

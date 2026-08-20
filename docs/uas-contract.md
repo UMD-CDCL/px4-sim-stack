@@ -279,17 +279,33 @@ six of its ten inputs need no bridge.
 
 ### Ground to vehicle, domain 70 to 99 to `60 + N`
 
-`gimbal_point_cmd`, `reassert_gimbal_cmd`, `start_survey_cmd`,
-`vlm_capture_cmd`, `mosaic_capture_cmd`, `advance_mission_cmd` and
-`hil_detection/detected`.
+`gimbal_point_cmd`, `roi_point_cmd`, `raw_roi_point_cmd`, `gimbal_raw_command`,
+`gimbal_angle_cmd`, `reassert_gimbal_cmd`, `release_gimbal_cmd`,
+`start_survey_cmd`, `vlm_capture_cmd`, `mosaic_capture_cmd`,
+`advance_mission_cmd` and `hil_detection/detected`. On a v3, `zoom/preset_cmd`
+as well.
 
-The operator's gimbal control runs ON THE GROUND. A Foxglove click is a local
-message, and the mode services are local services, so neither crosses. The node
-turns a click into a `DetectionInterface` and sends only that, which is about
-28 bytes. Centering and taking control back use `reassert_gimbal_cmd`, the
-recovery command the stack already trusts. The click mode stays on the ground:
-nothing on the vehicle reads it, and a second ground station already shares
-domain 70.
+The operator's console runs ON THE GROUND, and every gimbal command is issued
+by the VEHICLE. A Foxglove click is a local message and the click mode services
+are local services, so neither crosses; what crosses is one small message for
+each operator action, between 8 and 750 bytes.
+
+That split is not a preference. PX4 accepts `GIMBAL_MANAGER_SET_ATTITUDE` only
+from the station that holds primary control and answers
+`DO_GIMBAL_MANAGER_PITCHYAW` from anyone else with `DENIED`
+(`src/modules/gimbal/input_mavlink.cpp`), and it implements no secondary
+control. A ground station that commanded the gimbal over MAVLink would take it
+from the vehicle's own node, and the onboard tracking would stop.
+
+A region of interest is the exception and is instructive: `DO_SET_ROI_LOCATION`
+reaches the navigator rather than the gimbal module and carries no sender, so
+any station can point the gimbal with one, whoever holds control. The vehicle
+holds the place itself and re-sends the attitude, because PX4 computes the
+pointing once when the command arrives.
+
+Losing primary control is reported and never contested. `gimbal/state` carries
+the mode, the angles, the owner and the held place as one latched sentence, and
+`reassert_gimbal_cmd` is the only way back in.
 
 ### What never crosses
 

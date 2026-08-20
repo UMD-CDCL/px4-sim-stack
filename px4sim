@@ -131,8 +131,6 @@ resolve_origin
 . ./scripts/fleet.sh
 # shellcheck disable=SC1091
 . ./scripts/zoom.sh
-# shellcheck disable=SC1091
-. ./scripts/zoom.sh
 
 # A vehicle is named by its UAS number, 11 upwards. A single digit is its place
 # in UAS_FLEET, which is how that line reads, so `1` and `11` both reach the
@@ -298,6 +296,8 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     scenario [name]     Place the targets again, with no restart
     origin              The coordinates this scene and scenario fly at
     reset               Remove the targets from the running world
+    place               Put the fleet back upright at its start
+    fly <N> [m]         Respawn, then get that vehicle airborne
     genscene <args>     Build a world from map data. Try: genscene --help
                         ${DIM}all runs create / detect / edit (browser on :8090) / build${OFF}
 
@@ -658,6 +658,108 @@ reset)
 	$DC exec sim /scenes/spawn_scenario.py --world "${SCENE:-recon_field}" --clear
 	;;
 
+fly)
+	# Get a vehicle into the air from the SAME start every time.
+	#
+	# It always respawns first. Landing this airframe often tips it over, and a
+	# vehicle left on its side, armed on the ground, or already flying needs a
+	# different recovery each time. Branching on which one it is was tried and
+	# it hung: the state read is the fragile part, not the flying. Respawning
+	# costs a world reload and removes every branch, so a check that fails
+	# after this failed for its own reasons.
+	#
+	#   ./px4sim fly 11         respawn, then climb to the default height
+	#   ./px4sim fly 11 25      to 25 m
+	n=$(vehicle_arg "${1:-}"); shift || true
+	height=${1:-20}
+	add_fleet_profiles
+
+	say "uas$n: respawning for a known start"
+	./px4sim place >/dev/null 2>&1
+
+	# ONE budget for the whole wait, not a chain of them. Every marker below is
+	# read from the container's own log by id, because the id changes when a
+	# container is recreated and because `docker compose logs --tail` drops the
+	# line: PX4 writes enough after boot to push "Ready for takeoff" out of any
+	# tail window, which is a check that can never match and a loop that never
+	# ends. That happened.
+	ready_by=$((SECONDS + ${FLY_READY_S:-90}))
+	world=false
+	picture=false
+	while true; do
+		sim_id=$($DC ps -q sim 2>/dev/null)
+		companion=$($DC ps -q "onboard$n" 2>/dev/null)
+		[ -n "$sim_id" ] && docker logs "$sim_id" 2>&1 \
+			| grep -q "Ready for takeoff" && world=true
+		[ -n "$companion" ] && docker logs "$companion" 2>&1 \
+			| grep -qE "camera: [a-z]+$n ready" && picture=true
+		[ "$world" = true ] && [ "$picture" = true ] && break
+		if [ "$SECONDS" -ge "$ready_by" ]; then
+			warn "uas$n was not ready in ${FLY_READY_S:-90}s:"
+			[ "$world" = true ] || warn "  the world never said 'Ready for takeoff'. ./px4sim logs sim"
+			[ "$picture" = true ] || warn "  the camera never opened. ./px4sim logs onboard$n"
+			die "nothing was flown"
+		fi
+		sleep 2
+	done
+	say "the world and the camera are up"
+
+	# The autopilot forgets who holds the gimbal across the reboot the respawn
+	# causes, while the manager status still names the old owner. Without this
+	# the gimbal silently ignores every command and the state looks healthy.
+	timeout 60 $DC exec -T "onboard$n" bash -lc '
+		. /opt/ros/humble/setup.bash
+		. /home/user/ros2_ws/install/setup.bash
+		exec ros2 topic pub --once -w 1 "$1" std_msgs/msg/Float32 "{data: -361.0}"
+		' _ "/uas$n/reassert_gimbal_cmd" >/dev/null 2>&1 || true
+
+	if timeout 300 ./px4sim uas "$n" takeoff "$height" >/dev/null 2>&1; then
+		say "uas$n is flying at $height m, from a fresh world"
+		exit 0
+	fi
+	die "uas$n will not climb even from a fresh world. ./px4sim logs sim, ./px4sim logs onboard$n"
+	;;
+
+place)
+	# Put every vehicle back on its feet at its start. A test that ends badly
+	# leaves one on its side, and everything after that reads as a broken
+	# stack: the gimbal points into the ground, no ray meets anything, and the
+	# next takeoff refuses.
+	#
+	# This restarts the simulator, because nothing smaller is honest. PX4 owns
+	# the vehicle's dynamics and drives the model every step, so moving the
+	# Gazebo entity underneath it is overwritten within a step and leaves the
+	# estimator arguing with the world. Restarting respawns each vehicle at the
+	# pose it was spawned with, with PX4 fresh behind it. The world reloads, so
+	# the targets come back where the scenario puts them.
+	add_fleet_profiles
+	say "Putting the fleet back at its start. The world reloads, which takes a moment."
+	$DC up -d --force-recreate sim
+
+	# The companions and the ground station go with it. A pipeline opens its
+	# camera ONCE, and the RTSP stream it was reading does not survive a new
+	# simulator, so anything left running afterwards holds a pipeline that will
+	# never see another frame. The symptom is not an error: the panel keeps
+	# painting the last frame it got, so the operator sees a picture that
+	# stopped rather than a picture that failed. Their entry points wait for
+	# the camera on the way back up.
+	# ground-router borrows the ground station's network namespace
+	# (network_mode: service:offboard), so recreating offboard without it
+	# leaves the router attached to a namespace that no longer exists. It keeps
+	# running and reports nothing wrong, and MAVLink simply never reaches the
+	# ground again: no fix, so no frame tree, so the terrain, the footprint,
+	# the live view and every scoring layer sit silent while their nodes look
+	# healthy. Recreate them together.
+	restarting=""
+	for number in $(fleet_numbers); do restarting="$restarting onboard$number"; done
+	has_service offboard && restarting="$restarting offboard"
+	has_service ground-router && restarting="$restarting ground-router"
+	# shellcheck disable=SC2086
+	$DC up -d --force-recreate $restarting >/dev/null 2>&1
+	say "respawned:$(fleet_numbers | sed 's/^/ uas/' | tr '\n' ' ')and the pipelines that read them"
+	say "Wait for 'Ready for takeoff' in ./px4sim logs sim"
+	;;
+
 genscene)
 	# The generator runs once and exits. The first use builds its image,
 	# which downloads the CPU torch wheel and takes a few minutes.
@@ -668,37 +770,32 @@ genscene)
 verify)   ./verify/run.sh "$@" ;;
 
 zoom)
-	# A v3 lens zooms by cropping the middle out of the widest view its camera
-	# renders, so this is what the operator's preset does to the picture. The
-	# calibration cam_info publishes follows UAS_ZOOM, which is read at start,
-	# so change that and restart to move both together.
+	# Ask the LENS, not the picture. The zoom node owns the framing: it moves
+	# the lens and publishes the calibration for where it went, so asking it is
+	# the only way the two stay together. Driving the Gazebo topic by hand moved
+	# the picture alone, and the emulated controller now puts it back on its
+	# next status poll anyway.
+	#
+	# This is the same message the operator's Foxglove button sends, on the
+	# vehicle's own domain, so it needs no ground station.
 	n=$(vehicle_arg "${1:-}")
-	preset=${2:?name a preset: $UAS_ZOOM_PRESETS}
-	hfov=$(zoom_hfov_deg "$preset") || die "No zoom preset '$preset'. This lens has: $UAS_ZOOM_PRESETS"
+	preset=${2:?name a framing from: $UAS_ZOOM_PRESETS}
+	zoom_hfov_deg "$preset" >/dev/null \
+		|| die "No framing '$preset'. This lens has: $UAS_ZOOM_PRESETS"
 	[ "$(mark_of "$n")" = v3 ] || die "uas$n is a $(mark_of "$n"), and only a v3 lens zooms."
 	add_fleet_profiles
-	$DC exec -T sim gz topic -t "/uas$n/camera/zoom" -m gz.msgs.Double \
-		-p "data: $(python3 -c "import math; print(math.radians($hfov))")"
-	say "uas$n lens at $preset, $hfov degrees"
-	warn "The picture changes now. cam_info still publishes the UAS_ZOOM preset"
-	warn "until the companion restarts, so set UAS_ZOOM to keep the two together."
-	;;
-
-zoom)
-	# A v3 lens zooms by cropping the middle out of the widest view its camera
-	# renders, so this is what the operator's preset does to the picture. The
-	# calibration cam_info publishes follows UAS_ZOOM, which is read at start,
-	# so change that and restart to move both together.
-	n=$(vehicle_arg "${1:-}")
-	preset=${2:?name a preset from: $UAS_ZOOM_PRESETS}
-	hfov=$(zoom_hfov_deg "$preset") || die "No zoom preset '$preset'. This lens has: $UAS_ZOOM_PRESETS"
-	[ "$(mark_of "$n")" = v3 ] || die "uas$n is a $(mark_of "$n"), and only a v3 lens zooms."
-	add_fleet_profiles
-	$DC exec -T sim gz topic -t "/uas$n/camera/zoom" -m gz.msgs.Double \
-		-p "data: $(python3 -c "import math; print(math.radians($hfov))")"
-	say "uas$n lens at $preset, $hfov degrees"
-	warn "The picture changes now. cam_info still publishes the UAS_ZOOM preset"
-	warn "until the companion restarts, so set UAS_ZOOM to keep the two together."
+	container=$($DC ps -q "onboard$n" 2>/dev/null)
+	[ -n "$container" ] || die "onboard$n is not running. Start it: ./px4sim start"
+	docker exec -e ROS_DOMAIN_ID="$(uas_domain "$n")" "$container" bash -lc '
+		set -e
+		. /opt/ros/humble/setup.bash
+		. /home/user/ros2_ws/install/setup.bash
+		exec ros2 topic pub --once -w 1 "$1" std_msgs/msg/String "{data: $2}"
+		' _ "/uas$n/zoom/preset_cmd" "$preset" >/dev/null \
+		|| die "uas$n did not take the framing. Is its zoom node running? ./px4sim logs onboard$n"
+	say "uas$n asked for the $preset framing, $(zoom_hfov_deg "$preset") degrees"
+	say "The lens travels for a second or two. The calibration changes when the"
+	say "recall is accepted, before the lens arrives, so do not localize during it."
 	;;
 
 snap)
@@ -794,7 +891,71 @@ check)
 		[ -d "modules/sim/scenes/models/$(model_of "$n")" ] \
 			|| { warn "no model directory for uas$n's '$(model_of "$n")'."; problems=$((problems + 1)); }
 	done
-	[ "$problems" = 0 ] && echo "front door OK: every service, profile and script it names exists"
+	# A shared table is read on the host AND inside the containers, and the two
+	# read the same file only if compose passes the variables. It did not pass
+	# the framing table, so .env's table never reached a container and both
+	# sides quietly used the built-in defaults. Nothing showed, because the
+	# defaults matched. This is what that costs to catch.
+	for table in scripts/fleet.sh scripts/zoom.sh; do
+		[ -f "$table" ] || continue
+		while read -r name; do
+			# Only the ones a container really reads. compose interpolates
+			# others on the host, where passing them would mean nothing.
+			grep -rqlw "$name" modules/ 2>/dev/null || continue
+			grep -q "^[[:space:]]*$name: " compose.yaml \
+				|| { warn "compose.yaml never passes $name, which $table defines and a container reads."
+				     problems=$((problems + 1)); }
+		done < <(sed -n 's/^\([A-Z][A-Z0-9_]*\)=\${\1:-.*/\1/p' "$table")
+	done
+
+	# This script's own case arms. A second arm with the same name is
+	# unreachable, and the copy that is never run is the one that gets edited.
+	duplicates=$(grep -o '^[a-z][a-z|]*)' "$0" | sort | uniq -d)
+	if [ -n "$duplicates" ]; then
+		warn "px4sim answers to these more than once: $(echo "$duplicates" | tr -d ')' | tr '\n' ' ')"
+		problems=$((problems + 1))
+	fi
+
+	# Parameter files, as rcl reads them rather than as YAML does. A node whose
+	# ros__parameters block has nothing left in it stops that node dead at
+	# launch, and the file still parses and still looks right.
+	params_dir=${ROS2_WS_DIR:-../ros2_ws}/src/5g_drone/config/param_files
+	if [ -d "$params_dir" ]; then
+		# shellcheck disable=SC2044
+		if faults=$(find "$params_dir" -name '*.yaml' -print0 \
+				| xargs -0 python3 verify/component/param_files.py); then
+			echo "parameter files OK: every node block carries a parameter"
+		else
+			warn "$faults"
+			problems=$((problems + 1))
+		fi
+	fi
+
+	# The operator's console. One value Foxglove rejects takes the whole
+	# panel's settings with it and says nothing, and a panel with no place in
+	# the layout is never drawn at all.
+	layout=${FOXGLOVE_LAYOUT:-${ROS2_WS_DIR:-../ros2_ws}/src/5g_drone/config/foxglove/chimera_sim.json}
+	if [ -f "$layout" ]; then
+		if faults=$(python3 verify/component/foxglove_layout.py "$layout"); then
+			echo "layout OK: every panel setting is one Foxglove accepts, and every panel is drawn"
+		else
+			warn "$layout: $faults"
+			problems=$((problems + 1))
+		fi
+	fi
+
+	# The simulated gimbal is wrong in three ways without these, and each one
+	# points plausibly rather than failing.
+	if [ -d src/PX4-Autopilot/.git ]; then
+		for patch in patches/px4-*.patch; do
+			grep -qx "$(md5sum "$patch" | cut -d' ' -f1) $(basename "$patch")" \
+				src/PX4-Autopilot/.px4sim-patches 2>/dev/null \
+				|| { warn "$(basename "$patch") is not applied. Run ./px4sim setup px4."
+				     problems=$((problems + 1)); }
+		done
+	fi
+
+	[ "$problems" = 0 ] && echo "front door OK: every service, profile, script and variable it names exists"
 	./scripts/lint-docs.sh
 	[ "$problems" = 0 ] || die "The front door names something that does not exist. See the warnings above."
 	;;

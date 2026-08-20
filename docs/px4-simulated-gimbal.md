@@ -4,15 +4,15 @@ How PX4's simulated gimbal behaves over the MAVLink gimbal protocol v2, and how
 to command it so that it points where you intend. The gimbal is `GZGimbal.cpp`
 in PX4's gz_bridge, driving the CGO3 model that the `gz_x500_gimbal` airframe
 carries. Each behavior below differs from what the protocol promises, and each
-one produces plausible wrong pointing instead of an error. Two of them have a
+one produces plausible wrong pointing instead of an error. Three of them have a
 patch here that corrects them.
 
 The flight code does not accommodate the simulator, so every accommodation is
-here: two patches against PX4, the model in
+here: three patches against PX4, the model in
 `modules/sim/scenes/models/gimbal/model.sdf`, and the stream rates in
 `modules/sim/px4-rcS`.
 
-## It executes every command vehicle relative
+## It executed every command vehicle relative
 
 The MAVLink contract: with the ROLL, PITCH and YAW lock flags set, a
 GIMBAL_MANAGER_SET_ATTITUDE quaternion is earth referenced, and the device holds
@@ -26,15 +26,82 @@ as vehicle-relative roll, pitch and yaw in the aerospace sign convention,
 whatever the flags say. The joints track a setpoint to about 0.1 degrees.
 
 `umd_uas/gimbal.py` sends flags 12, ROLL_LOCK and PITCH_LOCK, so the yaw it
-sends is already vehicle relative and the simulation executes that half
-correctly. The roll and pitch halves are the ones the simulation gets wrong: the
-node asks for a level horizon, and a real device holds it while a banked
-aircraft rolls under it. This one does not.
+sends is already vehicle relative and the simulation executed that half
+correctly. The roll and pitch halves were the ones it got wrong: the node asks
+for a level horizon, and a real device holds it while a banked aircraft rolls
+under it. At 20 degrees of bank the simulated camera rolled 20 degrees with the
+airframe, and every consumer that casts a pixel through the camera frame
+inherited that error.
 
-To point at something earth fixed, convert the direction into the vehicle frame
-first, and send that attitude with the lock flags clear. Do not send earth
-referenced yaw and trim the miss with a fixed offset. The miss equals the
-vehicle heading, so the offset only works at the heading where it was measured.
+`patches/px4-gzgimbal-lock.patch` corrects it. It takes the airframe attitude
+off the setpoint before the joint angles are written, which is the arithmetic
+the frame patch does for the report, the other way round:
+
+```
+report:  q_report = conj(q_reference) * q_camera
+command: q_joint  = conj(q_vehicle) * q_reference * q_setpoint
+```
+
+`q_reference` is the frame the lock bits name, from `attitudeReferenceFrame()`.
+With no lock bit that frame is the airframe, the two conjugates cancel, and the
+joints take the setpoint unchanged, so a follow mode command behaves as it
+always did. The patch also runs that arithmetic every cycle rather than only
+when a setpoint arrives, because a locked axis is held against the world and a
+real device stabilizes continuously from its own IMU.
+
+That arithmetic alone is not enough, and the second half is the one that bites.
+
+## The arms turn in a different order than the angles are read
+
+`model.sdf` builds the mount as three revolute joints in a chain: the vertical
+arm about the yaw axis, then the horizontal arm about the roll axis, then the
+camera about the pitch axis. The attitude those arms build is
+
+```
+R = Rz(yaw) * Rx(roll) * Ry(pitch)
+```
+
+`matrix::Eulerf` reads `Rz * Ry * Rx`, the aerospace order, which puts pitch
+before roll. **The two orders give the same three angles only while roll is
+zero.** PX4 commands roll zero by default and the Chimera flight code sends a
+level horizon on every command, so roll has been zero for the life of this
+simulator and GZGimbal has always read the setpoint in the wrong order without
+it ever mattering. Stabilization is the first thing that ever asked these arms
+for a roll.
+
+The miss is large and it does not look like a gain error. Across the flight
+envelope the aerospace order leaves up to 40 degrees of pointing error, and it
+is worst where the camera is pitched furthest down, which is where this camera
+works. The reason is physical: the roll arm turns before the camera is pitched,
+so with the camera pitched down a rotation of the roll arm swings the boresight
+sideways in azimuth instead of rolling the picture.
+
+Measured on the running simulator, from the Gazebo link poses: a commanded roll
+of 2.43 degrees with the camera at pitch -45 moved the boresight 2.05 degrees
+in azimuth and left the roll of the picture almost unchanged.
+
+So the patch reads the angles in the chain's own order, and both the locked
+path and the plain path use the one function that does it. Over 20000 random
+airframe attitudes with the setpoint the flight code sends, the aerospace order
+leaves up to 40.096 degrees of error and the chain order leaves 1.7e-06.
+
+The yaw arm never has to move for any of it. For a setpoint of roll zero and
+vehicle-frame yaw zero, the yaw joint this decomposition asks for is zero at
+every airframe attitude, to 8e-15 degrees. **A mount with a roll arm and a
+pitch arm holds the horizon exactly**, and takes its azimuth from the airframe.
+That is worth knowing on its own: the two axis mount is not a compromise for
+stabilization, only for azimuth.
+
+If you ever suspect this class of fault again, the signature is that the
+correction is in the right direction and the wrong size, and that the size
+depends on the pitch angle. A fixed offset cannot fix it and halving it only
+moves the error to a different pitch.
+
+With the patch in place, send the attitude the aircraft gets: earth referenced
+roll and pitch, vehicle referenced yaw, flags 12. Do not convert a direction
+into the vehicle frame yourself, and do not trim a miss with a fixed offset.
+The miss equals the vehicle attitude, so an offset only works at the attitude
+where it was measured.
 
 ## It computes a region of interest once
 
@@ -45,13 +112,23 @@ attitude is earth referenced with the yaw lock flag set, and the section above
 says what the simulated gimbal then does with it. So an ROI does not track the
 point as the vehicle moves, and it does not point correctly even at the start.
 
-`umd_uas/survey.py` points through `gimbal_control/manager/set_roi`, so a
-simulated survey inherits this. A click from the operator does not: it becomes a
-`DetectionInterface`, and `gimbal.py` turns that into a vehicle-relative
-attitude, which the simulation executes correctly.
+This is not a simulator fault, so there is nothing here to patch.
+`umd_uas/gimbal.py` holds the place instead: it casts the clicked pixel at the
+ground, keeps the answer as WGS84, and re-sends the attitude at 10 Hz while the
+aircraft moves. `survey.py` asks that node for its survey points rather than
+asking the autopilot, so one thing owns the setpoint.
 
-To hold the simulated gimbal on a world point, recompute the vehicle-relative
-attitude as the vehicle moves, and send it as an attitude rather than as an ROI.
+Measured on the running simulator, this is what a second commander looks like.
+The gimbal report read flags 92 and pitch -55.8 degrees an hour after
+`gimbal.py` last commanded pitch -60. Flag 16 is YAW_LOCK, which PX4 sets for a
+region of interest (`output.cpp`, `_absolute_angle[2] = true`) and which
+`gimbal.py` never sends. A standing region of interest had held the gimbal ever
+since, and nothing reported the disagreement.
+
+A region of interest also skips the control owner check. DO_SET_ROI_LOCATION
+goes to the navigator, not to the gimbal module (`navigator_main.cpp`), and
+`vehicle_roi` carries no sender, so any station can point the gimbal with one
+whoever holds primary control.
 
 ## It reported an absolute attitude with no lock flag
 
@@ -71,10 +148,15 @@ so the earth referenced report goes onto the airframe attitude a second time.
 reports. It sends the lock bits of the last setpoint, it sets
 YAW_IN_VEHICLE_FRAME or YAW_IN_EARTH_FRAME to agree with them, and it moves the
 quaternion into the frame those flags declare. PX4 asks for ROLL_LOCK and
-PITCH_LOCK by default, and the Chimera flight code asks for the same two, so the
-usual report is flags 44: the lock bits 12, plus 32 for the vehicle frame. The
-quaternion then holds the camera attitude against a level frame at the airframe
-heading, which is what the aircraft gimbal sends.
+PITCH_LOCK by default, and the Chimera flight code asks for the same two, so
+the report reads flags 44 after either commands: the lock bits 12, plus 32 for
+the vehicle frame. The quaternion then holds the camera attitude against a
+level frame at the airframe heading, which is what the aircraft gimbal sends.
+
+Read the flags rather than assuming them. The running simulator reported flags
+92 instead, because the last setpoint came from a region of interest and
+carried YAW_LOCK. 92 is the lock bits 28 plus 64 for the earth frame, and the
+quaternion is earth referenced there. The number tells you who commanded last.
 
 The arithmetic, with the airframe at roll 20, pitch 10, yaw 40 degrees and the
 camera 30 degrees down and 25 degrees right of the nose. That yaw is more than
@@ -88,10 +170,12 @@ the two-axis mount can make, and it is here to move all three axes:
 Across 2000 random attitudes the stock error reached 180 degrees, and the
 patched error stayed at zero.
 
-The patch does not make the simulated gimbal hold the horizon. The lock bits
-report the mode that was commanded, as a real device does, while the quaternion
-reports where the camera is. So the report now shows the roll and pitch error
-that the first section describes.
+This patch alone does not make the simulated gimbal hold the horizon. The lock
+bits report the mode that was commanded, as a real device does, while the
+quaternion reports where the camera is, so before the lock patch the report
+showed the roll and pitch error the first section describes. That is the right
+order to read them in: this patch makes the report honest, and the lock patch
+makes the joints match it.
 
 MAVInsight took one fix with this. Its earth reference frame, which the YAW_LOCK
 bit selects, was aligned with ENU. The MAVLink earth frame is NED, so a yaw
@@ -152,16 +236,35 @@ vehicle-attitude correction off the world-true camera orientation. The
 correction drifts only at EKF speed, so a sudden disagreement always belongs to
 the joints.
 
-## The yaw axis is locked, on purpose
+## The yaw axis is locked, and the device now says so
 
-The Chimera mount is two axis, roll and pitch. It has no yaw actuator, and the
-camera's azimuth comes from the airframe heading. `model.sdf` therefore gives
-the yaw joint equal lower and upper limits, which holds the arm at zero and
-leaves the joint and its controller in place, so PX4 still finds everything it
-commands.
+`model.sdf` gives the yaw joint equal lower and upper limits, which holds the
+arm at zero and leaves the joint and its controller in place, so PX4 still
+finds everything it commands. The camera's azimuth then comes from the airframe
+heading, which is what a two axis mount does.
+
+Stock GZGimbal contradicted its own model here. It declared HAS_YAW_AXIS,
+HAS_YAW_FOLLOW and SUPPORTS_INFINITE_YAW in GIMBAL_DEVICE_INFORMATION, with a
+yaw range of plus and minus infinity, while the joint could not move at all.
+`px4-gzgimbal-lock.patch` drops those three flags and reports a yaw range of 0
+to 0, so the report, the joint clamp and the model say one thing. The same
+patch adds HAS_ROLL_LOCK and HAS_PITCH_LOCK, because the device now holds those
+two axes.
 
 Do not open that axis to make a pointing click work. The aircraft would have to
-turn, so the simulator must turn too.
+turn, so the simulator must turn too. If the Chimera mount is ever shown to
+carry a yaw actuator, three things open together: the yaw joint limits in
+`model.sdf`, the yaw capability flags and range in the patch, and
+`yaw_angle_min` and `yaw_angle_max` in the flight code parameters.
+
+The axis count is not settled by any evidence in these repositories. The claim
+above rests on the model and on the flight code never having used gimbal yaw
+for RC, for missions or for surveys. Nothing here holds a
+GIMBAL_DEVICE_INFORMATION capture from an aircraft. `umd_uas/gimbal.py`
+subscribes to `gimbal_control/device/info` and prints what the mount declares,
+so one flight settles it. On the simulator that topic is advertised and carries
+nothing, because PX4 sends GIMBAL_DEVICE_INFORMATION only when something asks
+for it and no stream rate does.
 
 ## The rates, and the patch that raises them
 
@@ -184,17 +287,29 @@ a link back to the profile default when a ground station appears on it.
 
 | The simulation does | You do |
 |---|---|
-| Executes commands vehicle relative, flags ignored | Send a vehicle-relative attitude, lock flags clear |
-| Computes an ROI attitude once, earth referenced | Re-command the point yourself as the vehicle moves |
+| Executed commands vehicle relative, flags ignored | Apply the lock patch, then send the attitude a real device gets |
+| Reads the setpoint in the aerospace angle order, which is not the order its arms turn in | Apply the lock patch, which reads it in the chain's order |
+| Computes an ROI attitude once, earth referenced | Hold the place in the flight code, as gimbal.py does |
 | Reported an absolute attitude with no lock bit | Apply the frame patch, then check the gimbal frame against the vehicle heading |
 | Measures the patched report against the EKF airframe attitude | Build earth-frame poses from the report, build command state from your own setpoints |
 | Runs its cycle at 5 Hz | Apply the rate patch, and stream the report at 50 Hz |
 
-To apply the patches, from `src/PX4-Autopilot`:
+`./px4sim setup` applies the patches, and applying them again is safe:
 
 ```bash
-git apply ../../patches/px4-gzgimbal-frame.patch
-git apply ../../patches/px4-gzgimbal-rate.patch
+./px4sim setup px4
 ```
+
+It reads `patches/px4-*.patch` in name order, which is also the order they
+depend on: the lock patch builds on the two helpers the frame patch adds, and
+the rate patch stands alone. What it applied is written to
+`src/PX4-Autopilot/.px4sim-patches`, one checksum for each patch, because two
+of these patches change the same lines and a patch that is already in the tree
+stops reversing cleanly once the next one lands. Reading the record instead of
+the tree means a correctly patched tree is never reported as unpatched, and an
+edited patch is applied again.
+
+A tree that was patched by hand before that record existed is recognized and
+recorded on the next run.
 
 Then restart `sim`. The entrypoint rebuilds what changed.

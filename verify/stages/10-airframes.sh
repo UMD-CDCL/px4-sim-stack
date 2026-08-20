@@ -26,9 +26,23 @@ expand_airframe() {
 				-exec ln -sfn -t $merged {} +
 			find /scenes/models -mindepth 1 -maxdepth 1 -type d -exec ln -sfn -t $merged {} +
 			export GZ_SIM_RESOURCE_PATH=$merged SDF_PATH=$merged
-			export GIMBAL_HFOV_RAD=0.5 THERMAL_HFOV_RAD=0.5 DOWN_HFOV_RAD=0.5
-			envsubst "\${GIMBAL_HFOV_RAD} \${THERMAL_HFOV_RAD} \${DOWN_HFOV_RAD}" \
-				< /scenes/models/'"$1"'/model.sdf > $merged/rendered/model.sdf
+			# Every placeholder the template actually holds, whatever it is.
+			# A written-out list goes stale the moment the model gains a
+			# variable: the model gained ${UAS_NUM} for the per-framing camera
+			# topics, the list did not, and gz refused the file with the
+			# placeholder still in it.
+			template=/scenes/models/'"$1"'/model.sdf
+			names=$(grep -o "\${[A-Z_][A-Z0-9_]*}" $template | sort -u)
+			for name in $names; do
+				bare=${name#\$\{}; bare=${bare%\}}
+				case "$bare" in
+				*_RAD) value=0.5 ;;
+				UAS_NUM) value=11 ;;
+				*) value=x ;;
+				esac
+				export "$bare=$value"
+			done
+			envsubst "$(echo $names)" < $template > $merged/rendered/model.sdf
 			printf "<?xml version=\"1.0\"?><model><name>rendered</name><version>1.0</version><sdf version=\"1.9\">model.sdf</sdf></model>" \
 				> $merged/rendered/model.config
 			gz sdf -p $merged/rendered/model.sdf 2>/tmp/err

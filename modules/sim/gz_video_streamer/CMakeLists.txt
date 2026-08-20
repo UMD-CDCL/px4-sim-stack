@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.22)
 project(gz_video_streamer CXX)
 
+# Two programs: the encoder that turns Gazebo cameras into video streams, and
+# the publisher that carries the emulated lens position to it.
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(NOT CMAKE_BUILD_TYPE)
@@ -31,4 +34,17 @@ target_link_libraries(gz_video_streamer
     PkgConfig::GST
 )
 
-install(TARGETS gz_video_streamer RUNTIME DESTINATION bin)
+# The other half of the simulated camera: the lens. The emulated SCF4
+# controller has no Gazebo of its own, so it writes the field of view it is at
+# and this puts it on the topic the streamer follows. Built here because it
+# needs the same gz-transport and nothing else, and because one install step
+# then covers both.
+add_executable(gz_zoom_publisher zoom_publisher.cc)
+
+target_link_libraries(gz_zoom_publisher
+  PRIVATE
+    gz-transport13::core
+    gz-msgs10::core
+)
+
+install(TARGETS gz_video_streamer gz_zoom_publisher RUNTIME DESTINATION bin)

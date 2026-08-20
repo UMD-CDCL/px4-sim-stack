@@ -16,7 +16,11 @@ FROM px4simstack/ros-base:${DS_VERSION}
 ARG USERNAME=user
 
 USER root
-COPY entrypoint.sh sim_calibration.py zoom.sh /usr/local/bin/
+COPY entrypoint.sh sim_calibration.py /usr/local/bin/
+# The framing table, from the repository root. A build context cannot reach
+# outside itself, so compose gives this image a second one rather than the
+# stack keeping a copy of the table for each image that reads it.
+COPY --from=shared zoom.sh /usr/local/bin/zoom.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 USER ${USERNAME}

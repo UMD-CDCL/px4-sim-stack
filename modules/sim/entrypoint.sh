@@ -52,6 +52,29 @@ read -r -a STREAM_CHOICE <<< "${UAS_STREAMS:-gimbal}"
 
 radians() { awk -v deg="$1" 'BEGIN { printf "%.6f", deg * atan2(0, -1) / 180 }'; }
 
+# The mark of an airframe, which decides what it carries.
+mark_of_model() {
+	case "$1" in
+	*_v3) echo v3 ;;
+	*_v2) echo v2 ;;
+	esac
+}
+
+# The fields of view a v3's gimbal renders, widest first, in degrees. One
+# camera for each framing the zoom lens reaches, all on the same mount: gz-sim
+# cannot change a camera's field of view once the world is loaded.
+#
+# They come from the framing table rather than from UAS_GIMBAL_HFOV_DEG, and
+# that is deliberate. A vehicle rendered narrower than its widest framing could
+# never reach that framing, and nothing downstream would be able to tell -- the
+# picture would simply stop at the widest the camera has while the calibration
+# went on saying otherwise. Deriving it removes the setting that can be wrong.
+gimbal_framings_deg() {
+	[ "$(mark_of_model "$1")" = v3 ] || return 1
+	local preset
+	zoom_presets_widest_first | while read -r preset; do zoom_hfov_deg "$preset"; done
+}
+
 children=()
 cleanup() {
 	for pid in "${children[@]:-}"; do
@@ -148,11 +171,30 @@ for index in "${!FLEET[@]}"; do
 	rm -rf "$rendered"
 	mkdir -p "$rendered"
 
-	GIMBAL_HFOV_RAD=$(radians "${GIMBAL_HFOV[$index]:-${GIMBAL_HFOV[0]}}")
+	# shellcheck disable=SC2207
+	framings=($(gimbal_framings_deg "$model" || true))
+	configured=${GIMBAL_HFOV[$index]:-${GIMBAL_HFOV[0]}}
+	if [ ${#framings[@]} -gt 0 ]; then
+		if [ "$configured" != "${framings[0]}" ]; then
+			warn "uas$uas_num renders its gimbal camera at ${framings[0]} degrees, the widest framing, not the $configured degrees UAS_GIMBAL_HFOV_DEG names. A v3 takes its gimbal field of view from UAS_ZOOM_PRESETS."
+		fi
+		GIMBAL_HFOV_RAD=$(radians "${framings[0]}")
+		# A framing the table does not name renders at the widest, which makes
+		# it a duplicate. The streamer keeps only the framings narrower than
+		# the one it bound to, so a duplicate is simply never chosen.
+		GIMBAL_HFOV_2_RAD=$(radians "${framings[1]:-${framings[0]}}")
+		GIMBAL_HFOV_3_RAD=$(radians "${framings[2]:-${framings[0]}}")
+	else
+		GIMBAL_HFOV_RAD=$(radians "$configured")
+		GIMBAL_HFOV_2_RAD=$GIMBAL_HFOV_RAD
+		GIMBAL_HFOV_3_RAD=$GIMBAL_HFOV_RAD
+	fi
 	THERMAL_HFOV_RAD=$(radians "${THERMAL_HFOV[$index]:-${THERMAL_HFOV[0]}}")
 	DOWN_HFOV_RAD=$(radians "${DOWN_HFOV[$index]:-${DOWN_HFOV[0]}}")
-	export GIMBAL_HFOV_RAD THERMAL_HFOV_RAD DOWN_HFOV_RAD
-	envsubst '${GIMBAL_HFOV_RAD} ${THERMAL_HFOV_RAD} ${DOWN_HFOV_RAD}' \
+	UAS_NUM=$uas_num
+	export GIMBAL_HFOV_RAD GIMBAL_HFOV_2_RAD GIMBAL_HFOV_3_RAD
+	export THERMAL_HFOV_RAD DOWN_HFOV_RAD UAS_NUM
+	envsubst '${GIMBAL_HFOV_RAD} ${GIMBAL_HFOV_2_RAD} ${GIMBAL_HFOV_3_RAD} ${THERMAL_HFOV_RAD} ${DOWN_HFOV_RAD} ${UAS_NUM}' \
 		< "$template" > "$rendered/model.sdf"
 	printf '<?xml version="1.0"?>\n<model><name>uas%s</name><version>1.0</version>\n<sdf version="1.9">model.sdf</sdf>\n<description>%s for uas%s, rendered by the sim entrypoint.</description>\n</model>\n' \
 		"$uas_num" "$model" "$uas_num" > "$rendered/model.config"
@@ -170,7 +212,8 @@ for index in "${!FLEET[@]}"; do
 		warn "$sdf_errors"
 	fi
 done
-unset GIMBAL_HFOV_RAD THERMAL_HFOV_RAD DOWN_HFOV_RAD
+unset GIMBAL_HFOV_RAD GIMBAL_HFOV_2_RAD GIMBAL_HFOV_3_RAD
+unset THERMAL_HFOV_RAD DOWN_HFOV_RAD UAS_NUM
 
 # PX4 addresses the world by the name inside the file, not by the file name.
 # A mismatch produces a silent hang, so check it here.
@@ -201,14 +244,6 @@ if [ "$GZ_GUI" = "1" ]; then
 		warn "GZ_GUI=1 but DISPLAY is empty. Running headless."
 	fi
 fi
-
-# The mark of an airframe, which decides what it carries.
-mark_of_model() {
-	case "$1" in
-	*_v3) echo v3 ;;
-	*_v2) echo v2 ;;
-	esac
-}
 
 # Whether a vehicle serves one camera, given what it was asked for.
 serves() {
@@ -251,7 +286,15 @@ for index in "${!FLEET[@]}"; do
 	#   all      every camera the model declares
 	#   a list   rgb, pilot or thermal, comma separated
 	choice=${STREAM_CHOICE[$index]:-${STREAM_CHOICE[0]:-gimbal}}
-	gimbal_hfov_rad=$(radians "${GIMBAL_HFOV[$index]:-${GIMBAL_HFOV[0]}}")
+	# The same three fields of view the model was rendered with, so the
+	# streamer, the cameras and the calibration all describe one lens.
+	# shellcheck disable=SC2207
+	framings=($(gimbal_framings_deg "$model" || true))
+	if [ ${#framings[@]} -gt 0 ]; then
+		gimbal_hfov_rad=$(radians "${framings[0]}")
+	else
+		gimbal_hfov_rad=$(radians "${GIMBAL_HFOV[$index]:-${GIMBAL_HFOV[0]}}")
+	fi
 	case "$model" in
 	*_v3) gimbal_camera=rgb ;;
 	*_v2) gimbal_camera=pilot ;;
@@ -277,6 +320,14 @@ for index in "${!FLEET[@]}"; do
 		# calibration and every ray cast through it depend on.
 		if [ "$camera" = "$gimbal_camera" ] && [ "$(mark_of_model "$model")" = v3 ]; then
 			spec="$spec,hfov=${gimbal_hfov_rad},zoom_topic=/uas${UAS_NUM}/camera/zoom"
+			# The narrower framings, in the order the model declares them.
+			# The streamer reads whichever one covers what the lens is asking
+			# for, so a framing has a whole rendering at its own field of view
+			# rather than a fraction of the widest stretched back up.
+			for framing in 2 3; do
+				[ -n "${framings[$((framing - 1))]:-}" ] || continue
+				spec="$spec,framing=$(radians "${framings[$((framing - 1))]}"):/uas${UAS_NUM}/camera/framing/${framing}"
+			done
 		fi
 		case "${width:--}" in
 		-|'') ;;
@@ -307,22 +358,39 @@ for index in "${!FLEET[@]}"; do
 	log "Starting the uas$UAS_NUM camera encoders: ${served[*]}"
 	gz_video_streamer "${args[@]}" &
 	children+=($!)
-
-	# The lens starts at a preset. The streamer crops the camera to it, and the
-	# companion writes the calibration for the same preset, so the picture and
-	# the intrinsics agree from the first frame.
-	if [ "$(mark_of_model "$model")" = v3 ] && preset=$(zoom_preset_of_slot "$index"); then
-		if hfov=$(zoom_hfov_deg "$preset"); then
-			zoom_topic=/uas${UAS_NUM}/camera/zoom
-			( sleep 5; gz topic -t "$zoom_topic" -m gz.msgs.Double \
-				-p "data: $(radians "$hfov")" >/dev/null 2>&1 ) &
-			log "uas$UAS_NUM lens at the $preset preset, $hfov degrees"
-		else
-			warn "uas$UAS_NUM asks for zoom preset '$preset', which UAS_ZOOM_PRESETS does not name."
-		fi
-	fi
 done
 unset UAS_NUM GZ_MODEL
+
+# ----------------------------------------------------------- 5b. the v3 lenses
+# On the aircraft the lens is a Kurokesu SCF4 on a USB serial port. Here it is
+# the same controller answering the same G-code on a TCP port, and the
+# companion opens socket://sim:<port> instead of /dev/tty*. The companion runs
+# the real umd_uas/zoom.py against it either way: the same homing, the same
+# travel limits, the same preset recalls, the same CameraInfo.
+#
+# The lens writes the field of view it is at and gz_zoom_publisher puts it on
+# the topic the streamer follows, so the picture goes where the lens goes --
+# including through a preset recall, which takes the mechanism a real second or
+# two, exactly as it does on the aircraft.
+#
+# Its own loop rather than part of the encoders': a vehicle that serves no
+# camera still has a lens, and zoom.py takes itself down when the controller
+# never turns up.
+for index in "${!FLEET[@]}"; do
+	[ "$(mark_of_model "${FLEET[$index]}")" = v3 ] || continue
+	uas_num=$((UAS_BASE + index + 1))
+	port=$(zoom_port "$uas_num")
+	mkdir -p "$LOG_DIR/uas$uas_num"
+	log "Starting the uas$uas_num lens: an SCF4 on port $port"
+	echo "    Log: logs/px4/uas$uas_num/lens.log"
+	( python3 /opt/sim/scf4_emulator.py \
+		--uas "$uas_num" --port "$port" \
+		--presets "$UAS_ZOOM_PRESETS" --steps "$UAS_ZOOM_STEPS" \
+		--travel "$UAS_ZOOM_TRAVEL" --datum "$UAS_ZOOM_DATUM" \
+		| gz_zoom_publisher --topic "/uas${uas_num}/camera/zoom" \
+		) >> "$LOG_DIR/uas$uas_num/lens.log" 2>&1 &
+	children+=($!)
+done
 
 # -------------------------------------------------------- 6. the scenario props
 if [ -n "$SCENARIO" ] && [ -f "$SCENES_DIR/scenarios/$SCENARIO.yaml" ]; then

@@ -106,9 +106,13 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY px4-rcS /opt/sim/px4-rcS
 COPY hold-stream-rates.sh /opt/sim/hold-stream-rates.sh
 COPY gimbal_rangefinder.py /opt/sim/gimbal_rangefinder.py
-COPY zoom.sh /opt/sim/zoom.sh
+COPY scf4_emulator.py /opt/sim/scf4_emulator.py
+# The framing table, from the repository root. A build context cannot reach
+# outside itself, so compose gives this image a second one rather than the
+# stack keeping a copy of the table for each image that reads it.
+COPY --from=shared zoom.sh /opt/sim/zoom.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh /opt/sim/gimbal_rangefinder.py \
-      /opt/sim/hold-stream-rates.sh \
+      /opt/sim/hold-stream-rates.sh /opt/sim/scf4_emulator.py \
     && chmod 0644 /opt/sim/px4-rcS
 
 USER dev

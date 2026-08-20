@@ -66,36 +66,85 @@ fi
 
 # The calibration of the camera that really made the picture. A simulated camera
 # is an ideal pinhole at the field of view its airframe was rendered with, so
-# cam_info reads a file written here rather than one of the aircraft's real lens
-# files. config/param_files/sim/onboard_sim_params.yaml names this path.
+# the calibration is a file written here rather than one of the aircraft's real
+# lens files, which describe real optics and carry a real lens's distortion.
+#
+# Everything written here lands in CAMERA_DIR, a simulator volume. None of it
+# goes near the package the aircraft loads.
 read -r -a _gimbal_hfov <<< "${UAS_GIMBAL_HFOV_DEG:-56.06 56.06 85.25 25.98}"
 CAMERA_HFOV_DEG=${_gimbal_hfov[$SLOT]:-${_gimbal_hfov[0]}}
+CAMERA_DIR=${CAMERA_DIR:-/camera}
+mkdir -p "${CAMERA_DIR}"
 
-# A v3 lens zooms. The simulator crops its camera to the preset the vehicle
-# flies at, so the calibration is the preset's field of view rather than the
-# widest the camera renders. One table says what a preset is, and both read it.
 # shellcheck disable=SC1091
 . /usr/local/bin/zoom.sh
-if [ "${MODEL}" = v3 ] && _preset=$(zoom_preset_of_slot "${SLOT}"); then
-	if _preset_hfov=$(zoom_hfov_deg "${_preset}"); then
-		CAMERA_HFOV_DEG=${_preset_hfov}
-		echo "lens: ${_preset} preset, ${_preset_hfov} degrees"
-	else
-		echo "uas${UAS_NUM} asks for zoom preset '${_preset}', which UAS_ZOOM_PRESETS does not name." >&2
-	fi
-fi
 
 # The aircraft calibrates at the preview size: uas1_params.yaml names
 # uas1-mid-640x360-d1.yaml. The detector reports its boxes in that space and a
 # panel draws the preview, so a calibration at the full sensor size puts every
 # annotation a factor of three from the thing it marks.
-python3 /usr/local/bin/sim_calibration.py \
-	--model "/scenes/models/${AIRFRAME}/model.sdf" \
-	--sensor gimbal_camera \
-	--hfov-deg "${CAMERA_HFOV_DEG}" \
-	--width "${CAMERA_PREVIEW_WIDTH:-640}" \
-	--height "${CAMERA_PREVIEW_HEIGHT:-360}" \
-	--out "${CAMERA_DIR:-/camera}/gimbal.yaml"
+calibrate() {   # <field of view, degrees> <name> <output file>
+	python3 /usr/local/bin/sim_calibration.py \
+		--model "/scenes/models/${AIRFRAME}/model.sdf" \
+		--sensor gimbal_camera \
+		--hfov-deg "$1" --name "$2" \
+		--width "${CAMERA_PREVIEW_WIDTH:-640}" \
+		--height "${CAMERA_PREVIEW_HEIGHT:-360}" \
+		--out "$3"
+}
+
+# A v3 carries a zoom lens, and each framing is its own optic: the simulator
+# renders a camera for each one, so each one has its own intrinsics. The zoom
+# node publishes the current framing's CameraInfo, so it needs all of them.
+#
+# The parameters that point at these files, and at the emulated controller,
+# are written beside them and loaded last. They are simulator values -- a
+# framing table of 1x, 3x and 10x, and a lens on a TCP port -- and a simulated
+# uas11 loads the real uas1_params.yaml, so they must not be in it.
+LENS_PARAMS=""
+if [ "${MODEL}" = v3 ]; then
+	LENS_PARAMS="${CAMERA_DIR}/lens.yaml"
+	ZOOM_SERIAL_HOST=${ZOOM_SERIAL_HOST:-sim}
+	{
+		echo "# Written by modules/onboard/entrypoint.sh from scripts/zoom.sh."
+		echo "# The simulated lens: which framings it reaches, where they put"
+		echo "# the motors, and where the controller answers. Loaded last, so"
+		echo "# it beats the aircraft's own values for the same node."
+		echo "/**/*:"
+		echo "  zoom:"
+		echo "    ros__parameters:"
+		echo "      # An emulated SCF4 in the sim container, in place of the"
+		echo "      # USB controller the aircraft finds by its USB identity."
+		echo "      # Setting a port is what skips that search."
+		printf '      zoom.serial.port: "socket://%s:%s"\n' \
+			"${ZOOM_SERIAL_HOST}" "$(zoom_port "${UAS_NUM}")"
+		echo "      # The emulated lens has no optics, so sharpness does not"
+		echo "      # follow the focus axis and a sweep would find a peak that"
+		echo "      # means nothing -- and leave the framing off its preset."
+		echo '      zoom.autofocus.topic.image: ""'
+		for _axis in zoom focus; do
+			printf '      zoom.home.%s: %s\n' "${_axis}" "$(zoom_datum "${_axis}")"
+			printf '      zoom.limits.%s: [%s]\n' "${_axis}" "$(zoom_travel "${_axis}")"
+		done
+		for _preset in $(zoom_presets_widest_first); do
+			printf '      zoom.presets.%s: [%s]\n' "${_preset}" "$(zoom_steps "${_preset}")"
+			printf '      zoom.camera_info.calibration.%s: "%s/gimbal-%s.yaml"\n' \
+				"${_preset}" "${CAMERA_DIR}" "${_preset}"
+		done
+		if _boot=$(zoom_preset_of_slot "${SLOT}"); then
+			printf '      zoom.boot.preset: "%s"\n' "${_boot}"
+		fi
+	} > "${LENS_PARAMS}"
+
+	for _preset in $(zoom_presets_widest_first); do
+		calibrate "$(zoom_hfov_deg "${_preset}")" "${_preset}" \
+			"${CAMERA_DIR}/gimbal-${_preset}.yaml"
+	done
+	echo "lens: $(echo "${UAS_ZOOM_PRESETS}" | tr ' ' ',') on socket://${ZOOM_SERIAL_HOST}:$(zoom_port "${UAS_NUM}")"
+else
+	# One fixed lens, one calibration, published by cam_info.
+	calibrate "${CAMERA_HFOV_DEG}" simulated "${CAMERA_DIR}/gimbal.yaml"
+fi
 
 SITE_PARAMS=${SITE_PARAMS:-/camera/site.yaml}
 source /usr/local/bin/site-params.sh
@@ -140,7 +189,7 @@ if [ "${1:-launch}" = "launch" ]; then
 		uas:="${UAS_NUM}" \
 		model:="${MODEL}" \
 		sim:=true \
-		params:="${SITE_PARAMS}${ONBOARD_PARAMS_FILE:+,${ONBOARD_PARAMS_FILE}}" \
+		params:="${SITE_PARAMS}${LENS_PARAMS:+,${LENS_PARAMS}}${ONBOARD_PARAMS_FILE:+,${ONBOARD_PARAMS_FILE}}" \
 		"$@"
 fi
 

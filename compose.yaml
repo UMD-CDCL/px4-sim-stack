@@ -30,6 +30,10 @@ x-mavlink-router: &mavlink-router
   restart: unless-stopped
 
 x-mavlink-router-env: &mavlink-router-env
+  # The first simulated vehicle is UAS_BASE + 1. Every entry point derives
+  # its identifiers from it, so the host and the container have to read the
+  # same number: scripts/fleet.sh holds the same default.
+  UAS_BASE: ${UAS_BASE:-10}
   # The UDP server PX4 pushes into. Every router has its own namespace, so
   # every router can use the same port. See modules/sim/px4-rcS.
   PX4_UPLINK_PORT: "14545"
@@ -57,6 +61,12 @@ x-mavlink-router-env: &mavlink-router-env
 x-onboard: &onboard
   build:
     context: ./modules/onboard
+    additional_contexts:
+      # scripts/zoom.sh, the framing table. A build context cannot reach
+      # outside itself, and the table has ONE copy: the simulator crops to a
+      # preset and the companion writes the calibration for it, so a second
+      # copy is two answers to what "mid" means.
+      shared: ./scripts
     args:
       # Which ros-base to derive from. Everything heavy is there, so this image
       # is its entry point and nothing else. `./px4sim build` builds the base
@@ -86,12 +96,26 @@ x-onboard: &onboard
   depends_on: [video-router]
 
 x-onboard-env: &onboard-env
+  # The first simulated vehicle is UAS_BASE + 1. Every entry point derives
+  # its identifiers from it, so the host and the container have to read the
+  # same number: scripts/fleet.sh holds the same default.
+  UAS_BASE: ${UAS_BASE:-10}
   # One source of truth for the airframe of each vehicle. See modules/onboard/entrypoint.sh.
   UAS_FLEET: ${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2}
   # The same list the simulator renders with. cam_info needs the calibration of
   # the camera that really produced the picture, and a simulated camera's is its
   # field of view. See modules/onboard/sim_calibration.py.
   UAS_GIMBAL_HFOV_DEG: ${UAS_GIMBAL_HFOV_DEG:-27.45 27.45 85.25 25.98}
+  # The framing table. scripts/zoom.sh holds the same values as its own
+  # defaults, so leaving these out is not an error: it is the host and the
+  # container quietly reading two different tables. They were absent, and
+  # .env's table had never reached a container.
+  UAS_ZOOM_PRESETS: ${UAS_ZOOM_PRESETS:-narrow=6.09 mid=20.13 wide=56.06}
+  UAS_ZOOM: ${UAS_ZOOM:-mid mid - -}
+  UAS_ZOOM_STEPS: ${UAS_ZOOM_STEPS:-narrow=29000,32380 mid=34500,32980 wide=40000,31140}
+  UAS_ZOOM_TRAVEL: ${UAS_ZOOM_TRAVEL:-zoom=29000,40000 focus=29500,33500}
+  UAS_ZOOM_DATUM: ${UAS_ZOOM_DATUM:-zoom=32000 focus=32000}
+  UAS_ZOOM_PORT_BASE: ${UAS_ZOOM_PORT_BASE:-5900}
   UAS_THERMAL_HFOV_DEG: ${UAS_THERMAL_HFOV_DEG:-29.75 29.75 31.03 29.75}
   <<: *gpu-env
   RTSP_BASE: rtsp://video-router:8554
@@ -141,6 +165,12 @@ services:
   sim:
     build:
       context: ./modules/sim
+      additional_contexts:
+        # scripts/zoom.sh, the framing table. A build context cannot reach
+        # outside itself, and the table has ONE copy: the simulator crops to a
+        # preset and the companion writes the calibration for it, so a second
+        # copy is two answers to what "mid" means.
+        shared: ./scripts
       args:
         <<: *ids
         PX4_REF: ${PX4_REF:-v1.17.0}
@@ -161,7 +191,21 @@ services:
       # The fields of view are degrees and belong to the vehicle: uas13 and uas14
       # are both v2 and carry different lenses. See .env.example.
       UAS_FLEET: ${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2}
+      # The first simulated vehicle is UAS_BASE + 1. Every entry point derives
+      # its identifiers from it, so the host and the container have to read the
+      # same number: scripts/fleet.sh holds the same default.
+      UAS_BASE: ${UAS_BASE:-10}
       UAS_GIMBAL_HFOV_DEG: ${UAS_GIMBAL_HFOV_DEG:-27.45 27.45 85.25 25.98}
+      # The framing table. scripts/zoom.sh holds the same values as its own
+      # defaults, so leaving these out is not an error: it is the host and the
+      # container quietly reading two different tables. They were absent, and
+      # .env's table had never reached a container.
+      UAS_ZOOM_PRESETS: ${UAS_ZOOM_PRESETS:-narrow=6.09 mid=20.13 wide=56.06}
+      UAS_ZOOM: ${UAS_ZOOM:-mid mid - -}
+      UAS_ZOOM_STEPS: ${UAS_ZOOM_STEPS:-narrow=29000,32380 mid=34500,32980 wide=40000,31140}
+      UAS_ZOOM_TRAVEL: ${UAS_ZOOM_TRAVEL:-zoom=29000,40000 focus=29500,33500}
+      UAS_ZOOM_DATUM: ${UAS_ZOOM_DATUM:-zoom=32000 focus=32000}
+      UAS_ZOOM_PORT_BASE: ${UAS_ZOOM_PORT_BASE:-5900}
       UAS_THERMAL_HFOV_DEG: ${UAS_THERMAL_HFOV_DEG:-29.75 29.75 31.03 29.75}
       UAS_DOWN_HFOV_DEG: ${UAS_DOWN_HFOV_DEG:-25.98 25.98 25.98 25.98}
       UAS_SPACING_M: ${UAS_SPACING_M:-1}
@@ -459,6 +503,13 @@ services:
     environment:
       <<: [*gpu-env, *x11-env]
       UAS_FLEET: ${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2}
+      # The first simulated vehicle is UAS_BASE + 1. Every entry point derives
+      # its identifiers from it, so the host and the container have to read the
+      # same number: scripts/fleet.sh holds the same default.
+      UAS_BASE: ${UAS_BASE:-10}
+      # The ground station's own ROS domain. offboard.launch.py reads it and
+      # falls back to 70, so leaving it out means .env cannot move the fleet.
+      GROUND_DOMAIN: ${GROUND_DOMAIN:-70}
       # ds_node reads the LOW RATE mount of each gimbal camera, which is what
       # crosses the radio link on the aircraft: rgbl<N> on a v3, pilotl<N> on
       # a v2.

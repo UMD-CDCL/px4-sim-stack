@@ -39,6 +39,20 @@ else
 	note "$(printf '%s' "$missing" | tr '\n' ' ')"
 fi
 
+# The buttons. A Call Service panel that names a service nobody offers looks
+# configured and fails under the operator's hand, with no clue in the layout.
+mapfile -t called < <(python3 verify/component/foxglove_layout.py --services "$layout")
+if [ ${#called[@]} -gt 0 ]; then
+	offered=$(./px4sim foxglove ground --services "${called[@]}" 2>/dev/null)
+	unoffered=$(printf '%s\n' "$offered" | awk -F'\t' '$3 == "absent" { print $1 }')
+	if [ -z "$unoffered" ]; then
+		pass "Foxglove is offered every one of the ${#called[@]} services the layout's buttons call"
+	else
+		fail "Foxglove is offered every service the layout's buttons call"
+		note "$(printf '%s' "$unoffered" | tr '\n' ' ')"
+	fi
+fi
+
 # The live view. The camera reaches the ground as a stream, and the ground's
 # own viewer turns it back into the topic the Image panel reads: a viewer that
 # started before the stream did used to die there and leave the panel waiting.

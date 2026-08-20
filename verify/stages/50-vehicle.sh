@@ -1,8 +1,9 @@
 # shellcheck shell=bash
-# A flying vehicle: telemetry, the gimbal, the outline, and a localized target
+# A vehicle that is up: every topic the contract names carries data
 #
-# Needs the stack running. Flies the lead vehicle over a target the scenario
-# recorded, points the gimbal at it and checks what the nodes make of it.
+# Needs the stack running. Nothing here flies: the flight checks are one
+# takeoff in the flight stage, so a fault in the graph is found before the
+# vehicle leaves the ground.
 
 lead=$FIRST_UAS
 container=$(COMPOSE_PROFILES="uas$lead,onboard$lead" docker compose ps -q "onboard$lead" 2>/dev/null)
@@ -24,92 +25,3 @@ while IFS=$'\t' read -r topic publishers verdict; do
 	esac
 	expect_eq "${topic##*/uas$lead/} carries data" data "$verdict"
 done <<< "$telemetry"
-
-# Over a target the scenario recorded, low and oblique, which is where a
-# detector finds a person. The campus scenario puts casualty_m14 111 m north of
-# the origin, and 20 m short of it at 12 m is a clear view of it.
-flying "$lead" 30 || fail "uas$lead reaches the air"
-uas goto "${TARGET_EAST:-0}" "${TARGET_NORTH:-91}" 12 --heading 0 >/dev/null
-pointing=$(uas gimbal -30)
-depression=$(printf '%s' "$pointing" | sed -n 's/^reported depression \([-0-9.]*\).*/\1/p')
-if [ -z "$depression" ]; then
-	fail "the gimbal reports where it points"
-	note "$pointing"
-else
-	# A degree is well inside the slew the report settles to.
-	within=$(python3 -c "print(abs($depression - 30) <= 2.0)")
-	expect_eq "the gimbal points where it is told" True "$within"
-fi
-
-for topic in camera_fov ground_projection; do
-	verdict=$(./px4sim probe "$lead" "/uas$lead/$topic" 2>/dev/null | cut -f3)
-	expect_eq "$topic is published with ground in view" data "$verdict"
-done
-
-# The 3D panel gets the scene from the same files a ray is localized against,
-# so the ground it draws has to be that ground: the right shape, at the right
-# height, in colours that came from the satellite image. A scene drawn a geoid
-# separation above the aircraft is published exactly as convincingly.
-# Faults are written to the error stream, so they are read back here rather
-# than left to a stage that only ever sees the numbers.
-drawn=$(uas scene /viz/scene/terrain 2>&1)
-if printf '%s' "$drawn" | grep -q '^fault'; then
-	fail "the panel draws the ground the rays are cast at"
-	note "$(printf '%s' "$drawn" | grep '^fault' | tr '\n' ' ')"
-elif printf '%s' "$drawn" | grep -q '^vertices'; then
-	pass "the panel draws the ground the rays are cast at: $(printf '%s' "$drawn" | tr '\n' ' ')"
-else
-	fail "the panel draws the ground the rays are cast at"
-	note "$(printf '%s' "$drawn" | tail -2)"
-fi
-
-# The buildings come with the ground, drawn from the same image and measured
-# against the same survey, so the check above reads them too. It says nothing
-# about them when nothing published them.
-if printf '%s' "$drawn" | grep -q '^roofs'; then
-	pass "the panel draws the scene's buildings: $(printf '%s' "$drawn" | grep '^roofs')"
-else
-	fail "the panel draws the scene's buildings"
-fi
-
-uas detect on >/dev/null
-# Settle first. A localization taken while the gimbal is still slewing is
-# computed against a pose the camera has already left.
-sleep "${VEHICLE_SETTLE_S:-15}"
-found=$(uas detections)
-boxes=$(printf '%s' "$found" | sed -n 's/^\([0-9]*\) boxes.*/\1/p')
-if [ "${boxes:-0}" -gt 0 ]; then
-	pass "the detector finds $boxes boxes in the live stream"
-else
-	fail "the detector finds something in the live stream"
-	note "$(printf '%s' "$found" | tail -2)"
-fi
-
-# Every localized box should land on the target the scenario recorded. The
-# scenario places people, the detector finds people, so the nearest recorded
-# target is the one it found.
-errors=$(printf '%s' "$found" | sed -n 's/.* -> \([0-9.]*\) m from .*/\1/p')
-if [ -z "$errors" ]; then
-	fail "the boxes localize against the recorded targets"
-	note "$(printf '%s' "$found" | tail -3)"
-else
-	best=$(printf '%s' "$errors" | sort -g | head -1)
-	worst=$(printf '%s' "$errors" | sort -g | tail -1)
-	on_terrain=$(printf '%s' "$found" | grep -c 'on the terrain' || true)
-
-	# What this can decide is whether the localization is working, not how well.
-	# A wrong datum, a wrong frame or a wrong anchor puts a box tens or hundreds
-	# of metres out, or off the planet, and that is what the bound catches. How
-	# close it gets inside that depends on the host: one vehicle serving two
-	# streams puts the closest box inside a metre, four serving twelve run this
-	# machine at a tenth of real time and everything resting on a timestamp
-	# loosens with it. The distance is reported rather than graded.
-	if [ "$(python3 -c "print($worst <= ${LOCALIZATION_LIMIT_M:-20.0})")" = True ]; then
-		pass "every box lands on a recorded target, closest $best m, furthest $worst m"
-	else
-		fail "every box lands on a recorded target"
-		note "furthest was $worst m, which is not this scene"
-	fi
-	expect_eq "the boxes land on the terrain, not the flat plane" \
-		"$(printf '%s\n' "$errors" | wc -l)" "$on_terrain"
-fi

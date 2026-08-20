@@ -28,8 +28,44 @@ clone_at() { # url dir ref
 	          --jobs 8 "$url" "$dir"
 }
 
+# The simulated gimbal is wrong in three ways, and each one produces plausible
+# wrong pointing rather than an error. patches/ corrects them and
+# docs/px4-simulated-gimbal.md says what each one does. They are applied here,
+# every time this step runs, so a tree cloned before a patch existed picks it
+# up.
+#
+# What has been applied is RECORDED rather than detected. Two of these patches
+# change the same lines of the same file, so once the later one is in, the
+# earlier one no longer reverses cleanly and a tree that is correctly patched
+# reads as unpatched. The record is a checksum for each patch, so an edited
+# patch is applied again and an unchanged one is left alone.
+patch_record() { echo "$1/.px4sim-patches"; }
+
+apply_patches() { # dir
+	local dir=$1 record patch name sum
+	record=$(patch_record "$dir")
+	touch "$record"
+	for patch in "$PWD"/patches/px4-*.patch; do
+		name=$(basename "$patch")
+		sum=$(md5sum "$patch" | cut -d' ' -f1)
+		if grep -qx "$sum $name" "$record"; then
+			echo "    $name is already applied"
+		elif git -C "$dir" apply "$patch" 2>/dev/null; then
+			echo "$sum $name" >> "$record"
+			echo "    applied $name"
+		elif git -C "$dir" apply --reverse --check "$patch" 2>/dev/null; then
+			echo "$sum $name" >> "$record"
+			echo "    $name was already in the tree. Recorded."
+		else
+			echo "    $name does not apply. See docs/px4-simulated-gimbal.md" >&2
+		fi
+	done
+}
+
 if [ "$WHAT" = "default" ] || [ "$WHAT" = "all" ] || [ "$WHAT" = "px4" ]; then
 	clone_at https://github.com/PX4/PX4-Autopilot.git src/PX4-Autopilot "$PX4_REF"
+	echo "==> Patching the simulated gimbal"
+	apply_patches src/PX4-Autopilot
 fi
 
 # The flight code is not cloned here. The onboard and offboard images build
