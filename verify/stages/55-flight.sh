@@ -212,7 +212,10 @@ if printf '%s' "$stood" | grep -q "(+6.00, -9.00)"; then
 		"${VERIFY_HEIGHT_M:-20}" --heading 0 >/dev/null
 	uas gimbal "-$depression" >/dev/null
 	surveyed=$(uas fiducial --placed "$survey_east" "$survey_north")
-	read -r _ east north _ <<< "$(printf '%s' "$surveyed" | grep fiducial_offset)"
+	# The line reads "<from> -> <to>\teast\tnorth\tup", so the numbers are the
+	# last three fields. Counting from the left picks up the arrow.
+	read -r east north <<< "$(printf '%s' "$surveyed" | grep fiducial_offset \
+		| awk '{ print $(NF - 2), $(NF - 1) }')"
 	if [ -n "${north:-}" ]; then
 		expect_eq "a survey of the marker recovers where it stands" True \
 			"$(python3 -c "
