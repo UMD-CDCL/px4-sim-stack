@@ -89,6 +89,22 @@ VEHICLE_MODEL_YAW_OFFSET_DEG = {
 # (CASUALTY_MODEL_POOL), next to the Target type and the import.
 FIDUCIAL_THICKNESS_M = 0.02
 FIDUCIAL_COLOR = "1 0.45 0.05 1"
+# The two halves of the survey marker, which a scene may hold apart.
+#
+# The SURVEYED coordinate is what the crew is handed. It leaves in the
+# scenario as fiducial_lat and fiducial_lon, the entry point writes it into
+# tf_loc's fiducial_lla, and the vehicle surveys against it.
+#
+# The PLACEMENT is where the disk really stands, the surveyed coordinate plus
+# the scene's placed_east_m and placed_north_m. Zero for a scene that
+# describes the truth, which is every real scene.
+#
+# A non-zero placement is how the simulator holds a frame error. The vehicle
+# measures the marker where the disk is, cannot tell a displaced marker from a
+# displaced frame of its own, and publishes a correction of minus the
+# placement. The scenario carries the placement too, so a check reads the
+# answer it must get out of the same file the vehicle read its survey from.
+FIDUCIAL_PLACEMENT = ("placed_east_m", "placed_north_m")
 # Walls get a slight per-building gray so adjacent buildings read as
 # separate ones from the air. Roofs carry the satellite texture instead.
 BUILDING_GRAY_RANGE = (0.55, 0.72)
@@ -324,6 +340,13 @@ def _floor_z(placed: list[PlacedBuilding], grid, meta, origin_alt: float,
     return floor
 
 
+def _fiducial_placement(scene: scene_model.SceneSpec) -> tuple[float, float]:
+    """Where the survey disk really stands, scene ENU. See FIDUCIAL_PLACEMENT."""
+    east, north = FIDUCIAL_PLACEMENT
+    return (scene.fiducial["east_m"] + scene.fiducial.get(east, 0.0),
+            scene.fiducial["north_m"] + scene.fiducial.get(north, 0.0))
+
+
 def _origin_lla(scene: scene_model.SceneSpec) -> list:
     """Where scene ENU (0, 0, 0) sits on the Earth."""
     return [round(scene.center_lat, 7), round(scene.center_lon, 7),
@@ -502,16 +525,17 @@ def build_world_sdf(scene: scene_model.SceneSpec, placed: list[PlacedBuilding],
         counts["trees"] += 1
 
     fiducial = scene.fiducial
+    disk_east, disk_north = _fiducial_placement(scene)
     # The disk floats just over the highest surface under its rim, a roof
     # included, so a slope never buries an edge, the whole 0.5 m circle
     # stays visible from the air, and a fiducial placed on a building
     # sits on that building.
     radius = fiducial["diameter_m"] / 2.0
     rim_ground = max(
-        _floor_z(placed, grid, meta, origin_alt, fiducial["east_m"] + dx,
-                 fiducial["north_m"] + dy, True)
+        _floor_z(placed, grid, meta, origin_alt, disk_east + dx,
+                 disk_north + dy, True)
         for dx, dy in [(0, 0), (radius, 0), (-radius, 0), (0, radius), (0, -radius)])
-    fiducial_pose = _pose(fiducial["east_m"], fiducial["north_m"],
+    fiducial_pose = _pose(disk_east, disk_north,
                           rim_ground + FIDUCIAL_THICKNESS_M / 2.0 + 0.005)
 
     buildings_model = ""
@@ -832,16 +856,24 @@ def run(scene_data_dir: Path, scenes_dir: Path) -> int:
     buildings_viz_path.write_text(
         buildings_viz_json(scene, frame, clusters, scene_data_dir))
 
+    # The surveyed coordinate, which is what the crew is handed, at the ground
+    # height under it. The disk itself may stand somewhere else: see
+    # FIDUCIAL_PLACEMENT.
     fiducial_lat, fiducial_lon, fiducial_alt = frame.enu_to_latlon(
         scene.fiducial["east_m"], scene.fiducial["north_m"],
         _floor_z(placed, grid, meta, scene.origin_alt_m,
                  scene.fiducial["east_m"], scene.fiducial["north_m"], True))
+    placed_east, placed_north = _fiducial_placement(scene)
     geo_meta = {"home_lat": round(scene.center_lat, 7),
                 "home_lon": round(scene.center_lon, 7),
                 "home_alt": round(scene.origin_alt_m, 2),
                 "fiducial_lat": round(fiducial_lat, 7),
                 "fiducial_lon": round(fiducial_lon, 7),
-                "fiducial_alt": round(fiducial_alt, 2)}
+                "fiducial_alt": round(fiducial_alt, 2),
+                "fiducial_placed_east": round(
+                    placed_east - scene.fiducial["east_m"], 3),
+                "fiducial_placed_north": round(
+                    placed_north - scene.fiducial["north_m"], 3)}
 
     # The scenario always exists, even with zero targets, because it is
     # what carries home and fiducial: SCENE and SCENARIO in .env select

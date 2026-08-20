@@ -141,6 +141,43 @@ Everything is graphical. You never edit a file to fix the scene.
 - Drag the orange fiducial to move the survey marker. Its coordinate
   lands in the printed `FIDUCIAL_SURVEYED_*` lines.
 
+## The survey marker
+
+Every built world holds one: a flat orange 0.5 m disk, the thing a
+vehicle photographs to find out where its own frame sits on the Earth.
+
+The scene holds two facts about it, and they are not the same fact.
+
+| In `scene.json` | Means |
+|---|---|
+| `east_m`, `north_m` | The SURVEYED coordinate, the one the crew is given. It leaves in the scenario as `fiducial_lat` and `fiducial_lon`, and the onboard entry point writes it into `tf_loc`'s `fiducial_lla`. |
+| `placed_east_m`, `placed_north_m` | How far the disk really stands from that coordinate. Zero in a scene that describes the truth, which is every real scene. |
+
+A non-zero placement is how the simulator holds a frame error. The
+vehicle measures the marker where the disk is, cannot tell a displaced
+marker from a frame of its own displaced the other way, and publishes a
+correction of minus the placement. Every later localization then moves
+by that correction. The scenario records the placement as
+`fiducial_placed_east` and `fiducial_placed_north`, so a check reads the
+answer it must get out of the same file the vehicle read its survey
+from.
+
+Keep the placement at zero for any run that scores localization: a
+survey against a displaced marker moves every reported position by the
+correction, on purpose.
+
+The same displacement is available on a running simulator, with no
+rebuild and no restart:
+
+```bash
+./px4sim shell sim "/scenes/spawn_scenario.py --world lorton --fiducial 6 -9"
+./px4sim shell sim "/scenes/spawn_scenario.py --world lorton --fiducial 0 0"
+```
+
+It stands the disk that far from the coordinate in the world file, on
+the ground at the new point, and prints the correction a survey of it
+must produce.
+
 Save writes straight back to `scene.json`; the previous version becomes
 `scene.json.bak`. Then run `build` again.
 

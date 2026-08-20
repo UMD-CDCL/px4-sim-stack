@@ -295,6 +295,7 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     scene <name>        Switch the world and restart the simulator
     scenario [name]     Place the targets again, with no restart
     origin              The coordinates this scene and scenario fly at
+    fiducial [e] [n]    Stand the survey marker this far off its survey
     reset               Remove the targets from the running world
     place               Put the fleet back upright at its start
     fly <N> [m]         Respawn, then get that vehicle airborne
@@ -652,6 +653,16 @@ scenario)
 	[ -n "$name" ] || die "Give a scenario name, or set SCENARIO in .env"
 	$DC exec sim /scenes/spawn_scenario.py \
 		--world "${SCENE:-recon_field}" --scenario "/scenes/scenarios/${name}.yaml"
+	;;
+
+fiducial)
+	# Stand the survey marker away from the coordinate the vehicles were given,
+	# which is how this simulator holds a frame error. A vehicle cannot tell a
+	# displaced marker from a frame of its own displaced the other way, so a
+	# survey of it must come back as minus this offset. Zeros put it back,
+	# which is what a scoring run needs.
+	$DC exec sim /scenes/spawn_scenario.py \
+		--world "${SCENE:-recon_field}" --fiducial "${1:-0}" "${2:-0}"
 	;;
 
 reset)

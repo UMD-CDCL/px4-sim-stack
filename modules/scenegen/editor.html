@@ -996,8 +996,11 @@ function fiducialPanel() {
   return [
     numberField("east m", +f.east_m.toFixed(2), 0.1, v => { f.east_m = v; }),
     numberField("north m", +f.north_m.toFixed(2), 0.1, v => { f.north_m = v; }),
-    note(`The orange 0.5 m survey circle. Its coordinates land in .env as
-          FIDUCIAL_SURVEYED_*.`),
+    note(`The orange 0.5 m survey circle. These are the coordinates the crew
+          is given: they land in the scenario as fiducial_lat and
+          fiducial_lon. A scene can stand the disk itself somewhere else, to
+          simulate a frame error, with placed_east_m and placed_north_m in
+          scene.json.`),
   ];
 }
 

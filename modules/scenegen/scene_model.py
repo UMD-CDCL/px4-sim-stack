@@ -175,8 +175,17 @@ class SceneSpec:
     origin_alt_m: float           # terrain AMSL at the center; world z=0 sits here
     imagery: dict = field(default_factory=dict)
     elevation: dict = field(default_factory=dict)
+    # The survey marker. east_m and north_m are the coordinate the crew is
+    # given: it rides in the scenario as fiducial_lat and fiducial_lon and the
+    # vehicle surveys against it. placed_east_m and placed_north_m are how far
+    # the disk really stands from that coordinate, which is zero for a scene
+    # that describes the truth. A scene that sets them simulates a vehicle
+    # whose own frame is displaced: the vehicle measures the marker there,
+    # cannot tell the two apart, and publishes a correction of minus that
+    # placement. See FIDUCIAL_PLACEMENT in build_world.py.
     fiducial: dict = field(default_factory=lambda: {
-        "east_m": 0.0, "north_m": 0.0, "diameter_m": FIDUCIAL_DIAMETER_M})
+        "east_m": 0.0, "north_m": 0.0, "diameter_m": FIDUCIAL_DIAMETER_M,
+        "placed_east_m": 0.0, "placed_north_m": 0.0})
     buildings: list[Building] = field(default_factory=list)
     vehicles: list[Vehicle] = field(default_factory=list)
     targets: list[Target] = field(default_factory=list)

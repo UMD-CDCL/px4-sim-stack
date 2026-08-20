@@ -8,6 +8,11 @@ change without a simulator restart.
     spawn_scenario.py --world recon_field --scenario scenarios/urban_casualties.yaml
     spawn_scenario.py --world recon_field --clear
     spawn_scenario.py --list
+    spawn_scenario.py --world lorton --fiducial 6 -9
+
+The last one stands the survey marker away from the coordinate the vehicles
+were given, which is how the simulator holds a frame error. See
+`move_fiducial`.
 
 The script talks to Gazebo through the `gz service` command line tool, so it
 needs no Python bindings.
@@ -18,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -38,6 +44,10 @@ GZ_SERVICE_WORKERS = 4
 # often to look. The old fixed sleep paid the full ceiling every time.
 SPAWN_SETTLE_CEILING_S = 1.5
 POSE_POLL_INTERVAL_S = 0.2
+# The survey marker in every generated world. modules/scenegen/build_world.py
+# writes it, at the coordinate the scenario hands the vehicles as fiducial_lat
+# and fiducial_lon.
+FIDUCIAL_MODEL = "fiducial_marker"
 
 
 def gz_service(service: str, reqtype: str, req: str, timeout_ms: int = 8000,
@@ -175,6 +185,99 @@ def write_resolved(world: str, entities: list[dict],
           f"(largest difference from the request: {worst:.2f} m)")
 
 
+def world_file(world: str) -> Path:
+    return SCENES_DIR / "worlds" / f"{world}.sdf"
+
+
+def surveyed_pose(world: str) -> tuple[float, float, float] | None:
+    """Where the world file stands the survey marker.
+
+    That pose IS the surveyed coordinate: scenegen writes the disk and the
+    scenario's fiducial_lat and fiducial_lon from one place in the scene, so
+    the world file is the record of where the vehicles were told the marker
+    is.
+    """
+    path = world_file(world)
+    if not path.is_file():
+        print(f"No world file at {path}", file=sys.stderr)
+        return None
+    text = path.read_text()
+    block = re.search(rf'<model name="{FIDUCIAL_MODEL}">(.*?)</model>', text,
+                      re.DOTALL)
+    pose = re.search(r"<pose>([^<]*)</pose>", block.group(1)) if block else None
+    if pose is None:
+        print(f"{path} holds no {FIDUCIAL_MODEL}. Rebuild the scene: "
+              f"modules/scenegen writes it.", file=sys.stderr)
+        return None
+    values = [float(v) for v in pose.group(1).split()]
+    return values[0], values[1], values[2]
+
+
+def terrain_height(world: str, east: float, north: float) -> float | None:
+    """The scene surface's own height at a point, world z.
+
+    Read from the same `<scene>_surface.json` the vehicles cast their rays
+    at, so the marker sits on the ground the localization believes in. None
+    when the file is missing or the point is outside the square.
+    """
+    path = world_file(world).with_name(f"{world}_surface.json")
+    if not path.is_file():
+        return None
+    surface = json.loads(path.read_text())
+    grid, n, side = surface["terrain_z"], surface["grid_n"], surface["side_m"]
+    x = (east + side / 2.0) / (side / n)
+    y = (north + side / 2.0) / (side / n)
+    if not (0.0 <= x <= n and 0.0 <= y <= n):
+        return None
+    i, j = min(int(x), n - 1), min(int(y), n - 1)
+    fx, fy = x - i, y - j
+    return float(
+        grid[j][i] * (1 - fx) * (1 - fy) + grid[j][i + 1] * fx * (1 - fy)
+        + grid[j + 1][i] * (1 - fx) * fy + grid[j + 1][i + 1] * fx * fy)
+
+
+def move_fiducial(world: str, east: float, north: float) -> int:
+    """Stand the survey marker this far from the coordinate it was surveyed at.
+
+    A vehicle cannot tell a displaced marker from a frame of its own that is
+    displaced the other way, so this is how the simulator holds a frame error
+    without touching the autopilot. The vehicle photographs the marker,
+    localizes it, compares it against the coordinate it was given, and must
+    publish a correction of minus this offset. Every later localization then
+    moves by that correction.
+
+    Zeros put the marker back where the scene surveyed it, which is the state
+    every scoring run needs.
+    """
+    base = surveyed_pose(world)
+    if base is None:
+        return 1
+    east_at, north_at = base[0] + east, base[1] + north
+    height, was = terrain_height(world, east_at, north_at), \
+        terrain_height(world, base[0], base[1])
+    z = base[2] if height is None or was is None else base[2] + height - was
+    ok = gz_service(
+        f"/world/{world}/set_pose", "gz.msgs.Pose",
+        f'name: "{FIDUCIAL_MODEL}", position: {{x: {east_at}, y: {north_at}, '
+        f"z: {z}}}, orientation: {{x: 0, y: 0, z: 0, w: 1}}",
+        label=FIDUCIAL_MODEL)
+    if not ok:
+        return 1
+    print(f"{FIDUCIAL_MODEL} stands at ({east_at:.2f}, {north_at:.2f}, "
+          f"{z:.2f}), which is ({east:+.2f}, {north:+.2f}) m from the "
+          f"coordinate the vehicles were given.")
+    if east or north:
+        print(f"A survey of it must publish a correction of "
+              f"({-east:+.2f}, {-north:+.2f}) m east and north, and every "
+              f"later localization must move by that.")
+    else:
+        print("A survey of it must publish a correction of about zero.")
+    if height is None:
+        print("    no scene surface to read, so the marker keeps its old "
+              "height. Check it is not buried or floating.", file=sys.stderr)
+    return 0
+
+
 def load_state() -> dict:
     if STATE_FILE.exists():
         try:
@@ -274,14 +377,20 @@ def main() -> int:
     ap.add_argument("--scenario", type=Path)
     ap.add_argument("--clear", action="store_true", help="remove the entities that are placed")
     ap.add_argument("--list", action="store_true", help="show the scenarios on disk")
+    ap.add_argument("--fiducial", nargs=2, type=float, metavar=("EAST", "NORTH"),
+                    help="stand the survey marker this far, in metres, from "
+                         "the coordinate the vehicles were given. Zeros put "
+                         "it back.")
     args = ap.parse_args()
 
     if args.list:
         return cmd_list()
+    if args.fiducial is not None:
+        return move_fiducial(args.world, *args.fiducial)
     if args.clear:
         return cmd_clear(args.world)
     if not args.scenario:
-        ap.error("give --scenario, --clear or --list")
+        ap.error("give --scenario, --clear, --list or --fiducial")
     if not args.scenario.is_file():
         print(f"No scenario file at {args.scenario}", file=sys.stderr)
         return 1

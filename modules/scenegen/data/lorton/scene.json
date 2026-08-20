@@ -24,9 +24,11 @@
   "max_m": 50.72
  },
  "fiducial": {
-  "east_m": 0,
-  "north_m": 0,
-  "diameter_m": 0.5
+  "east_m": -12.0,
+  "north_m": 16.0,
+  "diameter_m": 0.5,
+  "placed_east_m": 0.0,
+  "placed_north_m": 0.0
  },
  "buildings": [
   {
