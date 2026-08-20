@@ -73,11 +73,18 @@ else
 	echo "terrain: no surface for scene '${SCENE}'. The footprint uses the flat plane." >&2
 fi
 
+# The same site the vehicles work out. The station draws the scene against the
+# vehicle's home fix and recomputes the camera footprint, so it needs the datum
+# the vehicle has.
+SITE_PARAMS=${SITE_PARAMS:-/camera/site.yaml}
+source /usr/local/bin/site-params.sh
+
 if [ "${1:-launch}" = "launch" ]; then
 	shift || true
 	exec ros2 launch umd_uas offboard.launch.py \
 		uas:="${numbers#,}" \
 		models:="${models#,}" \
+		params:="${SITE_PARAMS}" \
 		"$@"
 fi
 

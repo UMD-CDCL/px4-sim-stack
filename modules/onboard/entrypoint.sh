@@ -97,29 +97,8 @@ python3 /usr/local/bin/sim_calibration.py \
 	--height "${CAMERA_PREVIEW_HEIGHT:-360}" \
 	--out "${CAMERA_DIR:-/camera}/gimbal.yaml"
 
-# The site, worked out from the scene rather than configured. A terrain tile is
-# anchored above mean sea level and a NavSatFix altitude is above the WGS84
-# ellipsoid; GeoidEval says how far apart those are here, and mavros already
-# installs the datasets it reads.
 SITE_PARAMS=${SITE_PARAMS:-/camera/site.yaml}
-# The panel places the scene against the vehicle's home fix, which is a height
-# above the ellipsoid, while the scene is anchored above mean sea level. Unset,
-# the terrain and the buildings are drawn a geoid separation off the ground.
-export GEOID_HEIGHT_M=0.0
-if [ -f "${SURFACE}" ]; then
-	geoid_height=$(python3 -c "
-import json, subprocess, sys
-latitude, longitude, _ = json.load(open('${SURFACE}'))['origin_lla']
-print(subprocess.run(['GeoidEval'], input=f'{latitude} {longitude}',
-                     capture_output=True, text=True).stdout.strip())")
-	printf '/**/*:\n  ros__parameters:\n    localization.geoid_height_m: %s\n' \
-		"${geoid_height}" > "${SITE_PARAMS}"
-	echo "site: geoid height ${geoid_height} m"
-	export GEOID_HEIGHT_M="${geoid_height}"
-else
-	printf '/**/*:\n  ros__parameters:\n    localization.geoid_height_m: 0.0\n' \
-		> "${SITE_PARAMS}"
-fi
+source /usr/local/bin/site-params.sh
 
 # Where the survey marker really is. A fiducial capture is localized and the
 # difference between that and this is the correction the whole fleet's frame

@@ -521,27 +521,48 @@ Two nodes draw what the vehicle flies over, both from the files a ray is
 localized against, so the panel and the localization cannot show different
 ground.
 
-| Node | Topic | Reads |
+| Node | Topic | Draws |
 |---|---|---|
-| `terrain_viz` | `/viz/scene/terrain` | the terrain mesh and the satellite image over it |
-| `buildings_viz` | `/viz/scene/buildings` | the roofs, one surface for each floor |
+| `terrain_viz` | `/viz/scene/terrain` | the terrain, with the satellite image over it |
+| `buildings_viz` | `/viz/scene/buildings` | the roofs, one surface for each floor, under the same image |
 
-Foxglove draws a triangle list and no texture, so the terrain is coloured by
-sampling the satellite image at each vertex and the panel interpolates between
-them. The detail is the mesh's rather than the image's: a stride of one over a
-600 m scene samples every 4.7 m, which is a road and a roof and a field, and
-not a car. `terrain_stride` takes one vertex in every few for a lighter
-message, at a quarter of the triangles for each step.
+Both go out as a `foxglove_msgs/SceneUpdate` carrying a binary glTF. Foxglove
+draws no texture on a triangle list, and a `ModelPrimitive` carries the model's
+bytes in the message, so nothing has to serve a file and nothing has to reach a
+URL. The detail is then the image's rather than the mesh's: a third of a metre
+a pixel over a 600 m scene, against the 4.7 m a colour for each vertex gave.
+`terrain_stride` takes one vertex in every few for a lighter message, at a
+quarter of the triangles for each step.
+
+A roof is one polygon whose corners are its only vertices, so a colour for each
+corner would wash a whole building into one shade. The image goes over the
+roofs too, and the map then reads as one picture draped over the ground and the
+buildings on it rather than stopping at every wall.
 
 The mesh is read rather than the surface file because it already carries the
 texture coordinates. The imagery is a slippy tile mosaic, and placing a point
-in it needs a georeference the built scene no longer ships.
+in it needs a georeference the built scene no longer ships. Those coordinates
+are a straight map over the scene square to within half a pixel, which is how
+the roofs take their own piece of the image without reading the mesh at all.
+
+glTF is Y up and -Z forward, and Foxglove turns every glTF model a quarter turn
+about X to stand it up in a Z up world. `models/gltf.py` writes the model in
+that frame, so east stays east and north becomes -Z; written in ENU instead,
+the ground arrives on its side. glTF also measures v down from the top of the
+image where COLLADA measures it up from the bottom, and the same function flips
+it: unflipped, the map draws mirrored north for south. `test/test_gltf.py`
+holds both conventions, and `./px4sim uas ground scene` reads them back off the
+wire.
 
 Both place the scene against the vehicle's home fix, and both need
 `geoid_height_m` to do it: the scene is anchored above mean sea level and a fix
 is above the ellipsoid, so without it the whole scene is drawn a geoid
-separation off the ground, 33 m in Maryland. The simulator works it out per
-scene and the entry point exports it.
+separation off the ground, 33 m in Maryland. The same separation reaches
+`sim_ground_truth`, which publishes casualty positions as fixes and would
+otherwise put every one of them 33 m over the ground it lies on.
+`modules/ros-base/site-params.sh` works it out from the scene, and both entry
+points source it: the ground station draws the same scene against the same
+fixes as the vehicle, and a station without it draws its own version.
 
 ## Speed and determinism
 

@@ -132,6 +132,9 @@ Fly a vehicle and see what its nodes make of it:
 ./px4sim uas 11 capture mosaic   # mosaic, fiducial, vlm, snapshot
 ./px4sim probe 11             # what its ROS graph carries right now
 ./px4sim probe ground         # the same, on the ground station
+./px4sim foxglove ground      # what a panel is offered, over Foxglove's own protocol
+./px4sim uas 11 heading       # which way the vehicle, its camera and its footprint point
+./px4sim uas 11 scene         # the ground, roofs and targets the 3D panel is given
 ./px4sim zoom 11 wide         # a v3 lens: narrow, mid or wide
 ./px4sim snap rgb11           # one frame of a stream, to look at
 ```
@@ -144,8 +147,8 @@ Fly a vehicle and see what its nodes make of it:
 ./px4sim verify airframes     # one of them
 ```
 
-The first four stages need nothing running. `vehicle`, `ground`, `fleet` and
-`captures` fly the stack and say so if it is not up. What each one measured
+The first four stages need nothing running. `vehicle`, `ground`, `fleet`,
+`captures` and `foxglove` fly the stack and say so if it is not up. What each one measured
 last is in [docs/development.md](docs/development.md).
 
 Start a subset by naming the profiles:

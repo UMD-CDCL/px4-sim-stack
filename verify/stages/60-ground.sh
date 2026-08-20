@@ -98,3 +98,18 @@ else
 	expect_eq "a station whose clicks are off ignores them" True \
 		"$(python3 -c "print(abs($ignored - $aimed_before) < 3)")"
 fi
+
+# Everything an operator sees in the scene hangs off the aircraft's own frame:
+# the model, the camera under it, the outline on the ground and the picture
+# laid into it. A station that is not told which way the aircraft points draws
+# all of them the same wrong way, and each one looks right beside the others.
+for side in "$lead" ground; do
+	name=$([ "$side" = ground ] && echo "the ground station" || echo "uas$lead")
+	if facing=$(./px4sim uas "$side" heading 2>&1); then
+		pass "$name points uas$lead the way it is flying"
+		note "$(printf '%s' "$facing" | tr '\n' ' ')"
+	else
+		fail "$name points uas$lead the way it is flying"
+		note "$(printf '%s' "$facing" | tr '\n' ' ')"
+	fi
+done

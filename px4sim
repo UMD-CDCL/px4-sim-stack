@@ -307,6 +307,8 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     uas <N> <command>   Fly one vehicle and read its nodes: status, arm,
                         takeoff [m], land, gimbal <pitch>
     probe <N> [topic]   What that vehicle's ROS graph carries right now
+    foxglove <N>        What Foxglove is offered on that bridge, over the
+                        protocol Foxglove speaks. `foxglove ground` too.
     snap <stream>       Save one frame of a live stream to look at
     zoom <N> <preset>   Set a v3 lens: narrow, mid or wide
     clean               Remove containers, networks and volumes
@@ -713,7 +715,7 @@ snap)
 	say "$out"
 	;;
 
-uas|probe)
+uas|probe|foxglove)
 	# Inside the vehicle's companion, on the vehicle's ROS domain, which is
 	# where its nodes are. The tools live in verify/component and are copied
 	# in rather than mounted, so this works against a container that compose
@@ -732,7 +734,11 @@ uas|probe)
 		[ -n "$container" ] || die "onboard$n is not running. Start it: ./px4sim start"
 		domain=$(uas_domain "$n")
 	fi
-	tool=uas.py; [ "$cmd" = probe ] && tool=graph_probe.py
+	case "$cmd" in
+	probe)    tool=graph_probe.py ;;
+	foxglove) tool=foxglove_probe.py ;;
+	*)        tool=uas.py ;;
+	esac
 	# The default list stands in when no topic is named. An option is not a
 	# topic, so `probe 11 --deadline 5` still gets the list.
 	named_a_topic=false
@@ -750,13 +756,12 @@ uas|probe)
 	[ "$cmd" = uas ] && set -- "$n" "$@"
 	docker cp verify/component/uas.py "$container:/tmp/uas.py" >/dev/null
 	docker cp verify/component/graph_probe.py "$container:/tmp/graph_probe.py" >/dev/null
+	docker cp verify/component/foxglove_probe.py "$container:/tmp/foxglove_probe.py" >/dev/null
 	docker cp verify/component/udp-only.xml "$container:/tmp/udp-only.xml" >/dev/null
 	# DDS writes its own warnings to stdout, so a caller reading the answer
 	# gets them mixed into it. The probe answers in three tab separated fields
-	# and nothing else does, so that is what comes back.
-	# DDS writes its own warnings to stdout, so a caller reading the answer
-	# gets them mixed into it. The probe answers in three tab separated fields
-	# and nothing else does, so that is what comes back.
+	# and nothing else does, so that is what comes back. The Foxglove probe
+	# speaks no DDS and has nothing to strip.
 	probe_answer() { if [ "$cmd" = probe ]; then awk -F'\t' 'NF == 3'; else cat; fi; }
 	docker exec -e ROS_DOMAIN_ID="$domain" \
 		-e FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/udp-only.xml "$container" bash -lc '

@@ -179,6 +179,14 @@ RUN set -eux; \
     mkdir -p "${WORKSPACE_DIR}/src" /models /logs /terrain /camera; \
     chown -R "${HOST_UID}:${HOST_GID}" /home/user "${WORKSPACE_DIR}" /models /logs /terrain /camera
 
+# What verify/component/foxglove_probe.py speaks. It reads the Foxglove bridge
+# over the same protocol the panels do, which is the only way to see a layout
+# the way an operator's Foxglove sees it. Its own layer, above everything slow
+# and below the workspace, so an edit to a node never pays for it.
+# From pip rather than apt: jammy ships websockets 9.1, which passes a loop to
+# asyncio.Lock and so cannot run on the Python 3.10 beside it.
+RUN python3 -m pip install --no-cache-dir "websockets==12.0"
+
 # ---------------------------------------------------------------------------
 # The workspace. `ros2_ws` is a named build context, so the sources stay where
 # they are checked out and no copy of them lives in this repository.
@@ -211,3 +219,8 @@ USER ${USERNAME}
 RUN . /opt/ros/humble/setup.sh \
     && colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
 
+# What both entry points work the site out with. Last, because it is the
+# cheapest thing here to edit and nothing above it depends on it.
+USER root
+COPY site-params.sh /usr/local/bin/site-params.sh
+USER ${USERNAME}

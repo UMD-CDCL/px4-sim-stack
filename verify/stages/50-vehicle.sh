@@ -50,7 +50,9 @@ done
 # so the ground it draws has to be that ground: the right shape, at the right
 # height, in colours that came from the satellite image. A scene drawn a geoid
 # separation above the aircraft is published exactly as convincingly.
-drawn=$(uas scene /viz/scene/terrain)
+# Faults are written to the error stream, so they are read back here rather
+# than left to a stage that only ever sees the numbers.
+drawn=$(uas scene /viz/scene/terrain 2>&1)
 if printf '%s' "$drawn" | grep -q '^fault'; then
 	fail "the panel draws the ground the rays are cast at"
 	note "$(printf '%s' "$drawn" | grep '^fault' | tr '\n' ' ')"
@@ -61,11 +63,11 @@ else
 	note "$(printf '%s' "$drawn" | tail -2)"
 fi
 
-# The buildings are roofs, so they stand above the terrain and carry more
-# relief than it does. Only that they are drawn is checked here; where they
-# stand is buildings_viz's own business and the same offset as the terrain.
-if ./px4sim uas "$lead" scene /viz/scene/buildings 2>/dev/null | grep -q '^vertices'; then
-	pass "the panel draws the scene's buildings"
+# The buildings come with the ground, drawn from the same image and measured
+# against the same survey, so the check above reads them too. It says nothing
+# about them when nothing published them.
+if printf '%s' "$drawn" | grep -q '^roofs'; then
+	pass "the panel draws the scene's buildings: $(printf '%s' "$drawn" | grep '^roofs')"
 else
 	fail "the panel draws the scene's buildings"
 fi

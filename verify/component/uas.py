@@ -12,6 +12,7 @@ Runs inside that vehicle's companion container, on its ROS domain:
 """
 
 import argparse
+import array
 import json
 import math
 import os
@@ -27,6 +28,8 @@ import pymap3d as pm
 import rclpy
 from rclpy.node import Node
 from scipy.spatial.transform import Rotation
+from rclpy.time import Time
+from tf2_ros import Buffer, TransformException, TransformListener
 from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
                        ReliabilityPolicy)
 
@@ -38,17 +41,28 @@ from mavros_msgs.srv import CommandBool, CommandInt, CommandTOL, SetMode
 from std_srvs.srv import SetBool, Trigger
 from sensor_msgs.msg import NavSatFix
 from rosidl_runtime_py.utilities import get_message
-from std_msgs.msg import Float32
+from std_msgs.msg import Float32, Float64
 from foxglove_msgs.msg import SceneUpdate
+from cdcl_umd_msgs.msg import CameraFOV
+from vision_msgs.msg import Detection3DArray
 from visualization_msgs.msg import Marker, MarkerArray
 
 SENSOR_QOS = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
                         history=HistoryPolicy.KEEP_LAST, depth=1)
 RELIABLE_QOS = QoSProfile(reliability=ReliabilityPolicy.RELIABLE,
                           history=HistoryPolicy.KEEP_LAST, depth=10)
-# How far the drawn scene may sit from where the surface file puts it. The fix
-# and the scene are anchored in different vertical datums, and getting that
-# wrong moves the whole scene by a geoid separation, 33 m here.
+# How far the drawn ground may be from square with the scene, and how near an
+# edge of the image its own edge has to fall.
+SCENE_SPAN_TOLERANCE_M = 5.0
+# How far the drawn heading of the airframe may be from the one it flies, and
+# how far the footprint may lie from where the camera points. The footprint is
+# a quadrilateral on uneven ground, so its middle is not exactly down the
+# camera's own axis.
+HEADING_TOLERANCE_DEG = 10.0
+FOOTPRINT_TOLERANCE_DEG = 20.0
+FOOTPRINT_MIN_DEPRESSION_DEG = 15.0
+METRES_PER_DEGREE = 111320.0
+TEXTURE_EDGE = 0.05
 SCENE_HEIGHT_TOLERANCE_M = 5.0
 # Colours closer together than this came from a default, not from an image.
 FLAT_COLOUR = 0.02
@@ -176,6 +190,19 @@ class Uas(Node):
         end = time.monotonic() + seconds
         while time.monotonic() < end:
             rclpy.spin_once(self, timeout_sec=0.05)
+
+    def topic(self, name: str) -> str:
+        """A name in this vehicle's namespace, unless it is already absolute."""
+        return name if name.startswith("/") else f"{self.namespace}/{name}"
+
+    def latest(self, message_type, topic: str, qos, deadline_s: float):
+        """The newest message on a topic, or None. Every reader here wants the
+        same thing: subscribe, wait, take what came."""
+        arrived = {}
+        self.create_subscription(message_type, topic,
+                                 lambda msg: arrived.__setitem__("msg", msg), qos)
+        self.wait_until(lambda: "msg" in arrived, deadline_s, topic)
+        return arrived.get("msg")
 
     def wait_until(self, ready, deadline_s: float, what: str, remaining=None) -> bool:
         """Poll for a condition and say which way it went. Every wait here says
@@ -609,14 +636,129 @@ def command_fiducial(uas: Uas, args) -> int:
     return 0
 
 
+def compass_of(orientation) -> float:
+    """A frame's heading, in the degrees from north an operator reads.
+
+    A tree is ENU, so its yaw counts anticlockwise from east, and every
+    heading beside it counts clockwise from north.
+    """
+    yaw = Rotation.from_quat([orientation.x, orientation.y, orientation.z,
+                              orientation.w]).as_euler("xyz")[2]
+    return (90.0 - math.degrees(yaw)) % 360.0
+
+
+def depression_of(orientation) -> float:
+    """How far below the horizon a frame's own forward axis points."""
+    forward = Rotation.from_quat([orientation.x, orientation.y, orientation.z,
+                                  orientation.w]).apply([1.0, 0.0, 0.0])
+    return -math.degrees(math.asin(max(-1.0, min(1.0, forward[2]))))
+
+
+def separation(first: float, second: float) -> float:
+    """How far apart two headings are, the short way round."""
+    return abs((first - second + 180.0) % 360.0 - 180.0)
+
+
+def command_heading(uas: Uas, args) -> int:
+    """Which way the vehicle, its camera and its footprint are pointing.
+
+    Everything an operator sees in the scene hangs off the aircraft's own
+    frame: the model, the camera under it, the outline on the ground and the
+    picture laid into it. A station that is not told which way the aircraft
+    points draws all of them the same wrong way, and each one looks right
+    beside the others.
+    """
+    buffer = Buffer()
+    TransformListener(buffer, uas)
+    heading = {}
+    uas.create_subscription(Float64, uas.topic("global_position/compass_hdg"),
+                            lambda msg: heading.__setitem__("compass", msg.data),
+                            SENSOR_QOS)
+    # The outline is drawn in the localization origin frame and published as
+    # fixes about that frame's own fix. Measuring it from there rather than
+    # from the vehicle's GPS keeps a surveyed frame out of the answer: a
+    # fiducial correction moves the frame and the outline in it together.
+    origin_fix = uas.latest(NavSatFix, uas.topic("home_position/fix"),
+                            RELIABLE_QOS, args.deadline)
+    if not uas.wait_until(lambda: "compass" in heading, args.deadline, "a compass heading"):
+        return 1
+
+    frames = {"airframe": f"d{args.number}_base_link",
+              "camera": f"d{args.number}_gimbal_frame"}
+    origin = args.origin or f"uas{args.number}_home_position"
+    print(f"compass\t{heading['compass']:.1f}")
+    drawn = {}
+    depression = {}
+    standing = {}
+    for what, frame in frames.items():
+        # A listener starts with an empty buffer, and a tree takes a moment to
+        # reach it. Asking straight away reports a frame that is published as
+        # one that does not exist.
+        if not uas.wait_until(lambda f=frame: buffer.can_transform(origin, f, Time()),
+                              args.deadline, f"{origin} -> {frame}"):
+            return 1
+        found = buffer.lookup_transform(origin, frame, Time())
+        drawn[what] = compass_of(found.transform.rotation)
+        depression[what] = depression_of(found.transform.rotation)
+        standing[what] = found.transform.translation
+        print(f"{what}\t{drawn[what]:.1f}")
+
+    # A fiducial survey moves the origin frame away from the fix the outline is
+    # published about, and the outline carries that move while the frame tree
+    # does not. The camera is put through the same move, so the two are
+    # measured in one place whether or not a marker has been surveyed.
+    survey = (0.0, 0.0)
+    try:
+        moved = buffer.lookup_transform(f"d{args.number}_fiducial_offset",
+                                        origin, Time()).transform.translation
+        survey = (moved.x, moved.y)
+        print(f"survey\t{survey[0]:+.1f}\t{survey[1]:+.1f}")
+    except TransformException:
+        pass
+
+    view = uas.latest(CameraFOV, uas.topic("camera_fov"), RELIABLE_QOS, args.deadline)
+    if view is not None and view.fov_polygon and origin_fix is not None:
+        middle = [statistics.median([point.latitude for point in view.fov_polygon]),
+                  statistics.median([point.longitude for point in view.fov_polygon])]
+        north = (middle[0] - origin_fix.latitude) * METRES_PER_DEGREE \
+            - standing["camera"].y - survey[1]
+        east = (middle[1] - origin_fix.longitude) * METRES_PER_DEGREE \
+            * math.cos(math.radians(origin_fix.latitude)) \
+            - standing["camera"].x - survey[0]
+        drawn["footprint"] = math.degrees(math.atan2(east, north)) % 360.0
+        print(f"footprint\t{drawn['footprint']:.1f}\t{math.hypot(east, north):.0f}")
+
+    faults = []
+    if separation(drawn["airframe"], heading["compass"]) > HEADING_TOLERANCE_DEG:
+        faults.append(f"the airframe is drawn pointing {drawn['airframe']:.0f} "
+                      f"where it is flying {heading['compass']:.0f}")
+    # A camera near the horizon draws no patch under the aircraft: the outline
+    # runs to the far limit of the ray and its middle says nothing about where
+    # the camera points. Only a camera looking at the ground is asked.
+    if depression.get("camera", 0.0) < FOOTPRINT_MIN_DEPRESSION_DEG:
+        print(f"footprint\tnot compared: the camera is "
+              f"{depression.get('camera', 0.0):.0f} degrees below the horizon")
+    elif "footprint" in drawn and \
+            separation(drawn["footprint"], drawn["camera"]) > FOOTPRINT_TOLERANCE_DEG:
+        faults.append(f"the footprint lies {drawn['footprint']:.0f} from the "
+                      f"vehicle where the camera points {drawn['camera']:.0f}")
+    for fault in faults:
+        print(f"fault\t{fault}", file=sys.stderr)
+    return 1 if faults else 0
+
+
 def command_scene(uas: Uas, args) -> int:
     """Check the scene the 3D panel is given.
 
     A message either arrives or it does not, and that is all a topic probe can
     say. What matters is whether the ground it draws is the ground: the right
-    shape, at the right height, with an image over it. A terrain drawn flat, or
-    a geoid separation above the aircraft, is published exactly as convincingly
-    as a correct one.
+    shape, at the right height, the right way round, with an image over it. A
+    terrain drawn flat, mirrored, or a geoid separation above the aircraft is
+    published exactly as convincingly as a correct one.
+
+    The scene is one place, so this reads all of it: the ground, the buildings
+    that stand on it and the targets that lie on it. Each is placed by its own
+    node, and a panel shows the disagreement rather than the fault.
     """
     # The ground arrives as a model and the buildings as triangles, because a
     # roof needs no image over it. Both are the scene, so both are read here.
@@ -650,42 +792,180 @@ def command_scene(uas: Uas, args) -> int:
 
     # The model's own bytes say what it draws, so this reads them rather than
     # trusting the log line that announced them.
-    vertices, lowest, highest, has_image = gltf_summary(bytes(model.data))
-    grid = [z for row in json.load(open(args.surface))["terrain_z"] for z in row]
+    drawn = gltf_terrain(bytes(model.data))
+    surface = json.load(open(args.surface))
+    grid = [z for row in surface["terrain_z"] for z in row]
     relief = max(grid) - min(grid)
+    lowest, highest = drawn["up"]
     drawn_relief = highest - lowest
     # The model is built about the scene centre and placed by its pose.
     height = model.pose.position.z + statistics.median([lowest, highest]) \
         - statistics.median(grid)
 
-    print(f"vertices\t{vertices}")
+    print(f"vertices\t{drawn['vertices']}")
     print(f"bytes\t{len(model.data)}")
     print(f"height\t{height:+.1f}")
     print(f"relief\t{drawn_relief:.1f}\t{relief:.1f}")
-    print(f"image\t{'yes' if has_image else 'no'}")
+    print(f"image\t{'yes' if drawn['image'] else 'no'}")
+    print(f"span\t{drawn['east_span']:.0f}\t{drawn['north_span']:.0f}"
+          f"\t{surface['side_m']:.0f}")
+    print(f"texture\tnorth v {drawn['north_edge_v']:.2f}"
+          f"\tsouth v {drawn['south_edge_v']:.2f}"
+          f"\teast u {drawn['east_edge_u']:.2f}"
+          f"\twest u {drawn['west_edge_u']:.2f}")
 
     faults = []
     if abs(height) > SCENE_HEIGHT_TOLERANCE_M:
         faults.append(f"drawn {height:+.1f} m from the surface file")
     if abs(drawn_relief - relief) > SCENE_HEIGHT_TOLERANCE_M:
         faults.append(f"relief {drawn_relief:.1f} m against {relief:.1f} m")
-    if not has_image:
+    if not drawn["image"]:
         faults.append("no image, so the ground has no map on it")
+    for axis in ("east_span", "north_span"):
+        if abs(drawn[axis] - surface["side_m"]) > SCENE_SPAN_TOLERANCE_M:
+            faults.append(f"{axis.replace('_', ' ')} {drawn[axis]:.0f} m "
+                          f"against a {surface['side_m']:.0f} m scene")
+    if drawn["north_edge_v"] > TEXTURE_EDGE or drawn["south_edge_v"] < 1 - TEXTURE_EDGE:
+        faults.append("the map is mirrored north for south")
+    if drawn["east_edge_u"] < 1 - TEXTURE_EDGE or drawn["west_edge_u"] > TEXTURE_EDGE:
+        faults.append("the map is mirrored east for west")
+    faults += standing_on_it(uas, model, drawn, surface, args)
     for fault in faults:
         print(f"fault\t{fault}", file=sys.stderr)
     return 1 if faults else 0
 
 
-def gltf_summary(model: bytes):
-    """What a GLB holds: how many vertices, the range of their heights, and
-    whether an image came with it."""
+def standing_on_it(uas, model, drawn, surface, args):
+    """How far the buildings and the targets are off the drawn ground.
+
+    Everything in the scene comes from one survey, so each part belongs at a
+    height the survey already gives. A casualty lies on the terrain. A
+    building is drawn as its roofs and nothing else, so it belongs a storey
+    above it, and the survey says how far. Each part is placed by a different
+    node against a datum of its own, and a gap of a geoid separation is the
+    one that keeps coming back.
+    """
+    faults = []
+    offset = (model.pose.position.x, model.pose.position.y, model.pose.position.z)
+    for what, topic, heights, expected in (
+            ("the roofs", args.buildings, building_heights,
+             surveyed_roof_height(surface)),
+            ("the targets", uas.topic(args.targets), target_heights, 0.0)):
+        places = heights(uas, topic)
+        if not places or expected is None:
+            print(f"{what.split()[-1]}\tnothing on {topic}")
+            continue
+        gaps = [z - terrain_height(drawn, offset, east, north)
+                for east, north, z in places]
+        gap = statistics.median(gaps)
+        print(f"{what.split()[-1]}\t{len(gaps)}\t{gap:+.1f}\t{expected:+.1f}")
+        if abs(gap - expected) > SCENE_HEIGHT_TOLERANCE_M:
+            faults.append(f"{what} stand {gap:+.1f} m over the drawn ground "
+                          f"where the survey puts them {expected:+.1f} m")
+    return faults
+
+
+def surveyed_roof_height(surface):
+    """How far over the ground the scene's own survey puts its roofs."""
+    grid = surface.get("terrain_z")
+    if not grid:
+        return None
+    side, cells = float(surface["side_m"]), int(surface["grid_n"])
+    step = side / cells
+    def cell(value):
+        return min(max(int(round((value + side / 2) / step)), 0), cells)
+    heights = []
+    for building in surface.get("buildings") or []:
+        ring = building.get("footprint") or []
+        if len(ring) < 3 or "roof_z" not in building:
+            continue
+        east = statistics.median(corner[0] for corner in ring)
+        north = statistics.median(corner[1] for corner in ring)
+        heights.append(float(building["roof_z"]) - grid[cell(north)][cell(east)])
+    return statistics.median(heights) if heights else None
+
+
+def terrain_height(drawn, offset, east, north):
+    """The drawn ground under a point. The mesh is a grid a few metres across,
+    and what is being measured here is a geoid separation, so the nearest
+    vertex is near enough."""
+    east_m = np.asarray(drawn["east"]) + offset[0]
+    north_m = np.asarray(drawn["north"]) + offset[1]
+    nearest = int(np.argmin((east_m - east) ** 2 + (north_m - north) ** 2))
+    return drawn["height"][nearest] + offset[2]
+
+
+def building_heights(uas, topic):
+    """Where the roofs are drawn, corner by corner. They arrive as one model,
+    the same way the ground does, so this reads the same bytes back."""
+    message = uas.latest(SceneUpdate, topic, LATCHED_QOS, 20.0)
+    models = [model for entity in (message.entities if message else [])
+              for model in entity.models]
+    if not models:
+        return []
+    drawn = gltf_terrain(bytes(models[0].data))
+    pose = models[0].pose.position
+    return list(zip((east + pose.x for east in drawn["east"]),
+                    (north + pose.y for north in drawn["north"]),
+                    (height + pose.z for height in drawn["height"])))
+
+
+def target_heights(uas, topic):
+    """Where each known target lies, as the node that scores against it holds
+    it."""
+    message = uas.latest(Detection3DArray, topic, RELIABLE_QOS, 20.0)
+    if message is None:
+        return []
+    return [(d.bbox.center.position.x, d.bbox.center.position.y,
+             d.bbox.center.position.z) for d in message.detections]
+
+
+def gltf_terrain(model: bytes):
+    """What a GLB holds, and which way round it holds it.
+
+    glTF is Y up and -Z forward, so the axes are read as east, up and south.
+    Foxglove turns the model a quarter turn about X to stand it up, and a
+    model written in any other frame arrives on its side.
+
+    The texture coordinates say the rest. glTF measures v down from the top of
+    the image, satellite imagery starts at its northern edge, so the northern
+    edge of the ground belongs at v = 0 and the eastern edge at u = 1. A map
+    that is mirrored or turned shows up here and nowhere else.
+    """
     if model[:4] != b"glTF":
         raise ValueError("not a GLB")
     length = struct.unpack("<I", model[12:16])[0]
     document = json.loads(model[20:20 + length])
-    position = document["accessors"][0]
-    lowest, highest = position["min"][2], position["max"][2]
-    return position["count"], lowest, highest, bool(document.get("images"))
+    binary = 20 + length + 8
+
+    def read(accessor_index, columns):
+        accessor = document["accessors"][accessor_index]
+        view = document["bufferViews"][accessor["bufferView"]]
+        start = binary + view["byteOffset"] + accessor.get("byteOffset", 0)
+        values = array.array("f")
+        values.frombytes(model[start:start + 4 * columns * accessor["count"]])
+        return [tuple(values[i:i + columns])
+                for i in range(0, len(values), columns)]
+
+    positions = read(0, 3)
+    uvs = read(1, 2)
+    north = [-position[2] for position in positions]
+    return {
+        "east": [position[0] for position in positions],
+        "north": north,
+        "height": [position[1] for position in positions],
+        "vertices": len(positions),
+        "image": bool(document.get("images")),
+        "up": (min(p[1] for p in positions), max(p[1] for p in positions)),
+        "east_span": max(p[0] for p in positions) - min(p[0] for p in positions),
+        "north_span": max(north) - min(north),
+        "north_edge_v": uvs[north.index(max(north))][1],
+        "south_edge_v": uvs[north.index(min(north))][1],
+        "east_edge_u": uvs[max(range(len(positions)),
+                              key=lambda i: positions[i][0])][0],
+        "west_edge_u": uvs[min(range(len(positions)),
+                              key=lambda i: positions[i][0])][0],
+    }
 
 
 COMMANDS = {
@@ -703,6 +983,7 @@ COMMANDS = {
     "click": command_click,
     "fiducial": command_fiducial,
     "scene": command_scene,
+    "heading": command_heading,
 }
 
 
@@ -756,8 +1037,16 @@ def main() -> int:
                        help="click without setting the mode, to see whether a "
                             "station whose clicks are off really ignores them")
     click.add_argument("--settle", type=float, default=5.0)
+    facing = sub.add_parser("heading")
+    facing.add_argument("--origin", default="",
+                        help="the frame to measure in. Default: the vehicle's home")
+    facing.add_argument("--deadline", type=float, default=20.0)
+
     scene = sub.add_parser("scene")
     scene.add_argument("topic", nargs="?", default="/viz/scene/terrain")
+    scene.add_argument("--buildings", default="/viz/scene/buildings")
+    scene.add_argument("--targets", default="scoring/target_status",
+                       help="relative to the vehicle's namespace")
     scene.add_argument("--surface",
                        default=f"/scenes/worlds/{os.environ.get('SCENE', '')}_surface.json")
     scene.add_argument("--deadline", type=float, default=30.0)
