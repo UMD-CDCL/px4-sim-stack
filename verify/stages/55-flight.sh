@@ -93,7 +93,10 @@ fi
 
 # ----------------------------------------------------------- a held place
 held=$(uas click roi 320 180)
-state=$(./px4sim uas "$lead" published --topic gimbal/state 2>/dev/null | tail -1)
+# The state is latched and it speaks only when the mode changes, so it is read
+# with the latched reader. `published` speaks TargetBoxArray and can never
+# answer a String topic, which is what made this look like a broken gimbal.
+state=$(./px4sim uas "$lead" topic gimbal/state 2>/dev/null | tail -1)
 if printf '%s' "$state" | grep -q "mode=roi"; then
 	pass "a click in region of interest mode holds a place"
 else
@@ -111,6 +114,82 @@ if [ -n "$first" ] && [ -n "$second" ]; then
 		"$(python3 -c "print(abs($second - $first) >= 3.0)")"
 else
 	fail "the gimbal repoints to hold that place as the aircraft moves"
+fi
+
+# ------------------------------------------- what the operator is shown
+# The overlay is what Foxglove projects into the image panel, so its rate is a
+# product feature rather than waste. It fell to the scoring rate once and the
+# marks visibly trailed the picture.
+uas gimbal "-$depression" >/dev/null
+counts=$(./px4sim probe "$lead" --count 8 \
+	"/viz/uas$lead/scoring/targets" \
+	"/uas$lead/scoring/verdicts" \
+	"/viz/uas$lead/scoring/annotations" 2>/dev/null)
+marks=$(printf '%s' "$counts" | awk -F'\t' '/viz.*scoring\/targets/ { print $3 }')
+judged=$(printf '%s' "$counts" | awk -F'\t' '/^\/uas[0-9]*\/scoring\/verdicts/{ print $3 }')
+boxes=$(printf '%s' "$counts" | awk -F'\t' '/scoring\/annotations/  { print $3 }')
+expect_eq "the overlay is drawn about ten times a second" True \
+	"$(python3 -c "print(${marks:-0} >= 60)")"
+
+# One message decides both views, so a box goes on the picture when the verdict
+# that judges it does. They were built from different messages once, and a box
+# wore the verdict of whatever shared its place in the frame before.
+#
+# This counts the SCORER's verdicts, not the marker arrays: the marks are
+# restamped on their own timer at ten a second so that the overlay tracks the
+# camera, and comparing the boxes against them measures the timer instead.
+if [ "${judged:-0}" -gt 0 ] && [ "${boxes:-0}" -gt 0 ]; then
+	expect_eq "the boxes are published with the verdicts that judge them" True \
+		"$(python3 -c "print(abs($boxes - $judged) <= 0.2 * $judged)")"
+else
+	fail "the boxes are published with the verdicts that judge them"
+fi
+note "verdicts ${judged:-0}, boxes ${boxes:-0}, marks ${marks:-0} in 8s"
+
+# The one that used to fail. Nothing localizes above the horizon gate, and the
+# localizer publishes nothing at all on a frame that held nothing, so the marks
+# and the boxes both used to hang until a timeout swept them.
+uas gimbal -5 >/dev/null
+empty=$(./px4sim probe "$lead" --count 4 \
+	"/viz/uas$lead/scoring/verdicts" 2>/dev/null | awk -F'\t' '{ print $3 }')
+still=$(./px4sim uas "$lead" published --topic scoring/verdicts 2>/dev/null | tail -1)
+uas gimbal "-$depression" >/dev/null
+back=$(./px4sim probe "$lead" --count 6 \
+	"/viz/uas$lead/scoring/annotations" 2>/dev/null | awk -F'\t' '{ print $3 }')
+expect_eq "the marks come back when the camera does" True \
+	"$(python3 -c "print(${back:-0} > 0)")"
+
+# ------------------------------------------------------------- the mosaic
+# A capture asked for from the ground has to reach the vehicle, and the map it
+# builds has to land on the ground the vehicle flew over.
+#
+# A frame is not always added. A vehicle holding station sees the ground it has
+# already mapped, and the node refuses a frame that is nearly all old ground.
+# That is the node working, so this asks whether the capture ARRIVED, and lets
+# the node decide what to do with it.
+seen_before=$(mosaic_summary 30m "$lead" | sed -n 's/received=\([0-9]*\).*/\1/p')
+drew_before=$(terrain_map_draws 30m)
+added_before=$(mosaic_added 30m "$lead")
+./px4sim capture "$lead" mosaic >/dev/null 2>&1
+seen_after=$(mosaic_summary 30m "$lead" | sed -n 's/received=\([0-9]*\).*/\1/p')
+if [ "${seen_after:-0}" -gt "${seen_before:-0}" ]; then
+	pass "a capture asked for from the ground reaches the vehicle"
+	note "$(mosaic_summary 30m "$lead")"
+else
+	fail "a capture asked for from the ground reaches the vehicle"
+	note "the mosaic node saw ${seen_after:-no} captures, was ${seen_before:-none}"
+fi
+
+# Only a frame the mosaic accepted produces a new map to draw. Asking the
+# terrain to redraw for a frame that was refused as old ground would fail on
+# the node doing the right thing.
+if [ "$(mosaic_added 30m "$lead")" = "${added_before:-0}" ]; then
+	skip "the map is drawn into the terrain: the frame was old ground"
+elif await 40 "the map is drawn into the terrain, one surface" \
+		terrain_drew_since "${drew_before:-0}" 30m; then
+	note "$(terrain_drew_map 30m)"
+else
+	note "the mosaic took the frame and the terrain never drew it"
 fi
 
 # ------------------------------------------------------- giving it up

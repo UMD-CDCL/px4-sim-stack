@@ -669,6 +669,31 @@ def separation(first: float, second: float) -> float:
     return abs((first - second + 180.0) % 360.0 - 180.0)
 
 
+def command_topic(uas: Uas, args) -> int:
+    """Print one message from any topic this graph carries.
+
+    The type comes from the graph, so this needs no table of its own, and the
+    subscription is latched. A topic that speaks only when something changes
+    would otherwise never answer a reader that subscribed after the change:
+    the reader waits for a change that has already happened, and an empty
+    answer reads as a broken node rather than as a missed message.
+    """
+    uas.pump(3.0)
+    name = args.topic if args.topic.startswith("/") else f"{uas.namespace}/{args.topic}"
+    known = dict(uas.get_topic_names_and_types())
+    if name not in known:
+        print(f"nothing publishes {name}", file=sys.stderr)
+        return 1
+    arrived = {}
+    uas.create_subscription(get_message(known[name][0]), name,
+                            lambda msg: arrived.setdefault("msg", msg), LATCHED_QOS)
+    if not uas.wait_until(lambda: "msg" in arrived, args.deadline, name):
+        return 1
+    message = arrived["msg"]
+    print(getattr(message, "data", message))
+    return 0
+
+
 def command_heading(uas: Uas, args) -> int:
     """Which way the vehicle, its camera and its footprint are pointing.
 
@@ -994,6 +1019,7 @@ COMMANDS = {
     "fiducial": command_fiducial,
     "scene": command_scene,
     "heading": command_heading,
+    "topic": command_topic,
 }
 
 
@@ -1062,6 +1088,9 @@ def main() -> int:
     scene.add_argument("--surface",
                        default=f"/scenes/worlds/{os.environ.get('SCENE', '')}_surface.json")
     scene.add_argument("--deadline", type=float, default=30.0)
+    topic = sub.add_parser("topic")
+    topic.add_argument("topic", help="absolute, or relative to the namespace")
+    topic.add_argument("--deadline", type=float, default=10.0)
     fiducial = sub.add_parser("fiducial")
     fiducial.add_argument("--deadline", type=float, default=20.0)
     score = sub.add_parser("score")

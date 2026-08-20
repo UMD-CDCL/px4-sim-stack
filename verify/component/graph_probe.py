@@ -8,6 +8,11 @@ graph of twenty topics costs a minute of waiting and hides which ones were
 merely slow.
 
 Prints one tab separated line per topic: name, publishers, and the verdict.
+
+With `--count SECONDS` the verdict is instead how many messages arrived in
+that window, so two streams can be compared over one window rather than
+sampled one after the other. A stream sampled twice in a row cannot be told
+from a stream that changed in between, which is how a race reads as a fault.
 """
 
 import argparse
@@ -27,6 +32,7 @@ class Probe(Node):
         super().__init__("verify_graph_probe")
         self.deadline_s = deadline_s
         self.seen = set()
+        self.counts = {}
         self.publishers_of = {}
         self.subscriptions_made = []
         self.topics = topics
@@ -55,6 +61,7 @@ class Probe(Node):
     def _make_callback(self, topic):
         def callback(_message):
             self.seen.add(topic)
+            self.counts[topic] = self.counts.get(topic, 0) + 1
         return callback
 
 
@@ -63,6 +70,9 @@ def main() -> int:
     parser.add_argument("topics", nargs="+")
     parser.add_argument("--deadline", type=float, default=10.0,
                         help="seconds to wait for the first message")
+    parser.add_argument("--count", type=float, default=0.0, metavar="SECONDS",
+                        help="listen this long and report messages seen "
+                             "instead of the verdict")
     args = parser.parse_args()
 
     rclpy.init()
@@ -75,12 +85,18 @@ def main() -> int:
         rclpy.spin_once(probe, timeout_sec=0.1)
     probe.discover()
 
-    end = time.monotonic() + args.deadline
-    while time.monotonic() < end and len(probe.seen) < len(args.topics):
+    # Counting listens out the whole window. Stopping at the first message of
+    # each topic would report one message everywhere.
+    end = time.monotonic() + (args.count or args.deadline)
+    while time.monotonic() < end and (
+            args.count or len(probe.seen) < len(args.topics)):
         rclpy.spin_once(probe, timeout_sec=0.05)
 
     for topic in args.topics:
         publishers = probe.publishers_of.get(topic, 0)
+        if args.count:
+            print(f"{topic}\t{publishers}\t{probe.counts.get(topic, 0)}")
+            continue
         if topic in probe.seen:
             verdict = "data"
         elif publishers:

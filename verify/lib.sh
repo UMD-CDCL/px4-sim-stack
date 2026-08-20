@@ -77,8 +77,59 @@ flying() {
 	# a vehicle on its side, an autopilot that rebooted and stopped honouring
 	# the gimbal, and a takeoff that will not climb, and it says which of those
 	# it found. A second copy of that logic here would drift from it.
-	local n=$1 height=${2:-30}
-	./px4sim fly "$n" "$height" >/dev/null 2>&1
+	# Keep what it said. `fly` names the condition it gave up on -- the world,
+	# the telemetry or the camera -- and throwing that away leaves a stage
+	# reporting only that a vehicle did not reach the air, which is the one
+	# thing the reader already knows.
+	local n=$1 height=${2:-30} said
+	said=$(./px4sim fly "$n" "$height" 2>&1)
+	local flew=$?
+	printf '%s' "$said" | grep -q "is flying at" || {
+		printf '%s\n' "$said" | grep -E "never|not ready|will not climb" \
+			| sed 's/^/       /' >&2
+		return 1
+	}
+	return $flew
+}
+
+# What a vehicle's mosaic node did with the captures it was asked for. Its own
+# words say more than the canvas does: they name the frame that was refused and
+# why, as well as the one that was added.
+mosaic_summary() {
+	./px4sim logs --since "${1:-20m}" "onboard$2" 2>/dev/null \
+		| grep -oE "received=[0-9]+, added_to_mosaic=[0-9]+, dropped=[0-9]+" | tail -1
+}
+
+# terrain_viz reports the share of the terrain image the vehicle's map covers,
+# which is the one line that says the map reached the ground rather than merely
+# being published.
+terrain_drew_map() {
+	./px4sim logs --since "${1:-20m}" offboard 2>/dev/null \
+		| grep -oE "the vehicle.s map over [^,]*" | tail -1
+}
+
+# How many frames the mosaic has ACCEPTED. A vehicle holding station sees ground
+# it has already mapped, and the node refuses a frame that is nearly all old
+# ground. Nothing downstream redraws for a refused frame, and that is the node
+# working, so a check on the drawing has to know which happened.
+mosaic_added() {
+	mosaic_summary "${1:-20m}" "$2" | sed -n 's/.*added_to_mosaic=\([0-9]*\).*/\1/p'
+}
+
+# Whether it has drawn one since the count taken before the capture. A capture
+# command returns as soon as the Bool is published, and the map has to be built,
+# published and composited after that, so a reader that looks straight away sees
+# the state before the work.
+terrain_drew_since() {
+	[ "$(terrain_map_draws "${2:-20m}")" -gt "${1:-0}" ]
+}
+
+# How many times it has said it. A check that only asks whether the words
+# appear anywhere in the window passes on a map drawn before the run started,
+# which is the same answer a stack that drew nothing today would give.
+terrain_map_draws() {
+	./px4sim logs --since "${1:-20m}" offboard 2>/dev/null \
+		| grep -c "vehicle.s map over" | tr -d '\r'
 }
 
 report() {

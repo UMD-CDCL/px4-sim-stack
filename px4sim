@@ -296,6 +296,7 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     scenario [name]     Place the targets again, with no restart
     origin              The coordinates this scene and scenario fly at
     fiducial [e] [n]    Stand the survey marker this far off its survey
+    capture <N> [kind]  Ask for a mosaic, vlm or fiducial capture
     reset               Remove the targets from the running world
     place               Put the fleet back upright at its start
     fly <N> [m]         Respawn, then get that vehicle airborne
@@ -694,7 +695,13 @@ fly)
 	# line: PX4 writes enough after boot to push "Ready for takeoff" out of any
 	# tail window, which is a check that can never match and a loop that never
 	# ends. That happened.
-	ready_by=$((SECONDS + ${FLY_READY_S:-90}))
+	# One budget for the whole wait, never a chain of them: a stage that waits
+	# out several deadlines in a row hides which step was slow. Measured on this
+	# stack, a companion recreated behind a fresh simulator reaches its first
+	# frame either side of 90s, because DeepStream loads its engines and the
+	# pipeline then has to reach an RTSP source that is itself still starting.
+	# Back to back respawns, which the verification does, land on the slow side.
+	ready_by=$((SECONDS + ${FLY_READY_S:-150}))
 	world=false
 	picture=false
 	while true; do
@@ -706,7 +713,7 @@ fly)
 			| grep -qE "camera: [a-z]+$n ready" && picture=true
 		[ "$world" = true ] && [ "$picture" = true ] && break
 		if [ "$SECONDS" -ge "$ready_by" ]; then
-			warn "uas$n was not ready in ${FLY_READY_S:-90}s:"
+			warn "uas$n was not ready in ${FLY_READY_S:-150}s:"
 			[ "$world" = true ] || warn "  the world never said 'Ready for takeoff'. ./px4sim logs sim"
 			[ "$picture" = true ] || warn "  the camera never opened. ./px4sim logs onboard$n"
 			die "nothing was flown"
@@ -779,6 +786,28 @@ genscene)
 	;;
 
 verify)   ./verify/run.sh "$@" ;;
+
+capture)
+	# Ask a vehicle for a capture the way an operator does. A Foxglove panel
+	# publishes this on the ground and the ground bridge carries it into the
+	# vehicle's domain, so asking from the ground exercises the link a real
+	# ground station uses. Publishing on the vehicle's own domain would answer
+	# even with the bridge broken.
+	n=$(vehicle_arg "${1:-}"); shift || true
+	kind=${1:-mosaic}
+	case "$kind" in
+	mosaic | vlm | fiducial) ;;
+	*) die "capture takes mosaic, vlm or fiducial, not '$kind'" ;;
+	esac
+	say "asking uas$n for a $kind capture, from the ground"
+	$DC exec -e ROS_DOMAIN_ID="$GROUND_DOMAIN" offboard bash -lc '
+		. /opt/ros/humble/setup.bash
+		. /home/user/ros2_ws/install/setup.bash
+		exec timeout 10 ros2 topic pub --once "$1" std_msgs/msg/Bool "{data: true}"' \
+		_ "/uas$n/${kind}_capture_cmd" >/dev/null \
+		&& echo "  asked for $kind on /uas$n/${kind}_capture_cmd" \
+		|| die "nothing accepted the $kind capture command"
+	;;
 
 zoom)
 	# Ask the LENS, not the picture. The zoom node owns the framing: it moves
