@@ -16,6 +16,7 @@ import json
 import math
 import os
 import statistics
+import struct
 import sys
 import time
 
@@ -38,6 +39,7 @@ from std_srvs.srv import SetBool, Trigger
 from sensor_msgs.msg import NavSatFix
 from rosidl_runtime_py.utilities import get_message
 from std_msgs.msg import Float32
+from foxglove_msgs.msg import SceneUpdate
 from visualization_msgs.msg import Marker, MarkerArray
 
 SENSOR_QOS = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -60,6 +62,8 @@ SETTLE_POLL_S = 0.2
 # PX4 drops out of OFFBOARD when setpoints stop arriving, and refuses to enter
 # it until a few have. 20 Hz is the rate the flight code streams at.
 ARRIVED_M = 2.0
+# Below this the vehicle is on the ground, whatever it believes.
+GROUNDED_M = 1.5
 # Movement that counts as getting closer rather than as noise.
 PROGRESS_M = 0.5
 # MAV_CMD_DO_REPOSITION, with the frame whose altitude is metres over home.
@@ -241,25 +245,47 @@ def command_arm(uas: Uas, _args) -> int:
 
 
 def command_takeoff(uas: Uas, args) -> int:
-    uas.wait_until(lambda: uas.state is not None, 15.0, "MAVROS state")
-    if uas.state and not uas.state.armed:
-        uas.call(uas.arming, CommandBool.Request(value=True), "arming")
-    # NAV_TAKEOFF takes an altitude above mean sea level and an operator means
-    # a height over home.
-    if not uas.wait_until(lambda: uas.height is not None, 15.0, "an altitude report"):
+    """Take off to a height over home, from whatever state the vehicle is in.
+
+    A vehicle that has flown and landed is armed, on the ground and holding a
+    mode it will not climb out of, and a takeoff sent into that is accepted and
+    does nothing. So a vehicle already on the ground is disarmed first: that is
+    the one state every takeoff works from, and it costs a second against a
+    stage that otherwise measures a vehicle that never left the ground.
+    """
+    if not uas.wait_until(lambda: uas.state is not None and uas.height is not None,
+                          20.0, "MAVROS state and an altitude report"):
         return 1
-    request = CommandTOL.Request(min_pitch=0.0, yaw=float("nan"),
-                                 latitude=float("nan"), longitude=float("nan"),
-                                 altitude=float(uas.amsl_for(args.height)))
-    result = uas.call(uas.takeoff_srv, request, "takeoff")
-    if not (result and result.success):
-        print("takeoff refused")
-        return 1
-    reached = uas.wait_until(lambda: uas.altitude >= args.height * 0.9,
-                             args.deadline, f"{args.height} m over home",
-                             remaining=lambda: max(0.0, args.height - uas.altitude))
+
+    for attempt in range(args.attempts):
+        if uas.altitude < GROUNDED_M and uas.state.armed:
+            uas.call(uas.arming, CommandBool.Request(value=False), "disarming")
+            uas.wait_until(lambda: not uas.state.armed, 15.0, "a disarmed vehicle")
+        if not uas.state.armed:
+            answer = uas.call(uas.arming, CommandBool.Request(value=True), "arming")
+            if not (answer and answer.success):
+                print("arming refused", file=sys.stderr)
+                return 1
+            uas.wait_until(lambda: uas.state.armed, 15.0, "an armed vehicle")
+
+        # NAV_TAKEOFF takes an altitude above mean sea level and an operator
+        # means a height over home.
+        request = CommandTOL.Request(min_pitch=0.0, yaw=float("nan"),
+                                     latitude=float("nan"), longitude=float("nan"),
+                                     altitude=float(uas.amsl_for(args.height)))
+        answer = uas.call(uas.takeoff_srv, request, "takeoff")
+        if not (answer and answer.success):
+            print("takeoff refused", file=sys.stderr)
+            return 1
+        if uas.wait_until(lambda: uas.altitude >= args.height * 0.9,
+                          args.deadline, f"{args.height} m over home",
+                          remaining=lambda: max(0.0, args.height - uas.altitude)):
+            print(f"height {uas.altitude:.1f} m")
+            return 0
+        print(f"still {uas.altitude:.1f} m after attempt {attempt + 1}", file=sys.stderr)
+
     print(f"height {uas.altitude:.1f} m")
-    return 0 if reached else 1
+    return 1
 
 
 def command_land(uas: Uas, args) -> int:
@@ -586,48 +612,80 @@ def command_fiducial(uas: Uas, args) -> int:
 def command_scene(uas: Uas, args) -> int:
     """Check the scene the 3D panel is given.
 
-    A marker array either arrives or it does not, and that is all a topic probe
-    can say. What matters is whether the ground it draws is the ground: the
-    right shape, at the right height, in colours that came from an image. A
-    terrain drawn flat, or a geoid separation above the aircraft, is published
-    exactly as convincingly as a correct one.
+    A message either arrives or it does not, and that is all a topic probe can
+    say. What matters is whether the ground it draws is the ground: the right
+    shape, at the right height, with an image over it. A terrain drawn flat, or
+    a geoid separation above the aircraft, is published exactly as convincingly
+    as a correct one.
     """
+    # The ground arrives as a model and the buildings as triangles, because a
+    # roof needs no image over it. Both are the scene, so both are read here.
+    uas.pump(3.0)
+    known = dict(uas.get_topic_names_and_types())
+    if args.topic not in known:
+        print(f"nothing publishes {args.topic}", file=sys.stderr)
+        return 1
     arrived = {}
-    uas.create_subscription(MarkerArray, args.topic,
+    uas.create_subscription(get_message(known[args.topic][0]), args.topic,
                             lambda msg: arrived.setdefault("msg", msg), LATCHED_QOS)
     if not uas.wait_until(lambda: "msg" in arrived, args.deadline, args.topic):
         return 1
+    message = arrived["msg"]
 
-    drawn = [m for m in arrived["msg"].markers if m.type == Marker.TRIANGLE_LIST]
-    points = [p for marker in drawn for p in marker.points]
-    colours = [c for marker in drawn for c in marker.colors]
-    if not points:
-        print(f"{args.topic} carries no triangles", file=sys.stderr)
+    if isinstance(message, MarkerArray):
+        drawn = [m for m in message.markers if m.type == Marker.TRIANGLE_LIST]
+        points = [p for marker in drawn for p in marker.points]
+        if not points:
+            print(f"{args.topic} carries no triangles", file=sys.stderr)
+            return 1
+        print(f"vertices\t{len(points)}")
+        print(f"triangles\t{len(points) // 3}")
+        return 0
+
+    models = [model for entity in message.entities for model in entity.models]
+    if not models:
+        print(f"{args.topic} carries no model", file=sys.stderr)
         return 1
+    model = models[0]
 
-    # The surface file is what a ray is localized against, so the drawn ground
-    # has to be that same ground.
+    # The model's own bytes say what it draws, so this reads them rather than
+    # trusting the log line that announced them.
+    vertices, lowest, highest, has_image = gltf_summary(bytes(model.data))
     grid = [z for row in json.load(open(args.surface))["terrain_z"] for z in row]
     relief = max(grid) - min(grid)
-    drawn_relief = max(p.z for p in points) - min(p.z for p in points)
-    height = statistics.median(p.z for p in points) - statistics.median(grid)
-    spread = statistics.pstdev([c.r for c in colours]) if colours else 0.0
+    drawn_relief = highest - lowest
+    # The model is built about the scene centre and placed by its pose.
+    height = model.pose.position.z + statistics.median([lowest, highest]) \
+        - statistics.median(grid)
 
-    print(f"triangles\t{len(points) // 3}")
+    print(f"vertices\t{vertices}")
+    print(f"bytes\t{len(model.data)}")
     print(f"height\t{height:+.1f}")
     print(f"relief\t{drawn_relief:.1f}\t{relief:.1f}")
-    print(f"colour\t{spread:.3f}")
+    print(f"image\t{'yes' if has_image else 'no'}")
 
     faults = []
     if abs(height) > SCENE_HEIGHT_TOLERANCE_M:
         faults.append(f"drawn {height:+.1f} m from the surface file")
     if abs(drawn_relief - relief) > SCENE_HEIGHT_TOLERANCE_M:
         faults.append(f"relief {drawn_relief:.1f} m against {relief:.1f} m")
-    if spread < FLAT_COLOUR:
-        faults.append("one colour, so no image reached it")
+    if not has_image:
+        faults.append("no image, so the ground has no map on it")
     for fault in faults:
         print(f"fault\t{fault}", file=sys.stderr)
     return 1 if faults else 0
+
+
+def gltf_summary(model: bytes):
+    """What a GLB holds: how many vertices, the range of their heights, and
+    whether an image came with it."""
+    if model[:4] != b"glTF":
+        raise ValueError("not a GLB")
+    length = struct.unpack("<I", model[12:16])[0]
+    document = json.loads(model[20:20 + length])
+    position = document["accessors"][0]
+    lowest, highest = position["min"][2], position["max"][2]
+    return position["count"], lowest, highest, bool(document.get("images"))
 
 
 COMMANDS = {
@@ -659,6 +717,9 @@ def main() -> int:
     takeoff.add_argument("height", type=float, nargs="?", default=40.0,
                          help="metres over home, not above sea level")
     takeoff.add_argument("--deadline", type=float, default=90.0)
+    takeoff.add_argument("--attempts", type=int, default=2,
+                         help="a vehicle in a stale state takes one attempt to "
+                              "clear and the next to fly")
     land = sub.add_parser("land")
     land.add_argument("--deadline", type=float, default=120.0)
     gimbal = sub.add_parser("gimbal")

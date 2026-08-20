@@ -28,7 +28,7 @@ done <<< "$telemetry"
 # Over a target the scenario recorded, low and oblique, which is where a
 # detector finds a person. The campus scenario puts casualty_m14 111 m north of
 # the origin, and 20 m short of it at 12 m is a clear view of it.
-uas takeoff 30 >/dev/null
+flying "$lead" 30 || fail "uas$lead reaches the air"
 uas goto "${TARGET_EAST:-0}" "${TARGET_NORTH:-91}" 12 --heading 0 >/dev/null
 pointing=$(uas gimbal -30)
 depression=$(printf '%s' "$pointing" | sed -n 's/^reported depression \([-0-9.]*\).*/\1/p')
@@ -54,7 +54,7 @@ drawn=$(uas scene /viz/scene/terrain)
 if printf '%s' "$drawn" | grep -q '^fault'; then
 	fail "the panel draws the ground the rays are cast at"
 	note "$(printf '%s' "$drawn" | grep '^fault' | tr '\n' ' ')"
-elif printf '%s' "$drawn" | grep -q '^triangles'; then
+elif printf '%s' "$drawn" | grep -q '^vertices'; then
 	pass "the panel draws the ground the rays are cast at: $(printf '%s' "$drawn" | tr '\n' ' ')"
 else
 	fail "the panel draws the ground the rays are cast at"
@@ -64,7 +64,7 @@ fi
 # The buildings are roofs, so they stand above the terrain and carry more
 # relief than it does. Only that they are drawn is checked here; where they
 # stand is buildings_viz's own business and the same offset as the terrain.
-if ./px4sim uas "$lead" scene /viz/scene/buildings 2>/dev/null | grep -q '^triangles'; then
+if ./px4sim uas "$lead" scene /viz/scene/buildings 2>/dev/null | grep -q '^vertices'; then
 	pass "the panel draws the scene's buildings"
 else
 	fail "the panel draws the scene's buildings"

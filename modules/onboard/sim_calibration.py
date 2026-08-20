@@ -72,10 +72,21 @@ def main() -> None:
     parser.add_argument("--model", required=True, help="the airframe model.sdf")
     parser.add_argument("--sensor", default="gimbal_camera")
     parser.add_argument("--hfov-deg", type=float, required=True)
+    parser.add_argument("--width", type=int, default=0,
+                        help="pixel space of the calibration. The aircraft "
+                             "calibrates at the preview size, and a panel that "
+                             "draws a preview against a full size calibration "
+                             "puts every annotation in the wrong place.")
+    parser.add_argument("--height", type=int, default=0)
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
 
     width, height = image_size(args.model, args.sensor)
+    # The field of view belongs to the camera and the pixel space to whoever
+    # reads it. Naming a smaller space keeps the same view through fewer
+    # pixels, which is what a preview is.
+    if args.width and args.height:
+        width, height = args.width, args.height
     with open(args.out, "w", encoding="utf-8") as handle:
         handle.write(as_yaml(calibration(width, height, args.hfov_deg)))
     print(f"camera: {args.sensor} {width}x{height} at {args.hfov_deg} degrees -> {args.out}")

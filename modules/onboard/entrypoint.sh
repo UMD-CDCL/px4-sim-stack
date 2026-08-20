@@ -85,10 +85,16 @@ if [ "${MODEL}" = v3 ] && _preset=$(zoom_preset_of_slot "${SLOT}"); then
 	fi
 fi
 
+# The aircraft calibrates at the preview size: uas1_params.yaml names
+# uas1-mid-640x360-d1.yaml. The detector reports its boxes in that space and a
+# panel draws the preview, so a calibration at the full sensor size puts every
+# annotation a factor of three from the thing it marks.
 python3 /usr/local/bin/sim_calibration.py \
 	--model "/scenes/models/${AIRFRAME}/model.sdf" \
 	--sensor gimbal_camera \
 	--hfov-deg "${CAMERA_HFOV_DEG}" \
+	--width "${CAMERA_PREVIEW_WIDTH:-640}" \
+	--height "${CAMERA_PREVIEW_HEIGHT:-360}" \
 	--out "${CAMERA_DIR:-/camera}/gimbal.yaml"
 
 # The site, worked out from the scene rather than configured. A terrain tile is

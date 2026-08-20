@@ -43,7 +43,7 @@ TARGET_NORTH=${TARGET_NORTH:-111.23}
 fly() { ./px4sim uas "$@" >/dev/null 2>&1 || true; }
 station() {
 	local n=$1 east=$2 north=$3 up=$4 heading=$5 depression=$6
-	fly "$n" takeoff 30
+	flying "$n" 30 || true
 	fly "$n" goto "$east" "$north" "$up" --heading "$heading"
 	fly "$n" gimbal "-$depression"
 	fly "$n" detect on

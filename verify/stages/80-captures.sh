@@ -18,7 +18,7 @@ vehicle_ready "$lead" || return 0
 # A mosaic frame is only added when its corner rays all reach the ground and it
 # covers ground the mosaic does not already hold, so this flies a short line
 # looking straight down rather than capturing from one place.
-uas takeoff 40 >/dev/null
+flying "$lead" 40 || fail "uas$lead reaches the air"
 uas detect on >/dev/null
 for north in 100 130 160 190; do
 	uas goto 0 "$north" 40 --heading 0 >/dev/null
