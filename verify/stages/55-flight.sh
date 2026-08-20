@@ -192,5 +192,44 @@ else
 	note "the mosaic took the frame and the terrain never drew it"
 fi
 
+# ------------------------------------------------------------- the survey
+# A survey measures the error between the frame the vehicle holds and the ground
+# it flies over. This simulator holds that error by standing the marker away
+# from the coordinate the vehicles were given, so the correction must come back
+# as minus the offset.
+#
+# Displace it AFTER the vehicle is airborne. `fly` reloads the world and the
+# marker goes back to its surveyed coordinate, so a displacement set earlier is
+# silently undone and the survey measures about zero against an expected ten
+# metres -- which reads as a broken loop rather than as a reset marker.
+survey_east=6
+survey_north=-9
+stood=$(./px4sim fiducial "$survey_east" "$survey_north" 2>&1)
+if printf '%s' "$stood" | grep -q "(+6.00, -9.00)"; then
+	# Stand off far enough that the camera, at this depression, looks at it.
+	uas goto "$survey_east" \
+		"$(python3 -c "print($survey_north - ${VERIFY_HEIGHT_M:-20})")" \
+		"${VERIFY_HEIGHT_M:-20}" --heading 0 >/dev/null
+	uas gimbal "-$depression" >/dev/null
+	surveyed=$(uas fiducial --placed "$survey_east" "$survey_north")
+	read -r _ east north _ <<< "$(printf '%s' "$surveyed" | grep fiducial_offset)"
+	if [ -n "${north:-}" ]; then
+		expect_eq "a survey of the marker recovers where it stands" True \
+			"$(python3 -c "
+import math
+print(math.hypot($east - -$survey_east, $north - -($survey_north)) <= 1.5)")"
+		note "$(printf '%s' "$surveyed" | tail -2 | tr '\n' ' ')"
+	else
+		fail "a survey of the marker recovers where it stands"
+		note "$(printf '%s' "$surveyed" | tail -1)"
+	fi
+else
+	fail "the marker stands where it is put"
+	note "$(printf '%s' "$stood" | tail -1)"
+fi
+# Put it back, so a scoring run after this one is not measured against a moved
+# marker. A world reload would do it too, and this does not wait for one.
+./px4sim fiducial 0 0 >/dev/null 2>&1
+
 # ------------------------------------------------------- giving it up
 ./px4sim uas "$lead" click off >/dev/null 2>&1 || true

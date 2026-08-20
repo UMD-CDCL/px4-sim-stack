@@ -34,12 +34,12 @@ from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
                        ReliabilityPolicy)
 
 from geometry_msgs.msg import PointStamped, PoseStamped, TransformStamped
-from cdcl_umd_msgs.msg import TargetBoxArray
+from cdcl_umd_msgs.msg import TargetBox, TargetBoxArray
 from cdcl_umd_msgs.srv import TBALocalization
 from mavros_msgs.msg import Altitude, GimbalDeviceAttitudeStatus, HomePosition, State
 from mavros_msgs.srv import CommandBool, CommandInt, CommandTOL, SetMode
 from std_srvs.srv import SetBool, Trigger
-from sensor_msgs.msg import NavSatFix
+from sensor_msgs.msg import CameraInfo, NavSatFix
 from rosidl_runtime_py.utilities import get_message
 from std_msgs.msg import Float32, Float64
 from foxglove_msgs.msg import SceneUpdate
@@ -613,60 +613,127 @@ def command_click(uas: Uas, args) -> int:
 
 
 def command_fiducial(uas: Uas, args) -> int:
-    """Localize one box as the fiducial marker, and read back the correction.
+    """Survey the marker, and read back the correction it produces.
 
-    A real fiducial capture goes to a human, who marks the marker in the image.
-    This stands in for that: it takes a frame the detector has already produced,
-    marks it as the fiducial, and asks for the same localization the human's
-    answer would ask for. What comes back is the survey that moves the whole
-    fleet's frame.
+    A real fiducial capture goes to a human, who marks the marker in the
+    picture. This stands in for that. It asks for the survey shot, works out
+    which pixel the marker falls on from the camera pose the shot was taken
+    at, marks that pixel, and asks for the localization the human's answer
+    would ask for.
+
+    Marking the first box the detector happened to report surveys the frame
+    against a casualty, which is a confident wrong answer rather than a
+    failure, so the marker's own place is computed here instead.
+
+    `--placed` is what the marker was stood away from the coordinate the
+    vehicles were given, which is how this simulator holds a frame error. The
+    correction has to come back as minus that.
     """
-    latest = {}
-    uas.create_subscription(TargetBoxArray, f"{uas.namespace}/target_detections",
-                            lambda msg: latest.__setitem__("msg", msg), RELIABLE_QOS)
+    from umd_uas.bbox import image_size
+    from umd_uas.footprint import body_ray_pixels, scaled_pixel
+
+    surveyed = args.surveyed
+    if not surveyed:
+        try:
+            with open(args.scenario, encoding="utf-8") as handle:
+                scenario = yaml.safe_load(handle)
+            surveyed = [float(scenario["fiducial_lat"]),
+                        float(scenario["fiducial_lon"])]
+        except (OSError, KeyError, TypeError, ValueError):
+            print(f"no fiducial_lat/fiducial_lon in {args.scenario}; "
+                  f"pass --surveyed LAT LON", file=sys.stderr)
+            return 1
+    placed_east, placed_north = args.placed
+
+    buffer = Buffer()
+    TransformListener(buffer, uas)
+    frames = {}
+    uas.create_subscription(
+        TargetBoxArray, uas.topic("target_detections/fiducial"),
+        lambda msg: frames.__setitem__("msg", msg), RELIABLE_QOS)
     correction = {}
-    uas.create_subscription(TransformStamped, f"{uas.namespace}/fiducial_update",
-                            lambda msg: correction.setdefault("msg", msg), RELIABLE_QOS)
-    if not uas.wait_until(lambda: "msg" in latest, args.deadline, "a frame to mark"):
+    uas.create_subscription(TransformStamped, uas.topic("fiducial_update"),
+                            lambda msg: correction.setdefault("msg", msg),
+                            RELIABLE_QOS)
+    info = uas.latest(CameraInfo, uas.topic("camera/camera_info"),
+                      LATCHED_QOS, args.deadline)
+    # Volatile, as command_heading reads it. A latched reader is not merely
+    # unlucky against a volatile writer, it is incompatible, and DDS drops the
+    # pair with a warning nothing else reports.
+    origin_fix = uas.latest(NavSatFix, uas.topic("home_position/fix"),
+                            RELIABLE_QOS, args.deadline)
+    if info is None or origin_fix is None:
+        print("no calibration or no origin fix", file=sys.stderr)
         return 1
 
-    marked = latest["msg"]
+    if not uas.call(uas.captures["fiducial"], Trigger.Request(), "fiducial"):
+        return 1
+    if not uas.wait_until(lambda: "msg" in frames, args.deadline,
+                          "the survey shot"):
+        return 1
+    shot = frames["msg"]
+
+    # Where the marker stands, in the frame the cast works in: the coordinate
+    # the vehicles were given, plus however far the marker was stood from it.
+    east, north, up = pm.geodetic2enu(
+        surveyed[0], surveyed[1], origin_fix.altitude,
+        origin_fix.latitude, origin_fix.longitude, origin_fix.altitude)
+    marker = np.array([east + placed_east, north + placed_north, up])
+
+    # The pose the shot was taken at, not the pose now. A vehicle that has
+    # moved since marks a pixel the camera was not looking through.
+    origin = f"uas{args.number}_home_position"
+    camera = f"d{args.number}_rgb_offset"
+    stamp = Time.from_msg(shot.header.stamp)
+    if not uas.wait_until(
+            lambda: buffer.can_transform(origin, camera, stamp),
+            args.deadline, f"{origin} -> {camera} at the shot"):
+        return 1
+    pose = buffer.lookup_transform(origin, camera, stamp).transform
+    stood = np.array([pose.translation.x, pose.translation.y, pose.translation.z])
+    turned = Rotation.from_quat([pose.rotation.x, pose.rotation.y,
+                                 pose.rotation.z, pose.rotation.w])
+    ray = turned.inv().apply(marker - stood)
+    pixel = body_ray_pixels(info, [ray])[0]
+    if not np.all(np.isfinite(pixel)):
+        print("the marker is not in front of the camera", file=sys.stderr)
+        return 1
+
+    # The operator marks the picture, and the calibration names a space of its
+    # own. tf_loc scales the other way, so this scales back.
+    shown = image_size(shot.source_img.data)
+    if shown is not None:
+        pixel = scaled_pixel(pixel[0], pixel[1], (info.width, info.height), shown)
+    print(f"marking {pixel[0]:.1f}, {pixel[1]:.1f} of "
+          f"{shown[0] if shown else info.width}x"
+          f"{shown[1] if shown else info.height}")
+
+    # One box, built rather than borrowed. The survey shot usually carries no
+    # boxes at all: the detector reports people and the marker is a disk, so
+    # there is nothing of it to reuse. A human marking the picture draws this
+    # box, and this is the same box drawn from the geometry.
+    marked = shot
     marked.fiducial_marker = True
-    marked.uav_target_boxes = list(marked.uav_target_boxes)[:1]
-    if not marked.uav_target_boxes:
-        print("the frame carried no box to mark", file=sys.stderr)
-        return 1
-    uas.call(uas.localize, TBALocalization.Request(un_localized=marked), "tba_loczn")
+    mark = TargetBox()
+    mark.data_source_id = 0
+    mark.detection_class = "fiducial"
+    mark.target_bbox.center.position.x = float(pixel[0])
+    mark.target_bbox.center.position.y = float(pixel[1])
+    mark.target_bbox.size_x = float(args.box)
+    mark.target_bbox.size_y = float(args.box)
+    marked.uav_target_boxes = [mark]
+    uas.call(uas.localize, TBALocalization.Request(un_localized=marked),
+             "tba_loczn")
 
-    if not uas.wait_until(lambda: "msg" in correction, 10.0, "a fiducial correction"):
+    if not uas.wait_until(lambda: "msg" in correction, args.deadline,
+                          "a fiducial correction"):
         return 1
     moved = correction["msg"].transform.translation
-    print(f"{correction['msg'].header.frame_id} -> {correction['msg'].child_frame_id}"
+    print(f"{correction['msg'].header.frame_id} -> "
+          f"{correction['msg'].child_frame_id}"
           f"\t{moved.x:.2f}\t{moved.y:.2f}\t{moved.z:.2f}")
+    print(f"expected\t{-placed_east:.2f}\t{-placed_north:.2f}")
     return 0
-
-
-def compass_of(orientation) -> float:
-    """A frame's heading, in the degrees from north an operator reads.
-
-    A tree is ENU, so its yaw counts anticlockwise from east, and every
-    heading beside it counts clockwise from north.
-    """
-    yaw = Rotation.from_quat([orientation.x, orientation.y, orientation.z,
-                              orientation.w]).as_euler("xyz")[2]
-    return (90.0 - math.degrees(yaw)) % 360.0
-
-
-def depression_of(orientation) -> float:
-    """How far below the horizon a frame's own forward axis points."""
-    forward = Rotation.from_quat([orientation.x, orientation.y, orientation.z,
-                                  orientation.w]).apply([1.0, 0.0, 0.0])
-    return -math.degrees(math.asin(max(-1.0, min(1.0, forward[2]))))
-
-
-def separation(first: float, second: float) -> float:
-    """How far apart two headings are, the short way round."""
-    return abs((first - second + 180.0) % 360.0 - 180.0)
 
 
 def command_topic(uas: Uas, args) -> int:
@@ -1092,6 +1159,17 @@ def main() -> int:
     topic.add_argument("topic", help="absolute, or relative to the namespace")
     topic.add_argument("--deadline", type=float, default=10.0)
     fiducial = sub.add_parser("fiducial")
+    fiducial.add_argument("--surveyed", nargs=2, type=float, metavar=("LAT", "LON"),
+                          help="what the crew was told. Defaults to the "
+                               "scenario's fiducial_lat and fiducial_lon")
+    fiducial.add_argument("--placed", nargs=2, type=float, default=[0.0, 0.0],
+                          metavar=("EAST", "NORTH"),
+                          help="how far the marker stands from that, which is "
+                               "what the survey has to recover, negated")
+    fiducial.add_argument("--scenario",
+                          default=os.environ.get("GROUND_TRUTH_FILE", ""))
+    fiducial.add_argument("--box", type=float, default=24.0,
+                          help="pixels across, for the box put on the marker")
     fiducial.add_argument("--deadline", type=float, default=20.0)
     score = sub.add_parser("score")
     score.add_argument("--deadline", type=float, default=20.0)
