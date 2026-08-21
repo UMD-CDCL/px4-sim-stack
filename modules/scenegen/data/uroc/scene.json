@@ -24,8 +24,8 @@
   "max_m": 46.99
  },
  "fiducial": {
-  "east_m": 1.35,
-  "north_m": 5.49,
+  "east_m": 0.25,
+  "north_m": 0.71,
   "diameter_m": 0.5,
   "placed_east_m": 0,
   "placed_north_m": 0
@@ -1299,18 +1299,6 @@
    "id": "t_manual_2",
    "east_m": -13.74,
    "north_m": 9.12
-  },
-  {
-   "name": "casualty_m3",
-   "agl_m": null,
-   "on_building": true,
-   "yaw_deg": null,
-   "model_uri": null,
-   "enabled": true,
-   "source": "manual",
-   "id": "t_manual_3",
-   "east_m": 0.16,
-   "north_m": 0.24
   },
   {
    "name": "casualty_m4",
