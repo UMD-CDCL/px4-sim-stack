@@ -750,13 +750,14 @@ class Sampled:
 
 
 Frame = namedtuple("Frame", "arrived stamp seq boxes vehicle speed lever "
-                            "pitch yaw slew")
+                            "pitch yaw slew pitch_rate")
 RECORD_COLUMNS = (
     "stamp", "seq", "box", "casualty", "verdict", "cited",
     "rep_lat", "rep_lon", "rep_alt", "gt_lat", "gt_lon", "gt_alt",
     "err_east", "err_north", "err_up", "err_horiz",
     "veh_lat", "veh_lon", "veh_alt", "ground_speed",
-    "gimbal_pitch", "gimbal_yaw", "slew_rate", "slant_range", "depression",
+    "gimbal_pitch", "gimbal_yaw", "slew_rate", "pitch_rate",
+    "slant_range", "depression",
     "px_u", "px_v", "px_w", "px_h", "confidence", "class", "surface", "sigma")
 NOT_MEASURED = "nan"
 
@@ -798,7 +799,7 @@ def command_record(uas: Uas, args) -> int:
             before = tree.lookup_transform(origin, camera_frame,
                                            at - Duration(seconds=SLEW_WINDOW_S))
         except TransformException:
-            return None, float("nan"), float("nan"), float("nan")
+            return None, float("nan"), float("nan"), float("nan"), float("nan")
         turned = math.degrees(math.acos(float(np.clip(np.dot(
             boresight_of(now.transform.rotation),
             boresight_of(before.transform.rotation)), -1.0, 1.0))))
@@ -808,8 +809,15 @@ def command_record(uas: Uas, args) -> int:
         lever = (now.transform.translation.x - body.transform.translation.x,
                  now.transform.translation.y - body.transform.translation.y,
                  now.transform.translation.z - body.transform.translation.z)
-        return (lever, -depression_of(now.transform.rotation),
-                compass_of(now.transform.rotation), turned / SLEW_WINDOW_S)
+        # slew is a magnitude, because a boresight can move in two axes at
+        # once. pitch_rate carries the sign, and the sign is what diagnoses a
+        # timing fault: a stamp that names an instant later than the shutter
+        # moves every ray the way the boresight is going, so the error changes
+        # sign when the sweep reverses and a magnitude alone cancels it out.
+        pitch = -depression_of(now.transform.rotation)
+        was = -depression_of(before.transform.rotation)
+        return (lever, pitch, compass_of(now.transform.rotation),
+                turned / SLEW_WINDOW_S, (pitch - was) / SLEW_WINDOW_S)
 
     pending = deque()
     horizontal = []
@@ -818,11 +826,12 @@ def command_record(uas: Uas, args) -> int:
 
     def collect(msg):
         counted["frames"] += 1
-        lever, pitch, yaw, slew = viewpoint(msg.header.stamp)
+        lever, pitch, yaw, slew, pitch_rate = viewpoint(msg.header.stamp)
         pending.append(Frame(
             time.monotonic(), msg.header.stamp, msg.seq,
             list(msg.uav_target_boxes), msg.uav_gps_location,
-            speeds.at(seconds_of(msg.header.stamp)), lever, pitch, yaw, slew))
+            speeds.at(seconds_of(msg.header.stamp)), lever, pitch, yaw, slew,
+            pitch_rate))
 
     def write(frame):
         vehicle = frame.vehicle
@@ -867,6 +876,7 @@ def command_record(uas: Uas, args) -> int:
                 f"{vehicle.latitude:.7f}", f"{vehicle.longitude:.7f}",
                 f"{vehicle.altitude:.2f}", f"{speed:.2f}",
                 f"{frame.pitch:.2f}", f"{frame.yaw:.2f}", f"{frame.slew:.2f}",
+                f"{frame.pitch_rate:+.2f}",
                 f"{slant:.2f}", f"{descent_of(ray[2], slant):.2f}",
                 f"{centre.x:.1f}", f"{centre.y:.1f}",
                 f"{box.target_bbox.size_x:.1f}", f"{box.target_bbox.size_y:.1f}",
