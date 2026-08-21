@@ -128,6 +128,26 @@ else
         Check it out, or set ROS2_WS_DIR in .env."
 fi
 
+# The onboard and offboard images carry a copy of the flight code, taken when
+# they were built. A tree edited after that leaves the image a launch file
+# short of a node, and the stack says "executable not found" or names a launch
+# file that is not there. That reads as a bug in the flight code, so say here
+# that the image is behind the tree.
+newest=$(find "$ws/src" \( -name .git -o -name __pycache__ -o -name build \
+                          -o -name install -o -name log \) -prune -o \
+              -type f -printf '%T@\n' 2>/dev/null | sort -rn | head -1)
+newest=${newest%%.*}
+stale=""
+for image in "onboard:${DS_VERSION_ONBOARD:-7.1}" "offboard:${DS_VERSION_OFFBOARD:-7.1}"; do
+	created=$(docker image inspect --format '{{.Created}}' "px4simstack/$image" 2>/dev/null) || continue
+	built=$(date -d "$created" +%s 2>/dev/null) || continue
+	[ -n "${newest:-}" ] && [ "$newest" -gt "$built" ] && stale="$stale ${image%%:*}"
+done
+if [ -n "$stale" ]; then
+	note "The flight code in $ws/src is newer than the build inside:$stale
+        Those containers run it as it was. Rebuild:  ./px4sim build$stale"
+fi
+
 echo ""
 if [ "$fail" -gt 0 ]; then
 	echo "${RED}$fail check(s) failed.${OFF} Fix them before you start the stack."

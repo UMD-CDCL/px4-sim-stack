@@ -500,6 +500,24 @@ Both images build the workspace at `ROS2_WS_DIR` through a named build context.
 A missing checkout, or a checkout without `src/5g_drone`, fails there. `./px4sim
 doctor` reports it before the build does.
 
+### A node or a launch file is missing from the image
+
+The companion logs `executable 'buildings_viz' not found on the libexec
+directory`, or the ground station exits with `No such file or directory:
+.../share/mavinsight/launch/launch_sim.launch.py`. The node is in the tree at
+`ROS2_WS_DIR` and not in the image.
+
+Both images hold the flight code as it was when they were built. A node added
+after that is named by the launch file and is not installed. Rebuild them, and
+recreate what runs them:
+
+```bash
+./px4sim build onboard offboard
+./px4sim restart onboard11 offboard
+```
+
+`./px4sim doctor` compares the two dates and reports this before a start does.
+
 ### One build failure cancels the others
 
 `docker compose build a b c` stops everything when one target fails. Build them
