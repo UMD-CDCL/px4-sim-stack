@@ -20,6 +20,7 @@ import statistics
 import struct
 import sys
 import time
+from collections import deque, namedtuple
 
 import yaml
 
@@ -28,13 +29,15 @@ import pymap3d as pm
 import rclpy
 from rclpy.node import Node
 from scipy.spatial.transform import Rotation
+from rclpy.duration import Duration
 from rclpy.time import Time
 from tf2_ros import Buffer, TransformException, TransformListener
 from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
                        ReliabilityPolicy)
 
-from geometry_msgs.msg import PointStamped, PoseStamped, TransformStamped
-from cdcl_umd_msgs.msg import TargetBox, TargetBoxArray
+from geometry_msgs.msg import (PointStamped, PoseStamped, TransformStamped,
+                               TwistStamped)
+from cdcl_umd_msgs.msg import KnownCasualtyLocations, TargetBox, TargetBoxArray
 from cdcl_umd_msgs.srv import TBALocalization
 from mavros_msgs.msg import (Altitude, GimbalDeviceAttitudeStatus,
                             GimbalManagerSetPitchyaw, HomePosition, State)
@@ -97,6 +100,27 @@ DEGREES_TO_INT = 1e7
 # gimbal.py reads this on the reassert topic to mean "take control back, and
 # keep the pitch you already hold".
 KEEP_PITCH = -361.0
+
+# How long a recorded frame waits for the scorer to judge it. The scorer judges
+# a frame as it arrives, so this only covers the hop between the two nodes.
+VERDICT_WAIT_S = 1.0
+ROW_FLUSH_S = 0.2
+# How many judged frames to hold. The scorer republishes its judgement at 2 Hz
+# until a new frame arrives, so a reader that keeps only the newest stamp still
+# finds the frame it is looking for; this holds a few seconds of them anyway,
+# because frames are localized concurrently and can arrive out of order.
+JUDGED_DEPTH = 256
+# Over what interval the camera pose is differentiated to get the slew rate.
+# Long enough to average the steps in the pose stream, short enough that the
+# answer is the rate at this frame rather than the mean of a whole sweep.
+SLEW_WINDOW_S = 0.2
+# How many samples of a telemetry topic to hold, for a reader that wants the
+# one nearest a frame's own stamp rather than whichever arrived last.
+SAMPLE_DEPTH = 200
+# What a scorer's verdict cites, best first. A `hit:` is a box inside a
+# casualty's gate, a `crossed:` is a box whose ray passed through one and
+# landed elsewhere, and `nearest:` is the closest casualty of all.
+CITATIONS = ("hit:", "crossed:", "nearest:")
 
 
 class Uas(Node):
@@ -274,6 +298,43 @@ class Uas(Node):
     @property
     def altitude(self) -> float:
         return self.local.pose.position.z if self.local else float("nan")
+
+
+def boresight_of(rotation) -> np.ndarray:
+    """Where a frame in the tree looks, as a unit vector in east, north, up.
+
+    Every frame the flight code points with looks along its own x axis: the
+    gimbal, the camera under it and the nose of the airframe. tf_loc casts its
+    rays from the camera frame the same way.
+    """
+    return Rotation.from_quat([rotation.x, rotation.y, rotation.z,
+                               rotation.w]).apply([1.0, 0.0, 0.0])
+
+
+def compass_of(rotation) -> float:
+    """Which way a frame in the tree points, clockwise from north."""
+    east, north, _ = boresight_of(rotation)
+    return math.degrees(math.atan2(east, north)) % 360.0
+
+
+def depression_of(rotation) -> float:
+    """How far below the horizon a frame in the tree looks."""
+    up = boresight_of(rotation)[2]
+    return -math.degrees(math.asin(float(np.clip(up, -1.0, 1.0))))
+
+
+def separation(one: float, other: float) -> float:
+    """How far apart two bearings are, the short way round."""
+    return abs((one - other + 180.0) % 360.0 - 180.0)
+
+
+def stamp_key(stamp):
+    """One frame's stamp, as something a dictionary can be keyed on."""
+    return (stamp.sec, stamp.nanosec)
+
+
+def seconds_of(stamp) -> float:
+    return stamp.sec + stamp.nanosec * 1e-9
 
 
 def command_status(uas: Uas, _args) -> int:
@@ -478,6 +539,7 @@ def command_detections(uas: Uas, args) -> int:
     # over whatever is queued, and localizing a frame from before the vehicle
     # settled measures a pose the camera has already left.
     latest = {}
+    casualties = Casualties(uas)
     uas.create_subscription(TargetBoxArray, f"{uas.namespace}/target_detections",
                             lambda msg: latest.__setitem__("msg", msg), RELIABLE_QOS)
     if not uas.wait_until(lambda: "msg" in latest, args.deadline, "a detection"):
@@ -499,51 +561,126 @@ def command_detections(uas: Uas, args) -> int:
                       "tba_loczn")
     if not answer:
         return 1
-    truth = ground_truth(args.truth, args.scene)
-    for box in answer.localized_boxes.uav_target_boxes:
-        fix = box.target_location_altimeter_plane
-        topo = box.target_location_topo
-        surface = "terrain" if topo.status.status >= 0 else "flat plane"
-        name, error = nearest(truth, fix.latitude, fix.longitude) if truth else ("", 0.0)
+    localized = answer.localized_boxes.uav_target_boxes
+    for index, box in enumerate(localized):
+        fix, surface = localized_at(box)
+        if fix is None:
+            continue
+        match = casualties.of(detection.header.stamp, index, fix)
         if args.tsv:
             # One line per box, for a caller comparing two vehicles' answers.
-            print(f"{name}\t{fix.latitude:.7f}\t{fix.longitude:.7f}"
-                  f"\t{fix.altitude:.2f}\t{error:.2f}\t{surface}")
+            print(f"{match.name}\t{fix.latitude:.7f}\t{fix.longitude:.7f}"
+                  f"\t{fix.altitude:.2f}\t{match.distance:.2f}\t{surface}")
             continue
         line = (f"  localized {fix.latitude:.7f}, {fix.longitude:.7f}, "
                 f"{fix.altitude:.1f} m on the {surface}")
-        if truth:
-            line += f"  -> {error:.1f} m from {name}"
+        if match.name:
+            line += f"  -> {match.distance:.1f} m from {match.name}"
         print(line)
-    return 0 if answer.localized_boxes.uav_target_boxes else 1
+    return 0 if localized else 1
 
 
-def ground_truth(path: str, scene_surface: str):
-    """Where the scenario really put its targets, as WGS84 positions.
+Match = namedtuple("Match", "name verdict cited distance")
+# Which localization of a box to read, best first. The order scoring.py judges
+# on, so a row written here and a verdict published there read one answer.
+LOCALIZATIONS = ("target_location_topo", "target_location_rangefinder",
+                 "target_location_gimbal_plane", "target_location_altimeter_plane")
 
-    The simulator records the pose it achieved for every entity, in metres from
-    the world origin, and the scene surface says where that origin is.
+
+def localized_at(box):
+    """Where a box landed, and what surface put it there.
+
+    A zero stamp is this stack's "never filled in" sentinel, and tf_loc marks a
+    fix it could not produce with STATUS_NO_FIX. The terrain fix is the one
+    asked for first, so a box that carries one is a box whose ray met a tile.
     """
-    if not (path and os.path.exists(path) and os.path.exists(scene_surface)):
-        return []
-    origin = json.load(open(scene_surface))["origin_lla"]
-    placed = yaml.safe_load(open(path)) or {}
-    truth = []
-    for entity in placed.get("entities", []):
-        east, north, up = entity["pose"]
-        latitude, longitude, _ = pm.enu2geodetic(east, north, up, *origin, deg=True)
-        truth.append((entity["name"], latitude, longitude))
-    return truth
+    for field in LOCALIZATIONS:
+        fix = getattr(box, field, None)
+        if fix is None or fix.header.stamp.sec == 0 or fix.status.status < 0:
+            continue
+        return fix, "terrain" if field == LOCALIZATIONS[0] else "plane"
+    return None, "none"
 
 
-def nearest(truth, latitude: float, longitude: float):
-    """The closest recorded target, and how far away it is on the ground."""
-    def metres(entry):
-        east, north, _ = pm.geodetic2enu(latitude, longitude, 0.0,
-                                         entry[1], entry[2], 0.0, deg=True)
-        return math.hypot(east, north)
-    closest = min(truth, key=metres)
-    return closest[0], metres(closest)
+class Casualties:
+    """Which known casualty a localized box is, and where that casualty lies.
+
+    The scorer answers this for every box it judges, and it says how it got
+    there: it cites the casualty whose gate the box landed in, the casualties
+    whose gate its ray crossed, and the nearest one of all. This reads that
+    citation back, so every command here names a target the same way the
+    operator's display does.
+
+    Reading the citation rather than matching a box to whatever truth lies
+    nearest is what lets a large error stay large. The casualties in a scenario
+    stand a few metres apart, so nearest-neighbour binds any error wider than
+    half that spacing to the wrong casualty and then reports the short distance
+    to it. That caps what these commands can measure at exactly the errors
+    worth measuring.
+
+    A frame the scorer has not judged still gets an answer, from the nearest
+    known casualty, and the row says which of the two it is.
+    """
+
+    def __init__(self, uas: "Uas") -> None:
+        self.known = {}
+        self.judged = {}
+        uas.create_subscription(KnownCasualtyLocations, "/known_casualty_locations",
+                                self._on_truth, LATCHED_QOS)
+        uas.create_subscription(Detection3DArray, uas.topic("scoring/verdicts"),
+                                self._on_verdicts, RELIABLE_QOS)
+
+    def _on_truth(self, msg) -> None:
+        if not msg.is_ground_truth:
+            return
+        # The name scoring.py's target_name() gives an id, so a row that fell
+        # back to the nearest casualty joins with one that read a citation.
+        self.known = {f"casualty_{known.casualty_id}": known.position
+                      for known in msg.casualty_locations}
+
+    def _on_verdicts(self, msg) -> None:
+        # A verdict is named for the box it judges, "<source>_<index>", and the
+        # index is the box's place in the frame the scorer was sent. Keying on
+        # it rather than on the verdict's own place in the list survives a box
+        # the scorer could not place.
+        judged = {}
+        for detection in msg.detections:
+            _, _, index = detection.id.rpartition("_")
+            if index.isdigit():
+                judged[int(index)] = detection
+        self.judged[stamp_key(msg.header.stamp)] = judged
+        while len(self.judged) > JUDGED_DEPTH:
+            del self.judged[next(iter(self.judged))]
+
+    def of(self, stamp, index: int, fix) -> Match:
+        """Which casualty the box at `index` of the frame stamped `stamp` is."""
+        judged = self.judged.get(stamp_key(stamp), {})
+        if index in judged:
+            return self._cited(judged[index])
+        return self._nearest(fix)
+
+    @staticmethod
+    def _cited(judged) -> Match:
+        verdict = judged.results[0].hypothesis.class_id if judged.results else ""
+        for citation in CITATIONS:
+            for result in judged.results:
+                if result.hypothesis.class_id.startswith(citation):
+                    return Match(result.hypothesis.class_id[len(citation):], verdict,
+                                 citation.rstrip(":"), result.hypothesis.score)
+        return Match("", verdict, "uncited", float("nan"))
+
+    def _nearest(self, fix) -> Match:
+        if not self.known:
+            return Match("", "", "unjudged", float("nan"))
+
+        def metres(entry) -> float:
+            east, north, _ = pm.geodetic2enu(fix.latitude, fix.longitude, 0.0,
+                                             entry[1].latitude, entry[1].longitude,
+                                             0.0, deg=True)
+            return math.hypot(east, north)
+
+        closest = min(self.known.items(), key=metres)
+        return Match(closest[0], "", "unjudged", metres(closest))
 
 
 def command_published(uas: Uas, args) -> int:
@@ -555,20 +692,16 @@ def command_published(uas: Uas, args) -> int:
     """
     seen = {}
     samples = {}
-    truth = ground_truth(args.truth, args.scene)
+    localized = []
+    casualties = Casualties(uas)
 
     def collect(msg):
         for index, box in enumerate(msg.uav_target_boxes):
-            fix = box.target_location_altimeter_plane
+            fix, _ = localized_at(box)
+            if fix is None:
+                continue
             if args.named:
-                # Every sample of a target, kept by name so a caller comparing
-                # two vehicles has something to join on. The median goes out
-                # rather than the last: a single frame taken while the gimbal
-                # moved is metres out, and one of those should not decide what
-                # a vehicle thinks a target's position is.
-                name, error = nearest(truth, fix.latitude, fix.longitude)
-                samples.setdefault(name, []).append(
-                    (fix.latitude, fix.longitude, fix.altitude, error))
+                localized.append((msg.header.stamp, index, fix))
                 continue
             seen[(msg.seq, index)] = (
                 f"{msg.seq}\t{index}\t{fix.latitude:.7f}\t{fix.longitude:.7f}"
@@ -577,6 +710,20 @@ def command_published(uas: Uas, args) -> int:
     uas.create_subscription(TargetBoxArray, f"{uas.namespace}/{args.topic}",
                             collect, RELIABLE_QOS)
     uas.pump(args.seconds)
+    # The scorer judges a frame after the frame is published, so the boxes are
+    # named once collecting has stopped rather than as each one arrives.
+    uas.pump(VERDICT_WAIT_S)
+    for stamp, index, fix in localized:
+        # Every sample of a target, kept by name so a caller comparing two
+        # vehicles has something to join on. The median goes out rather than
+        # the last: a single frame taken while the gimbal moved is metres out,
+        # and one of those should not decide what a vehicle thinks a target's
+        # position is.
+        match = casualties.of(stamp, index, fix)
+        if not match.name:
+            continue
+        samples.setdefault(match.name, []).append(
+            (fix.latitude, fix.longitude, fix.altitude, match.distance))
     for name, taken in sorted(samples.items()):
         middle = [statistics.median(value) for value in zip(*taken)]
         print(f"{name}\t{middle[0]:.7f}\t{middle[1]:.7f}"
@@ -584,6 +731,204 @@ def command_published(uas: Uas, args) -> int:
     for key in sorted(seen):
         print(seen[key])
     return 0 if (seen or samples) else 1
+
+
+class Sampled:
+    """The recent samples of a topic, so a reader can ask for the one nearest a
+    frame's own stamp rather than for whichever one arrived last."""
+
+    def __init__(self) -> None:
+        self.samples = deque(maxlen=SAMPLE_DEPTH)
+
+    def add(self, when: float, value) -> None:
+        self.samples.append((when, value))
+
+    def at(self, when: float):
+        if not self.samples:
+            return None
+        return min(self.samples, key=lambda sample: abs(sample[0] - when))[1]
+
+
+Frame = namedtuple("Frame", "arrived stamp seq boxes vehicle speed lever "
+                            "pitch yaw slew")
+RECORD_COLUMNS = (
+    "stamp", "seq", "box", "casualty", "verdict", "cited",
+    "rep_lat", "rep_lon", "rep_alt", "gt_lat", "gt_lon", "gt_alt",
+    "err_east", "err_north", "err_up", "err_horiz",
+    "veh_lat", "veh_lon", "veh_alt", "ground_speed",
+    "gimbal_pitch", "gimbal_yaw", "slew_rate", "slant_range", "depression",
+    "px_u", "px_v", "px_w", "px_h", "confidence", "class", "surface", "sigma")
+NOT_MEASURED = "nan"
+
+
+def command_record(uas: Uas, args) -> int:
+    """Write one row for every localized box, beside the motion that made it.
+
+    An error is only a number until it sits next to what the aircraft and the
+    camera were doing when the box was measured. Error is linear in how fast
+    the camera turns, so a run that does not record the slew rate cannot say
+    whether a change helped.
+
+    The camera pose comes from the frame tree at the frame's own stamp, which
+    is the pose tf_loc cast the ray from. Reading the newest pose instead would
+    measure how long this command took to arrive.
+
+    The rows go to standard output and a summary goes to standard error, so a
+    caller can redirect one and read the other.
+    """
+    tree = Buffer()
+    TransformListener(tree, uas)
+    casualties = Casualties(uas)
+    origin = f"uas{args.number}_home_position"
+    camera_frame = f"d{args.number}_rgb_offset"
+    airframe = f"d{args.number}_base_link"
+
+    speeds = Sampled()
+    uas.create_subscription(
+        TwistStamped, uas.topic("local_position/velocity_local"),
+        lambda msg: speeds.add(seconds_of(msg.header.stamp), msg.twist.linear),
+        SENSOR_QOS)
+
+    def viewpoint(stamp):
+        """Where the camera stood, where it looked, and how fast it turned."""
+        at = Time.from_msg(stamp)
+        try:
+            now = tree.lookup_transform(origin, camera_frame, at)
+            body = tree.lookup_transform(origin, airframe, at)
+            before = tree.lookup_transform(origin, camera_frame,
+                                           at - Duration(seconds=SLEW_WINDOW_S))
+        except TransformException:
+            return None, float("nan"), float("nan"), float("nan")
+        turned = math.degrees(math.acos(float(np.clip(np.dot(
+            boresight_of(now.transform.rotation),
+            boresight_of(before.transform.rotation)), -1.0, 1.0))))
+        # The camera sits a little off the airframe's own origin and the ray is
+        # cast from the camera. Taken as a difference inside one frame, so a
+        # fiducial survey that moves that frame does not reach it.
+        lever = (now.transform.translation.x - body.transform.translation.x,
+                 now.transform.translation.y - body.transform.translation.y,
+                 now.transform.translation.z - body.transform.translation.z)
+        return (lever, -depression_of(now.transform.rotation),
+                compass_of(now.transform.rotation), turned / SLEW_WINDOW_S)
+
+    pending = deque()
+    horizontal = []
+    vertical = []
+    counted = {"frames": 0, "rows": 0, "unlocalized": 0, "unjudged": 0}
+
+    def collect(msg):
+        counted["frames"] += 1
+        lever, pitch, yaw, slew = viewpoint(msg.header.stamp)
+        pending.append(Frame(
+            time.monotonic(), msg.header.stamp, msg.seq,
+            list(msg.uav_target_boxes), msg.uav_gps_location,
+            speeds.at(seconds_of(msg.header.stamp)), lever, pitch, yaw, slew))
+
+    def write(frame):
+        vehicle = frame.vehicle
+        camera = (None if frame.lever is None else
+                  pm.enu2geodetic(*frame.lever, vehicle.latitude,
+                                  vehicle.longitude, vehicle.altitude, deg=True))
+        speed = (float("nan") if frame.speed is None
+                 else math.hypot(frame.speed.x, frame.speed.y))
+        for index, box in enumerate(frame.boxes):
+            fix, surface = localized_at(box)
+            if fix is None:
+                counted["unlocalized"] += 1
+                continue
+            match = casualties.of(frame.stamp, index, fix)
+            truth = casualties.known.get(match.name)
+            counted["rows"] += 1
+            counted["unjudged"] += match.cited == "unjudged"
+            if truth is None:
+                error = (float("nan"),) * 3
+            else:
+                error = pm.geodetic2enu(fix.latitude, fix.longitude, fix.altitude,
+                                        truth.latitude, truth.longitude,
+                                        truth.altitude, deg=True)
+                horizontal.append(math.hypot(error[0], error[1]))
+                vertical.append(error[2])
+            ray = ((float("nan"),) * 3 if camera is None else
+                   pm.geodetic2enu(fix.latitude, fix.longitude, fix.altitude,
+                                   *camera, deg=True))
+            slant = math.sqrt(sum(axis * axis for axis in ray))
+            centre = box.target_bbox.center.position
+            covariance = fix.position_covariance
+            print("\t".join((
+                f"{frame.stamp.sec}.{frame.stamp.nanosec:09d}",
+                f"{frame.seq}", f"{index}",
+                match.name or "?", match.verdict or "?", match.cited,
+                f"{fix.latitude:.7f}", f"{fix.longitude:.7f}", f"{fix.altitude:.2f}",
+                NOT_MEASURED if truth is None else f"{truth.latitude:.7f}",
+                NOT_MEASURED if truth is None else f"{truth.longitude:.7f}",
+                NOT_MEASURED if truth is None else f"{truth.altitude:.2f}",
+                f"{error[0]:.3f}", f"{error[1]:.3f}", f"{error[2]:.3f}",
+                f"{math.hypot(error[0], error[1]):.3f}",
+                f"{vehicle.latitude:.7f}", f"{vehicle.longitude:.7f}",
+                f"{vehicle.altitude:.2f}", f"{speed:.2f}",
+                f"{frame.pitch:.2f}", f"{frame.yaw:.2f}", f"{frame.slew:.2f}",
+                f"{slant:.2f}", f"{descent_of(ray[2], slant):.2f}",
+                f"{centre.x:.1f}", f"{centre.y:.1f}",
+                f"{box.target_bbox.size_x:.1f}", f"{box.target_bbox.size_y:.1f}",
+                f"{box.detection_confidence:.3f}", box.detection_class or "?",
+                surface,
+                f"{math.sqrt(covariance[0] + covariance[4]):.2f}")), flush=True)
+
+    def flush(after: float) -> None:
+        while pending and time.monotonic() - pending[0].arrived >= after:
+            write(pending.popleft())
+
+    # Everything a row joins has to be in hand before the window opens, or the
+    # first frames record a pose and a speed nobody had sent yet. The tree also
+    # has to hold enough history to differentiate.
+    uas.wait_until(
+        lambda: (speeds.samples and casualties.known
+                 and tree.can_transform(origin, camera_frame, Time())
+                 and tree.can_transform(origin, airframe, Time())),
+        args.deadline, "the frame tree, a ground speed and the ground truth")
+    uas.pump(2.0 * SLEW_WINDOW_S)
+
+    uas.create_subscription(TargetBoxArray, uas.topic("target_locations"),
+                            collect, RELIABLE_QOS)
+    uas.create_timer(ROW_FLUSH_S, lambda: flush(VERDICT_WAIT_S))
+    print("\t".join(RECORD_COLUMNS), flush=True)
+    uas.pump(args.seconds)
+    # The scorer judges a frame after the frame is published, so the last
+    # frames of the window are named after the window closes.
+    uas.pump(VERDICT_WAIT_S + ROW_FLUSH_S)
+    flush(0.0)
+
+    for what, count in counted.items():
+        print(f"{what}\t{count}", file=sys.stderr)
+    if horizontal:
+        print(f"horizontal\t{spread(horizontal)}", file=sys.stderr)
+        print(f"vertical\t{spread(vertical)}", file=sys.stderr)
+    elif counted["rows"]:
+        print("localized boxes, but no ground truth to measure them against",
+              file=sys.stderr)
+    else:
+        print("nothing localized in the window", file=sys.stderr)
+    return 0 if counted["rows"] else 1
+
+
+def descent_of(up: float, slant: float) -> float:
+    """How far below the horizon the camera looked to reach one box."""
+    if not slant:
+        return float("nan")
+    return math.degrees(math.asin(float(np.clip(-up / slant, -1.0, 1.0))))
+
+
+def spread(values) -> str:
+    """The shape of a column of measurements, in one line.
+
+    The largest is the one furthest from zero, so a vertical error that is all
+    one way reads as a bias rather than as a spread about nothing.
+    """
+    ordered = sorted(values)
+    p95 = ordered[min(len(ordered) - 1, int(0.95 * len(ordered)))]
+    return (f"n {len(values)}\tmean {statistics.fmean(values):.2f}"
+            f"\tp50 {statistics.median(values):.2f}\tp95 {p95:.2f}"
+            f"\tmax {max(values, key=abs):.2f}")
 
 
 def command_score(uas: Uas, args) -> int:
@@ -1129,6 +1474,7 @@ COMMANDS = {
     "capture": command_capture,
     "detections": command_detections,
     "published": command_published,
+    "record": command_record,
     "score": command_score,
     "click": command_click,
     "fiducial": command_fiducial,
@@ -1181,8 +1527,6 @@ def main() -> int:
     detections.add_argument("--deadline", type=float, default=20.0)
     detections.add_argument("--tsv", action="store_true",
                             help="one line per box: target, position, error")
-    detections.add_argument("--truth", default=os.environ.get("RESOLVED_TRUTH_FILE", ""),
-                            help="what the scenario actually placed")
     click = sub.add_parser("click")
     click.add_argument("mode", choices=["point", "roi", "off"])
     click.add_argument("u", type=float, nargs="?", default=320.0)
@@ -1228,17 +1572,18 @@ def main() -> int:
     published = sub.add_parser("published")
     published.add_argument("--topic", default="target_locations")
     published.add_argument("--named", action="store_true",
-                           help="one line per target, named by the recorded "
-                                "target it landed nearest")
-    published.add_argument("--truth", default=os.environ.get("RESOLVED_TRUTH_FILE", ""))
-    published.add_argument("--scene",
-                           default=f"/scenes/worlds/{os.environ.get('SCENE', '')}_surface.json")
+                           help="one line per target, named by the casualty "
+                                "the scorer says each box is")
     published.add_argument("--seconds", type=float, default=12.0,
                            help="how long to collect. Run both sides at once "
                                 "and join on the sequence number: the two are "
                                 "watching one live stream, not one message")
-    detections.add_argument("--scene", default=f"/scenes/worlds/{os.environ.get('SCENE', '')}_surface.json",
-                            help="the surface that says where the world origin is")
+    record = sub.add_parser("record")
+    record.add_argument("--deadline", type=float, default=20.0)
+    record.add_argument("--seconds", type=float, default=30.0,
+                        help="how long to collect. One row per localized box, "
+                             "so a hover over eight casualties fills about "
+                             "eighty rows a second")
     args = parser.parse_args()
 
     rclpy.init()

@@ -361,12 +361,12 @@ gz_video_streamer --encoder "x264enc tune=zerolatency bitrate=2000" ...
 ### The v3 zoom
 
 A v3 carries a zoom lens. gz-sim cannot change a camera's field of view once
-the world is loaded, so the camera renders the widest view the lens reaches and
-a narrower preset is the middle of it. The streamer crops to the field of view
-asked for on `/uas<N>/camera/zoom`, keeping the fraction that is the ratio of
-the tangents of the half angles, which is what makes the result a real field of
-view rather than a smaller picture. The stream keeps its size, so no consumer
-renegotiates when the operator zooms.
+the world is loaded, so the airframe model carries one camera per framing. The
+streamer reads the narrowest camera that still covers what the lens asks for on
+`/uas<N>/camera/zoom`, and crops it by the ratio of the tangents of the half
+angles. That ratio is what makes the result a real field of view rather than a
+smaller picture. The stream keeps its size, so no consumer renegotiates when
+the operator zooms.
 
 `scripts/zoom.sh` is the one table of what the presets are, measured from the
 calibration files in 5g_drone. The simulator reads it to crop the camera and
@@ -375,14 +375,54 @@ about what `mid` means.
 
 ```bash
 UAS_ZOOM="mid mid - -"        # the preset each vehicle boots at, - for a v2
-./px4sim zoom 11 wide         # change the picture while it flies
+./px4sim zoom 11 wide         # change the framing while it flies
 ```
 
-`./px4sim zoom` moves the picture alone. The calibration follows `UAS_ZOOM`,
-which is read when the companion starts, so change that and restart to move
-both together. A crop is soft, because it is fewer pixels stretched back: the
-geometry is right and the detail is not. Render the camera larger in the
-airframe model to buy that back.
+`./px4sim zoom` asks on the topic the operator's Foxglove button publishes. It
+then waits for the vehicle to report the framing it reached, prints that
+framing and the calibration it read back, and fails if either one disagrees
+with the request.
+
+Nothing else has to change to keep the two together. The zoom node moves the
+lens and publishes the calibration of the picture it delivers, so the
+calibration travels with the lens.
+
+A crop is soft, because it is fewer pixels stretched back. The geometry is
+right and the detail is not. Render the camera larger in the airframe model to
+buy that back.
+
+#### Two floors the simulated lens has, and what they cost
+
+These numbers come from this stack, with the vehicle 40 m over the ground and
+the gimbal 45 degrees down. Neither floor is worth chasing.
+
+**A settled framing rests about 0.42% wide of its nominal field of view.** The
+emulated controller models coast, backlash and jitter (`COAST_JITTER_STEPS` and
+`BACKLASH_STEPS` in `modules/sim/scf4_emulator.py`). After `preset/wide` it
+reports the counter at 40000, but the mechanism rests about 21 steps short. The
+picture is then 55.87 degrees where the calibration says 56.06.
+
+That is a focal scale error: zero at the image centre, 0.04 m on the ground
+80 px off centre, and about **0.15 m at the frame edge**. A real motorized lens
+also rests a few steps off its counter, which is why you calibrate a lens at
+its framings. The emulator is doing its job here. Read the resting value with:
+
+```bash
+docker compose exec sim gz topic -e -t /uas11/camera/zoom
+```
+
+**A widening move delivers the old field of view for about 25 ms.** Gazebo
+renders nothing from a camera that nobody subscribes to. So when the lens opens
+past the framing the streamer reads, the wider camera needs about 80 ms to give
+its first frame, and the streamer clamps the crop until it arrives
+(`zoom_fraction_ = min(1.0, ...)` in `modules/sim/gz_video_streamer/main.cc`).
+The picture holds the narrower framing while the calibration has already
+started to open.
+
+Worst case: **0.75 m** of ground error 160 px off centre, for one frame of a
+`mid` to `wide` recall. Narrowing has no such gap, because the camera already
+in use covers the target. The aircraft has one sensor and no camera to switch
+to, so this floor belongs to the simulator alone.
 
 ## The flight code
 
@@ -515,6 +555,86 @@ they catch; the distance inside that is reported rather than graded.
 Four things do not move: what reaches the ground, whether it reaches it
 unchanged, where the gimbal points, and whether a ray lands on terrain or on
 the flat plane.
+
+### Measuring localization error
+
+```bash
+./px4sim uas 11 record --seconds 60 > logs/hover.tsv
+```
+
+`record` writes one row for every localized box, with the motion that made it
+beside the error it made. The rows go to standard output and the summary goes
+to standard error, so the command above files the rows and shows the summary.
+
+```
+frames       242
+rows         1693
+unlocalized  0
+unjudged     7
+horizontal   n 1693  mean 0.26  p50 0.26  p95 0.45  max 0.50
+vertical     n 1693  mean 0.01  p50 0.00  p95 0.02  max 0.02
+```
+
+That is uas11 at 40 m over the `lorton` casualties, gimbal at -45 degrees,
+hovering. `unlocalized` counts boxes that carried no position at all, and
+`unjudged` counts rows the scorer had not judged when the row went out.
+
+Error is not one number. It grows with how fast the camera turns, so the
+columns beside it carry the answer: `ground_speed`, `slew_rate`, `slant_range`
+and `depression`. A run that records only the error cannot say whether a change
+helped.
+
+| Column | What it holds |
+|---|---|
+| `stamp` | the frame's own stamp, the instant the shutter opened |
+| `casualty` `verdict` `cited` | which casualty this box is, the scorer's verdict, and how the scorer got there |
+| `rep_*` `gt_*` | where the box was reported, and where the scenario really put that casualty |
+| `err_east` `err_north` `err_up` `err_horiz` | the reported point measured from the truth |
+| `veh_*` `ground_speed` | where the aircraft was and how fast it was flying |
+| `gimbal_pitch` `gimbal_yaw` `slew_rate` | where the camera looked, and how fast it turned |
+| `slant_range` `depression` | how far the camera was from this box, and how far under the horizon it looked to reach it |
+| `px_*` `confidence` `class` | the box in the picture |
+| `surface` | `terrain` if the ray met a tile, `plane` if it met the flat ground |
+| `sigma` | the localizer's own horizontal uncertainty |
+
+`verdict` is `TP`, `MISLOCALIZED` or `FP`. `cited` is `hit`, `crossed`,
+`nearest` or `unjudged`.
+
+`gimbal_pitch` is the angle an operator types: negative looks down.
+`gimbal_yaw` is a compass bearing. `slew_rate` is how fast the boresight turns
+in the world, so a yawing aircraft moves it as well as a moving mount.
+
+The scorer names each box, on `<ns>/scoring/verdicts`. The command does not
+match a box to the nearest truth. Casualties in a scenario stand a few metres
+apart, so the nearest truth binds any error wider than half that spacing to the
+wrong casualty and then reports the short distance to it. That hides exactly
+the errors worth measuring.
+
+A row the scorer did not judge reads `unjudged` in `cited`, and falls back to
+the nearest casualty. A run with a large `unjudged` count measures less than it
+says. `./px4sim uas <N> detections` and `./px4sim uas <N> published --named`
+name their targets the same way.
+
+The camera pose comes from the frame tree at the frame's own stamp. That is the
+pose `tf_loc` cast the ray from, so a row measures the localizer and not the
+delay in reading it.
+
+Vertical error is `err_up`, and it carries a sign. A mean away from zero is a
+bias in the surface the ray met, not a spread. Nothing else in the stack
+measures it.
+
+Read a run with `awk`. Take the columns by name off the header line. Mean
+horizontal error against slew rate:
+
+```bash
+awk -F'\t' 'NR == 1 { for (i = 1; i <= NF; i++) column[$i] = i; next }
+            { rate = int($column["slew_rate"])
+              seen[rate]++; total[rate] += $column["err_horiz"] }
+            END { for (rate in seen)
+                    printf "%s deg/s\t%.2f m\t%d rows\n",
+                           rate, total[rate] / seen[rate], seen[rate] }' \
+  logs/hover.tsv | sort -n
+```
 
 ### The scene in the 3D panel
 
