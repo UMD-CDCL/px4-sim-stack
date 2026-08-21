@@ -68,8 +68,35 @@ else
 		"$(python3 -c "print(abs(abs($now - $was) - $want) <= 0.6)")"
 fi
 
+# Sideways is the other half of a click, and the half a locked yaw joint eats.
+# The mount yaws, so a pixel right of the boresight comes to it by turning
+# rather than by pitching. The turn is bigger than the offset in the picture
+# and it grows as the camera looks further down, because the offset is measured
+# across the picture and the turn is measured about the vertical.
+uas gimbal "-$depression" --yaw 0 >/dev/null
+turned=$(uas click point 480 180)
+sideways=$(printf '%s' "$turned" | sed -n \
+	's/.*depression \([-0-9.]*\) -> \([-0-9.]*\).*azimuth \([-0-9.]*\) -> \([-0-9.]*\).*/\1 \2 \3 \4/p')
+if [ -z "$sideways" ]; then
+	fail "a sideways click turns the camera by the angle the lens says"
+	note "$turned"
+else
+	read -r pitch_was pitch_now yaw_was yaw_now <<< "$sideways"
+	expect_eq "a sideways click turns the camera by the angle the lens says" True \
+		"$(python3 -c "
+import math
+# 160 px right of the centre of a 640 column image, through the focal length in
+# hand, and then off the nose rather than across the picture.
+print(abs(($yaw_now) - ($yaw_was) - math.degrees(math.atan(
+	(160 / ${VERIFY_FX:-1802.85}) / math.cos(math.radians($pitch_was))))) <= 1.0)")"
+	expect_eq "a sideways click spends its move on yaw, not on pitch" True \
+		"$(python3 -c "print(abs($pitch_now - $pitch_was) <= 1.0)")"
+fi
+
 # ------------------------------------------------------------------ the lens
-uas gimbal "-$depression" >/dev/null
+# Both axes: the click above left the camera off the nose, and everything from
+# here frames a target from the vehicle's heading.
+uas gimbal "-$depression" --yaw 0 >/dev/null
 for preset in wide mid narrow; do
 	lens "$preset"
 	sleep 6
@@ -120,7 +147,7 @@ fi
 # The overlay is what Foxglove projects into the image panel, so its rate is a
 # product feature rather than waste. It fell to the scoring rate once and the
 # marks visibly trailed the picture.
-uas gimbal "-$depression" >/dev/null
+uas gimbal "-$depression" --yaw 0 >/dev/null
 counts=$(./px4sim probe "$lead" --count 8 \
 	"/viz/uas$lead/scoring/targets" \
 	"/uas$lead/scoring/verdicts" \

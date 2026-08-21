@@ -85,9 +85,9 @@ the chain order leaves 1.7e-06 degrees.
 
 The yaw arm never has to move for any of it. For a setpoint of roll zero and
 vehicle-frame yaw zero, the yaw joint this decomposition asks for is zero at
-every airframe attitude, to 8e-15 degrees. A mount with a roll arm and a pitch
-arm holds the horizon exactly, and takes its azimuth from the airframe, which is
-what the Chimera mount is built to do.
+every airframe attitude, to 8e-15 degrees. The roll arm and the pitch arm hold
+the horizon exactly on their own, so the yaw arm turns only when a commander
+asks for an azimuth, and stabilization never fights it for the axis.
 
 WHAT ELSE CHANGES.
 
@@ -100,22 +100,21 @@ WHAT ELSE CHANGES.
 2. The RC path clears the flags and the stored attitude. It commands the joints
    themselves, so there is no frame to hold anything against.
 
-3. GIMBAL_DEVICE_INFORMATION now describes this mount. It gains HAS_ROLL_LOCK
-   and HAS_PITCH_LOCK, because the device now really does hold those axes, and
-   it loses HAS_YAW_AXIS, HAS_YAW_FOLLOW and SUPPORTS_INFINITE_YAW, because
-   model.sdf gives the yaw joint equal limits and holds the arm at zero. The
-   reported yaw range becomes 0 to 0 for the same reason, which also clamps the
-   joint command to what the joint can do rather than to plus and minus
-   infinity.
+3. GIMBAL_DEVICE_INFORMATION now describes this mount. It gains HAS_ROLL_LOCK,
+   HAS_PITCH_LOCK and HAS_YAW_LOCK, because the device now really does hold
+   those axes against the world, and it loses SUPPORTS_INFINITE_YAW, because
+   model.sdf gives the yaw joint -180 to +180 degrees of travel. The reported
+   yaw range becomes that same range, which also clamps the joint command to
+   what the arm can do rather than to plus and minus infinity.
 
    Nothing in PX4 reads these flags; they are what a consumer reads to learn the
    mount. `umd_uas/gimbal.py` subscribes to the report and says out loud when
    the mount declares no yaw axis while its yaw limits allow one, so the axis
    count is read from the device on both the simulator and the aircraft rather
-   than assumed. If the Chimera mount is ever shown to have a yaw actuator,
-   three things open together: the yaw joint limits in model.sdf, the yaw
-   capability flags and range here, and `yaw_angle_min` and `yaw_angle_max` in
-   the flight code parameters.
+   than assumed. Three things state that one travel and they open and close
+   together: the yaw joint limits in model.sdf, the yaw capability flags and
+   range here, and `yaw_angle_min` and `yaw_angle_max` in the flight code
+   parameters.
 
 WHAT THIS DOES NOT DO.
 
@@ -126,8 +125,8 @@ real vehicle with a MAVLink v2 gimbal behaves the same way. Holding a place is
 the flight code's work, and `umd_uas/gimbal.py` does it by re-sending the
 attitude.
 
-It does not add a yaw actuator. An azimuth the mount cannot reach still needs
-the aircraft to turn.
+It does not turn the aircraft. An azimuth past the travel of the yaw arm still
+needs the aircraft to turn, and `umd_uas/gimbal.py` says by how much.
 
 It does not touch the joint controllers. Each one is effort limited at
 cmd_max 0.3 with p_gain 0.8, so a fast bank is still followed with a lag. That
@@ -153,43 +152,46 @@ src/PX4-Autopilot:
  	float _gimbal_rate[3] = {NAN};
  
  	// Device information attributes
-@@ -100,14 +103,18 @@
+@@ -100,14 +103,23 @@
  	const uint32_t _hardware_version = (_hardware_dev_version & 0xff) << 24 | (_hardware_patch_version & 0xff) << 16 |
  					   (_hardware_minor_version & 0xff) << 8 | (_hardware_major_version & 0xff);
  	const uint64_t _uid = 0x9a77a55b3c10971f ;
 +	// What this mount can do, which is now what it does. The LOCK bits are
-+	// here because the joints hold a locked axis against the world, and the
-+	// yaw bits are absent because model.sdf pins the yaw joint: a two axis
-+	// mount takes its azimuth from the airframe heading. Read this from
-+	// GIMBAL_DEVICE_INFORMATION rather than assuming it, on both sides.
++	// here because the joints hold a locked axis against the world, on all
++	// three axes. The yaw bits stay, because the mount has a yaw arm, but
++	// SUPPORTS_INFINITE_YAW goes: model.sdf gives that arm -180 to +180
++	// degrees of travel, which is a range and not an infinite one. Read
++	// this from GIMBAL_DEVICE_INFORMATION rather than assuming it, on both
++	// sides.
  	const uint16_t _cap_flags = gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_HAS_NEUTRAL |
  				    gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_HAS_ROLL_AXIS |
  				    gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_HAS_ROLL_FOLLOW |
 +				    gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_HAS_ROLL_LOCK |
  				    gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_HAS_PITCH_AXIS |
  				    gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_HAS_PITCH_FOLLOW |
--				    gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_HAS_YAW_AXIS |
--				    gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_HAS_YAW_FOLLOW |
++				    gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_HAS_PITCH_LOCK |
+ 				    gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_HAS_YAW_AXIS |
+ 				    gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_HAS_YAW_FOLLOW |
 -				    gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_SUPPORTS_INFINITE_YAW;
-+				    gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_HAS_PITCH_LOCK;
++				    gimbal_device_information_s::GIMBAL_DEVICE_CAP_FLAGS_HAS_YAW_LOCK;
  	const uint16_t _custom_cap_flags = 0;
  
  	// This module act as the gimbal driver. In case of a Mavlink compatible gimbal, the driver is aware of
-@@ -116,8 +123,11 @@
+@@ -116,8 +128,11 @@
  	const float _roll_max = 0.785398f;
  	const float _pitch_min = -2.35619f;
  	const float _pitch_max = 0.785398f;
 -	const float _yaw_min = NAN; 		// infinite yaw
 -	const float _yaw_max = NAN;		// infinite yaw
-+	// The yaw joint of model.sdf has equal limits, so the arm is held at
-+	// zero. Reporting the same thing here keeps the report, the clamp and
-+	// the model saying one thing. Open all three together, or none.
-+	const float _yaw_min = 0.0f;
-+	const float _yaw_max = 0.0f;
++	// The travel of the yaw joint in model.sdf. Reporting the same range
++	// here keeps the report, the clamp and the model saying one thing, and
++	// it clamps the joint command to what the arm can do.
++	const float _yaw_min = -3.141593f;
++	const float _yaw_max = 3.141593f;
  
  	const uint8_t _gimbal_device_id = 1;	// Gimbal is implemented by the same component: options are 1..6
  	uint16_t _gimbal_device_flags = 0;  // GIMBAL_DEVICE_FLAGS
-@@ -143,6 +153,15 @@
+@@ -143,6 +158,15 @@
  	/// @param q_vehicle airframe attitude in the NED earth frame
  	/// @return rotation from the reference frame to the NED earth frame
  	static matrix::Quatf attitudeReferenceFrame(const uint16_t lock_flags, const matrix::Quatf &q_vehicle);

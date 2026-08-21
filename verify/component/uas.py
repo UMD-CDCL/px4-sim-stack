@@ -36,7 +36,8 @@ from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
 from geometry_msgs.msg import PointStamped, PoseStamped, TransformStamped
 from cdcl_umd_msgs.msg import TargetBox, TargetBoxArray
 from cdcl_umd_msgs.srv import TBALocalization
-from mavros_msgs.msg import Altitude, GimbalDeviceAttitudeStatus, HomePosition, State
+from mavros_msgs.msg import (Altitude, GimbalDeviceAttitudeStatus,
+                            GimbalManagerSetPitchyaw, HomePosition, State)
 from mavros_msgs.srv import CommandBool, CommandInt, CommandTOL, SetMode
 from std_srvs.srv import Trigger
 from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
@@ -127,6 +128,11 @@ class Uas(Node):
             self._on_gimbal, SENSOR_QOS)
         self.gimbal_pitch = self.create_publisher(
             Float32, f"{self.namespace}/gimbal_raw_command", RELIABLE_QOS)
+        # Both axes at once. The elevation-only topic above holds the azimuth
+        # the gimbal already has, which is what USPI sends and what leaves a
+        # yawed mount where the last click put it.
+        self.gimbal_angle = self.create_publisher(
+            GimbalManagerSetPitchyaw, f"{self.namespace}/gimbal_angle_cmd", RELIABLE_QOS)
         self.gimbal_reassert = self.create_publisher(
             Float32, f"{self.namespace}/reassert_gimbal_cmd", RELIABLE_QOS)
         self.reposition = self.create_client(CommandInt, f"{self.namespace}/cmd/command_int")
@@ -180,6 +186,13 @@ class Uas(Node):
             return None
         return self.height.amsl - self.height.relative + height_over_home
 
+    def _boresight(self):
+        """Where the camera looks, in the frame the gimbal's report declares."""
+        if self.gimbal is None:
+            return None
+        q = self.gimbal.q
+        return Rotation.from_quat([q.x, q.y, q.z, q.w]).apply([1.0, 0.0, 0.0])
+
     def boresight_depression_deg(self):
         """How far below the horizon the camera looks, from the gimbal's own
         report.
@@ -188,11 +201,24 @@ class Uas(Node):
         MAVLink states a gimbal attitude in a forward-right-DOWN frame, so a
         positive z component is already a look downwards.
         """
-        if self.gimbal is None:
+        forward = self._boresight()
+        if forward is None:
             return None
-        q = self.gimbal.q
-        forward = Rotation.from_quat([q.x, q.y, q.z, q.w]).apply([1.0, 0.0, 0.0])
         return float(np.degrees(np.arcsin(np.clip(forward[2], -1.0, 1.0))))
+
+    def boresight_azimuth_deg(self):
+        """How far right of the nose the camera looks, from the same report.
+
+        The mount yaws, so the other half of where it points is this one.
+        Positive is right, in the same forward-right-down frame. That frame is
+        the vehicle frame while this station commands the gimbal, so the angle
+        is off the nose; a region of interest set by somebody else carries
+        YAW_LOCK and makes it an angle from north instead.
+        """
+        forward = self._boresight()
+        if forward is None:
+            return None
+        return float(np.degrees(np.arctan2(forward[1], forward[0])))
 
     def pump(self, seconds: float) -> None:
         end = time.monotonic() + seconds
@@ -344,15 +370,21 @@ def command_gimbal(uas: Uas, args) -> int:
     uas.gimbal_reassert.publish(Float32(data=KEEP_PITCH))
     uas.pump(1.0)
     for _ in range(args.repeat):
-        uas.gimbal_pitch.publish(Float32(data=float(args.pitch)))
+        if args.yaw is None:
+            uas.gimbal_pitch.publish(Float32(data=float(args.pitch)))
+        else:
+            uas.gimbal_angle.publish(GimbalManagerSetPitchyaw(
+                pitch=float(args.pitch), yaw=float(args.yaw)))
         uas.pump(0.25)
-    print(f"commanded pitch {args.pitch} degrees")
+    print(f"commanded pitch {args.pitch} degrees"
+          + ("" if args.yaw is None else f", yaw {args.yaw} degrees off the nose"))
     uas.pump(args.settle)
     reported = uas.boresight_depression_deg()
     if reported is None:
         print("the gimbal reports no attitude", file=sys.stderr)
         return 1
     print(f"reported depression {reported:.2f} degrees below the horizon")
+    print(f"reported azimuth {uas.boresight_azimuth_deg():.2f} degrees right of the nose")
     print(f"flags {uas.gimbal.flags}")
     return 0
 
@@ -377,9 +409,9 @@ def command_goto(uas: Uas, args) -> int:
         command=MAV_CMD_DO_REPOSITION,
         param1=DEFAULT_GROUND_SPEED,
         param2=CHANGE_MODE,
-        # NaN keeps the heading it has. The gimbal's yaw is locked to the
-        # airframe, so pointing the camera at something means pointing the
-        # vehicle at it first.
+        # NaN keeps the heading it has. The gimbal yaws -180 to +180 degrees
+        # off the nose, so a heading here is how a caller frames the shot, not
+        # how the camera reaches the target.
         param4=math.radians(args.heading) if args.heading is not None else float("nan"),
         x=int(round(latitude * DEGREES_TO_INT)),
         y=int(round(longitude * DEGREES_TO_INT)),
@@ -605,6 +637,7 @@ def command_click(uas: Uas, args) -> int:
                           "the gimbal's attitude"):
         return 1
     before = uas.boresight_depression_deg()
+    azimuth_before = uas.boresight_azimuth_deg()
     point = PointStamped()
     point.header.frame_id = "preview"
     point.header.stamp = uas.get_clock().now().to_msg()
@@ -621,7 +654,9 @@ def command_click(uas: Uas, args) -> int:
         uas.pump(0.25)
     uas.pump(args.settle)
     after = uas.boresight_depression_deg()
-    print(f"clicked {args.u}, {args.v}: depression {before:.1f} -> {after:.1f} degrees")
+    azimuth_after = uas.boresight_azimuth_deg()
+    print(f"clicked {args.u}, {args.v}: depression {before:.1f} -> {after:.1f} degrees, "
+          f"azimuth {azimuth_before:.1f} -> {azimuth_after:.1f} degrees right of the nose")
     return 0
 
 
@@ -1122,6 +1157,10 @@ def main() -> int:
     gimbal = sub.add_parser("gimbal")
     gimbal.add_argument("pitch", type=float,
                         help="degrees, negative looks down, -90 is straight down")
+    gimbal.add_argument("--yaw", type=float, default=None,
+                        help="degrees off the nose, positive right. The mount "
+                             "yaws, so this is how to centre it again. Left "
+                             "out, the azimuth stays where it is.")
     gimbal.add_argument("--repeat", type=int, default=4,
                         help="the node holds the newest command, so a few make "
                              "the first one land whatever the discovery timing")

@@ -87,10 +87,9 @@ leaves up to 40.096 degrees of error and the chain order leaves 1.7e-06.
 
 The yaw arm never has to move for any of it. For a setpoint of roll zero and
 vehicle-frame yaw zero, the yaw joint this decomposition asks for is zero at
-every airframe attitude, to 8e-15 degrees. **A mount with a roll arm and a
-pitch arm holds the horizon exactly**, and takes its azimuth from the airframe.
-That is worth knowing on its own: the two axis mount is not a compromise for
-stabilization, only for azimuth.
+every airframe attitude, to 8e-15 degrees. **The roll arm and the pitch arm
+hold the horizon on their own**, so the yaw arm turns only when a commander
+asks for an azimuth. Stabilization and pointing never fight over that axis.
 
 If you ever suspect this class of fault again, the signature is that the
 correction is in the right direction and the wrong size, and that the size
@@ -159,8 +158,8 @@ carried YAW_LOCK. 92 is the lock bits 28 plus 64 for the earth frame, and the
 quaternion is earth referenced there. The number tells you who commanded last.
 
 The arithmetic, with the airframe at roll 20, pitch 10, yaw 40 degrees and the
-camera 30 degrees down and 25 degrees right of the nose. That yaw is more than
-the two-axis mount can make, and it is here to move all three axes:
+camera 30 degrees down and 25 degrees right of the nose, which moves all three
+axes:
 
 | the report | flags | the camera frame MAVInsight builds |
 |---|---|---|
@@ -236,35 +235,43 @@ vehicle-attitude correction off the world-true camera orientation. The
 correction drifts only at EKF speed, so a sudden disagreement always belongs to
 the joints.
 
-## The yaw axis is locked, and the device now says so
+## The yaw axis, and the three places that state its travel
 
-`model.sdf` gives the yaw joint equal lower and upper limits, which holds the
-arm at zero and leaves the joint and its controller in place, so PX4 still
-finds everything it commands. The camera's azimuth then comes from the airframe
-heading, which is what a two axis mount does.
+The Chimera mount is three axis: yaw, roll and pitch. The camera takes an
+azimuth off the nose without the aircraft turning, and a pointing click that
+lands left or right of the boresight is a yaw command like any other.
 
-Stock GZGimbal contradicted its own model here. It declared HAS_YAW_AXIS,
-HAS_YAW_FOLLOW and SUPPORTS_INFINITE_YAW in GIMBAL_DEVICE_INFORMATION, with a
-yaw range of plus and minus infinity, while the joint could not move at all.
-`px4-gzgimbal-lock.patch` drops those three flags and reports a yaw range of 0
-to 0, so the report, the joint clamp and the model say one thing. The same
-patch adds HAS_ROLL_LOCK and HAS_PITCH_LOCK, because the device now holds those
-two axes.
+Three places state the travel of that axis, and they have to agree. `model.sdf`
+gives the yaw joint -180 to +180 degrees. `px4-gzgimbal-lock.patch` reports the
+same range in GIMBAL_DEVICE_INFORMATION, which is also what GZGimbal clamps the
+joint command to. `yaw_angle_min` and `yaw_angle_max` in the flight code
+parameters bound what `umd_uas/gimbal.py` will ask for. Change one and change
+all three, or the mount stops at a limit that nothing else knows about.
 
-Do not open that axis to make a pointing click work. The aircraft would have to
-turn, so the simulator must turn too. If the Chimera mount is ever shown to
-carry a yaw actuator, three things open together: the yaw joint limits in
-`model.sdf`, the yaw capability flags and range in the patch, and
-`yaw_angle_min` and `yaw_angle_max` in the flight code parameters.
+That is exactly how this axis was lost. `model.sdf` was given equal yaw limits,
+which pins the arm at zero while the joint and its controller stay in place, so
+PX4 still found everything it commanded and nothing failed. The flight code went
+on sending an azimuth, the report went on declaring an infinite yaw, and the
+camera answered in pitch alone. A click left of the boresight moved the picture
+down. **A locked joint is silent: the command is accepted, clamped and gone.**
 
-The axis count is not settled by any evidence in these repositories. The claim
-above rests on the model and on the flight code never having used gimbal yaw
-for RC, for missions or for surveys. Nothing here holds a
-GIMBAL_DEVICE_INFORMATION capture from an aircraft. `umd_uas/gimbal.py`
-subscribes to `gimbal_control/device/info` and prints what the mount declares,
-so one flight settles it. On the simulator that topic is advertised and carries
-nothing, because PX4 sends GIMBAL_DEVICE_INFORMATION only when something asks
-for it and no stream rate does.
+The capability flags are the honest half of it. Stock GZGimbal declared
+HAS_YAW_AXIS, HAS_YAW_FOLLOW and SUPPORTS_INFINITE_YAW while the joint could not
+move at all. The patch keeps the first two, drops SUPPORTS_INFINITE_YAW because
+the travel is now a range rather than an infinite one, and adds HAS_ROLL_LOCK,
+HAS_PITCH_LOCK and HAS_YAW_LOCK, because the device holds all three axes against
+the world once it honours the lock bits.
+
+Nothing in PX4 reads those flags. They are what a consumer reads to learn the
+mount, and `umd_uas/gimbal.py` prints them from `gimbal_control/device/info` and
+says out loud when they disagree with its own yaw limits. On the simulator that
+topic is advertised and carries nothing, because PX4 sends
+GIMBAL_DEVICE_INFORMATION only when something asks for it and no stream rate
+does, so read the flags from the aircraft and the travel from this file.
+
+An azimuth past the travel is still the aircraft's work. `umd_uas/gimbal.py`
+clips the demand at its own limits and says how far the aircraft has to turn for
+the rest; nothing in the flight code turns it.
 
 ## The rates, and the patch that raises them
 
@@ -311,5 +318,15 @@ edited patch is applied again.
 
 A tree that was patched by hand before that record existed is recognized and
 recorded on the next run.
+
+To EDIT one of these patches, put the files it touches back first. A new
+version of a patch does not apply on top of the old one, and the record only
+knows that the checksum changed:
+
+```bash
+git -C src/PX4-Autopilot checkout -- src/modules/simulation/gz_bridge
+rm src/PX4-Autopilot/.px4sim-patches
+./px4sim setup px4
+```
 
 Then restart `sim`. The entrypoint rebuilds what changed.

@@ -132,10 +132,11 @@ down. The two marks add the cameras they fly.
 | `chimera_v2` | gimbal RGB, gimbal thermal | `pilot<N>`, `pilotl<N>`, `thermal<N>`, `thermall<N>` |
 | `chimera_v3` | gimbal RGB, gimbal thermal, down-facing RGB | `rgb<N>`, `rgbl<N>`, `pilot<N>`, `pilotl<N>`, `thermal<N>`, `thermall<N>` |
 
-The gimbal is two axis, roll and pitch, with the pitch travel the aircraft has:
-level to straight down and no further. Yaw is locked, because the aircraft has
-no yaw actuator on the mount. A pointing command that needs azimuth must turn
-the aircraft. See [px4-simulated-gimbal.md](px4-simulated-gimbal.md).
+The gimbal is three axis, yaw, roll and pitch, with the travel the aircraft has:
+pitch from level to straight down and no further, yaw -180 to +180 degrees off
+the nose. An azimuth past that travel must turn the aircraft. The model, the
+device report and the flight code parameters state that travel in three places
+and they change together. See [px4-simulated-gimbal.md](px4-simulated-gimbal.md).
 
 Both models are templates. The camera field of view belongs to the vehicle
 rather than to the mark, so the entrypoint renders one airframe model for each

@@ -389,6 +389,29 @@ ros2 topic pub --once /uas11/reassert_gimbal_cmd std_msgs/msg/Float32 "{data: -3
 
 `./px4sim fly` sends that on every takeoff, so it does not arise there.
 
+### A click moves the camera in pitch, and never turns it
+
+The mount yaws, so a pixel left or right of the boresight is a yaw command like
+any other. A camera that answers such a click with a small pitch move is a yaw
+setpoint that something clamped on the way to the joint. Ask for an azimuth and
+read it back:
+
+```bash
+./px4sim uas 11 gimbal -45 --yaw 30
+```
+
+If the reported azimuth stays at zero, one of the three places that state the
+travel of that axis disagrees with the others: the yaw joint limits in
+`modules/sim/scenes/models/gimbal/model.sdf`, the yaw range and capability
+flags in `patches/px4-gzgimbal-lock.patch`, and `yaw_angle_min` and
+`yaw_angle_max` in the flight code parameters. `./px4sim check` says whether
+the patch reached the source at all, and the gimbal node logs its own limits
+when it starts:
+
+```bash
+./px4sim logs --since 1h onboard11 | grep yaw_limits
+```
+
 ### PX4 rebuilds on every start
 
 The build output goes to `src/PX4-Autopilot/build/`, on the host. If it

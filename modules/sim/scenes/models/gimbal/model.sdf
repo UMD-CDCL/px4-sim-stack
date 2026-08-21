@@ -75,25 +75,22 @@
       </visual>
     </link>
 
-    <!-- Yaw joint, locked. The mount modelled here is two axis, roll and
-         pitch, and the camera's azimuth comes from the airframe heading.
+    <!-- Yaw joint. A real axis: the mount is three axis, so the camera takes
+         an azimuth off the nose without the aircraft turning.
+
+         The travel is -180 to +180 degrees, which is what the flight code may
+         ask for: `umd_uas/gimbal.py` wraps every azimuth into that range and
+         clamps it to yaw_angle_min and yaw_angle_max. Three things state that
+         one range and they open and close together: these limits, the yaw
+         capability flags and range in `patches/px4-gzgimbal-lock.patch`, and
+         those two flight code parameters. See docs/px4-simulated-gimbal.md.
+
          `umd_uas/gimbal.py` sends flags 12, ROLL_LOCK | PITCH_LOCK, and the
-         missing YAW_LOCK means yaw is commanded in the vehicle frame. Its
-         yaw_angle_min and yaw_angle_max clamp that request; they are not a
-         motor.
-
-         Equal limits hold the arm at zero and leave the joint and its
-         controller in place, so PX4 still finds everything it commands.
-         `patches/px4-gzgimbal-lock.patch` makes GIMBAL_DEVICE_INFORMATION
-         declare the same thing, so a consumer that reads the mount is told
-         there is no yaw axis rather than an infinite one.
-
-         Do not open this axis to make a pointing click work. The aircraft
-         would have to turn, so the simulator must turn too. Opening it means
-         opening three things together: these limits, the yaw capability flags
-         and range in that patch, and yaw_angle_min and yaw_angle_max in the
-         flight code parameters. No evidence in these repositories settles the
-         axis count of the real mount; see docs/px4-simulated-gimbal.md. -->
+         missing YAW_LOCK means yaw is commanded in the vehicle frame, so this
+         arm holds an angle off the nose and turns with the airframe. YAW_LOCK
+         holds the azimuth against north instead. The patch turns either one
+         into the angle this joint takes, so the frame is the commander's
+         choice rather than a property of the mount. -->
     <joint name='cgo3_vertical_arm_joint' type='revolute'>
       <child>cgo3_vertical_arm_link</child>
       <parent>cgo3_mount_link</parent>
@@ -101,8 +98,8 @@
       <axis>
         <xyz>0 0 -1</xyz>
         <limit>
-          <lower>0</lower>
-          <upper>0</upper>
+          <lower>-3.141593</lower>
+          <upper>3.141593</upper>
           <effort>100</effort>
           <velocity>-1</velocity>
         </limit>

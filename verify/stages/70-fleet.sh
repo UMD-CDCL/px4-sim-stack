@@ -36,8 +36,8 @@ done
 # Every vehicle aimed at one target, from a different place. The campus
 # scenario puts casualty_m14 111 m north of the origin. Each takes its own
 # offset and height, and its heading and gimbal angle are worked out from
-# those, because a gimbal's yaw is locked to the airframe: pointing the camera
-# at something means pointing the vehicle at it first.
+# those: the gimbal yaws, but a vehicle pointed at the target needs only a
+# depression angle, so this stage asks the gimbal for one number and not two.
 #
 # Flown at the same time, not one after another: four vehicles in turn is a
 # quarter of an hour of waiting, and they do not interfere with each other.

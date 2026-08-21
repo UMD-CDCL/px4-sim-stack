@@ -11,7 +11,7 @@
   fills the field of view in there.
 
   Payload:
-    gimbal              two axis mount, roll and pitch, from model://gimbal
+    gimbal              three axis mount, yaw, roll and pitch, from model://gimbal
     gimbal rangefinder  50 m laser along the gimbal boresight
     body rangefinder    200 m laser, fixed, points down
 
