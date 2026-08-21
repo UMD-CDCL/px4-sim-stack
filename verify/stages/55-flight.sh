@@ -15,6 +15,15 @@ uas() { ./px4sim uas "$lead" "$@" 2>&1 || true; }
 # The front door now waits for the vehicle to report the framing it arrived
 # at, so a failure here is the lens and not a race with it.
 lens() { ./px4sim zoom "$lead" "$1" >/dev/null 2>&1; }
+# The focal length in hand, read from the vehicle. A click is converted through
+# whatever lens is fitted, so a constant here passes only while the vehicle
+# happens to be at the framing that constant was written for.
+focal_px() {
+	# numpy prints a large focal length in scientific notation and a small one
+	# plain, and both are Python float literals where this lands.
+	uas topic camera/camera_info \
+		| sed -n 's/.*k=array(\[ *\([0-9.e+-]*\).*/\1/p' | head -1
+}
 
 vehicle_ready "$lead" || return 0
 
@@ -58,11 +67,11 @@ fi
 uas gimbal "-$depression" >/dev/null
 moved=$(printf '%s' "$(uas click point 320 90)" | sed -n 's/.*depression \([-0-9.]*\) -> \([-0-9.]*\).*/\1 \2/p')
 read -r was now <<< "${moved:-0 0}"
-want=$(./px4sim uas "$lead" published --topic camera/camera_info >/dev/null 2>&1; \
-	python3 -c "
+fx=$(focal_px)
+want=$(python3 -c "
 import math
 # 90 px above the centre of a 360 row image, through the focal length in hand.
-print(round(math.degrees(math.atan(90 / ${VERIFY_FX:-1802.85})), 2))")
+print(round(math.degrees(math.atan(90 / ${fx:-1802.85})), 2))")
 if [ -z "$moved" ]; then
 	fail "an off-boresight click slews by the angle the lens says"
 else
@@ -90,7 +99,7 @@ import math
 # 160 px right of the centre of a 640 column image, through the focal length in
 # hand, and then off the nose rather than across the picture.
 print(abs(($yaw_now) - ($yaw_was) - math.degrees(math.atan(
-	(160 / ${VERIFY_FX:-1802.85}) / math.cos(math.radians($pitch_was))))) <= 1.0)")"
+	(160 / ${fx:-1802.85}) / math.cos(math.radians($pitch_was))))) <= 1.0)")"
 	expect_eq "a sideways click spends its move on yaw, not on pitch" True \
 		"$(python3 -c "print(abs($pitch_now - $pitch_was) <= 1.0)")"
 fi
