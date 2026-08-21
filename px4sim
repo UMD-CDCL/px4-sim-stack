@@ -362,7 +362,8 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
 
   ${BOLD}Scenes and targets${OFF}
     scene <name>        Switch the world and restart the simulator
-    scenario [name]     Place the targets again, with no restart
+    scenario <name>     Switch the targets and reload what scores them
+    scenario            Place this scenario's targets again, with no restart
     origin              The coordinates this scene and scenario fly at
     fiducial [e] [n]    Stand the survey marker this far off its survey
     capture <N> [kind]  Ask for a mosaic, vlm or fiducial capture
@@ -441,6 +442,7 @@ fleet_facts() {
 		zoom_presets=$(zoom_presets_widest_first | paste -sd, -)
 		capture_kinds=$(echo "$CAPTURE_KINDS" | tr ' ' ',')
 		models=$(fleet_models | paste -sd, -)
+		scenarios=$(scenario_names | paste -sd, -)
 		declared=$(printf '%s\n' "$COMPOSE_SERVICES" | paste -sd, -)
 		expected=$($DC config --services 2>/dev/null | paste -sd, -)
 	EOF
@@ -465,6 +467,26 @@ fleet_models() {
 		name=${name##*/}
 		case "$name" in *_v2 | *_v3) echo "$name" ;; esac
 	done
+}
+
+# Every scenario this simulator can place, from the scenario files themselves.
+# `scenario` takes a name from this list and the console offers it, so a name
+# with no file behind it is caught here and not in a world with no targets.
+scenario_names() {
+	local path name
+	for path in modules/sim/scenes/scenarios/*.yaml; do
+		[ -f "$path" ] || continue
+		name=${path##*/}
+		echo "${name%.yaml}"
+	done
+}
+
+# Stop before a scenario that does not exist. The simulator only warns about
+# one, and the run then flies a world with no targets in it, which reads as a
+# detector that finds nothing rather than as a name that was mistyped.
+have_scenario() {
+	[ -f "modules/sim/scenes/scenarios/$1.yaml" ] \
+		|| die "No scenario named '$1'. Try: $(scenario_names | paste -sd' ' -)"
 }
 
 # Put the fleet back into .env and leave every other line as it was.
@@ -919,10 +941,34 @@ EOF
 	;;
 
 scenario)
-	name=${1:-${SCENARIO:-}}
-	[ -n "$name" ] || die "Give a scenario name, or set SCENARIO in .env"
-	$DC exec sim /scenes/spawn_scenario.py \
-		--world "${SCENE:-recon_field}" --scenario "/scenes/scenarios/${name}.yaml"
+	# A name switches the targets, the way `scene` switches the world. No name
+	# places the targets of the scenario already selected, which needs no
+	# restart, because that is the file every node already scores against.
+	#
+	# A switch cannot stop there. The scenario carries the origin and the survey
+	# marker, and the scoring nodes are handed its path in their environment, so
+	# a container left running scores the new targets against the old ground
+	# truth from the old origin, and reports nothing wrong while it does it.
+	if [ $# -eq 0 ]; then
+		[ -n "${SCENARIO:-}" ] \
+			|| die "Give a scenario name, or set SCENARIO in .env. Try: $(scenario_names | paste -sd' ' -)"
+		have_scenario "$SCENARIO"
+		$DC exec sim /scenes/spawn_scenario.py \
+			--world "${SCENE:-recon_field}" --scenario "/scenes/scenarios/${SCENARIO}.yaml"
+		exit 0
+	fi
+	have_scenario "$1"
+	was=${SCENARIO:-}
+	say "Switching to scenario '$1'"
+	export SCENARIO="$1"
+	resolve_origin "${SCENE:-}" "$SCENARIO"
+	reload_world
+	echo "  scenario $SCENARIO   origin ${HOME_LAT:-from the world file}"
+	if [ "$was" != "$SCENARIO" ]; then
+		warn "SCENARIO in .env still names '${was:-nothing}'. Change it there to"
+		warn "keep this scenario, or the next start flies the other one again."
+	fi
+	say "Wait for 'Ready for takeoff' in ./px4sim logs sim"
 	;;
 
 fiducial)

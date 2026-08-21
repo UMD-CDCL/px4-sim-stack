@@ -24,8 +24,12 @@ Three separate things, on purpose:
 | **Vehicle** | The airframe and its sensors | `modules/sim/scenes/models/<name>/` |
 | **Scenario** | The targets placed in a scene | `modules/sim/scenes/scenarios/<name>.yaml` |
 
-One scene carries many scenarios. One scenario runs in many scenes. A change of
-scenario needs no simulator restart.
+One scene carries many scenarios. One scenario runs in many scenes.
+
+`./px4sim scenario` places the same targets again and needs no restart.
+`./px4sim scenario <name>` changes to a different scenario, and that reloads
+the world: the scenario carries the origin, and the scoring nodes read its
+file at start up.
 
 ```bash
 # In .env, or on the command line
@@ -36,7 +40,8 @@ SCENARIO=urban_casualties
 
 ```bash
 ./px4sim scene forest        # new world, restarts the sim
-./px4sim scenario            # place the targets again, no restart
+./px4sim scenario <name>     # new targets, reloads the world
+./px4sim scenario            # place the same targets again, no restart
 ./px4sim reset               # remove the targets
 ./px4sim origin              # the coordinates this pair flies at
 ```
@@ -205,11 +210,15 @@ entities:
 
 ```bash
 ./px4sim scenario                              # apply SCENARIO from .env
+./px4sim scenario umd_campus_casualties        # switch to another one
 ./px4sim reset                                 # remove what is placed
 docker compose exec sim /scenes/spawn_scenario.py --list   # what is placed now
 ```
 
 A new scenario removes the previous one first, so scenarios do not stack.
+
+A name switches the scenario for this run. It does not write `.env`, so set
+`SCENARIO` there to keep the new one.
 
 The same file is the ground truth. `sim_ground_truth` reads it and publishes
 `/known_casualty_locations`, and the scoring nodes on both sides match estimates
