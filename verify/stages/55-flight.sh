@@ -12,7 +12,9 @@
 
 lead=$FIRST_UAS
 uas() { ./px4sim uas "$lead" "$@" 2>&1 || true; }
-lens() { ./px4sim zoom "$lead" "$1" >/dev/null 2>&1 || true; }
+# The front door now waits for the vehicle to report the framing it arrived
+# at, so a failure here is the lens and not a race with it.
+lens() { ./px4sim zoom "$lead" "$1" >/dev/null 2>&1; }
 
 vehicle_ready "$lead" || return 0
 
@@ -98,16 +100,18 @@ fi
 # here frames a target from the vehicle's heading.
 uas gimbal "-$depression" --yaw 0 >/dev/null
 for preset in wide mid narrow; do
-	lens "$preset"
-	sleep 6
-	seen=$(./px4sim probe "$lead" "/uas$lead/camera/camera_info" 2>/dev/null | cut -f3)
-	expect_eq "the $preset framing publishes a calibration" data "${seen:-absent}"
+	if lens "$preset"; then
+		seen=$(./px4sim probe "$lead" "/uas$lead/camera/camera_info" 2>/dev/null | cut -f3)
+		expect_eq "the $preset framing publishes a calibration" data "${seen:-absent}"
+	else
+		fail "the $preset framing publishes a calibration"
+		note "uas$lead never reported arriving at $preset"
+	fi
 done
 
 # Every framing has to put the same casualty in the same place. A stale
 # calibration passes every centred check and fails this one.
-lens mid
-sleep 6
+lens mid || fail "the lens returns to the mid framing"
 uas detect on >/dev/null
 sleep "${VERIFY_SETTLE_S:-12}"
 placed=$(uas detections | grep -c "on the terrain" || true)

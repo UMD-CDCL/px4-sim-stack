@@ -213,6 +213,39 @@ add_fleet_profiles() {
 	fi
 }
 
+# Reload the world, and everything that reads it. Both `scene` and `place`
+# need this, and a caller that recreates the simulator alone leaves a stack
+# that reports nothing wrong and answers with stale data.
+#
+# A pipeline opens its camera ONCE, and the RTSP stream it was reading does not
+# survive a new simulator, so anything left running afterwards holds a pipeline
+# that will never see another frame. The symptom is not an error: the panel
+# keeps painting the last frame it got, so the operator sees a picture that
+# stopped rather than a picture that failed. Their entry points wait for the
+# camera on the way back up.
+#
+# The companions also link the scene's terrain surface and compute the scene's
+# geoid height at start up, so one left running against a new scene casts every
+# ray at the old ground and reports a position that is confidently wrong.
+#
+# ground-router borrows the ground station's network namespace
+# (network_mode: service:offboard), so recreating offboard without it leaves
+# the router attached to a namespace that no longer exists. It keeps running
+# and reports nothing wrong, and MAVLink simply never reaches the ground again:
+# no fix, so no frame tree, so the terrain, the footprint, the live view and
+# every scoring layer sit silent while their nodes look healthy.
+reload_world() {
+	local number reloading="sim"
+	add_fleet_profiles
+	for number in $(fleet_numbers); do
+		has_service "onboard$number" && reloading="$reloading onboard$number"
+	done
+	has_service offboard && reloading="$reloading offboard"
+	has_service ground-router && reloading="$reloading ground-router"
+	# shellcheck disable=SC2086
+	$DC up -d --force-recreate $reloading >/dev/null 2>&1
+}
+
 # Which services join another's network namespace, read from the compose file
 # so a new one is never missed.
 namespace_borrowers() {
@@ -294,7 +327,7 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     fleet               Every vehicle: model, address, ports, domain, streams
     fleet add [model]   Fly one more vehicle. Default: another of the last one
     fleet remove [N]    Retire one vehicle. Default: the last of the fleet
-    logs [opts] [svc]   Follow the logs. `logs --since 5m sim` reads back.
+    logs [opts] [svc]   Follow the logs. \`logs --since 5m sim\` reads back.
     console             uas${FIRST_UAS}'s PX4 pxh> prompt. Detach with Ctrl-P Ctrl-Q
     px4 [N] <command>   One PX4 command on one vehicle: px4 ${LAST_UAS} commander status
 
@@ -326,15 +359,15 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
 
   ${BOLD}Housekeeping${OFF}
     check               Validate the compose file and lint the docs
-    verify [stage]      Run the verification stages. `verify help` lists them.
+    verify [stage]      Run the verification stages. \`verify help\` lists them.
     state [--watch]     Every reading the console draws, as JSON
     uas <N> <command>   Fly one vehicle and read its nodes: status, arm,
                         takeoff [m], land, gimbal <pitch>
     probe <N> [topic]   What that vehicle's ROS graph carries right now
     foxglove <N>        What Foxglove is offered on that bridge, over the
-                        protocol Foxglove speaks. `foxglove ground` too.
+                        protocol Foxglove speaks. \`foxglove ground\` too.
     snap <stream>       Save one frame of a live stream to look at
-    zoom <N> <preset>   Set a v3 lens: narrow, mid or wide
+    zoom <N> <preset>   Set a v3 lens: narrow, mid or wide, and read it back
     clean               Remove containers, networks and volumes
     clean-src           Delete the cloned upstream sources in ./src
     nuke                clean and clean-src together
@@ -793,8 +826,9 @@ scene)
 	# sim starts. Without this the vehicle would fly the old coordinates.
 	export SCENE="$name"
 	resolve_origin "$SCENE"
-	$DC up -d --force-recreate sim
+	reload_world
 	echo "  scene $SCENE   origin ${HOME_LAT:-from the world file}"
+	say "Wait for 'Ready for takeoff' in ./px4sim logs sim"
 	;;
 
 origin)
@@ -958,30 +992,8 @@ place)
 	# estimator arguing with the world. Restarting respawns each vehicle at the
 	# pose it was spawned with, with PX4 fresh behind it. The world reloads, so
 	# the targets come back where the scenario puts them.
-	add_fleet_profiles
 	say "Putting the fleet back at its start. The world reloads, which takes a moment."
-	$DC up -d --force-recreate sim
-
-	# The companions and the ground station go with it. A pipeline opens its
-	# camera ONCE, and the RTSP stream it was reading does not survive a new
-	# simulator, so anything left running afterwards holds a pipeline that will
-	# never see another frame. The symptom is not an error: the panel keeps
-	# painting the last frame it got, so the operator sees a picture that
-	# stopped rather than a picture that failed. Their entry points wait for
-	# the camera on the way back up.
-	# ground-router borrows the ground station's network namespace
-	# (network_mode: service:offboard), so recreating offboard without it
-	# leaves the router attached to a namespace that no longer exists. It keeps
-	# running and reports nothing wrong, and MAVLink simply never reaches the
-	# ground again: no fix, so no frame tree, so the terrain, the footprint,
-	# the live view and every scoring layer sit silent while their nodes look
-	# healthy. Recreate them together.
-	restarting=""
-	for number in $(fleet_numbers); do restarting="$restarting onboard$number"; done
-	has_service offboard && restarting="$restarting offboard"
-	has_service ground-router && restarting="$restarting ground-router"
-	# shellcheck disable=SC2086
-	$DC up -d --force-recreate $restarting >/dev/null 2>&1
+	reload_world
 	say "respawned:$(fleet_numbers | sed 's/^/ uas/' | tr '\n' ' ')and the pipelines that read them"
 	say "Wait for 'Ready for takeoff' in ./px4sim logs sim"
 	;;
@@ -1019,31 +1031,35 @@ capture)
 
 zoom)
 	# Ask the LENS, not the picture. The zoom node owns the framing: it moves
-	# the lens and publishes the calibration for where it went, so asking it is
-	# the only way the two stay together. Driving the Gazebo topic by hand moved
-	# the picture alone, and the emulated controller now puts it back on its
-	# next status poll anyway.
+	# the lens and publishes the calibration for the picture it is delivering,
+	# so asking it is the only way the two stay together. Driving the Gazebo
+	# topic by hand moved the picture alone, and the emulated controller now
+	# puts it back on its next status poll anyway.
 	#
-	# This is the same message the operator's Foxglove button sends, on the
-	# vehicle's own domain, so it needs no ground station.
+	# It asks on the topic the operator's Foxglove button publishes, and then
+	# waits for the vehicle to report the framing it arrived at. A fire and
+	# forget command needs the second half: `ros2 topic pub --once` used to
+	# print success here while its sample died with the participant, and a run
+	# that believes it is at wide while the lens sits at mid looks like a gross
+	# localization failure rather than like a lost message.
 	n=$(vehicle_arg "${1:-}")
 	preset=${2:?name a framing from: $UAS_ZOOM_PRESETS}
-	zoom_hfov_deg "$preset" >/dev/null \
+	hfov=$(zoom_hfov_deg "$preset") \
 		|| die "No framing '$preset'. This lens has: $UAS_ZOOM_PRESETS"
 	[ "$(mark_of "$n")" = v3 ] || die "uas$n is a $(mark_of "$n"), and only a v3 lens zooms."
 	add_fleet_profiles
 	container=$($DC ps -q "onboard$n" 2>/dev/null)
 	[ -n "$container" ] || die "onboard$n is not running. Start it: ./px4sim start"
-	docker exec -e ROS_DOMAIN_ID="$(uas_domain "$n")" "$container" bash -lc '
+	docker cp verify/component/zoom.py "$container:/tmp/zoom.py" >/dev/null
+	docker cp verify/component/udp-only.xml "$container:/tmp/udp-only.xml" >/dev/null
+	say "asking uas$n for the $preset framing, $hfov degrees"
+	docker exec -e ROS_DOMAIN_ID="$(uas_domain "$n")" \
+		-e FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/udp-only.xml "$container" bash -lc '
 		set -e
 		. /opt/ros/humble/setup.bash
 		. /home/user/ros2_ws/install/setup.bash
-		exec ros2 topic pub --once -w 1 "$1" std_msgs/msg/String "{data: $2}"
-		' _ "/uas$n/zoom/preset_cmd" "$preset" >/dev/null \
-		|| die "uas$n did not take the framing. Is its zoom node running? ./px4sim logs onboard$n"
-	say "uas$n asked for the $preset framing, $(zoom_hfov_deg "$preset") degrees"
-	say "The lens travels for a second or two. The calibration changes when the"
-	say "recall is accepted, before the lens arrives, so do not localize during it."
+		exec python3 /tmp/zoom.py "$@"' _ "$n" "$preset" --hfov "$hfov" \
+		|| die "uas$n is not at the $preset framing."
 	;;
 
 snap)
