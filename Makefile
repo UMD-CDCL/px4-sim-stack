@@ -11,6 +11,7 @@ PX4SIM := ./px4sim
 .DEFAULT_GOAL := help
 .PHONY: help preflight bootstrap x11 build build-% up up-core down restart ps logs \
         sim qgc router onboard ground topics px4-console scenario scene origin reset \
+        ui state \
         genscene clean clean-src lint-docs check endpoints fleet streams layout
 
 ## ----------------------------------------------------------------- setup
@@ -51,6 +52,12 @@ restart: ## Restart one service, for example `make restart S=sim`
 
 ps: ## Show the running services
 	@$(PX4SIM) status
+
+ui: ## Open the console: status and control in the terminal
+	@$(PX4SIM) ui
+
+state: ## Print every reading the console draws, as JSON
+	@$(PX4SIM) state
 
 logs: ## Follow the logs, optionally of one service: `make logs S=sim`
 	@$(PX4SIM) logs $(S)

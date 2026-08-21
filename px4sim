@@ -15,6 +15,10 @@ cd "$(dirname "$(readlink -f "$0")")"
 
 DC="docker compose"
 
+# What a vehicle can be asked to capture. The console offers these, and the
+# `capture` arm below takes these, so one list answers both.
+CAPTURE_KINDS="mosaic vlm fiducial"
+
 BOLD=$'\033[1m'; DIM=$'\033[2m'; GRN=$'\033[32m'; RED=$'\033[31m'; YEL=$'\033[33m'; OFF=$'\033[0m'
 say()  { printf '%s==> %s%s\n' "$BOLD" "$*" "$OFF"; }
 warn() { printf '%s    %s%s\n' "$YEL" "$*" "$OFF"; }
@@ -59,6 +63,18 @@ for name in $OVERRIDABLE; do
 		export "$name=${!holder}"
 	fi
 done
+
+# Whether the fleet that is flying is the one the file holds. This script
+# exports what it reads, so a px4sim that this one runs -- the console, or
+# `fly` calling `place` -- finds the file's own value in its environment and
+# cannot tell it from a value a person set for one run. So each px4sim says
+# which it holds, and the one it runs believes it. `fleet add` and `fleet
+# remove` edit the file, and they must not do that while another fleet flies.
+if [ -z "${override_UAS_FLEET+set}" ]; then
+	export PX4SIM_FLEET_FROM_FILE="${UAS_FLEET:-}"
+fi
+FLEET_IS_THE_FILE=false
+[ "${PX4SIM_FLEET_FROM_FILE:-}" = "${UAS_FLEET:-}" ] && FLEET_IS_THE_FILE=true
 
 # A coordinate in .env is a leftover from before the scene carried it. It
 # changes nothing now, and a line that looks live but is not is how a run ends
@@ -170,8 +186,10 @@ done
 # QGroundControl shows one stream, and which mount that is depends on the
 # airframe. compose defaults it to uas11's v3 name, so derive it here instead
 # and leave a value from .env or the environment alone.
+QGC_VIDEO_URL_FOLLOWS_FLEET=false
 if [ -z "${QGC_VIDEO_URL:-}" ] && [ -n "$(gimbal_stream "$FIRST_UAS")" ]; then
 	export QGC_VIDEO_URL="rtsp://video-router:8554/$(gimbal_stream "$FIRST_UAS")"
+	QGC_VIDEO_URL_FOLLOWS_FLEET=true
 fi
 
 # Every vehicle needs its router AND its companion. Without the onboard
@@ -272,7 +290,10 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     stop                Stop and remove the containers. Volumes stay.
     restart [service]   Restart one service, or all of them
     status              What is running, and the addresses to use
+    ui                  The same in a console, with a key for every command
     fleet               Every vehicle: model, address, ports, domain, streams
+    fleet add [model]   Fly one more vehicle. Default: another of the last one
+    fleet remove [N]    Retire one vehicle. Default: the last of the fleet
     logs [opts] [svc]   Follow the logs. `logs --since 5m sim` reads back.
     console             uas${FIRST_UAS}'s PX4 pxh> prompt. Detach with Ctrl-P Ctrl-Q
     px4 [N] <command>   One PX4 command on one vehicle: px4 ${LAST_UAS} commander status
@@ -306,6 +327,7 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
   ${BOLD}Housekeeping${OFF}
     check               Validate the compose file and lint the docs
     verify [stage]      Run the verification stages. `verify help` lists them.
+    state [--watch]     Every reading the console draws, as JSON
     uas <N> <command>   Fly one vehicle and read its nodes: status, arm,
                         takeoff [m], land, gimbal <pitch>
     probe <N> [topic]   What that vehicle's ROS graph carries right now
@@ -348,6 +370,158 @@ endpoints() {
 EOF
 }
 
+# The stack as one fact for each line, for a tool that reads rather than reads
+# out. scripts/state.py takes this on standard input, so the console draws the
+# numbers this script works out and never works out its own.
+fleet_facts() {
+	local n companion
+	cat <<-EOF
+		scene=${SCENE:-}
+		scenario=${SCENARIO:-}
+		home_lat=${HOME_LAT:-}
+		home_lon=${HOME_LON:-}
+		home_alt=${HOME_ALT:-}
+		fiducial=${FIDUCIAL_ENABLED:-0}
+		fiducial_lat=${FIDUCIAL_SURVEYED_LAT:-}
+		fiducial_lon=${FIDUCIAL_SURVEYED_LON:-}
+		fiducial_alt=${FIDUCIAL_SURVEYED_ALT:-}
+		profiles=${COMPOSE_PROFILES:-}
+		compose=$DC
+		ground_domain=$GROUND_DOMAIN
+		ground_foxglove=8765
+		mediamtx=${MEDIAMTX_API:-http://localhost:9997}
+		zoom_presets=$(zoom_presets_widest_first | paste -sd, -)
+		capture_kinds=$(echo "$CAPTURE_KINDS" | tr ' ' ',')
+		models=$(fleet_models | paste -sd, -)
+		declared=$(printf '%s\n' "$COMPOSE_SERVICES" | paste -sd, -)
+		expected=$($DC config --services 2>/dev/null | paste -sd, -)
+	EOF
+	for n in $(fleet_numbers); do
+		companion=$(has_service "onboard$n" && echo "onboard$n" || true)
+		printf 'vehicle n=%s sysid=%s model=%s mark=%s domain=%s tcp=%s gcs=%s foxglove=%s address=%s router=uas%s companion=%s gimbal=%s streams=%s zoom=%s\n' \
+			"$n" "$n" "$(model_of "$n")" "$(mark_of "$n")" "$(uas_domain "$n")" \
+			"$(uas_tcp_port "$n")" "$(uas_gcs_port "$n")" "$(uas_foxglove_port "$n")" \
+			"$(uas_address "$n")" "$n" "$companion" "$(gimbal_stream "$n")" \
+			"$(streams_of "$n" | tr ' ' ',' | sed 's/,$//')" \
+			"$(zoom_preset_of_slot $((n - UAS_BASE - 1)) || true)"
+	done
+}
+
+# Every airframe this simulator flies, from the model directories themselves.
+# The scene meshes live beside them, so the mark decides which is an airframe,
+# the way mark_of reads it.
+fleet_models() {
+	local path name
+	for path in modules/sim/scenes/models/*/; do
+		name=${path%/}
+		name=${name##*/}
+		case "$name" in *_v2 | *_v3) echo "$name" ;; esac
+	done
+}
+
+# Put the fleet back into .env and leave every other line as it was.
+fleet_write() {
+	if grep -q '^[[:space:]]*UAS_FLEET=' .env; then
+		sed -i "s|^[[:space:]]*UAS_FLEET=.*|UAS_FLEET=\"$1\"|" .env
+	else
+		printf 'UAS_FLEET="%s"\n' "$1" >> .env
+	fi
+}
+
+# Add or retire one vehicle, then bring the stack to the new fleet.
+#
+# The place in UAS_FLEET is the vehicle number, so a vehicle taken from
+# anywhere but the end moves every vehicle after it down one: other frames,
+# ports, ROS domains and stream names. --renumber says that is intended.
+fleet_edit() {
+	local action=$1; shift
+	local renumber=false argument="" word
+	for word in "$@"; do
+		case "$word" in
+		--renumber) renumber=true ;;
+		-*)         die "fleet $action does not take '$word'." ;;
+		*)          argument=$word ;;
+		esac
+	done
+	[ "$FLEET_IS_THE_FILE" = true ] \
+		|| die "UAS_FLEET is set in this shell, and it wins over .env, so a change
+    to the file would not be what flies. Run: unset UAS_FLEET"
+
+	local models=("${FLEET[@]}") model retired="" n slot name
+	case "$action" in
+	add)
+		model=${argument:-${models[-1]}}
+		local airframes
+		airframes=$(fleet_models)
+		case $'\n'"$airframes"$'\n' in
+		*$'\n'"$model"$'\n'*) ;;
+		*) die "No airframe '$model'. This simulator flies: $(echo $airframes)" ;;
+		esac
+		[ "${#models[@]}" -lt 9 ] \
+			|| die "This simulator numbers its vehicles uas11 to uas19, so nine is the whole fleet."
+		models+=("$model")
+		say "adding uas$((UAS_BASE + ${#models[@]})), a $model"
+		;;
+	remove)
+		[ "${#models[@]}" -gt 1 ] \
+			|| die "One vehicle is the smallest fleet. To stop flying: ./px4sim stop"
+		n=$(vehicle_arg "${argument:-$LAST_UAS}")
+		if [ "$n" -ne "$LAST_UAS" ] && [ "$renumber" != true ]; then
+			warn "uas$n is not the last vehicle. Taking it out moves uas$((n + 1)) to uas$n and"
+			warn "every vehicle after it down one, which gives each of them other frames,"
+			warn "ports, ROS domains and stream names. Say that this is intended:"
+			warn "  ./px4sim fleet remove $n --renumber"
+			die "nothing was changed"
+		fi
+		say "retiring uas$n, a $(model_of "$n")"
+		slot=$((n - UAS_BASE - 1))
+		unset 'models[slot]'
+		models=("${models[@]}")
+		# The fleet is one shorter, so the highest number goes, whichever
+		# vehicle was taken out of the list.
+		retired=$LAST_UAS
+		;;
+	esac
+
+	fleet_write "${models[*]}"
+	export UAS_FLEET="${models[*]}"
+	export PX4SIM_FLEET_FROM_FILE="$UAS_FLEET"
+	# Every number below follows the new fleet, from the one table that holds them.
+	# shellcheck disable=SC1091
+	. ./scripts/fleet.sh
+	if [ "$QGC_VIDEO_URL_FOLLOWS_FLEET" = true ] && [ -n "$(gimbal_stream "$FIRST_UAS")" ]; then
+		export QGC_VIDEO_URL="rtsp://video-router:8554/$(gimbal_stream "$FIRST_UAS")"
+	fi
+	say "UAS_FLEET is now: $UAS_FLEET"
+
+	if [ -z "$(COMPOSE_PROFILES="$ALL_PROFILES" $DC ps --status running -q 2>/dev/null)" ]; then
+		echo "  Nothing is running, so the new fleet flies at the next start:"
+		echo "    ./px4sim start"
+		return 0
+	fi
+
+	if [ -n "$retired" ]; then
+		local gone=()
+		for name in "uas$retired" "onboard$retired"; do
+			has_service "$name" && gone+=("$name")
+		done
+		if [ ${#gone[@]} -gt 0 ]; then
+			COMPOSE_PROFILES="$ALL_PROFILES" $DC rm -sf "${gone[@]}" >/dev/null 2>&1
+			say "removed ${gone[*]}, which the fleet no longer holds"
+		fi
+	fi
+
+	# The simulator spawns one PX4 and its cameras for each entry, and the
+	# ground station holds one MAVROS for each vehicle, so both carry UAS_FLEET
+	# and compose recreates them here. The world reloads with them.
+	add_fleet_profiles
+	say "reloading the world. Every vehicle respawns, which takes a moment."
+	$DC up -d
+	echo
+	$DC ps --format 'table {{.Service}}\t{{.Status}}'
+	say "Wait for 'Ready for takeoff' in ./px4sim logs sim"
+}
+
 # bash reads a script as it runs, so editing this file during a long command
 # makes it resume at a shifted offset and fail on a line that is now half of
 # another. A function is parsed in full before any of it runs, so the command
@@ -374,6 +548,7 @@ build)
 	# them is. Named on its own it is built on its own, which is how to warm
 	# the cache before a day's work.
 	needs_base=false
+	[ ${#SERVICES[@]} -eq 0 ] && needs_base=true
 	for svc in "${SERVICES[@]}"; do
 		case "$svc" in onboard* | offboard | ros-base) needs_base=true ;; esac
 	done
@@ -387,7 +562,11 @@ build)
 	for svc in "${SERVICES[@]}"; do
 		[ "$svc" = ros-base ] || REMAINING+=("$svc")
 	done
-	[ ${#REMAINING[@]} -gt 0 ] && $DC build "${REMAINING[@]}"
+	if [ ${#SERVICES[@]} -eq 0 ]; then
+		$DC build
+	elif [ ${#REMAINING[@]} -gt 0 ]; then
+		$DC build "${REMAINING[@]}"
+	fi
 	;;
 
 x11)      ./scripts/x11-allow.sh ;;
@@ -463,6 +642,30 @@ status|ps)
 	COMPOSE_PROFILES="$ALL_PROFILES" $DC ps \
 		--format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
 	endpoints
+	;;
+
+ui|tui)
+	# The console. It draws `state` and runs this script for everything it does,
+	# so it can start nothing that the prompt cannot. The profiles are added by
+	# the commands it runs, and adding them here would name each one twice.
+	#
+	# It keeps only what a person set for this run. This script exports what it
+	# reads from .env, and the console outlives that reading: every command it
+	# runs would then fly the fleet and the scene as they were when it started,
+	# and `fleet add` from inside it would change a file that nothing reads.
+	for name in $OVERRIDABLE; do
+		holder="override_$name"
+		[ -n "${!holder+set}" ] || unset "$name"
+	done
+	exec python3 scripts/tui.py "$@"
+	;;
+
+state)
+	# Every reading the console draws, as JSON. `--watch` keeps them coming, one
+	# object for each line. The readings come from the container engine, the
+	# video router API and MAVLink itself, never from a log message.
+	add_fleet_profiles
+	fleet_facts | COMPOSE_PROFILES="$ALL_PROFILES" python3 scripts/state.py "$@"
 	;;
 
 logs)
@@ -616,6 +819,11 @@ origin)
 endpoints|urls) endpoints ;;
 
 fleet)
+	case "${1:-}" in
+	add | remove) fleet_edit "$@"; exit 0 ;;
+	'') ;;
+	*) die "fleet takes 'add [model]' or 'remove [N]', or nothing to print the fleet." ;;
+	esac
 	# The whole map for one vehicle at a time. Everything here follows from
 	# the UAS number by arithmetic, and the stream names follow from the
 	# airframe. docs/uas-contract.md is the specification.
@@ -795,9 +1003,9 @@ capture)
 	# even with the bridge broken.
 	n=$(vehicle_arg "${1:-}"); shift || true
 	kind=${1:-mosaic}
-	case "$kind" in
-	mosaic | vlm | fiducial) ;;
-	*) die "capture takes mosaic, vlm or fiducial, not '$kind'" ;;
+	case " $CAPTURE_KINDS " in
+	*" $kind "*) ;;
+	*) die "capture takes $(echo "$CAPTURE_KINDS" | sed 's/ /, /g'), not '$kind'" ;;
 	esac
 	say "asking uas$n for a $kind capture, from the ground"
 	$DC exec -e ROS_DOMAIN_ID="$GROUND_DOMAIN" offboard bash -lc '
@@ -914,8 +1122,8 @@ check)
 	# deleted service or script fails in front of a user, and the front door
 	# is where that is cheapest to catch.
 	problems=0
-	for script in preflight bootstrap x11-allow origin-env list-streams lint-docs; do
-		case "$script" in list-streams) ext=.py ;; *) ext=.sh ;; esac
+	for script in preflight bootstrap x11-allow origin-env list-streams state tui lint-docs; do
+		case "$script" in list-streams | state | tui) ext=.py ;; *) ext=.sh ;; esac
 		[ -x "scripts/$script$ext" ] \
 			|| { warn "scripts/$script$ext is missing or not executable."; problems=$((problems + 1)); }
 	done

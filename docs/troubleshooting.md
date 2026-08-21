@@ -3,6 +3,7 @@
 Start here:
 
 ```bash
+./px4sim ui        # the console: containers, vehicles, streams and the GPU at once
 ./px4sim doctor    # the host
 ./px4sim status    # which containers are up
 ./px4sim logs sim  # the service you suspect

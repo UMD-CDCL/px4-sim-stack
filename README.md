@@ -106,11 +106,13 @@ already plugged in.
 ## Daily commands
 
 ```bash
+./px4sim ui                   # the console: what is running, and a key for every command
 ./px4sim start                # start everything
 ./px4sim stop                 # stop everything
 ./px4sim status               # what is running, and the addresses
 ./px4sim logs onboard11       # follow one service
 ./px4sim console              # the pxh> prompt. Detach with Ctrl-P Ctrl-Q
+./px4sim fleet add            # fly one more vehicle. `fleet remove 13` retires one
 ./px4sim scene baylands       # change the world and restart the sim
 ./px4sim scenario             # place the targets again, no restart
 ./px4sim streams              # which video streams are live
@@ -138,6 +140,64 @@ Fly a vehicle and see what its nodes make of it:
 ./px4sim zoom 11 wide         # a v3 lens: narrow, mid or wide
 ./px4sim snap rgb11           # one frame of a stream, to look at
 ```
+
+## The console
+
+`./px4sim ui` draws the stack in the terminal and runs these commands for you.
+It shows the containers, every vehicle, the video paths and the Foxglove ports,
+and it reads them again about every two seconds.
+
+Move between the panes with tab, and pick a row with the arrow keys. Press
+enter for what can be done to that row, or press the key beside an action.
+Press `:` to type any px4sim command, and `?` to see every action with the
+command it runs. Press esc to stop a command, and `q` to leave.
+
+Press `=` to fly one more vehicle, and `-` to retire the selected one. Both
+write `UAS_FLEET` in `.env` and bring the stack to the new fleet.
+
+The console starts nothing of its own. Every action runs `./px4sim ...`, so
+what it does is what the prompt does. It is a way to reach this script, not a
+second one.
+
+Each reading comes from the thing itself, never from a log message:
+
+| Reading | Where it comes from |
+|---|---|
+| A container | The container engine's own state |
+| A video path | The video router API, and the bytes that path carried since the report before |
+| A vehicle | MAVLink on `tcp://localhost:5761` upwards: mode, arming, battery, GPS, height and gimbal |
+| A Foxglove bridge | A connection to the port, opened and closed |
+| The GPU | `nvidia-smi`: what the cameras, the encoders and the detector are using |
+
+`./px4sim state` prints the same picture as JSON, and `./px4sim state --watch`
+keeps it coming, one object for each line. The console reads that stream, and
+so can a script.
+
+### The fleet
+
+`UAS_FLEET` is a list, and the place in the list is the vehicle number. The
+first entry is uas11, the second uas12, and so on.
+
+```bash
+./px4sim fleet                # what flies now
+./px4sim fleet add            # one more of the last airframe
+./px4sim fleet add chimera_v2 # one more, of this airframe
+./px4sim fleet remove         # the last vehicle
+./px4sim fleet remove 12      # this vehicle
+```
+
+Each of these writes `.env`, removes the containers the fleet no longer holds,
+and reloads the world, so every vehicle respawns. With nothing running it
+writes the file and says so.
+
+A vehicle taken from anywhere but the end moves every vehicle after it down
+one, which gives each of them other frames, ports, ROS domains and stream
+names. The command says so and stops. Add `--renumber` to say that this is
+what you want.
+
+The simulator flies nine vehicles at the most, uas11 to uas19. `compose.yaml`
+holds a companion for uas11 to uas14 only, so a fifth vehicle flies with a
+router and no ROS stack until you add an `onboard15` service.
 
 ## Verification
 
@@ -168,7 +228,7 @@ name here.
 | The world | `SCENE=` in `.env` | [docs/development.md](docs/development.md) |
 | The targets | Edit a file in `modules/sim/scenes/scenarios/` | [docs/development.md](docs/development.md) |
 | The airframe or its sensors | Edit `modules/sim/scenes/models/chimera_v2` or `chimera_v3` | [docs/development.md](docs/development.md) |
-| The fleet | `UAS_FLEET=` in `.env` | [docs/uas-contract.md](docs/uas-contract.md) |
+| The fleet | `./px4sim fleet add [model]` and `./px4sim fleet remove [N]`, or `UAS_FLEET=` in `.env` | [docs/uas-contract.md](docs/uas-contract.md) |
 | Which cameras each vehicle serves | `UAS_STREAMS=` in `.env` | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | The zoom preset a v3 lens flies at | `UAS_ZOOM=` in `.env` | [docs/development.md](docs/development.md) |
 | PX4 itself | Edit `src/PX4-Autopilot`, then restart `sim` | [docs/development.md](docs/development.md) |

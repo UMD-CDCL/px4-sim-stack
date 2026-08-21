@@ -2,8 +2,8 @@
 """Count the MAVLink messages on a link, by message and by system.
 
 Says what a link really carries, which is the question when telemetry reaches
-one consumer and not another. No MAVLink library: reading a header is less code
-than the dependency, and this reads nothing else.
+one consumer and not another. It reads the frames with scripts/mavlink.py,
+which is the one frame reader this stack has, so run it from this checkout.
 
     mavlink_census.py tcp://localhost:5761 --seconds 5
     mavlink_census.py udp://:14561 --seconds 5
@@ -14,7 +14,11 @@ import collections
 import socket
 import sys
 import time
+from pathlib import Path
 from urllib.parse import urlparse
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from mavlink import frames  # noqa: E402
 
 # The handful worth naming. Everything else is reported by number.
 NAMES = {
@@ -24,28 +28,6 @@ NAMES = {
     1: "SYS_STATUS", 285: "GIMBAL_DEVICE_ATTITUDE_STATUS",
     281: "GIMBAL_MANAGER_STATUS", 280: "GIMBAL_MANAGER_INFORMATION",
 }
-
-
-def messages(buffer: bytes):
-    """Every (system, message id) in a buffer, MAVLink 1 and 2."""
-    index, size = 0, len(buffer)
-    while index < size:
-        marker = buffer[index]
-        if marker == 0xFD and index + 12 <= size:
-            length = buffer[index + 1]
-            signed = buffer[index + 2] & 0x01
-            system = buffer[index + 5]
-            message = (buffer[index + 7] | buffer[index + 8] << 8
-                       | buffer[index + 9] << 16)
-            yield system, message
-            index += 12 + length + (13 if signed else 0)
-        elif marker == 0xFE and index + 8 <= size:
-            length = buffer[index + 1]
-            system = buffer[index + 3]
-            yield system, buffer[index + 5]
-            index += 8 + length
-        else:
-            index += 1
 
 
 def open_link(url: str):
@@ -68,6 +50,7 @@ def main() -> int:
     link, streaming = open_link(args.url)
     link.settimeout(0.5)
     seen = collections.Counter()
+    pending = b""
     end = time.monotonic() + args.seconds
     while time.monotonic() < end:
         try:
@@ -76,8 +59,9 @@ def main() -> int:
             continue
         if streaming and not data:
             break
-        for system, message in messages(data):
-            seen[(system, message)] += 1
+        found, pending = frames(pending + data)
+        for frame in found:
+            seen[(frame.system, frame.message)] += 1
 
     if not seen:
         print("nothing arrived", file=sys.stderr)
