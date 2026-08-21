@@ -266,4 +266,5 @@ name here.
 | [docs/development.md](docs/development.md) | How to change PX4, the airframe, the scenes and the targets |
 | [docs/px4-simulated-gimbal.md](docs/px4-simulated-gimbal.md) | How the PX4 simulated gimbal behaves, and how to command it |
 | [docs/localization-error.md](docs/localization-error.md) | Where a target position's error comes from, and which parts are floors |
+| [docs/localization-report.md](docs/localization-report.md) | What the 2026-08-21 accuracy pass changed, and what it measured |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | What breaks, and what to do |
