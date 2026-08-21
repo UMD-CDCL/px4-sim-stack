@@ -235,15 +235,30 @@ add_fleet_profiles() {
 # no fix, so no frame tree, so the terrain, the footprint, the live view and
 # every scoring layer sit silent while their nodes look healthy.
 reload_world() {
-	local number reloading="sim"
+	local reloading
 	add_fleet_profiles
-	for number in $(fleet_numbers); do
-		has_service "onboard$number" && reloading="$reloading onboard$number"
-	done
-	has_service offboard && reloading="$reloading offboard"
+	reloading="sim $(picture_consumers)"
 	has_service ground-router && reloading="$reloading ground-router"
 	# shellcheck disable=SC2086
 	$DC up -d --force-recreate $reloading >/dev/null 2>&1
+}
+
+# What carries the picture. A pipeline opens its camera ONCE, so recreating
+# either of these leaves every reader holding a pipeline that will never see
+# another frame. The reader reports nothing wrong: the panel keeps painting the
+# last frame it got, so the operator sees a picture that stopped rather than a
+# picture that failed.
+PICTURE_SOURCES="sim video-router"
+
+# Every container that opens a camera: each vehicle's companion, and the ground
+# station, which reads the low rate streams for its own preview.
+picture_consumers() {
+	local number list=""
+	for number in $(fleet_numbers); do
+		has_service "onboard$number" && list="$list onboard$number"
+	done
+	has_service offboard && list="$list offboard"
+	echo "${list# }"
 }
 
 # Which services join another's network namespace, read from the compose file
@@ -658,8 +673,20 @@ restart)
 	# recreated container gets a new namespace and the old one is left holding
 	# nothing but loopback, which reads as a running container that hears
 	# nobody. See network_mode in compose.yaml.
+	#
+	# A service that carries the picture takes every camera reader with it, for
+	# the same reason and with the same silence. See PICTURE_SOURCES.
 	resolve_services "$@"
 	add_fleet_profiles
+	for source in "${SERVICES[@]}"; do
+		case " $PICTURE_SOURCES " in *" $source "*) ;; *) continue ;; esac
+		for reader in $(picture_consumers); do
+			case " ${SERVICES[*]} " in
+			*" $reader "*) ;;
+			*) SERVICES+=("$reader") ;;
+			esac
+		done
+	done
 	for owner in "${SERVICES[@]}"; do
 		for borrower in $(namespace_borrowers "$owner"); do
 			case " ${SERVICES[*]} " in
