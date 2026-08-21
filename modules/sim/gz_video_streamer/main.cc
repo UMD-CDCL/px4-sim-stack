@@ -21,6 +21,12 @@
 // and the low-rate stream that crosses the radio link, at one encode each and
 // no second render.
 //
+// Each picture carries the instant it was rendered, written into the bitstream
+// as an SEI. A detection is localized by reading the camera pose at the instant
+// its frame names, and nothing else on the path carries an absolute time, so
+// without this a frame names its arrival and the pose is read after the camera
+// has moved on. See kCaptureStampUuid.
+//
 // Usage:
 //   gz_video_streamer --sink-base rtsp://video-router:8554 \
 //       --stream name=rgb1,regex=.*/camera_link/sensor/camera/image$,bitrate=8000,fps=15 \
@@ -32,6 +38,7 @@
 #include <gst/gst.h>
 #include <gst/app/gstappsrc.h>
 
+#include <gz/msgs/clock.pb.h>
 #include <gz/msgs/double.pb.h>
 #include <gz/msgs/image.pb.h>
 #include <gz/transport/Node.hh>
@@ -39,6 +46,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <cmath>
 #include <chrono>
 #include <csignal>
@@ -156,6 +164,139 @@ std::string EncoderFragment(const EncoderChoice &c, int bitrate_kbps) {
   return std::string(c.element) + " bitrate=" + std::to_string(bitrate_kbps) + " " + c.options;
 }
 
+// The instant a picture was rendered rides inside the bitstream, in an SEI that
+// a decoder is required to skip if it does not know it.
+//
+// It has to ride inside, because nothing outside survives the trip. The video
+// router re-originates the RTCP sender report from its own clock, so a reader
+// can recover when a frame arrived and never when it was taken; the pts is a
+// schedule with no epoch by the time it lands. A detection is localized by
+// reading the camera pose at the instant its frame names, so a frame that names
+// its arrival points the camera where it has already moved to, and the error is
+// that lag times the rate the view is moving.
+//
+// 30 bytes for each picture, 3.6 kbit/s at 15 fps, which is 0.045 % of the full
+// stream. ds_ros_pipeline/source.py reads the same 16 bytes and ignores a frame
+// that carries none, so a stream without them localizes as it did before.
+const uint8_t kCaptureStampUuid[16] = {
+    0x9d, 0x2c, 0x5f, 0x1a, 0x6b, 0x84, 0x4e, 0x37,
+    0xa1, 0x0c, 0x7e, 0x53, 0xd8, 0x91, 0x42, 0xb6};
+
+// Where the render instant rides between the camera and the encoded picture.
+//
+// It cannot ride on the frame's timestamp, because an encoder makes a new
+// buffer for the picture and rebases it: x265enc moves every timestamp a
+// thousand hours forward so that a decode timestamp can never go negative. A
+// reference timestamp meta is copied onto the new buffer unchanged.
+GstCaps *RenderInstantReference() {
+  static GstCaps *reference = gst_caps_new_empty_simple("timestamp/x-render-instant");
+  return reference;
+}
+
+// A NAL payload may not hold 00 00 followed by 00, 01, 02 or 03, because a
+// reader looking for start codes would stop in the middle of it. A 03 byte
+// breaks the run, and the reader takes it out again.
+void AppendEscaped(std::vector<uint8_t> *out, const uint8_t *data, std::size_t size) {
+  int zeros = 0;
+  for (std::size_t i = 0; i < size; ++i) {
+    if (zeros >= 2 && data[i] <= 3) {
+      out->push_back(3);
+      zeros = 0;
+    }
+    out->push_back(data[i]);
+    zeros = data[i] == 0 ? zeros + 1 : 0;
+  }
+}
+
+std::vector<uint8_t> CaptureStampSei(uint64_t wall_ns, bool h265) {
+  std::vector<uint8_t> payload;
+  payload.push_back(5);  // user_data_unregistered
+  payload.push_back(static_cast<uint8_t>(sizeof(kCaptureStampUuid) + sizeof(wall_ns)));
+  payload.insert(payload.end(), std::begin(kCaptureStampUuid), std::end(kCaptureStampUuid));
+  for (int shift = 56; shift >= 0; shift -= 8) {
+    payload.push_back(static_cast<uint8_t>((wall_ns >> shift) & 0xFF));
+  }
+  payload.push_back(0x80);  // rbsp_trailing_bits
+
+  std::vector<uint8_t> nal{0, 0, 0, 1};
+  if (h265) {
+    nal.push_back(39 << 1);  // PREFIX_SEI_NUT, layer 0
+    nal.push_back(1);        // temporal id + 1
+  } else {
+    nal.push_back(6);        // SEI
+  }
+  AppendEscaped(&nal, payload.data(), payload.size());
+  return nal;
+}
+
+// Where the start code of the first coded slice sits. A prefix SEI belongs
+// after the parameter sets and before that slice, so this is where the capture
+// stamp goes in. A buffer that holds no slice returns its own size, which is
+// what a parameter set on its own looks like.
+std::size_t FirstSliceStart(const uint8_t *data, std::size_t size, bool h265) {
+  std::size_t i = 0;
+  while (i + 3 <= size) {
+    if (data[i] != 0 || data[i + 1] != 0 || data[i + 2] != 1) {
+      ++i;
+      continue;
+    }
+    const std::size_t header = i + 3;
+    if (header >= size) break;
+    const int type = h265 ? (data[header] >> 1) & 0x3F : data[header] & 0x1F;
+    const bool is_slice = h265 ? type <= 31 : (type >= 1 && type <= 5);
+    if (is_slice) return (i > 0 && data[i - 1] == 0) ? i - 1 : i;
+    i = header;
+  }
+  return size;
+}
+
+// What wall clock instant a simulation time names.
+//
+// The simulator holds only a fraction of real time, and which fraction it holds
+// changes with the load, so the offset between the two clocks moves and cannot
+// be measured once. The world publishes both clocks in the same message at
+// every step, which makes the offset exact at that step and at most one step
+// old when it is read.
+class SimWallClock {
+ public:
+  bool watching() const { return watching_; }
+
+  bool Watch(const std::vector<std::string> &topics) {
+    if (watching_) return true;
+    static const std::regex world_clock("^/world/[^/]+/clock$");
+    for (const auto &t : topics) {
+      if (!std::regex_match(t, world_clock)) continue;
+      if (!node_.Subscribe(t, &SimWallClock::OnClock, this)) continue;
+      std::cout << "capture stamps take the wall clock from " << t << std::endl;
+      watching_ = true;
+      return true;
+    }
+    return false;
+  }
+
+  // Zero until the world has said, which leaves those pictures unstamped.
+  uint64_t WallNanosFor(const gz::msgs::Time &sim) const {
+    if (!have_offset_) return 0;
+    const int64_t wall_ns = Nanos(sim) + offset_ns_;
+    return wall_ns > 0 ? static_cast<uint64_t>(wall_ns) : 0;
+  }
+
+ private:
+  static int64_t Nanos(const gz::msgs::Time &t) {
+    return t.sec() * 1000000000LL + t.nsec();
+  }
+
+  void OnClock(const gz::msgs::Clock &msg) {
+    offset_ns_ = Nanos(msg.system()) - Nanos(msg.sim());
+    have_offset_ = true;
+  }
+
+  gz::transport::Node node_;
+  std::atomic<int64_t> offset_ns_{0};
+  std::atomic<bool> have_offset_{false};
+  bool watching_ = false;
+};
+
 // GStreamer caps string for a gz pixel format. An unsupported format returns
 // an empty string, and the stream stays down with one log line.
 const char *GstFormatFor(gz::msgs::PixelFormatType t) {
@@ -206,9 +347,9 @@ struct Spec {
 // One camera. It owns a gz subscription and a GStreamer pipeline.
 class Stream {
  public:
-  Stream(Spec spec, std::string encoder, std::string parser)
+  Stream(Spec spec, std::string encoder, std::string parser, const SimWallClock *sim_clock)
       : spec_(std::move(spec)), encoder_(std::move(encoder)), parser_(std::move(parser)),
-        pattern_(spec_.regex) {
+        sim_clock_(sim_clock), h265_(parser_ == "h265parse"), pattern_(spec_.regex) {
     // One entry before binding, so a zoom that arrives first has a field of
     // view to measure itself against. TryBind fills in the topic and the rest.
     framings_.push_back({spec_.hfov_rad, ""});
@@ -370,6 +511,77 @@ class Stream {
   }
 
  private:
+  void WriteCaptureStampsAt(const char *element_name) {
+    GstElement *parser = gst_bin_get_by_name(GST_BIN(pipeline_), element_name);
+    if (parser == nullptr) return;
+    GstPad *src = gst_element_get_static_pad(parser, "src");
+    if (src != nullptr) {
+      gst_pad_add_probe(src, GST_PAD_PROBE_TYPE_BUFFER, &Stream::OnCodedPicture, this, nullptr);
+      gst_object_unref(src);
+    }
+    gst_object_unref(parser);
+  }
+
+  static GstPadProbeReturn OnCodedPicture(GstPad *pad, GstPadProbeInfo *info, gpointer user_data) {
+    return static_cast<Stream *>(user_data)->InsertCaptureStamp(pad, info);
+  }
+
+  GstPadProbeReturn InsertCaptureStamp(GstPad *pad, GstPadProbeInfo *info) {
+    GstBuffer *buf = GST_PAD_PROBE_INFO_BUFFER(info);
+    if (buf == nullptr) return GST_PAD_PROBE_OK;
+    const GstReferenceTimestampMeta *rendered =
+        gst_buffer_get_reference_timestamp_meta(buf, RenderInstantReference());
+    if (rendered == nullptr || !CarriesStartCodes(pad)) return GST_PAD_PROBE_OK;
+
+    GstMapInfo picture;
+    if (!gst_buffer_map(buf, &picture, GST_MAP_READ)) return GST_PAD_PROBE_OK;
+    const std::size_t slice = FirstSliceStart(picture.data, picture.size, h265_);
+    std::vector<uint8_t> stamped;
+    if (slice < picture.size) {
+      const std::vector<uint8_t> sei = CaptureStampSei(rendered->timestamp, h265_);
+      stamped.reserve(picture.size + sei.size());
+      stamped.insert(stamped.end(), picture.data, picture.data + slice);
+      stamped.insert(stamped.end(), sei.begin(), sei.end());
+      stamped.insert(stamped.end(), picture.data + slice, picture.data + picture.size);
+    }
+    gst_buffer_unmap(buf, &picture);
+    if (stamped.empty()) return GST_PAD_PROBE_OK;
+
+    GstBuffer *out = gst_buffer_new_memdup(stamped.data(), stamped.size());
+    gst_buffer_copy_into(out, buf,
+                         static_cast<GstBufferCopyFlags>(GST_BUFFER_COPY_TIMESTAMPS |
+                                                         GST_BUFFER_COPY_FLAGS |
+                                                         GST_BUFFER_COPY_META),
+                         0, static_cast<gsize>(-1));
+    gst_buffer_unref(buf);
+    GST_PAD_PROBE_INFO_DATA(info) = out;
+    if (!stamping_) {
+      stamping_ = true;
+      std::cout << "[" << spec_.name << "] pictures carry the instant they were rendered"
+                << std::endl;
+    }
+    return GST_PAD_PROBE_OK;
+  }
+
+  // An SEI can only be written into a stream that separates its NAL units with
+  // start codes. A sink that wants them length prefixed instead, which the RTMP
+  // one does, gets the picture unstamped rather than corrupted.
+  bool CarriesStartCodes(GstPad *pad) {
+    GstCaps *caps = gst_pad_get_current_caps(pad);
+    if (caps == nullptr) return false;
+    const char *format =
+        gst_structure_get_string(gst_caps_get_structure(caps, 0), "stream-format");
+    const bool start_codes = format != nullptr && std::string(format) == "byte-stream";
+    if (!start_codes && !warned_stream_format_) {
+      warned_stream_format_ = true;
+      std::cerr << "[" << spec_.name << "] the sink asked for "
+                << (format != nullptr ? format : "an unnamed format")
+                << " rather than byte-stream, so pictures carry no capture stamp" << std::endl;
+    }
+    gst_caps_unref(caps);
+    return start_codes;
+  }
+
   void TeardownLocked() {
     if (pipeline_ == nullptr) return;
     gst_element_set_state(pipeline_, GST_STATE_NULL);
@@ -428,7 +640,7 @@ class Stream {
       p << ",width=" << width << ",height=" << height;
     }
     p << " ! " << encoder_
-      << " ! " << parser_ << " config-interval=1"
+      << " ! " << parser_ << " name=parser config-interval=1"
       << " ! " << SinkFragment();
 
     const std::string desc = p.str();
@@ -444,6 +656,7 @@ class Stream {
 
     appsrc_ = gst_bin_get_by_name(GST_BIN(pipeline_), "src");
     zoom_ = gst_bin_get_by_name(GST_BIN(pipeline_), "zoom");
+    WriteCaptureStampsAt("parser");
     source_width_ = width;
     source_height_ = height;
     ApplyZoomLocked(width, height);
@@ -509,6 +722,11 @@ class Stream {
 
     const auto &data = msg.data();
     GstBuffer *buf = gst_buffer_new_memdup(data.data(), data.size());
+    const uint64_t rendered_ns = sim_clock_->WallNanosFor(msg.header().stamp());
+    if (rendered_ns != 0) {
+      gst_buffer_add_reference_timestamp_meta(buf, RenderInstantReference(), rendered_ns,
+                                              GST_CLOCK_TIME_NONE);
+    }
     if (gst_app_src_push_buffer(GST_APP_SRC(appsrc_), buf) != GST_FLOW_OK) {
       std::cerr << "[" << spec_.name << "] push failed, restarting the pipeline"
                 << std::endl;
@@ -602,6 +820,8 @@ class Stream {
   int source_height_ = 0;
   std::string encoder_;
   std::string parser_;
+  const SimWallClock *sim_clock_ = nullptr;
+  bool h265_ = true;
   std::regex pattern_;
   uint64_t frames_ = 0;
   gz::transport::Node node_;
@@ -613,6 +833,10 @@ class Stream {
   GstElement *pipeline_ = nullptr;
   GstElement *appsrc_ = nullptr;
   std::chrono::steady_clock::time_point retry_after_{};
+
+  // Written on a GStreamer thread and read nowhere else.
+  bool stamping_ = false;
+  bool warned_stream_format_ = false;
 };
 
 void Usage() {
@@ -753,6 +977,8 @@ int main(int argc, char **argv) {
     }
   }
 
+  SimWallClock sim_clock;
+
   std::vector<std::unique_ptr<Stream>> streams;
   for (auto &s : specs) {
     std::string enc = encoder_override;
@@ -762,7 +988,7 @@ int main(int argc, char **argv) {
       enc = EncoderFragment(*choice, s.bitrate_kbps);
       parser = choice->parser;
     }
-    streams.push_back(std::make_unique<Stream>(s, enc, parser));
+    streams.push_back(std::make_unique<Stream>(s, enc, parser, &sim_clock));
     streams.back()->WatchZoom();
   }
 
@@ -772,11 +998,12 @@ int main(int argc, char **argv) {
     bool all_bound = true;
     for (const auto &s : streams) all_bound = all_bound && s->bound();
 
-    // The topic list only serves binding, and streams never unbind. Once
-    // every stream is bound, stop asking discovery for it.
-    if (!all_bound) {
+    // The topic list only serves binding and the clock, and streams never
+    // unbind. Once every stream is bound, stop asking discovery for it.
+    if (!all_bound || !sim_clock.watching()) {
       std::vector<std::string> topics;
       discovery.TopicList(topics);
+      sim_clock.Watch(topics);
       all_bound = true;
       for (auto &s : streams) {
         if (!s->bound()) s->TryBind(topics);

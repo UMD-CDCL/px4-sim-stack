@@ -13,6 +13,21 @@
 #   RTSP     rtsp://video-router:8554/<name>
 #   WebRTC   http://localhost:8889/<name>        in a browser, lowest latency
 #   HLS      http://localhost:8888/<name>        wide compatibility, ~2 s behind
+#
+# What a picture says about itself:
+#
+# A producer may write the instant it took a picture into the picture, as an
+# H.265 or H.264 user_data_unregistered SEI holding the 16 byte identifier
+# 9d2c5f1a6b844e37a10c7e53d89142b6 and then eight bytes of Unix nanoseconds,
+# most significant first. 30 bytes for each picture. A consumer that localizes
+# what it sees needs the instant the shutter opened, and no absolute time
+# survives this router: MediaMTX times each frame by its own clock, so the RTCP
+# sender report a reader receives names when the frame arrived here. Inside the
+# bitstream nothing rewrites it. A decoder is required to skip an SEI it does
+# not know, so a consumer that ignores this reads the stream as before.
+#
+# Written by modules/sim/gz_video_streamer/main.cc, read by
+# ds_ros_pipeline/source.py. Both name the same 16 bytes.
 
 logLevel: info
 logDestinations: [stdout]
