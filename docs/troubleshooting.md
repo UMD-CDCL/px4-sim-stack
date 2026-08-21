@@ -14,15 +14,19 @@ Start here:
 ### A container exits at once with a driver error
 
 DeepStream refuses to start when the driver is older than the release needs.
-DeepStream 7.1 needs driver 535.183.
+7.1 needs 535.183. A Blackwell card additionally needs 570.133 or later, for
+the TensorRT that can build engines for it.
 
 ```bash
-nvidia-smi --query-gpu=driver_version --format=csv,noheader
+nvidia-smi --query-gpu=driver_version,compute_cap --format=csv,noheader
+./px4sim doctor
 ```
 
 There are two answers: use an older DeepStream, or update the driver. No
 container flag works around it, and an image on disk does not mean the driver
-can run it. `./px4sim doctor` reports the driver and says whether it is enough.
+can run it. Left unpinned, `DS_VERSION` is resolved from this machine on every
+run and this does not arise; `./px4sim doctor` reports the release, the driver
+and the reason.
 
 ### Gazebo renders on the CPU, and the frame rate is 5
 
@@ -293,8 +297,43 @@ uses ffplay and already passes the right ones.
 docker compose logs onboard11 | grep -i ds_pipeline
 ```
 
-The first run builds a TensorRT engine next to the ONNX file, which takes 1 to 3
-minutes and says so. It stays in `ONBOARD_MODEL_DIR` afterwards.
+First, is the DeepStream release one this GPU can run?
+
+```bash
+./px4sim doctor            # the release, and why it was chosen
+docker compose logs onboard11 | grep -i "Unsupported SM"
+```
+
+TensorRT only emits kernels for the GPU architectures its release knows, and a
+GPU newer than the release does not degrade. The ONNX parses, the engine build
+fails with `Unsupported SM: 0xc00`, and everything else carries on: the streams
+decode, the operator sees video, and no box is ever drawn. DeepStream 7.1's own
+TensorRT 10.3 on a Blackwell card fails exactly this way.
+
+`scripts/ds-select.sh` reads the compute capability and installs a TensorRT
+that fits, inside the same Ubuntu 22.04 image, so the release and the ROS
+distribution do not move. `./px4sim doctor` prints what it chose. A build that
+picked up a stock base by mistake shows as TensorRT 10.3 on a card past Hopper:
+
+```bash
+docker compose exec onboard11 dpkg -l libnvinfer10
+```
+
+Second, are the artifacts where the container looks? `ONBOARD_MODEL_DIR` is
+mounted at `/models`, and `model.detector` and `model.classifier` name files
+inside it.
+
+```bash
+docker compose exec onboard11 ls -la /models
+```
+
+An empty directory produces no detections and no error worth reading. Docker
+also turns a missing bind-mount source into an empty root-owned directory, so
+one that was never created reads as one that lost its models.
+
+An engine beside the ONNX belongs to one GPU, one driver and one TensorRT
+version. Move the models to another machine and delete the `*.engine` files
+with them; the first run rebuilds each in 1 to 3 minutes and says so.
 
 After that, check the source. `ds_node` reads the full gimbal RGB stream:
 `rgb<N>` on a v3 and `pilot<N>` on a v2. `UAS_FLEET` and `UAS1<N>_MODEL` decide
@@ -351,9 +390,21 @@ Both ends must declare the same QoS. A best effort reader matches a reliable
 writer and then discards every repair, which reads as a link that carries
 nothing.
 
-Every container that carries `cdcl_umd_msgs` must run ROS 2 Humble. Jazzy adds a
-field to `sensor_msgs/Range`, which sits inside `TargetBoxArray` before the box
-array, so a mixed pair decodes an empty box list and reports no error.
+Every container that carries `cdcl_umd_msgs` must run the same ROS 2
+distribution, and that distribution is Humble, because the aircraft is Humble.
+Jazzy adds a field to `sensor_msgs/Range`, which sits inside `TargetBoxArray`
+before the box array. A mixed pair decodes `seq`, `system_id` and the
+rangefinder correctly and then reports zero boxes, with no error, in both
+directions:
+
+```
+sent:     seq=7 sysid=11 boxes=3 range=42.5
+received: seq=7 sysid=11 boxes=0 range=42.5
+```
+
+The distribution comes from the DeepStream release -- 7.1 is Humble, 8.0 and
+9.0 are Jazzy -- so this is what a `DS_VERSION=9.0` in `.env` costs.
+`./px4sim doctor` prints what this machine resolved to.
 
 ## The simulator
 

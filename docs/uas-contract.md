@@ -340,9 +340,16 @@ vehicle and the ground can each score without sending anything.
 
 ## 8. Constraints that fail quietly
 
-- Every container that carries `cdcl_umd_msgs` must run ROS 2 Humble. Jazzy adds
-  a field to `sensor_msgs/Range`, which sits inside `TargetBoxArray` before the
-  box array, so a mixed pair decodes an empty box list and reports no error.
+- Every container that carries `cdcl_umd_msgs` must run the same ROS 2
+  distribution, and that distribution is Humble, because the aircraft is a
+  Jetson Orin on Ubuntu 22.04. Jazzy adds a field to `sensor_msgs/Range`, which
+  sits inside `TargetBoxArray` before the box array. A mixed pair decodes the
+  scalars correctly and then reports zero boxes, with no error, either way
+  round: `seq=7 sysid=11 boxes=3` is received as `seq=7 sysid=11 boxes=0`.
+  The distribution comes with the DeepStream base: 7.1 is Humble; 8.0 and 9.0
+  are Jazzy. So the fleet is DeepStream 7.1 and Humble throughout. A GPU too
+  new for that release's TensorRT gets a newer TensorRT inside the same image,
+  never a newer DeepStream. See scripts/ds-select.sh.
 - A node specific parameter selector beats a wildcard selector whatever the file
   order. Keep `source.uri` out of the vehicle parameter file.
 - Set the imagery flow controller with `FASTRTPS_DEFAULT_PROFILES_FILE` and

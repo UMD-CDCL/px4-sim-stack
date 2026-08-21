@@ -92,12 +92,28 @@ fi
 
 # The retired simulator stack. Its services are gone, so a line that names one
 # selects nothing and starts nothing, which reads as a stack that came up.
-if grep -qE '^[[:space:]]*(ROS_STACK|ROS_DISTRO|ROS_DOMAIN_ID|PERCEPTION_CAMERA|DS_(IMAGE|VERSION|CONFIG)|LOCALIZATION_MODE|MQTT_|FIDUCIAL_MEASURED_)' .env \
+if grep -qE '^[[:space:]]*(ROS_STACK|ROS_DOMAIN_ID|PERCEPTION_CAMERA|DS_CONFIG|LOCALIZATION_MODE|MQTT_|FIDUCIAL_MEASURED_)' .env \
    || grep -qE '^[[:space:]]*COMPOSE_PROFILES=.*(ros|perception)' .env; then
 	warn "Your .env still names the retired ros and perception services. The"
 	warn "companion (onboard<N>) and the ground station (offboard) replace them."
 	warn "Compare it against .env.example."
 fi
+
+# What this machine needs to run DeepStream. The release and the ROS
+# distribution are fixed -- 7.1 and Humble, what the aircraft runs -- and the
+# GPU decides one thing only: whether the TensorRT that release ships can emit
+# kernels for this card. Where it cannot, a newer TensorRT goes into the same
+# 22.04 image. Left alone, the stack builds no engine and the only symptom is
+# video that streams and nothing that is ever detected.
+#
+# Resolved on every run rather than written into .env, because a value in the
+# file is right on the machine it was written on and silently wrong on the next
+# one. DS_VERSION in .env still pins a release when a result has to be
+# reproduced; ds-select.sh reads it from here. See scripts/ds-select.sh.
+ds_resolved=$(./scripts/ds-select.sh) ||
+	die "ds-select.sh could not choose a DeepStream release. See the message above."
+eval "$ds_resolved"
+export DS_VERSION DS_IMAGE DS_TAG ROS_DISTRO DS_CODENAME DS_TRT_VERSION DS_TRT_CUDA DS_REASON
 
 # The world origin and the survey marker come from the scene and the
 # scenario, never from .env. SCENE and SCENARIO carry them. Every command
@@ -841,7 +857,7 @@ topics)
 	n=$(vehicle_arg "${1:-}")
 	has_service "onboard$n" || die "compose.yaml defines no onboard$n, so uas$n has no ROS stack."
 	COMPOSE_PROFILES="$ALL_PROFILES" $DC exec -e ROS_DOMAIN_ID=$((60 + n)) "onboard$n" bash -lc \
-		'. /opt/ros/humble/setup.bash; . /home/user/ros2_ws/install/setup.bash; ros2 topic list' \
+		'. /opt/ros/$ROS_DISTRO/setup.bash; . /home/user/ros2_ws/install/setup.bash; ros2 topic list' \
 		|| die "onboard$n did not answer. Is it running?  ./px4sim status"
 	;;
 
@@ -1041,7 +1057,7 @@ fly)
 	# causes, while the manager status still names the old owner. Without this
 	# the gimbal silently ignores every command and the state looks healthy.
 	timeout 60 $DC exec -T "onboard$n" bash -lc '
-		. /opt/ros/humble/setup.bash
+		. /opt/ros/$ROS_DISTRO/setup.bash
 		. /home/user/ros2_ws/install/setup.bash
 		exec ros2 topic pub --once -w 1 "$1" std_msgs/msg/Float32 "{data: -361.0}"
 		' _ "/uas$n/reassert_gimbal_cmd" >/dev/null 2>&1 || true
@@ -1094,7 +1110,7 @@ capture)
 	esac
 	say "asking uas$n for a $kind capture, from the ground"
 	$DC exec -e ROS_DOMAIN_ID="$GROUND_DOMAIN" offboard bash -lc '
-		. /opt/ros/humble/setup.bash
+		. /opt/ros/$ROS_DISTRO/setup.bash
 		. /home/user/ros2_ws/install/setup.bash
 		exec timeout 10 ros2 topic pub --once "$1" std_msgs/msg/Bool "{data: true}"' \
 		_ "/uas$n/${kind}_capture_cmd" >/dev/null \
@@ -1129,7 +1145,7 @@ zoom)
 	docker exec -e ROS_DOMAIN_ID="$(uas_domain "$n")" \
 		-e FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/udp-only.xml "$container" bash -lc '
 		set -e
-		. /opt/ros/humble/setup.bash
+		. /opt/ros/$ROS_DISTRO/setup.bash
 		. /home/user/ros2_ws/install/setup.bash
 		exec python3 /tmp/zoom.py "$@"' _ "$n" "$preset" --hfov "$hfov" \
 		|| die "uas$n is not at the $preset framing."
@@ -1200,7 +1216,7 @@ uas|probe|foxglove)
 	docker exec -e ROS_DOMAIN_ID="$domain" \
 		-e FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/udp-only.xml "$container" bash -lc '
 		set -e
-		. /opt/ros/humble/setup.bash
+		. /opt/ros/$ROS_DISTRO/setup.bash
 		. /home/user/ros2_ws/install/setup.bash
 		exec python3 /tmp/'"$tool"' "$@"' _ "$@" | probe_answer
 	;;

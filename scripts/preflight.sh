@@ -17,20 +17,37 @@ echo "px4-sim-stack preflight"
 echo ""
 
 # ---------------------------------------------------------------- NVIDIA driver
-# The onboard and offboard images are DeepStream 7.1, which needs driver
-# 535.183 or later. A driver below the release does not degrade: CUDA fails to
-# initialize and the container stops at its first call.
+# The GPU and its driver decide which DeepStream release this machine can run,
+# and a DeepStream release brings its Ubuntu and so its ROS 2 distribution with
+# it. scripts/ds-select.sh holds that table; this only reports what it said.
+#
+# Neither bound degrades. A driver below the release fails to initialize CUDA
+# and the container stops at its first call. A GPU newer than the release's
+# TensorRT is worse: the pipeline runs, the streams decode, no engine is ever
+# built and nothing is ever detected.
 if command -v nvidia-smi >/dev/null 2>&1; then
 	drv=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1)
 	gpu=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
 	vram=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader | head -1)
-	ok "GPU: $gpu ($vram), driver $drv"
-	major=${drv%%.*}
-	if [ "$major" -lt 535 ]; then
-		bad "driver $drv is below 535.183. DeepStream 7.1 will not start."
-	fi
+	cap=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1)
+	ok "GPU: $gpu ($vram), driver $drv, compute capability ${cap:-unknown}"
 else
 	bad "nvidia-smi not found. Install the NVIDIA driver."
+fi
+
+# The release, and why. ds-select.sh writes its complaints to stderr, so a
+# pinned release this machine cannot run is reported here as a failure rather
+# than as a line nobody reads.
+ds_complaint=$(./scripts/ds-select.sh --explain 2>&1 >/dev/null)
+ds_choice=$(./scripts/ds-select.sh --explain 2>/dev/null)
+if [ -z "$ds_choice" ]; then
+	bad "no DeepStream release could be chosen"
+	printf '%s\n' "$ds_complaint" | sed 's/^ds-select: //; s/^/        /'
+elif [ -n "$ds_complaint" ]; then
+	bad "$ds_choice"
+	printf '%s\n' "$ds_complaint" | sed 's/^ds-select: //; s/^/        /'
+else
+	ok "$ds_choice"
 fi
 
 # ------------------------------------------------------------------- Docker
@@ -138,7 +155,8 @@ newest=$(find "$ws/src" \( -name .git -o -name __pycache__ -o -name build \
               -type f -printf '%T@\n' 2>/dev/null | sort -rn | head -1)
 newest=${newest%%.*}
 stale=""
-for image in "onboard:${DS_VERSION_ONBOARD:-7.1}" "offboard:${DS_VERSION_OFFBOARD:-7.1}"; do
+ds_tag=$(./scripts/ds-select.sh --tag 2>/dev/null || echo 7.1)
+for image in "onboard:${ds_tag}" "offboard:${ds_tag}"; do
 	created=$(docker image inspect --format '{{.Created}}' "px4simstack/$image" 2>/dev/null) || continue
 	built=$(date -d "$created" +%s 2>/dev/null) || continue
 	[ -n "${newest:-}" ] && [ "$newest" -gt "$built" ] && stale="$stale ${image%%:*}"

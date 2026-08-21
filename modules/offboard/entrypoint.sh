@@ -55,7 +55,11 @@ export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 # entry point on the first line of the first one. Nothing below reads a name
 # they leave unset, so relax it for the two lines that need it.
 set +u
-source /opt/ros/humble/setup.bash
+# ROS_DISTRO is set in the image, from the DeepStream release it was built
+# on: 7.1 carries Humble and 8.0 and 9.0 carry Jazzy. Naming a distribution
+# here would be a second answer to a question modules/ros-base already
+# settled. See scripts/ds-select.sh.
+source "/opt/ros/${ROS_DISTRO}/setup.bash"
 source /home/user/ros2_ws/install/setup.bash
 set -u
 

@@ -242,15 +242,17 @@ name here.
 | Component | Version | Reason |
 |---|---|---|
 | PX4 | v1.17.0 | Current stable, May 2026. |
-| ROS 2 | Humble | What the flight code runs on the aircraft. `cdcl_umd_msgs` does not decode across distributions, so every container that carries it is Humble. |
+| ROS 2 | Humble | What the aircraft runs. `cdcl_umd_msgs` does not decode across distributions, so the whole fleet is Humble and nothing here may choose otherwise. |
 | Gazebo | Harmonic | The Gazebo release that PX4 v1.17 installs. |
 | QGroundControl | v5.0.8 | The mature v5.0 line. Set `QGC_REF` in `.env` to move. |
-| DeepStream | 7.1 | The last release on Ubuntu 22.04, which is what Humble needs. It needs driver 535.183 or later. |
+| DeepStream | 7.1 | The last release on Ubuntu 22.04, which is what Humble needs, and what the Orin runs. On a GPU newer than its TensorRT, `scripts/ds-select.sh` installs a TensorRT that fits and changes nothing else. `./px4sim doctor` explains. |
 
 ## Requirements
 
 - Linux with an X11 session. Wayland works through XWayland, and is less tested.
-- An NVIDIA GPU, driver 535.183 or later, and `nvidia-container-toolkit`.
+- An NVIDIA GPU, driver 535.183 or later, and `nvidia-container-toolkit`. A
+  Blackwell card needs 570.133 or later, for the TensorRT that can build engines
+  for it.
 - Docker 24 or later with Compose v2.
 - About 120 GB of disk and 32 GB of RAM. Every vehicle costs GPU: a fleet of
   four renders ten cameras, encodes twenty streams and runs four detectors.

@@ -343,6 +343,86 @@ rm -rf src/PX4-Autopilot
 ./px4sim build sim
 ```
 
+## DeepStream, TensorRT and the GPU
+
+The companion and the ground station are built from an NVIDIA DeepStream image,
+and that choice settles the Ubuntu underneath and so the ROS 2 distribution the
+flight code is compiled against.
+
+It is not a choice this stack makes. The aircraft is a Jetson Orin on Ubuntu
+22.04 with DeepStream 7.1, which is ROS 2 Humble, and everything here is built
+to match it:
+
+| | Orin (sm_87) | a Blackwell workstation (sm_120) |
+|---|---|---|
+| DeepStream | 7.1 | 7.1 |
+| Ubuntu | 22.04 jammy | 22.04 jammy |
+| ROS 2 | Humble | Humble |
+| TensorRT | 10.3, as shipped | 10.9, installed over it |
+| image tag | `7.1` | `7.1-trt10.9` |
+
+The reason it cannot be a choice is `cdcl_umd_msgs`. Jazzy adds a field to
+`sensor_msgs/Range`, which sits inside `TargetBoxArray` ahead of the box array.
+A Humble reader of a Jazzy `TargetBoxArray` decodes `seq`, `system_id` and the
+rangefinder correctly and then reports **zero boxes, with no error**, in both
+directions. A vehicle and a ground station either side of that line silently
+share no detections. See docs/uas-contract.md section 8.
+
+### What does vary: TensorRT
+
+TensorRT only emits kernels for the GPU architectures its release knows.
+DeepStream 7.1 carries TensorRT 10.3, which stops at Hopper. On a Blackwell
+card it parses the ONNX, reports `Unsupported SM: 0xc00`, builds no engine and
+takes the process down -- while everything around it carries on. The streams
+decode, the operator sees video, and no box is ever drawn. That failure is why
+this section exists.
+
+The fix is not a newer DeepStream, because 8.0 and 9.0 are Ubuntu 24.04 and so
+Jazzy. It is a newer TensorRT inside the same 22.04 image. NVIDIA packages
+TensorRT for jammy well past what DeepStream shipped with, the soname does not
+change, and DeepStream's own `nvinfer` builds and loads engines against it.
+
+`scripts/ds-select.sh` reads the compute capability and decides:
+
+```bash
+./px4sim doctor            # the release, the distribution, the TensorRT, and why
+./scripts/ds-select.sh     # the same answer as shell assignments
+```
+
+Take the **oldest** TensorRT that covers the card, never the newest available.
+Each release deletes more of the API that DeepStream 7.1-era sources call: at
+10.16 the vendored DeepStream-Yolo parser stops compiling, because
+`NetworkDefinitionCreationFlag::kEXPLICIT_BATCH`,
+`IBuilder::platformHasFastFp16` and `BuilderFlag::kINT8` are all gone. 10.8 is
+the first release that knows Blackwell and 10.9 is the one DeepStream 8.0
+itself ships, so 10.9 is the shortest distance from 10.3. That reasoning is in
+the header of `ds-select.sh`; read it before raising the version.
+
+### Moving to another machine
+
+Each combination builds to its own image tag, so a machine that moves between
+them does not build one over the other and leave a container that will not
+start. The derived images follow `DS_TAG`, not the release number.
+
+The TensorRT engine beside each ONNX belongs to one GPU, one driver and one
+TensorRT. Delete the `*.engine` files when any of those change and let the
+first run rebuild them -- a stale engine that fails to deserialize is rebuilt
+anyway, but one that loads and is wrong is worse. The bbox parser is stamped:
+`.parser-deepstream` in the model directory records which release built the
+`.so` beside it, and the companion's entry point replaces it when they differ.
+
+### Pinning 8.0 or 9.0
+
+```bash
+# .env
+DS_VERSION=9.0
+```
+
+This works -- the pyds bindings are compiled from source, because NVIDIA
+publishes no wheel from 9.0 onward -- and it builds Jazzy, which breaks the
+fleet as described above. `ds-select.sh` prints that warning every time. It is
+there for a machine that has no Humble counterpart to talk to.
+
 ## The camera encoders
 
 `modules/sim/gz_video_streamer/main.cc` reads Gazebo camera topics and encodes

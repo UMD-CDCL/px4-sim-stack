@@ -4,7 +4,7 @@
 # These run against the sources as built into the companion image, so they check
 # the code the vehicle will actually run rather than a copy on this host.
 
-onboard_image=px4simstack/onboard:${DS_VERSION_ONBOARD:-7.1}
+onboard_image=px4simstack/onboard:${DS_TAG:-${DS_VERSION:-7.1}}
 workspace=$(readlink -f "${ROS2_WS_DIR:-../ros2_ws}")
 
 if ! docker image inspect "$onboard_image" >/dev/null 2>&1; then
@@ -16,7 +16,7 @@ run_tests() {
 	local what=$1 package=$2; shift 2
 	output=$(docker run --rm --entrypoint bash \
 		-v "$workspace/src/$package:/src:ro" "$onboard_image" -c "
-			source /opt/ros/humble/setup.bash
+			source /opt/ros/\$ROS_DISTRO/setup.bash
 			source /home/user/ros2_ws/install/setup.bash
 			cd /src && python3 -m pytest $* -q 2>&1
 		" 2>&1) || true

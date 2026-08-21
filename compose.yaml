@@ -14,6 +14,29 @@ x-x11-env: &x11-env
   XAUTHORITY: /tmp/.docker.xauth
   QT_X11_NO_MITSHM: "1"
 
+# What the three ROS images are built from. DeepStream 7.1 on Ubuntu 22.04
+# with ROS 2 Humble, everywhere, because that is what the aircraft is and
+# because cdcl_umd_msgs does not decode across a distribution change.
+#
+# Only TensorRT varies, and only where the GPU is newer than the one the
+# release shipped for. scripts/ds-select.sh reads the card and answers with all
+# of these, and ./px4sim exports them before it reaches compose. The defaults
+# here are the stock release with no accommodation, which is what `docker
+# compose` on its own -- with no front door to resolve anything -- gets. Run
+# `./px4sim doctor` to see what this machine chose and why.
+x-deepstream: &deepstream
+  DS_VERSION: ${DS_VERSION:-7.1}
+  DS_IMAGE: ${DS_IMAGE:-nvcr.io/nvidia/deepstream:7.1-samples-multiarch}
+  ROS_DISTRO: ${ROS_DISTRO:-humble}
+  DS_CODENAME: ${DS_CODENAME:-jammy}
+  # The built tag. onboard and offboard derive from ros-base by this name, so
+  # it has to carry the accommodation as well as the release.
+  DS_TAG: ${DS_TAG:-7.1}
+  # Empty on every GPU up to Hopper, which is what the aircraft is. Set only
+  # where the release's own TensorRT cannot emit kernels for the card.
+  TRT_VERSION: ${DS_TRT_VERSION:-}
+  TRT_CUDA: ${DS_TRT_CUDA:-}
+
 x-ids: &ids
   # Named HOST_UID, not UID. A build argument reaches every RUN as an
   # environment variable, and a variable named UID shadows the one bash
@@ -71,8 +94,8 @@ x-onboard: &onboard
       # Which ros-base to derive from. Everything heavy is there, so this image
       # is its entry point and nothing else. `./px4sim build` builds the base
       # first. See modules/ros-base/Dockerfile.
-      DS_VERSION: ${DS_VERSION_ONBOARD:-7.1}
-  image: px4simstack/onboard:${DS_VERSION_ONBOARD:-7.1}
+      <<: *deepstream
+  image: px4simstack/onboard:${DS_TAG:-7.1}
   runtime: nvidia
   ipc: host
   stop_grace_period: 20s
@@ -138,8 +161,8 @@ services:
 
   # -------------------------------------------------------------------------
   # ros-base - what the companion and the ground station are both made of.
-  # Built, never run: DeepStream, ROS 2 Humble, MAVROS and the built ros2_ws,
-  # in one image so the work happens once and one package list is maintained.
+  # Built, never run: DeepStream, ROS 2, MAVROS and the built ros2_ws, in one
+  # image so the work happens once and one package list is maintained.
   # -------------------------------------------------------------------------
   ros-base:
     profiles: [base]
@@ -150,11 +173,8 @@ services:
         # builds them into the image, so nothing is mounted at run time.
         ros2_ws: ${ROS2_WS_DIR:-../ros2_ws}
       args:
-        <<: *ids
-        # DeepStream 7.1 is the last Ubuntu 22.04 release, and 22.04 is what
-        # ROS 2 Humble needs. The Dockerfile stops a build on any other base.
-        DS_VERSION: ${DS_VERSION_ONBOARD:-7.1}
-    image: px4simstack/ros-base:${DS_VERSION_ONBOARD:-7.1}
+        <<: [*ids, *deepstream]
+    image: px4simstack/ros-base:${DS_TAG:-7.1}
     command: ["true"]
 
   # -------------------------------------------------------------------------
@@ -494,8 +514,8 @@ services:
       context: ./modules/offboard
       args:
         # See the onboard note above: everything heavy is in ros-base.
-        DS_VERSION: ${DS_VERSION_OFFBOARD:-7.1}
-    image: px4simstack/offboard:${DS_VERSION_OFFBOARD:-7.1}
+        <<: *deepstream
+    image: px4simstack/offboard:${DS_TAG:-7.1}
     hostname: offboard
     runtime: nvidia
     ipc: host
