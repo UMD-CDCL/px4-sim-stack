@@ -280,10 +280,24 @@ six of its ten inputs need no bridge.
 ### Ground to vehicle, domain 70 to 99 to `60 + N`
 
 `gimbal_point_cmd`, `roi_point_cmd`, `raw_roi_point_cmd`, `gimbal_raw_command`,
-`gimbal_angle_cmd`, `reassert_gimbal_cmd`, `release_gimbal_cmd`,
+`gimbal_angle_cmd`, `reassert_gimbal_cmd`, `release_gimbal_cmd` and
+`hil_detection/detected`. On a v3, `zoom/preset_cmd` as well.
+
+### Ground to vehicle, domain 70 straight to `60 + N`
+
 `start_survey_cmd`, `vlm_capture_cmd`, `mosaic_capture_cmd`,
-`advance_mission_cmd` and `hil_detection/detected`. On a v3, `zoom/preset_cmd`
-as well.
+`fiducial_capture_cmd`, `advance_mission_cmd` and `continuous_detection_cmd`,
+each a `std_msgs/msg/Bool`. These six take no air hop. The ground half writes
+them into the vehicle's own domain, so the vehicle half carries no entry for
+them: two entries would deliver every command twice.
+
+Five of the six are bare triggers and their contents are ignored.
+`continuous_detection_cmd` is the exception: `data` is the switch. It reaches
+`img_processing`, which sets its own `continuous` parameter, and that parameter
+tells the detector to run and opens the publish types that turn a localized
+detection into an observation. A mission sets the same parameter, so an
+operator and a mission use one door and the last command wins. It is a topic
+and not a parameter service because a service does not cross a domain.
 
 The operator's console runs ON THE GROUND, and every gimbal command is issued
 by the VEHICLE. A Foxglove click is a local message and the click mode services

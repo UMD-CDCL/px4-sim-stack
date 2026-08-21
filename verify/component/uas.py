@@ -38,7 +38,9 @@ from cdcl_umd_msgs.msg import TargetBox, TargetBoxArray
 from cdcl_umd_msgs.srv import TBALocalization
 from mavros_msgs.msg import Altitude, GimbalDeviceAttitudeStatus, HomePosition, State
 from mavros_msgs.srv import CommandBool, CommandInt, CommandTOL, SetMode
-from std_srvs.srv import SetBool, Trigger
+from std_srvs.srv import Trigger
+from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
+from rcl_interfaces.srv import SetParameters
 from sensor_msgs.msg import CameraInfo, NavSatFix
 from rosidl_runtime_py.utilities import get_message
 from std_msgs.msg import Float32, Float64
@@ -128,10 +130,14 @@ class Uas(Node):
         self.gimbal_reassert = self.create_publisher(
             Float32, f"{self.namespace}/reassert_gimbal_cmd", RELIABLE_QOS)
         self.reposition = self.create_client(CommandInt, f"{self.namespace}/cmd/command_int")
-        # The detector's own services. They sit outside the vehicle namespace,
-        # which is where ds_node advertises them.
-        self.toggle_detection = self.create_client(SetBool, "/ds/mode/toggle_detection")
-        # What the detector can be asked for, by the name an operator uses.
+        # Continuous detection, as one parameter on img_processing. That node turns
+        # the detector on itself and publishes what comes back, so the parameter is
+        # the whole switch. The detector's own /ds/mode/toggle_detection is half of
+        # it: it detects, and img_processing drops every detection.
+        self.continuous_detection = self.create_client(
+            SetParameters, f"{self.namespace}/img_processing/set_parameters")
+        # What the detector can be asked for, by the name an operator uses. These
+        # sit outside the vehicle namespace, which is where ds_node advertises them.
         self.captures = {
             name: self.create_client(Trigger, path) for name, path in (
                 ("detect", "/ds/batch/run_detect"),
@@ -404,14 +410,21 @@ def command_detect(uas: Uas, args) -> int:
     """Start or stop continuous detection.
 
     The detector runs its pipeline from the first frame but detects nothing
-    until this is on: a mission turns it on, and a bare stack leaves it off.
+    until this is on: a mission turns it on, and a bare stack leaves it off. A
+    mission turns it on by setting this parameter, so this asks the same way,
+    and what an operator sees here is what a mission produces.
     """
-    answer = uas.call(uas.toggle_detection, SetBool.Request(data=args.on == "on"),
-                      "toggle_detection")
-    if not answer:
+    on = args.on == "on"
+    request = SetParameters.Request(parameters=[Parameter(
+        name="continuous",
+        value=ParameterValue(type=ParameterType.PARAMETER_BOOL, bool_value=on))])
+    answer = uas.call(uas.continuous_detection, request, "img_processing parameter")
+    if not answer or not answer.results:
+        print("img_processing said nothing about the continuous parameter", file=sys.stderr)
         return 1
-    print(answer.message or ("on" if args.on == "on" else "off"))
-    return 0 if answer.success else 1
+    result = answer.results[0]
+    print(result.reason or ("on" if on else "off"))
+    return 0 if result.successful else 1
 
 
 def command_capture(uas: Uas, args) -> int:
