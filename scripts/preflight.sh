@@ -129,6 +129,83 @@ fi
 sed -i "/^DISPLAY=/d" .env
 ok ".env host values set (HOST_UID=$(id -u) HOST_GID=$(id -g))"
 
+# --------------------------------------------------------------- host ports
+# Every published port is a claim on the host, and this stack is not the only
+# thing that can hold one. This runs after the .env block above, because
+# compose cannot resolve the file's variables before the file exists.
+#
+# A taken port is not a small failure. `docker compose up` stops at the
+# container that wanted it and abandons the rest of the start, so the services
+# after it never run and what the operator sees is whatever those were
+# carrying, never the port. The container that lost the bind is worse: it keeps
+# its place in the project, and the next start brings it up with no network
+# endpoint at all. That one reads as healthy everywhere except in what it
+# serves. `./px4sim status` names that state once it exists; this is where it
+# is caught before it does.
+config=$(docker compose config --format json 2>/dev/null)
+if ! command -v ss >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
+	note "no ss or python3 here, so no host port was checked."
+elif [ -z "$config" ]; then
+	note "compose could not read its own file, so no host port was checked.
+        Say why:  ./px4sim check"
+else
+	# What this stack already publishes is its own, not a conflict with itself.
+	project=$(printf '%s' "$config" |
+		python3 -c 'import json,sys; print(json.load(sys.stdin).get("name",""))')
+	# docker prints a run of ports as one range, 14561-14569->14561-14569/udp,
+	# so each mapping is spread back out. Read one number where a range is
+	# meant and this stack reports its own ground station as a stranger.
+	mine=$(docker ps --filter "label=com.docker.compose.project=$project" \
+	                 --format '{{.Ports}}' 2>/dev/null |
+		tr ',' '\n' |
+		awk -F'->' 'NF == 2 {
+			split($1, address, ":"); span = address[length(address)]
+			split($2, target, "/"); protocol = target[2]
+			low = span; high = span
+			if (split(span, ends, "-") == 2) { low = ends[1]; high = ends[2] }
+			for (port = low + 0; port <= high + 0; port++) print port, protocol
+		}' | sort -u)
+
+	# Every port the next start would publish, and the service that wants it.
+	wanted=$(printf '%s' "$config" | python3 -c '
+import json, sys
+
+claims = {}
+for service, spec in (json.load(sys.stdin).get("services") or {}).items():
+    for port in spec.get("ports") or []:
+        published = port.get("published")
+        if published:
+            claims.setdefault((int(published), port.get("protocol", "tcp")), service)
+for (number, protocol), service in sorted(claims.items()):
+    print(number, protocol, service)
+')
+
+	taken=""
+	while read -r number protocol service; do
+		[ -n "${number:-}" ] || continue
+		printf '%s\n' "$mine" | grep -qx "$number $protocol" && continue
+		if [ "$protocol" = udp ]; then flag=-lnu; else flag=-lnt; fi
+		held=$(ss "$flag" -p 2>/dev/null |
+			awk -v want=":$number\$" '$4 ~ want { print; exit }')
+		[ -n "$held" ] || continue
+		# ss names the holder only when it belongs to this user or this is
+		# root. An empty name is not an empty port, so say which it is.
+		who=$(printf '%s' "$held" |
+			sed -n 's/.*users:((\([^,]*\),pid=\([0-9]*\).*/\1 pid \2/p' | tr -d '"')
+		taken="$taken
+        $number/$protocol, wanted by $service, held by ${who:-another user: sudo ss -lnp}"
+	done <<EOF
+$wanted
+EOF
+
+	if [ -n "$taken" ]; then
+		bad "host ports already taken. The start stops at the first of these and
+        leaves every service after it unstarted:$taken"
+	else
+		ok "$(printf '%s\n' "$wanted" | grep -c .) host ports free"
+	fi
+fi
+
 # --------------------------------------------------------------- source trees
 if [ -d src/PX4-Autopilot ]; then
 	ok "src/PX4-Autopilot present"

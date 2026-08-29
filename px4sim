@@ -35,6 +35,11 @@ compose_services() {
 COMPOSE_SERVICES=$(compose_services)
 has_service() { printf '%s\n' "$COMPOSE_SERVICES" | grep -qx "$1"; }
 
+# The project every container is labelled with, taken from the same file, so
+# `docker ps` can be asked for this stack's containers and no other's.
+COMPOSE_PROJECT=$(sed -n 's/^name:[[:space:]]*\([a-z0-9_-]\+\).*/\1/p' compose.yaml | head -1)
+[ -n "$COMPOSE_PROJECT" ] || die "compose.yaml declares no name. Is the file intact?"
+
 # Every profile, so `stop` and `clean` reach containers that `start` did not
 # create. Compose ignores a service whose profile is not selected, which
 # otherwise leaves the router and companion containers behind.
@@ -284,6 +289,39 @@ namespace_borrowers() {
 		/^  [a-z0-9_-]+:[[:space:]]*$/ { service = $1; sub(/:$/, "", service) }
 		$1 == "network_mode:" { mode = $2; gsub(/"/, "", mode)
 		                        if (mode == owner) print service }' compose.yaml
+}
+
+# A container that loses a host port at start keeps its place in the project,
+# and the next `up` can bring it back with no network endpoint at all: no
+# address on the network it was told to join, no name the other services can
+# resolve, and none of the ports it publishes. Nothing about it reads as
+# broken. Compose says running, `docker ps` says Up, and its own log says it is
+# listening, because inside the container it is. Everything that needs it waits
+# forever instead, which is a silence, not an error.
+#
+# So this reads the endpoint rather than the container: the network it was told
+# to join against the one it holds, and the ports it asked to publish against
+# the ones it got. A service that borrows another's namespace has no endpoint
+# of its own by design, and is left alone. See network_mode in compose.yaml.
+wedged_services() {
+	local names name fields service netmode nets bindings ports
+	names=$(docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+	                  --filter status=running --format '{{.Names}}' 2>/dev/null) || return 0
+	for name in $names; do
+		fields=$(docker inspect "$name" --format \
+			'{{index .Config.Labels "com.docker.compose.service"}} {{.HostConfig.NetworkMode}} {{len .NetworkSettings.Networks}} {{len .HostConfig.PortBindings}} {{len .NetworkSettings.Ports}}' \
+			2>/dev/null) || continue
+		# shellcheck disable=SC2086
+		set -- $fields
+		[ $# -eq 5 ] || continue
+		service=$1 netmode=$2 nets=$3 bindings=$4 ports=$5
+		case "$netmode" in container:* | host | none) continue ;; esac
+		if [ "$nets" -eq 0 ]; then
+			echo "$service joined no network: no address on $netmode, and no name to resolve."
+		elif [ "$bindings" -gt 0 ] && [ "$ports" -eq 0 ]; then
+			echo "$service published none of the $bindings host ports it asks for."
+		fi
+	done
 }
 
 need_sources() {
@@ -618,7 +656,10 @@ cmd=${1:-help}
 
 case "$cmd" in
 
-doctor)   ./scripts/preflight.sh ;;
+# The fleet profiles carry a router and a companion for each vehicle, and
+# so the ports those publish. Without them preflight checks the ports of a
+# stack smaller than the one `start` would raise.
+doctor)   add_fleet_profiles; ./scripts/preflight.sh ;;
 setup)    ./scripts/bootstrap.sh "$@" ;;
 
 build)
@@ -739,6 +780,16 @@ restart)
 status|ps)
 	COMPOSE_PROFILES="$ALL_PROFILES" $DC ps \
 		--format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
+	# Up is not the same as reachable, and the table above only knows Up.
+	wedged=$(wedged_services)
+	if [ -n "$wedged" ]; then
+		echo
+		warn "Running, and reachable by nothing:"
+		printf '%s\n' "$wedged" | while read -r line; do warn "  $line"; done
+		warn "Starting these again reuses the endpoint they have. Free whatever"
+		warn "holds the port (./px4sim doctor names it), then recreate them:"
+		warn "  ./px4sim stop && ./px4sim start"
+	fi
 	endpoints
 	;;
 
