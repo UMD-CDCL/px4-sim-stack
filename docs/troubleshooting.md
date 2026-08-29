@@ -9,6 +9,74 @@ Start here:
 ./px4sim logs sim  # the service you suspect
 ```
 
+## The start
+
+### `start` creates some of the stack, or none of it
+
+A published port is a claim on the host, and this stack is not the only thing
+that can hold one. A container that cannot bind its port stops `docker compose
+up` where it stands, and compose abandons everything after it:
+
+```
+Error response from daemon: failed to set up container networking: driver
+failed programming external connectivity on endpoint px4simstack-video-router-1:
+failed to bind host port 0.0.0.0:8554/tcp: address already in use
+```
+
+Every service compose had not reached yet is never created. 8554 costs the
+whole picture, because `video-router` comes early: `sim`, `qgc`, `offboard` and
+`ground-router` never start. The operator meets no video and no ground station,
+never a port.
+
+`./px4sim doctor` names the port, the service that wants it, and what holds it:
+
+```
+  fail  host ports already taken. The start stops at the first of these and
+        leaves every service after it unstarted:
+        8554/tcp, wanted by video-router, held by python3 pid 56131
+```
+
+`ss` names the holder only when it is yours or you are root. For anything
+else, `sudo ss -lnp` says who it is.
+
+An address this stack shares with a real airframe is the usual cause. 8554 is
+RTSP for both, so a relay for the real fleet on this machine and the simulator
+cannot both hold it. Stop the one you are not flying. If it is a service, stop
+the unit and not the process, or systemd starts it again five seconds later:
+
+```bash
+systemctl status lcam     # what holds it, and whether it comes back
+sudo systemctl stop lcam
+```
+
+### A service is Up, and nothing can reach it
+
+A container that lost a host port keeps its place in the project, and starting
+it again brings it up with no network endpoint at all: no address on
+`px4simstack_simnet`, no name for the other services to resolve, and none of
+the ports it publishes. Nothing about it reads as broken. Compose says running,
+`status` says Up with an empty PORTS column, and the service's own log says it
+is listening, because inside the container it is.
+
+`./px4sim status` reads the endpoint rather than the container, and says so:
+
+```
+    Running, and reachable by nothing:
+      video-router joined no network: no address on px4simstack_simnet, and no name to resolve.
+```
+
+Meanwhile the services that need it wait rather than fail. The simulator
+repeats `[rgb11] cannot start the pipeline`, and the companion repeats `waiting
+for rtsp://video-router:8554/rgb11 to be served`. Neither is an error, so
+neither stands out in a log.
+
+Start the container again and it reuses the endpoint it already has. Free the
+port first, then recreate it, which is what `stop` and `start` do together:
+
+```bash
+./px4sim stop && ./px4sim start
+```
+
 ## The GPU
 
 ### A container exits at once with a driver error
@@ -186,6 +254,16 @@ directly.
 `offline` means nobody is publishing, and a player gets a 404 or a timeout.
 Every path comes from the simulator, so they stay offline until Gazebo is up and
 the vehicle has spawned.
+
+If the router itself cannot be reached, no path is served and none is listed:
+
+```
+  cannot reach http://localhost:9997: <urlopen error [Errno 111] Connection refused>
+  Is the video router running?  ./px4sim status
+```
+
+That is the host side of `video-router`, not the streams. See
+[A service is Up, and nothing can reach it](#a-service-is-up-and-nothing-can-reach-it).
 
 ### Some streams are online and others never appear
 
