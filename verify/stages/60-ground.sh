@@ -30,6 +30,29 @@ done
 expect_eq "the ground holds the scene's casualty locations" data \
 	"$(./px4sim probe ground /known_casualty_locations 2>/dev/null | cut -f3)"
 
+# Aim at the casualties and turn detection on, rather than reading whatever the
+# stage before happened to leave pointed where.
+#
+# This asks whether the localizations the vehicle computes reach the ground
+# unchanged, so it needs the vehicle to be computing some. The flight stage ends
+# parked at the fiducial survey vantage with the gimbal over bare ground, so a
+# run in stage order arrived here with nothing being localized and failed on the
+# precondition -- which reads as a broken air link and says nothing at all about
+# one. Standing this up here costs one leg and makes the stage independent of
+# what ran before it.
+viewpoint=$(python3 verify/component/viewpoint.py \
+	"modules/sim/scenes/scenarios/${SCENARIO:-${SCENE}_casualties}.yaml" \
+	--height "${VERIFY_HEIGHT_M:-20}" --depression "${VERIFY_DEPRESSION_DEG:-45}" \
+	--buildings "modules/sim/scenes/worlds/${SCENE}_buildings.json" 2>/dev/null)
+if [ -n "$viewpoint" ]; then
+	read -r aim_east aim_north aim_up aim_heading <<< "$viewpoint"
+	./px4sim uas "$lead" goto "$aim_east" "$aim_north" "$aim_up" \
+		--heading "$aim_heading" >/dev/null 2>&1 || true
+	./px4sim uas "$lead" gimbal "-${VERIFY_DEPRESSION_DEG:-45}" --yaw 0 >/dev/null 2>&1 || true
+fi
+./px4sim uas "$lead" detect on >/dev/null 2>&1 || true
+sleep "${VERIFY_SETTLE_S:-12}"
+
 # Both at once: the two are watching one live stream, so sampling each in turn
 # compares different frames.
 work=$(mktemp -d)

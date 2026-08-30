@@ -17,11 +17,52 @@ angle rather than from straight above.
 """
 
 import argparse
+import json
 import math
 import re
 import sys
 
 import yaml
+
+
+def roofs(path):
+    """The buildings, as (footprint, roof height) pairs. None reads as no scene."""
+    if not path:
+        return []
+    with open(path) as handle:
+        scene = json.load(handle)
+    return [(b["footprint"], max((l.get("z", 0.0) for l in b["levels"]), default=0.0))
+            for b in scene.get("buildings", []) if b.get("footprint")]
+
+
+def within(point, polygon):
+    """Ray casting, because a footprint is a plain polygon in the same frame."""
+    x, y = point
+    inside = False
+    for i, (x1, y1) in enumerate(polygon):
+        x2, y2 = polygon[(i + 1) % len(polygon)]
+        if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1:
+            inside = not inside
+    return inside
+
+
+def sees(eye, target, buildings, step=0.5):
+    """Whether the eye can see a target on the ground, past the roofs between.
+
+    Marched rather than solved: a footprint is an arbitrary polygon and the only
+    question is whether the sight line is under a roof while it is over that
+    roof's outline. Half a metre is finer than the smallest building here.
+    """
+    span = math.dist(eye[:2], target)
+    for i in range(1, max(2, int(span / step))):
+        along = i / max(2, int(span / step))
+        height = eye[2] * (1 - along)
+        place = (eye[0] + (target[0] - eye[0]) * along,
+                 eye[1] + (target[1] - eye[1]) * along)
+        for footprint, roof in buildings:
+            if height < roof and within(place, footprint):
+                return False
+    return True
 
 
 def targets(scenario: dict, first: int):
@@ -76,7 +117,35 @@ def aim(places, spread):
     best = max((group_of(centre) for centre in places), key=score)
     return (sum(p[0] for p in best) / len(best),
             sum(p[1] for p in best) / len(best),
-            len(best))
+            best)
+
+
+def standoff(aim_point, group, reach, height, buildings):
+    """Where to stand to see the group, and the heading to face it.
+
+    Due south of the targets is the readable answer and the one this always gave:
+    the vehicle sits at (east, north - reach) on heading 0. It is only right when
+    nothing is in the way, and a scene with buildings in it does not promise
+    that. uroc puts a 5.8 m roof 10 m from its eastern casualties, which hides
+    all three of them from anywhere between bearing 45 and 165, and the same roof
+    hides two of them from due south as soon as the vehicle stands 40 m off
+    instead of 20 -- occlusion follows the range as much as the bearing, because
+    what matters is whether the sight line is still above the roof when it
+    crosses it.
+
+    So south is tried first and kept when it works, and otherwise the bearing
+    turns away from it in even steps until every target in the group is visible.
+    Answers the position, the heading, and how far it had to turn.
+    """
+    for turn in range(0, 181, 5):
+        for bearing in ({180 - turn, 180 + turn} if turn else {180}):
+            radians = math.radians(bearing)
+            eye = (aim_point[0] + reach * math.sin(radians),
+                   aim_point[1] + reach * math.cos(radians),
+                   height)
+            if all(sees(eye, target, buildings) for target in group):
+                return eye[0], eye[1], (bearing + 180) % 360, turn
+    return (aim_point[0], aim_point[1] - reach, 0.0, None)
 
 
 def main() -> int:
@@ -96,6 +165,10 @@ def main() -> int:
                              "footprint of the mid framing at the default "
                              "height and depression, which is the narrowest "
                              "view the checks use")
+    parser.add_argument("--buildings", default="",
+                        help="the scene's <scene>_buildings.json, so the "
+                             "bearing chosen is one the targets are visible "
+                             "from. Without it every bearing looks clear")
     parser.add_argument("--centre", action="store_true",
                         help="print the middle of the targets instead, as "
                              "east north, for a caller that plans its own view")
@@ -108,17 +181,28 @@ def main() -> int:
         print(f"{arguments.scenario} names no entity with a pose", file=sys.stderr)
         return 1
 
-    east, north, held = aim(places, arguments.spread)
-    if held < len(places):
-        print(f"aiming at {held} of {len(places)} targets, the biggest group "
-              f"within {arguments.spread:.0f} m", file=sys.stderr)
-    # Ground range at that depression, so the boresight lands on the middle of
-    # them. Heading 0 keeps the offset due south and the arithmetic readable.
+    east, north, group = aim(places, arguments.spread)
+    if len(group) < len(places):
+        print(f"aiming at {len(group)} of {len(places)} targets, the biggest "
+              f"group within {arguments.spread:.0f} m", file=sys.stderr)
     if arguments.centre:
         print(f"{east:.2f} {north:.2f}")
         return 0
+
+    # Ground range at that depression, so the boresight lands on the middle of
+    # them, and then a bearing from which they can actually be seen.
     reach = arguments.height / math.tan(math.radians(arguments.depression))
-    print(f"{east:.1f} {north - reach:.1f} {arguments.height:.1f} 0")
+    buildings = roofs(arguments.buildings)
+    stand_east, stand_north, heading, turn = standoff(
+        (east, north), group, reach, arguments.height, buildings)
+    if turn is None:
+        print("no bearing at this range and height sees the whole group past "
+              "the buildings; standing due south anyway", file=sys.stderr)
+    elif turn:
+        print(f"standing {turn} degrees off due south: a building hides the "
+              f"group from there", file=sys.stderr)
+    print(f"{stand_east:.1f} {stand_north:.1f} {arguments.height:.1f} "
+          f"{heading:.0f}")
     return 0
 
 
