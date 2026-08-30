@@ -69,6 +69,14 @@ for name in $OVERRIDABLE; do
 	fi
 done
 
+# The ground station's ROS domain. compose.yaml and the offboard entry point
+# both default it to 70, and the commands below hand it to `docker exec` as
+# ROS_DOMAIN_ID. Unset, that exec gets an empty string, which rmw reads as
+# domain 0 -- so `capture` published where nothing listens and reported
+# success, because `ros2 topic pub` does not need a subscriber. Defaulted here
+# so a .env written before this variable existed still reaches the station.
+export GROUND_DOMAIN=${GROUND_DOMAIN:-70}
+
 # Whether the fleet that is flying is the one the file holds. This script
 # exports what it reads, so a px4sim that this one runs -- the console, or
 # `fly` calling `place` -- finds the file's own value in its environment and
