@@ -230,3 +230,63 @@ settled recovers most of the error whether or not the hypothesis holds, and
 costs nothing if the estimate was good to begin with. Waiting out a warm up
 before the first mission is a reasonable operating practice, but a system that
 does not need it is better.
+
+## The check to run at the start of every mission
+
+The error above is not predictable, but it is measurable, and the aircraft
+already carries the one instrument that can measure it. Measuring it once per
+mission is what makes missions repeatable, whether or not the estimator was cold
+that morning.
+
+**Hover over flat ground and compare the rangefinder against the height the
+estimator claims. The difference is the vertical datum error.**
+
+    1. Climb to a hover over ground that is flat, and that is the same ground
+       the targets stand on. Note where, because the number belongs to that
+       place.
+    2. Wait for the climb transient to settle. In the flight above, 82 per cent
+       of the drift had arrived by 90 s and the rest was noise. Ninety seconds
+       is the floor, not a target.
+    3. Point the rangefinder at nadir and read the range. On the aircraft use
+       the body-fixed lidar, which needs no gimbal command. Use the unit whose
+       range covers the hover height: the 6 m unit returns nonsense above 6 m.
+    4. Read the estimator's height above the datum the localizer casts against.
+    5. Record the difference, with the time since power on, the fix type, the
+       satellite count and the barometer temperature beside it.
+
+What to do with the number is a choice, and both are worth having. As a GATE it
+is free: refuse the mission, or warn loudly, when the difference exceeds what
+the run can tolerate. As a CORRECTION it removes the bulk of the error, and it
+is the vertical half of what the fiducial survey does laterally.
+
+Four things to hold on to.
+
+**It measures the vertical only.** Lateral stays with the fiducial, which is the
+right shape for it: the flight above moved at most 0.561 m laterally against
+2.270 m vertically.
+
+**The ground below must be the ground the targets are on.** Terrain relief goes
+straight into the number. In the simulator the surface moved 0.250 m across the
+17 m between the vehicle and the marker, which is most of a 0.31 m error on its
+own.
+
+**A rangefinder lies in known ways.** It returns invalid near-zero values out of
+range: four apparent ground contacts in the flight bag are at 14 to 21 m
+altitude. Gate every reading on plausibility before believing it.
+
+**On the ground it reads the landing gear, not zero.** A ground comparison needs
+the gear height as well, which is why the hover is worth the ninety seconds.
+
+### The simulator cannot run this check as the aircraft would
+
+The aircraft carries `drone_lidar_6m` and `drone_lidar_200m`, both fixed to the
+body, as well as the gimbal's own `gimbal_lidar_50m`. **The simulated vehicle
+carries only the gimbal one.** So the procedure as the aircraft would run it,
+off a body-fixed sensor with no gimbal involved, has nothing to run against
+here. The gimbal unit stands in only if it is commanded to nadir first, which
+adds the gimbal's own pointing error to a measurement whose whole purpose is to
+be independent.
+
+Adding a body-fixed downward rangefinder to the simulated airframe is the change
+that would let this procedure be developed and regression tested before it is
+flown.
