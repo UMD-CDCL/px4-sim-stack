@@ -134,23 +134,99 @@ On the aircraft there is no surveyed terrain to lean on, so 2 and 3 are the
 ones that transfer. See the note below on why this matters more there than
 here.
 
-## The same fault is larger on the aircraft, and it moves
+## The same fault on the aircraft is larger, and it moves
 
-A characterization of `rosbag2_2026_08_18-16_02_00-fid`, UAS3 at Webster Field,
-found the EKF's vertical estimate sliding 2.353 m downward across one 640 s
-flight while the drone sat on the same ground at both ends, the downward lidar
-reading 0.040 m each time. The EKF tracked raw GNSS height to within 5 cm; the
-barometer over the same interval moved only 0.781 m. Downstream it biased
-altimeter plane localizations 3.17 m toward the drone, and recomputing them
-against barometer height cut that to 0.96 m.
+`rosbag2_2026_08_18-16_02_00-fid` holds UAS3 at Webster Field, 645 s, takeoff at
+about 8 s and level by 25 s. The vehicle sat on the same ground at both ends,
+which the downward lidar proves: 0.06 m for the first six seconds and 0.05 m for
+the last six, with the position estimate steady to 0.03 m inside each.
 
-Two differences from what is written above matter.
+Between those two periods:
 
-**It is larger, and it is the other way round.** The simulator reads about
-0.31 m high and so overshoots. That flight read low and so undershot, toward
-the vehicle.
+    lateral change   0.561 m
+    vertical change -2.270 m
 
-**It moves.** The simulator's error is latched at arming and constant. The
-aircraft's grows through the flight. A fiducial survey publishes ONE static
-correction, which is the right shape for a constant offset and the wrong shape
-for a drifting one. No single survey can track it, however well it is flown.
+`altitude.local` fell 2.026 m and raw GNSS height fell 2.041 m over the same
+window. The EKF tracks the GNSS height to 1.5 cm, so it is GNSS referenced and
+the two are not independent evidence.
+
+**Vertical dominates lateral by at least four to one**, and the gap is wider
+than that, because the lateral figure is an upper bound that also contains
+however far the aircraft was set down from where it lifted off, while the
+vertical figure is not.
+
+That is what says to split the correction rather than replace it. A survey
+publishes ONE static offset, which is the right shape for a sub-metre lateral
+error and the wrong shape for a vertical one measured in metres that moves. Keep
+the fiducial for lateral. Take the vertical from a live reference.
+
+## The vertical error is a takeoff transient, not a slide
+
+Binned against the pre-climb baseline, the barometer against the EKF referenced
+AMSL gives the shape:
+
+      0- 30s  +0.120      150-180s  +2.430
+     30- 60s  +1.164      300-330s  +2.401
+     60- 90s  +1.089      450-480s  +2.570
+     90-120s  +2.240      630-660s  +2.740
+
+**82 per cent of the total 2.606 m arrives in the first 90 s**, with the ramp
+starting at 20 to 25 s, which is where the climb ends. The remaining 550 s is a
+plateau that wanders about 0.8 m. Reading only the endpoints makes it look like
+a steady slide, and the shape is what decides the fix.
+
+PX4 logged `GPS reports spoofing indicated` from about 150 s, by which time most
+of the drift had already happened, and the satellite count held at 32 across the
+whole flight with no dip at the onset or at the warnings. So spoofing does not
+account for the bulk of it. The onset instead follows the climb, which is what
+the GNSS solution does when the antenna leaves the ground and its multipath and
+sky view change.
+
+A filter of `lidar < 0.10 m` alone finds false ground contacts: four of them in
+this bag are at 14 to 21 m, where the sensor returns an invalid near zero.
+Cross-check against altitude before trusting one.
+
+## Why it is not the same on every flight
+
+The operators report whole days of testing with no sign of this, and their
+reading is that it belongs to the first flight after power on, after which the
+estimator settles and the correction stops appearing.
+
+That is consistent with what the bag shows, once the mechanism is stated
+carefully. **The takeoff does not create the error. It reveals one that was
+already in the ground solution.** A receiver that has just powered on holds no
+current ephemeris, has not acquired SBAS, and sits under the worst multipath it
+will see all flight, while the barometer and the IMU are still warming. Its
+height on the ground is its poorest of the day. The climb clears the multipath
+and by then the ephemeris has arrived, so the solution improves and the filter
+walks to meet it. A second flight starts from a solution that is already good,
+so there is little left to walk.
+
+**Home is latched at arming**, which is to say it is latched against the worst
+height estimate of the flight, and every frame built on it inherits that.
+
+The hypothesis should not be leaned on, though, because several things that
+produce the same signature do not follow the first flight of the day:
+
+- Satellite geometry moves through the day, and vertical dilution of precision
+  is always the worse axis because every satellite is above the receiver.
+- Multipath belongs to the site and to what the aircraft is parked beside, not
+  to the flight number.
+- Ionospheric conditions vary within a day and can change sharply.
+- Warm up recurs whenever the airframe has cooled, so an evening flight after a
+  long gap is a cold start again in everything but ephemeris.
+- Most of all, **first flight of the day may really mean first flight after each
+  power cycle.** A GNSS module keeps its ephemeris across a battery swap only
+  with backup power. Without it, every swap is a cold start, and the day level
+  pattern would be a coincidence of how the batteries happened to be changed.
+
+To settle it, record time since power on, fix type, satellite count, VDOP and
+barometer temperature, and correlate the drift against those across flights,
+separating the ones where the autopilot was power cycled from the ones where it
+was not.
+
+None of this changes what to do. Re-deriving home once the climb transient has
+settled recovers most of the error whether or not the hypothesis holds, and
+costs nothing if the estimate was good to begin with. Waiting out a warm up
+before the first mission is a reasonable operating practice, but a system that
+does not need it is better.
