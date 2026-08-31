@@ -1097,10 +1097,21 @@ fly)
 	while true; do
 		sim_id=$($DC ps -q sim 2>/dev/null)
 		companion=$($DC ps -q "onboard$n" 2>/dev/null)
-		[ -n "$sim_id" ] && docker logs "$sim_id" 2>&1 \
-			| grep -q "Ready for takeoff" && world=true
-		[ -n "$companion" ] && docker logs "$companion" 2>&1 \
-			| grep -qE "camera: [a-z]+$n ready" && picture=true
+		# grep -c, never grep -q, and the reason is this script's own
+		# `set -o pipefail`. `grep -q` stops at the first match and closes the
+		# pipe, so `docker logs` dies of SIGPIPE with status 141 while it still
+		# has thousands of lines to write. pipefail then makes the PIPELINE 141
+		# even though the line was found, and the match is thrown away. The
+		# simulator's log runs to nine thousand lines with a fleet in it, so
+		# that check could never pass: it waited out its whole budget and
+		# reported a world that never said 'Ready for takeoff' while the log
+		# said it. The companion's log is a few hundred lines and usually loses
+		# the race the other way, which is why the camera half appeared to work.
+		# Counting reads to EOF, so nothing is left writing into a closed pipe.
+		[ -n "$sim_id" ] && [ "$(docker logs "$sim_id" 2>&1 \
+			| grep -c "Ready for takeoff")" -gt 0 ] && world=true
+		[ -n "$companion" ] && [ "$(docker logs "$companion" 2>&1 \
+			| grep -cE "camera: [a-z]+$n ready")" -gt 0 ] && picture=true
 		[ "$world" = true ] && [ "$picture" = true ] && break
 		if [ "$SECONDS" -ge "$ready_by" ]; then
 			warn "uas$n was not ready in ${FLY_READY_S:-150}s:"
