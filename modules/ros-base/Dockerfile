@@ -337,6 +337,38 @@ RUN set -eu; \
     rm -rf /var/lib/apt/lists/*; \
     python3 -c "import cv2"
 
+# The same stripping takes the GStreamer software codecs. The image records
+# gstreamer1.0-plugins-good, -bad and -ugly as installed with their plugin
+# objects removed, ships no gstreamer1.0-libav at all, and strips the codec
+# libraries those plugins load in the same way, so a plain install restores
+# nothing and a reinstalled plugin still fails to load. On a GPU with video
+# engines nothing ever misses them; on a machine without (T500-class laptop
+# GPUs: CUDA intact, NVENC and NVDEC fused off) they are the whole video
+# path -- ds_node decodes with avdec, records with x264enc and previews
+# with jpegenc, while inference stays on the GPU. Reinstall the plugins,
+# then whatever the restored objects cannot find, repeatedly, exactly as
+# for OpenCV above. The inspects at the end fail the build while it can
+# still say why, rather than leaving a companion that starts and shows
+# nothing.
+RUN set -eu; \
+    apt-get update; \
+    apt-get install -y --reinstall \
+      gstreamer1.0-libav \
+      gstreamer1.0-plugins-good \
+      gstreamer1.0-plugins-bad \
+      gstreamer1.0-plugins-ugly; \
+    plugins="/usr/lib/$(uname -m)-linux-gnu/gstreamer-1.0"; \
+    while missing=$(ldd "$plugins/libgstlibav.so" "$plugins/libgstx264.so" \
+                        "$plugins/libgstx265.so" "$plugins/libgstjpeg.so" \
+                    | awk '/not found/ {print $1}' | sort -u); [ -n "$missing" ]; do \
+      packages=$(for lib in $missing; do dpkg -S "$lib" | cut -d: -f1; done | sort -u); \
+      apt-get install -y --reinstall $packages; \
+    done; \
+    rm -rf /var/lib/apt/lists/*; \
+    for element in avdec_h264 avdec_h265 x264enc x265enc jpegenc; do \
+      gst-inspect-1.0 "$element" >/dev/null; \
+    done
+
 
 # The TensorRT this GPU needs, when the release does not ship one.
 #
