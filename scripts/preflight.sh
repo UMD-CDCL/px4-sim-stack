@@ -35,6 +35,55 @@ else
 	bad "nvidia-smi not found. Install the NVIDIA driver."
 fi
 
+# ------------------------------------------------------------- video engines
+# The compute cores and the video engines are separate silicon, and the
+# laptop parts (the T500, the MX class) ship with NVENC and NVDEC fused off
+# while CUDA works untouched. Nothing fails outright on such a machine: every
+# pipeline in the stack probes at run time and falls to software -- the sim
+# encodes with x265enc, the companion decodes with avdec and previews with
+# jpegenc, and TensorRT inference never used the engines at all. But each
+# fallback announces itself one container log at a time, so say here, once,
+# which way this machine will go.
+#
+# The nvcodec plugin asks the driver which engines exist and registers one
+# element per codec it finds, so a fresh registry is the hardware answering.
+# The session registry is not consulted: it can predate a driver change.
+if command -v nvidia-smi >/dev/null 2>&1; then
+	if command -v gst-inspect-1.0 >/dev/null 2>&1 &&
+	   gst-inspect-1.0 nvcodec >/dev/null 2>&1; then
+		registry=$(mktemp)
+		nvcodec=$(GST_REGISTRY="$registry" gst-inspect-1.0 nvcodec 2>/dev/null)
+		rm -f "$registry"
+		enc=no; dec=no
+		printf '%s' "$nvcodec" | grep -qE 'nv[a-z0-9]*h26[45]enc' && enc=yes
+		printf '%s' "$nvcodec" | grep -qE 'nv[a-z0-9]*h26[45]dec' && dec=yes
+		if [ "$enc" = yes ] && [ "$dec" = yes ]; then
+			ok "GPU video engines: NVENC and NVDEC present"
+		else
+			note "GPU video engines: NVENC $enc, NVDEC $dec. Video falls back to
+        software where an engine is missing: the sim encodes with x265enc, the
+        companion decodes on the CPU. Detection stays on the GPU either way."
+		fi
+	elif command -v ffmpeg >/dev/null 2>&1 &&
+	     ffmpeg -hide_banner -encoders 2>/dev/null | grep -q h264_nvenc; then
+		# No nvcodec plugin on this host, so ask NVENC itself by opening one
+		# session. Nothing on the host answers for NVDEC; the containers
+		# probe it at run time.
+		if ffmpeg -hide_banner -v error -f lavfi -i testsrc=duration=0.1:size=320x240 \
+		          -frames:v 1 -c:v h264_nvenc -f null - >/dev/null 2>&1; then
+			ok "GPU video engines: NVENC present (NVDEC not checked here)"
+		else
+			note "GPU video engines: no NVENC. Video falls back to software where
+        an engine is missing: the sim encodes with x265enc, the companion
+        decodes on the CPU. Detection stays on the GPU either way."
+		fi
+	else
+		note "GPU video engines: nothing here can check (no gstreamer nvcodec
+        plugin, no ffmpeg with nvenc). The containers probe at run time and
+        fall back to software encoders and decoders where an engine is missing."
+	fi
+fi
+
 # The release, and why. ds-select.sh writes its complaints to stderr, so a
 # pinned release this machine cannot run is reported here as a failure rather
 # than as a line nobody reads.

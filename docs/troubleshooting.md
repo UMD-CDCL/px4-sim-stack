@@ -136,6 +136,33 @@ docker compose exec sim gst-inspect-1.0 nvh264enc
 
 Software encoding works. It costs about one core for each 720p stream.
 
+### The GPU has no video engines at all
+
+The laptop parts (the T500, the MX class) ship with NVENC and NVDEC fused
+off while CUDA works untouched. `./px4sim doctor` says so up front: "GPU
+video engines: NVENC no, NVDEC no". Every pipeline recovers on its own, so
+this is a description of what such a machine does, not a fault to fix:
+
+- The sim's streamer probes its encoders by running them and lands on
+  `x265enc`, the software H.265 encoder. Same codec the aircraft sends.
+- The companion's `ds_node` probes `nvv4l2decoder` with one real decode at
+  startup, finds it dead, and resolves `pipeline.type` to `cpu`: `avdec`
+  decodes, `jpegenc` draws the preview, `x264enc` records.
+- Detection is unaffected. The batch inference pipeline is CUDA compute --
+  `nvvideoconvert`, `nvstreammux`, `nvinfer` -- and never touches the video
+  engines, so the detector runs on the GPU while the video around it is
+  software. The startup log says `pipeline_type=cpu` and still builds the
+  batch pipeline.
+
+Expect the fallback resolution to add about ten seconds to `ds_node`
+startup on such a machine: the decode probes have to time out before the
+resolution can step down. A machine with working engines passes the probe
+in under a second and changes nothing.
+
+Fly a small fleet on these machines. Every stream is a CPU encode in the
+sim container plus a CPU decode in every container that reads it, about a
+core each at 720p, and the physics loop competes for the same cores.
+
 ## The display
 
 ### "rm: cannot remove '/tmp/.docker.xauth': Is a directory"
