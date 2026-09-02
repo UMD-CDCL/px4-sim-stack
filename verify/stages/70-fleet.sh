@@ -40,9 +40,17 @@ done
 # depression angle, so this stage asks the gimbal for one number and not two.
 #
 # Flown at the same time, not one after another: four vehicles in turn is a
-# quarter of an hour of waiting, and they do not interfere with each other.
-# Getting there is setup, so a vehicle that arrives late still answers the
-# question this stage asks.
+# quarter of an hour of waiting. Getting there is setup, so a vehicle that
+# arrives late still answers the question this stage asks.
+#
+# They interfere through the takeoff, though, which is why the world is reloaded
+# ONCE here rather than by each of them. `flying` gets a vehicle airborne by
+# respawning, and a respawn reloads the WORLD, not that vehicle: four in
+# parallel each knocked the other three out of the air, and whichever won the
+# race was the only one still flying when the stage asked. That read as three
+# vehicles unable to localize. Reloading once gives every vehicle the fresh PX4
+# that `flying` wanted the respawn for, and a plain takeoff is enough below.
+./px4sim place >/dev/null 2>&1
 for n in $(fleet_numbers); do
 	vehicle_ready "$n" || return 0
 done
@@ -57,7 +65,10 @@ TARGET_NORTH=${TARGET_NORTH:-$scene_north}
 fly() { ./px4sim uas "$@" >/dev/null 2>&1 || true; }
 station() {
 	local n=$1 east=$2 north=$3 up=$4 heading=$5 depression=$6
-	flying "$n" 30 || true
+	# Takeoff, not `flying`: the world was reloaded once above, so there is no
+	# stuck land detector to respawn away, and respawning here would take the
+	# rest of the fleet down with it.
+	fly "$n" takeoff 30
 	fly "$n" goto "$east" "$north" "$up" --heading "$heading"
 	fly "$n" gimbal "-$depression"
 	fly "$n" detect on

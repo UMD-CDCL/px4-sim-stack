@@ -211,7 +211,17 @@ until timeout 15 gst-launch-1.0 -q rtspsrc "location=${CAMERA_URI}" latency=100 
 	sleep 5
 	waited=$((waited + 5))
 done
-[ "${waited}" -gt 0 ] && echo "camera: ${GIMBAL_STREAM} ready after ${waited}s"
+# Said whether or not there was a wait. `./px4sim fly` blocks until this line
+# appears in this container's log, so a camera that was ready on the first probe
+# used to leave that wait with nothing to find: it timed out after its whole
+# budget and reported a vehicle that never reached the air, on a stack where
+# every part of it was working. A warm video router makes the no-wait case the
+# usual one, which is why a fleet started earlier hits it every time.
+if [ "${waited}" -gt 0 ]; then
+	echo "camera: ${GIMBAL_STREAM} ready after ${waited}s"
+else
+	echo "camera: ${GIMBAL_STREAM} ready, first probe"
+fi
 
 if [ "${1:-launch}" = "launch" ]; then
 	shift || true
