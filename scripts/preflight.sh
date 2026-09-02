@@ -307,21 +307,35 @@ fi
 
 # ------------------------------------------------------------- detector models
 # The detector is the part of this stack that fails by producing nothing.
-# nvinfer reads its artifacts from ONBOARD_MODEL_DIR, mounted at /models, and
-# an empty directory costs no error anyone meets: the containers start, the
-# video flows, the operator watches it, and no box is ever drawn. Every other
-# way to learn this is downstream of a flight.
+# nvinfer reads its artifacts from under ONBOARD_MODEL_DIR, and an empty
+# directory costs no error anyone meets: the containers start, the video
+# flows, the operator watches it, and no box is ever drawn. Every other way to
+# learn this is downstream of a flight.
 #
-# The names are not kept here. The flight code's own parameter files carry
-# them, and the launch loads those in this order, each one beating the last --
-# so read the same three, in the same order, and check what the last one said.
+# Nothing about it is written down here. The flight code's own parameter files
+# carry the names AND the directory, and the launch loads those in this order,
+# each one beating the last -- so read the same three, in the same order, and
+# take what the last one said.
 models=${ONBOARD_MODEL_DIR:-./modules/onboard/models}
+
+# Those files hold paths as the container sees them, where the tree is mounted
+# at /models. This runs on the host, so put the mount back before opening
+# anything. A path that is not under /models belongs to the image rather than
+# to this mount, and is left as it is.
+host_path() { # a path inside the container -> where it is on this host
+	case ${1:-} in
+		/models)   printf '%s' "$models" ;;
+		/models/*) printf '%s/%s' "$models" "${1#/models/}" ;;
+		*)         printf '%s' "${1:-}" ;;
+	esac
+}
+
 model_name() { # key -- what the parameter files finally set it to
 	local key=$1 value="" file found
 	for file in \
 		"$ws/src/5g_drone/config/param_files/onboard_common_params.yaml" \
 		"$ws/src/5g_drone/config/param_files/sim/onboard_sim_params.yaml" \
-		"${ONBOARD_PARAMS_FILE:-}"
+		"$(host_path "${ONBOARD_PARAMS_FILE:-}")"
 	do
 		[ -n "$file" ] && [ -f "$file" ] || continue
 		found=$(sed -n "s/^[[:space:]]*$key:[[:space:]]*[\"']\?\([^\"'#]*[^\"'# ]\).*/\1/p" \
@@ -345,28 +359,42 @@ elif [ ! -w "$models" ]; then
         A directory compose created for a missing mount is owned by root:
         sudo chown -R $(id -u):$(id -g) $models"
 else
-	wanted=""
-	for key in 'model\.detector' 'model\.classifier'; do
-		name=$(model_name "$key")
-		[ -n "$name" ] || continue
-		# nvinfer needs one of the two: the ONNX it can build an engine from,
-		# or an engine already built. An engine belongs to one GPU, one driver
-		# and one TensorRT, so a machine that carries only engines is a machine
-		# that built them here.
-		ls "$models/$name.onnx" "$models/$name".onnx_b*.engine >/dev/null 2>&1 ||
-			wanted="$wanted $name"
-	done
-	if [ -n "$wanted" ]; then
-		note "no detector artifacts in $models for:$wanted
-        The names come from the parameter files under $ws. Nothing fails
-        without them and nothing is ever detected: build them with
-        scripts/convert_to_engine.py in 5g_drone, on this machine, or name
-        what this machine does have in ONBOARD_PARAMS_FILE."
-	elif [ -z "$(model_name 'model\.detector')" ]; then
-		note "could not read model.detector from the parameter files under
-        $ws, so no detector artifact was checked."
+	# model.dir is a path inside the mount, not the mount. In 5g_drone's
+	# perception_models tree it ends in local, the symlink fetch_models.py
+	# points at the engine group this GPU can load -- so the same string
+	# serves the Orin and either laptop, and each one resolves it elsewhere.
+	said=$(model_name 'model\.dir')
+	dir=$(host_path "$said")
+	[ -n "$dir" ] || { dir=$models; said=/models; }
+	if [ ! -d "$dir" ]; then
+		note "the parameter files read the artifacts from $said, which is
+        $dir here, and that is not a directory. In 5g_drone's
+        perception_models tree the last element is a symlink to this
+        machine's engine group, and only this machine can set it:
+        ./scripts/fetch_models.py resolve --link"
 	else
-		ok "detector artifacts present in $models"
+		wanted=""
+		for key in 'model\.detector' 'model\.classifier'; do
+			name=$(model_name "$key")
+			[ -n "$name" ] || continue
+			# Either will do: the ONNX nvinfer can build an engine from, or an
+			# engine already built. An engine belongs to one GPU, one driver
+			# and one TensorRT, so a directory holding one was filled by a
+			# machine like this one.
+			ls "$dir/$name.onnx" "$dir/$name".onnx_b*.engine >/dev/null 2>&1 ||
+				wanted="$wanted $name"
+		done
+		if [ -n "$wanted" ]; then
+			note "no detector artifacts in $dir for:$wanted
+        The names and that directory both come from the parameter files under
+        $ws. Nothing fails without them and nothing is ever detected. Fetch
+        them:  ./scripts/fetch_models.py fetch --role onboard"
+		elif [ -z "$(model_name 'model\.detector')" ]; then
+			note "could not read model.detector from the parameter files under
+        $ws, so no detector artifact was checked."
+		else
+			ok "detector artifacts present in $dir"
+		fi
 	fi
 fi
 
