@@ -34,6 +34,7 @@ never a port.
   fail  host ports already taken. The start stops at the first of these and
         leaves every service after it unstarted:
         8554/tcp, wanted by video-router, held by python3 pid 56131
+            Move the stack instead: set RTSP_HOST_PORT in .env
 ```
 
 `ss` names the holder only when it is yours or you are root. For anything
@@ -41,13 +42,46 @@ else, `sudo ss -lnp` says who it is.
 
 An address this stack shares with a real airframe is the usual cause. 8554 is
 RTSP for both, so a relay for the real fleet on this machine and the simulator
-cannot both hold it. Stop the one you are not flying. If it is a service, stop
-the unit and not the process, or systemd starts it again five seconds later:
+cannot both hold it.
+
+Where the port has a knob, `doctor` prints it under the holder, as above. Take
+it, and nothing has to be stopped:
+
+```bash
+RTSP_HOST_PORT=8654       # in .env
+```
+
+Only the host side moves. Inside `simnet` every consumer still dials
+`video-router:8554`, so QGC and the companions never notice, and `./px4sim
+view` and the addresses `status` prints follow the new value.
+
+Otherwise stop the one you are not flying. If it is a service, stop the unit
+and not the process, or systemd starts it again five seconds later:
 
 ```bash
 systemctl status lcam     # what holds it, and whether it comes back
 sudo systemctl stop lcam
 ```
+
+### A knob exists and .env has never heard of it
+
+`.env` is copied from `.env.example` once, and then it stops moving. A line
+added to the example afterwards is missing from every `.env` made before it,
+and a missing line is not an empty one: the reader takes a default written
+into `compose.yaml` or an entry point. The stack runs, nothing reports
+anything, and the setting that would have fixed the machine is one the
+operator cannot see, because the file they read does not carry it.
+
+`./px4sim doctor` compares the two files by name:
+
+```
+  warn  .env does not mention: RTSP_HOST_PORT
+```
+
+Copy the lines it names across from `.env.example`, with the comment above
+each one, and set the ones this host wants. A name is reported whether the
+example sets it or leaves it commented out, because a knob you can read is the
+point.
 
 ### A service is Up, and nothing can reach it
 

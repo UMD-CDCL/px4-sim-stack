@@ -178,6 +178,26 @@ fi
 sed -i "/^DISPLAY=/d" .env
 ok ".env host values set (HOST_UID=$(id -u) HOST_GID=$(id -g))"
 
+# .env.example is the list of every line the stack reads. An .env copied from
+# an older one is missing whatever was added since, and a missing line is not
+# an empty line: the reader falls back to a default written into compose.yaml
+# or an entrypoint, so the machine runs, and the knob that would have fixed it
+# is one the operator cannot see. Name the names. Which of them this host
+# wants is a decision, so this is a warning and not a failure.
+env_names() { # file -- every name the file mentions, set or commented out
+	sed -n 's/^[[:space:]]*#\?[[:space:]]*\([A-Za-z_][A-Za-z_0-9]*\)=.*/\1/p' "$1" |
+		sort -u
+}
+missing=$(comm -23 <(env_names .env.example) <(env_names .env) | paste -sd' ' -)
+if [ -n "$missing" ]; then
+	note ".env does not mention: $missing
+        These were added to .env.example after this .env was made from it.
+        Each one falls back to a built-in default, so nothing fails and
+        nothing says so. Copy the lines you want across."
+else
+	ok ".env mentions every name .env.example does"
+fi
+
 # --------------------------------------------------------------- host ports
 # Every published port is a claim on the host, and this stack is not the only
 # thing that can hold one. This runs after the .env block above, because
@@ -191,6 +211,17 @@ ok ".env host values set (HOST_UID=$(id -u) HOST_GID=$(id -g))"
 # endpoint at all. That one reads as healthy everywhere except in what it
 # serves. `./px4sim status` names that state once it exists; this is where it
 # is caught before it does.
+# Where the stack can move a host port itself, name the variable that does it
+# rather than leave the operator to go and find it. An overridable published
+# port is written `${VAR:-default}` in compose.yaml, so the file already says
+# which ports carry a knob and what each is called. Resolve each against the
+# environment, because the number to match against is the one that variable
+# publishes now, not the default it fell back from.
+overrides=$(sed -n 's/^[[:space:]]*-[[:space:]]*"\${\([A-Za-z_][A-Za-z_0-9]*\):-\([0-9]\{1,5\}\)}:.*/\1 \2/p' compose.yaml |
+	while read -r name default; do
+		printf '%s %s\n' "${!name:-$default}" "$name"
+	done)
+
 config=$(docker compose config --format json 2>/dev/null)
 if ! command -v ss >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
 	note "no ss or python3 here, so no host port was checked."
@@ -241,8 +272,11 @@ for (number, protocol), service in sorted(claims.items()):
 		# root. An empty name is not an empty port, so say which it is.
 		who=$(printf '%s' "$held" |
 			sed -n 's/.*users:((\([^,]*\),pid=\([0-9]*\).*/\1 pid \2/p' | tr -d '"')
+		knob=$(printf '%s\n' "$overrides" |
+			awk -v want="$number" '$1 == want { print $2; exit }')
 		taken="$taken
-        $number/$protocol, wanted by $service, held by ${who:-another user: sudo ss -lnp}"
+        $number/$protocol, wanted by $service, held by ${who:-another user: sudo ss -lnp}${knob:+
+            Move the stack instead: set $knob in .env}"
 	done <<EOF
 $wanted
 EOF
