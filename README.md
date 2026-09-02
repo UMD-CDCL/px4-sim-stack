@@ -113,7 +113,7 @@ already plugged in.
 ./px4sim logs onboard11       # follow one service
 ./px4sim console              # the pxh> prompt. Detach with Ctrl-P Ctrl-Q
 ./px4sim fleet add            # fly one more vehicle. `fleet remove 13` retires one
-./px4sim scene baylands       # change the world and restart the sim
+./px4sim scene uroc          # change the world and restart the sim
 ./px4sim scenario <name>      # change the targets and reload what scores them
 ./px4sim scenario             # place the same targets again, no restart
 ./px4sim streams              # which video streams are live

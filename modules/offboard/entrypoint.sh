@@ -9,7 +9,7 @@
 set -euo pipefail
 
 UAS_FLEET=${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2}
-SCENE=${SCENE:-recon_field}
+SCENE=${SCENE:-lorton}
 TERRAIN_DIR=${TERRAIN_DIR:-/terrain}
 
 UAS_BASE=${UAS_BASE:-10}

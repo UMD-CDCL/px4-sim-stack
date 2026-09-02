@@ -159,11 +159,11 @@ x-onboard-env: &onboard-env
   # the router pushes and MAVROS never dials out.
   FCU_URL: ${FCU_URL:-udp://:14402@:14550}
   CUDA_CACHE_PATH: /models/.nv-compute
-  SCENE: ${SCENE:-recon_field}
+  SCENE: ${SCENE:-lorton}
   # What sim_ground_truth scores against, the same pair the ground station
   # reads. Without them the node takes its own defaults, which name one
   # scenario, and every other scenario scores against the wrong targets.
-  GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO:-urban_casualties}.yaml
+  GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO:-lorton_casualties}.yaml
   RESOLVED_TRUTH_FILE: /scenes/ground_truth_actual.yaml
   # One more parameter file, loaded after every other. Where this machine names
   # what only it has, the detector artifacts above all. Put it in the model
@@ -222,7 +222,7 @@ services:
       <<: [*gpu-env, *x11-env]
       PX4_DIR: /px4
       SCENES_DIR: /scenes
-      SCENE: ${SCENE:-recon_field}
+      SCENE: ${SCENE:-lorton}
       # The fleet, in UAS number order. One PX4 SITL instance for each entry,
       # started as `px4 -i <index>`, which gives MAV_SYS_ID = index + 1.
       # The fields of view are degrees and belong to the vehicle: uas13 and uas14
@@ -557,11 +557,11 @@ services:
       # crosses the radio link on the aircraft: rgbl<N> on a v3, pilotl<N> on
       # a v2.
       RTSP_BASE: rtsp://video-router:8554
-      SCENE: ${SCENE:-recon_field}
+      SCENE: ${SCENE:-lorton}
       # What sim_ground_truth scores against. The scenario says where each
       # casualty was asked to go; the resolved file says where Gazebo put it,
       # and wins where it exists.
-      GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO:-urban_casualties}.yaml
+      GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO:-lorton_casualties}.yaml
       RESOLVED_TRUTH_FILE: /scenes/ground_truth_actual.yaml
       CUDA_CACHE_PATH: /logs/.nv-compute
     # The world origin, so the ground truth lands where the scene put it. Same

@@ -178,6 +178,26 @@ fi
 sed -i "/^DISPLAY=/d" .env
 ok ".env host values set (HOST_UID=$(id -u) HOST_GID=$(id -g))"
 
+# .env.example is the list of every line the stack reads. An .env copied from
+# an older one is missing whatever was added since, and a missing line is not
+# an empty line: the reader falls back to a default written into compose.yaml
+# or an entrypoint, so the machine runs, and the knob that would have fixed it
+# is one the operator cannot see. Name the names. Which of them this host
+# wants is a decision, so this is a warning and not a failure.
+env_names() { # file -- every name the file mentions, set or commented out
+	sed -n 's/^[[:space:]]*#\?[[:space:]]*\([A-Za-z_][A-Za-z_0-9]*\)=.*/\1/p' "$1" |
+		sort -u
+}
+missing=$(comm -23 <(env_names .env.example) <(env_names .env) | paste -sd' ' -)
+if [ -n "$missing" ]; then
+	note ".env does not mention: $missing
+        These were added to .env.example after this .env was made from it.
+        Each one falls back to a built-in default, so nothing fails and
+        nothing says so. Copy the lines you want across."
+else
+	ok ".env mentions every name .env.example does"
+fi
+
 # --------------------------------------------------------------- host ports
 # Every published port is a claim on the host, and this stack is not the only
 # thing that can hold one. This runs after the .env block above, because
@@ -191,6 +211,17 @@ ok ".env host values set (HOST_UID=$(id -u) HOST_GID=$(id -g))"
 # endpoint at all. That one reads as healthy everywhere except in what it
 # serves. `./px4sim status` names that state once it exists; this is where it
 # is caught before it does.
+# Where the stack can move a host port itself, name the variable that does it
+# rather than leave the operator to go and find it. An overridable published
+# port is written `${VAR:-default}` in compose.yaml, so the file already says
+# which ports carry a knob and what each is called. Resolve each against the
+# environment, because the number to match against is the one that variable
+# publishes now, not the default it fell back from.
+overrides=$(sed -n 's/^[[:space:]]*-[[:space:]]*"\${\([A-Za-z_][A-Za-z_0-9]*\):-\([0-9]\{1,5\}\)}:.*/\1 \2/p' compose.yaml |
+	while read -r name default; do
+		printf '%s %s\n' "${!name:-$default}" "$name"
+	done)
+
 config=$(docker compose config --format json 2>/dev/null)
 if ! command -v ss >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
 	note "no ss or python3 here, so no host port was checked."
@@ -241,8 +272,11 @@ for (number, protocol), service in sorted(claims.items()):
 		# root. An empty name is not an empty port, so say which it is.
 		who=$(printf '%s' "$held" |
 			sed -n 's/.*users:((\([^,]*\),pid=\([0-9]*\).*/\1 pid \2/p' | tr -d '"')
+		knob=$(printf '%s\n' "$overrides" |
+			awk -v want="$number" '$1 == want { print $2; exit }')
 		taken="$taken
-        $number/$protocol, wanted by $service, held by ${who:-another user: sudo ss -lnp}"
+        $number/$protocol, wanted by $service, held by ${who:-another user: sudo ss -lnp}${knob:+
+            Move the stack instead: set $knob in .env}"
 	done <<EOF
 $wanted
 EOF
@@ -269,6 +303,71 @@ if [ -d "$ws/src/5g_drone" ]; then
 else
 	note "$ws/src/5g_drone missing. The onboard and offboard images build it.
         Check it out, or set ROS2_WS_DIR in .env."
+fi
+
+# ------------------------------------------------------------- detector models
+# The detector is the part of this stack that fails by producing nothing.
+# nvinfer reads its artifacts from ONBOARD_MODEL_DIR, mounted at /models, and
+# an empty directory costs no error anyone meets: the containers start, the
+# video flows, the operator watches it, and no box is ever drawn. Every other
+# way to learn this is downstream of a flight.
+#
+# The names are not kept here. The flight code's own parameter files carry
+# them, and the launch loads those in this order, each one beating the last --
+# so read the same three, in the same order, and check what the last one said.
+models=${ONBOARD_MODEL_DIR:-./modules/onboard/models}
+model_name() { # key -- what the parameter files finally set it to
+	local key=$1 value="" file found
+	for file in \
+		"$ws/src/5g_drone/config/param_files/onboard_common_params.yaml" \
+		"$ws/src/5g_drone/config/param_files/sim/onboard_sim_params.yaml" \
+		"${ONBOARD_PARAMS_FILE:-}"
+	do
+		[ -n "$file" ] && [ -f "$file" ] || continue
+		found=$(sed -n "s/^[[:space:]]*$key:[[:space:]]*[\"']\?\([^\"'#]*[^\"'# ]\).*/\1/p" \
+			"$file" | tail -1)
+		[ -n "$found" ] && value=$found
+	done
+	printf '%s' "$value"
+}
+
+if [ ! -d "$models" ]; then
+	# Compose creates a missing bind-mount source as a root-owned directory,
+	# and the container then cannot write the engine it builds. Make it now,
+	# owned by whoever runs this.
+	mkdir -p "$models" 2>/dev/null &&
+		note "created $models. Put the detector artifacts in it.
+        See modules/onboard/models/README.md." ||
+		bad "$models does not exist and could not be created."
+elif [ ! -w "$models" ]; then
+	bad "$models is not writable by you. nvinfer builds the TensorRT engine
+        beside the ONNX on the first run, so the detector needs to write here.
+        A directory compose created for a missing mount is owned by root:
+        sudo chown -R $(id -u):$(id -g) $models"
+else
+	wanted=""
+	for key in 'model\.detector' 'model\.classifier'; do
+		name=$(model_name "$key")
+		[ -n "$name" ] || continue
+		# nvinfer needs one of the two: the ONNX it can build an engine from,
+		# or an engine already built. An engine belongs to one GPU, one driver
+		# and one TensorRT, so a machine that carries only engines is a machine
+		# that built them here.
+		ls "$models/$name.onnx" "$models/$name".onnx_b*.engine >/dev/null 2>&1 ||
+			wanted="$wanted $name"
+	done
+	if [ -n "$wanted" ]; then
+		note "no detector artifacts in $models for:$wanted
+        The names come from the parameter files under $ws. Nothing fails
+        without them and nothing is ever detected: build them with
+        scripts/convert_to_engine.py in 5g_drone, on this machine, or name
+        what this machine does have in ONBOARD_PARAMS_FILE."
+	elif [ -z "$(model_name 'model\.detector')" ]; then
+		note "could not read model.detector from the parameter files under
+        $ws, so no detector artifact was checked."
+	else
+		ok "detector artifacts present in $models"
+	fi
 fi
 
 # The onboard and offboard images carry a copy of the flight code, taken when

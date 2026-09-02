@@ -944,7 +944,7 @@ scene)
 	# No name restarts the sim with the scene already in .env, which is how
 	# a new UAS_FLEET or AIRFRAME reaches the world.
 	name=${1:-${SCENE:-}}
-	[ -n "$name" ] || die "Give a scene name. Try: recon_field, forest, baylands, walls"
+	[ -n "$name" ] || die "Give a scene name. Try: lorton, uroc, campus, recon_field"
 	say "Switching to scene '$name'"
 	# The new world brings its own origin, so resolve it again before the
 	# sim starts. Without this the vehicle would fly the old coordinates.
@@ -1029,7 +1029,7 @@ scenario)
 			|| die "Give a scenario name, or set SCENARIO in .env. Try: $(scenario_names | paste -sd' ' -)"
 		have_scenario "$SCENARIO"
 		$DC exec sim /scenes/spawn_scenario.py \
-			--world "${SCENE:-recon_field}" --scenario "/scenes/scenarios/${SCENARIO}.yaml"
+			--world "${SCENE:-lorton}" --scenario "/scenes/scenarios/${SCENARIO}.yaml"
 		exit 0
 	fi
 	have_scenario "$1"
@@ -1053,11 +1053,11 @@ fiducial)
 	# survey of it must come back as minus this offset. Zeros put it back,
 	# which is what a scoring run needs.
 	$DC exec sim /scenes/spawn_scenario.py \
-		--world "${SCENE:-recon_field}" --fiducial "${1:-0}" "${2:-0}"
+		--world "${SCENE:-lorton}" --fiducial "${1:-0}" "${2:-0}"
 	;;
 
 reset)
-	$DC exec sim /scenes/spawn_scenario.py --world "${SCENE:-recon_field}" --clear
+	$DC exec sim /scenes/spawn_scenario.py --world "${SCENE:-lorton}" --clear
 	;;
 
 fly)

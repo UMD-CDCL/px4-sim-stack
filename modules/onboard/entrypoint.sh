@@ -7,7 +7,7 @@
 set -euo pipefail
 
 UAS_NUM=${UAS_NUM:-11}
-SCENE=${SCENE:-recon_field}
+SCENE=${SCENE:-lorton}
 TERRAIN_DIR=${TERRAIN_DIR:-/terrain}
 # The airframe model. UAS_FLEET is the one source of truth for the whole fleet,
 # the same list the simulator builds its models from, so the companion reads its
