@@ -500,7 +500,16 @@ RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
 # Then the nodes. colcon finds the interfaces already built and this costs
 # seconds, which is what an edit to a node should cost.
 USER root
-COPY --from=ros2_ws --chown=${HOST_UID}:${HOST_GID} src/5g_drone ${WORKSPACE_DIR}/src/5g_drone
+# Everything but perception_models. That directory is 5g_drone's tree of ONNX
+# exports and TensorRT engines, several gigabytes of it, and the onboard
+# service bind-mounts it at /models -- which is the only path the node reads,
+# because model.dir names /models/local. A copy in the image would be a second
+# one that nothing opens, that grows the image by the size of the engines, and
+# that goes stale the moment a machine fetches a newer artifact. Excluded here
+# rather than ignored in the context, because the context is a checkout this
+# repository does not own.
+COPY --exclude=perception_models --from=ros2_ws \
+     --chown=${HOST_UID}:${HOST_GID} src/5g_drone ${WORKSPACE_DIR}/src/5g_drone
 COPY --from=ros2_ws --chown=${HOST_UID}:${HOST_GID} src/MAVInsight ${WORKSPACE_DIR}/src/MAVInsight
 USER ${USERNAME}
 RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
