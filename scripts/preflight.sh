@@ -305,6 +305,71 @@ else
         Check it out, or set ROS2_WS_DIR in .env."
 fi
 
+# ------------------------------------------------------------- detector models
+# The detector is the part of this stack that fails by producing nothing.
+# nvinfer reads its artifacts from ONBOARD_MODEL_DIR, mounted at /models, and
+# an empty directory costs no error anyone meets: the containers start, the
+# video flows, the operator watches it, and no box is ever drawn. Every other
+# way to learn this is downstream of a flight.
+#
+# The names are not kept here. The flight code's own parameter files carry
+# them, and the launch loads those in this order, each one beating the last --
+# so read the same three, in the same order, and check what the last one said.
+models=${ONBOARD_MODEL_DIR:-./modules/onboard/models}
+model_name() { # key -- what the parameter files finally set it to
+	local key=$1 value="" file found
+	for file in \
+		"$ws/src/5g_drone/config/param_files/onboard_common_params.yaml" \
+		"$ws/src/5g_drone/config/param_files/sim/onboard_sim_params.yaml" \
+		"${ONBOARD_PARAMS_FILE:-}"
+	do
+		[ -n "$file" ] && [ -f "$file" ] || continue
+		found=$(sed -n "s/^[[:space:]]*$key:[[:space:]]*[\"']\?\([^\"'#]*[^\"'# ]\).*/\1/p" \
+			"$file" | tail -1)
+		[ -n "$found" ] && value=$found
+	done
+	printf '%s' "$value"
+}
+
+if [ ! -d "$models" ]; then
+	# Compose creates a missing bind-mount source as a root-owned directory,
+	# and the container then cannot write the engine it builds. Make it now,
+	# owned by whoever runs this.
+	mkdir -p "$models" 2>/dev/null &&
+		note "created $models. Put the detector artifacts in it.
+        See modules/onboard/models/README.md." ||
+		bad "$models does not exist and could not be created."
+elif [ ! -w "$models" ]; then
+	bad "$models is not writable by you. nvinfer builds the TensorRT engine
+        beside the ONNX on the first run, so the detector needs to write here.
+        A directory compose created for a missing mount is owned by root:
+        sudo chown -R $(id -u):$(id -g) $models"
+else
+	wanted=""
+	for key in 'model\.detector' 'model\.classifier'; do
+		name=$(model_name "$key")
+		[ -n "$name" ] || continue
+		# nvinfer needs one of the two: the ONNX it can build an engine from,
+		# or an engine already built. An engine belongs to one GPU, one driver
+		# and one TensorRT, so a machine that carries only engines is a machine
+		# that built them here.
+		ls "$models/$name.onnx" "$models/$name".onnx_b*.engine >/dev/null 2>&1 ||
+			wanted="$wanted $name"
+	done
+	if [ -n "$wanted" ]; then
+		note "no detector artifacts in $models for:$wanted
+        The names come from the parameter files under $ws. Nothing fails
+        without them and nothing is ever detected: build them with
+        scripts/convert_to_engine.py in 5g_drone, on this machine, or name
+        what this machine does have in ONBOARD_PARAMS_FILE."
+	elif [ -z "$(model_name 'model\.detector')" ]; then
+		note "could not read model.detector from the parameter files under
+        $ws, so no detector artifact was checked."
+	else
+		ok "detector artifacts present in $models"
+	fi
+fi
+
 # The onboard and offboard images carry a copy of the flight code, taken when
 # they were built. A tree edited after that leaves the image a launch file
 # short of a node, and the stack says "executable not found" or names a launch
