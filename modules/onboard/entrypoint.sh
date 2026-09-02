@@ -225,6 +225,16 @@ fi
 
 if [ "${1:-launch}" = "launch" ]; then
 	shift || true
+	# One file per machine, at the same path on every machine:
+	# /models/local/params.yaml, where `local` is the symlink pointing at this
+	# machine's engine group. A machine with nothing of its own to say has no
+	# such file, and ros2 launch refuses a params: entry that names one that is
+	# not there, so an absent file is dropped rather than being an error.
+	if [ -n "${ONBOARD_PARAMS_FILE}" ] && [ ! -f "${ONBOARD_PARAMS_FILE}" ]; then
+		echo "params: no ${ONBOARD_PARAMS_FILE} on this machine; using the common files only"
+		ONBOARD_PARAMS_FILE=
+	fi
+
 	exec ros2 launch umd_uas onboard.launch.py \
 		uas:="${UAS_NUM}" \
 		model:="${MODEL}" \
