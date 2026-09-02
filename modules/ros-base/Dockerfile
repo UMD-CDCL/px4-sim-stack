@@ -500,17 +500,27 @@ RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
 # Then the nodes. colcon finds the interfaces already built and this costs
 # seconds, which is what an edit to a node should cost.
 USER root
-# Everything but perception_models. That directory is 5g_drone's tree of ONNX
-# exports and TensorRT engines, several gigabytes of it, and the onboard
-# service bind-mounts it at /models -- which is the only path the node reads,
-# because model.dir names /models/local. A copy in the image would be a second
-# one that nothing opens, that grows the image by the size of the engines, and
-# that goes stale the moment a machine fetches a newer artifact. Excluded here
-# rather than ignored in the context, because the context is a checkout this
-# repository does not own.
-COPY --exclude=perception_models --from=ros2_ws \
-     --chown=${HOST_UID}:${HOST_GID} src/5g_drone ${WORKSPACE_DIR}/src/5g_drone
-COPY --from=ros2_ws --chown=${HOST_UID}:${HOST_GID} src/MAVInsight ${WORKSPACE_DIR}/src/MAVInsight
+# The source, and nothing a working copy accumulates around it.
+#
+# perception_models is 5g_drone's tree of ONNX exports and TensorRT engines,
+# gigabytes of it, and the onboard service bind-mounts that same directory at
+# /models -- the only path the node reads, because model.dir names
+# /models/local. A copy here is one nothing opens.
+#
+# .git and .vscode are the working copy's own. .vscode costs more than its
+# size: the IntelliSense browse database is rewritten when a file is merely
+# opened, and this COPY is the layer the colcon build below sits on, so
+# browsing the flight code would invalidate it and buy back the five minutes
+# the split above exists to save.
+#
+# Excluded here rather than ignored in the context, because the context is a
+# checkout this repository does not own and must not leave files in.
+COPY --exclude=perception_models --exclude=.git --exclude=.vscode \
+     --from=ros2_ws --chown=${HOST_UID}:${HOST_GID} \
+     src/5g_drone ${WORKSPACE_DIR}/src/5g_drone
+COPY --exclude=.git --exclude=.vscode \
+     --from=ros2_ws --chown=${HOST_UID}:${HOST_GID} \
+     src/MAVInsight ${WORKSPACE_DIR}/src/MAVInsight
 USER ${USERNAME}
 RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
     && colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release

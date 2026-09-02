@@ -403,8 +403,14 @@ fi
 # short of a node, and the stack says "executable not found" or names a launch
 # file that is not there. That reads as a bug in the flight code, so say here
 # that the image is behind the tree.
-newest=$(find "$ws/src" \( -name .git -o -name __pycache__ -o -name build \
-                          -o -name install -o -name log \) -prune -o \
+# What is pruned is what the image does not carry: the build products, the
+# working copy's own directories, and the model tree, which is mounted rather
+# than copied. Counting any of them makes a rebuild look due after opening a
+# file in an editor or fetching an engine, and a warning that cries wolf is
+# one nobody reads on the day the tree really did move.
+newest=$(find "$ws/src" \( -name .git -o -name .vscode -o -name __pycache__ \
+                          -o -name build -o -name install -o -name log \
+                          -o -name perception_models \) -prune -o \
               -type f -printf '%T@\n' 2>/dev/null | sort -rn | head -1)
 newest=${newest%%.*}
 stale=""
