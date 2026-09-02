@@ -98,6 +98,12 @@ x-onboard: &onboard
   image: px4simstack/onboard:${DS_TAG:-7.1}
   runtime: nvidia
   ipc: host
+  # The software encoders bind their worker threads with set_mempolicy, which
+  # the default seccomp profile only allows alongside this capability. Without
+  # it every x265/x264 thread start prints "set_mempolicy: Operation not
+  # permitted" -- nearly two thousand lines on a machine that encodes in
+  # software, burying the log -- and the binding silently does not happen.
+  cap_add: [SYS_NICE]
   stop_grace_period: 20s
   volumes:
     # Detector and classifier artifacts from scripts/convert_to_engine.py.
@@ -199,6 +205,10 @@ services:
     hostname: sim
     runtime: nvidia
     ipc: host
+    # See the onboard note: without this, every software-encoder thread start
+    # prints "set_mempolicy: Operation not permitted", and a machine that
+    # encodes its cameras in software floods its own log at startup.
+    cap_add: [SYS_NICE]
     stdin_open: true
     tty: true
     environment:
@@ -519,6 +529,9 @@ services:
     hostname: offboard
     runtime: nvidia
     ipc: host
+    # See the onboard note: the ground station records and previews with the
+    # software encoders wherever the GPU has no video engines.
+    cap_add: [SYS_NICE]
     stop_grace_period: 20s
     environment:
       <<: [*gpu-env, *x11-env]
