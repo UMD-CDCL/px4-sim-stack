@@ -10,7 +10,7 @@ set -euo pipefail
 
 PX4_DIR=${PX4_DIR:-/px4}
 SCENES_DIR=${SCENES_DIR:-/scenes}
-SCENE=${SCENE:-recon_field}
+SCENE=${SCENE:-lorton}
 # One entry for each vehicle, in UAS number order. uas11 is the first.
 # The camera fields of view are degrees, and they belong to the vehicle rather
 # than to the mark: uas13 and uas14 are both v2 and carry different lenses.

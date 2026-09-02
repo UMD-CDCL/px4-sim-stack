@@ -33,9 +33,9 @@ file at start up.
 
 ```bash
 # In .env, or on the command line
-SCENE=recon_field
+SCENE=lorton
 UAS_FLEET=chimera_v3 chimera_v3 chimera_v2 chimera_v2
-SCENARIO=urban_casualties
+SCENARIO=lorton_casualties
 ```
 
 ```bash
@@ -55,8 +55,13 @@ flies somewhere else and looks correct while it does it.
 
 ## Scenes
 
-The stack ships `recon_field`: flat ground, a dirt track and three blocks. It is
-light, so the frame rate leaves room for the encoders and the detectors.
+The stack starts in `lorton`: the built scene, terrain and buildings from map
+data, with `lorton_casualties` standing on it. `./px4sim setup` builds it and
+every other scene in `modules/scenegen/data`.
+
+`recon_field` also ships, hand-written and in git: flat ground, a dirt track and
+three blocks. It is light, so the frame rate leaves room for the encoders and
+the detectors, which makes it the scene to fall back to on a small GPU.
 
 Every world from the PX4 model set is also available, because the entrypoint
 merges the PX4 world directory with this one:
