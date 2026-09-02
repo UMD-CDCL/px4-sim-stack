@@ -590,7 +590,11 @@ services:
     volumes:
       - ./modules/video-router/mediamtx.yml:/mediamtx.yml:ro
     ports:
-      - "8554:8554"        # RTSP
+      # The host side of RTSP is overridable because a field tool on the
+      # host -- a ground-station restreamer serving the real fleet -- may
+      # already hold 8554. Inside simnet nothing moves: every consumer dials
+      # video-router:8554 either way. `./px4sim doctor` names the holder.
+      - "${RTSP_HOST_PORT:-8554}:8554"  # RTSP
       - "1935:1935"        # RTMP ingest
       - "8888:8888"        # HLS
       - "8889:8889"        # WebRTC

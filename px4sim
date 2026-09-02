@@ -470,9 +470,9 @@ endpoints() {
               udp://<qgc>:14550         QGroundControl autoconnect, from QGC_ADDRESS
               udp://127.0.0.1:14402     the 5g_drone companion, inside the vehicle
               tcp://localhost:$(uas_tcp_port "$FIRST_UAS") upwards   MAVSDK, pymavlink
-  ${BOLD}Video${OFF}       rtsp://localhost:8554/rgb<N>      v3 gimbal camera, 1920x1080
-              rtsp://localhost:8554/pilot<N>    v3 down camera, v2 gimbal camera, 1920x1080
-              rtsp://localhost:8554/thermal<N>  640x512
+  ${BOLD}Video${OFF}       rtsp://localhost:${RTSP_HOST_PORT:-8554}/rgb<N>      v3 gimbal camera, 1920x1080
+              rtsp://localhost:${RTSP_HOST_PORT:-8554}/pilot<N>    v3 down camera, v2 gimbal camera, 1920x1080
+              rtsp://localhost:${RTSP_HOST_PORT:-8554}/thermal<N>  640x512
               ${DIM}Append l for the low-rate stream: rgbl<N>, pilotl<N>, thermall<N>, all 640x360 except thermal.${OFF}
               http://localhost:8889/$(gimbal_stream "$FIRST_UAS")       ${DIM}(WebRTC, browser)${OFF}
   ${BOLD}Foxglove${OFF}    ws://localhost:8765       the ground station, every vehicle
@@ -898,7 +898,7 @@ view)
 	*" $stream "*) ;;
 	*) warn "No vehicle in this fleet serves '$stream'. ./px4sim fleet lists what each one does." ;;
 	esac
-	url="rtsp://127.0.0.1:8554/$stream"
+	url="rtsp://127.0.0.1:${RTSP_HOST_PORT:-8554}/$stream"
 	command -v ffplay >/dev/null || die "ffplay is not installed. Run: sudo apt install ffmpeg"
 	say "Playing $url   (close the window or press q)"
 	# Force TCP and drop every buffer we can. Without -rtsp_transport tcp a
@@ -1006,7 +1006,7 @@ fleet)
 	done
 	cat <<EOF
 
-${DIM}  Video is rtsp://localhost:8554/<name>, or http://localhost:8889/<name> in a
+${DIM}  Video is rtsp://localhost:${RTSP_HOST_PORT:-8554}/<name>, or http://localhost:8889/<name> in a
   browser. The full stream is 1920x1080 and the l stream is 640x360, thermal
   excepted: it is 640x512 both ways.
 
