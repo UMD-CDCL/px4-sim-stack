@@ -125,6 +125,13 @@ x-onboard: &onboard
   depends_on: [video-router]
 
 x-onboard-env: &onboard-env
+  # ros2 launch reads its nodes through pipes, and a pipe makes Python
+  # block-buffer: everything ds_node says -- the backend it resolved, the
+  # engine it is building, the reason it stopped -- sits invisible in a
+  # buffer until the process exits and flushes. An hour of TensorRT engine
+  # build then reads as a hang with an empty log. Unbuffered, the log says
+  # what is happening while it happens.
+  PYTHONUNBUFFERED: "1"
   # The first simulated vehicle is UAS_BASE + 1. Every entry point derives
   # its identifiers from it, so the host and the container have to read the
   # same number: scripts/fleet.sh holds the same default.
@@ -535,6 +542,9 @@ services:
     stop_grace_period: 20s
     environment:
       <<: [*gpu-env, *x11-env]
+      # See the onboard-env note: without this, everything the preview
+      # ds_node says sits in a pipe buffer until the process exits.
+      PYTHONUNBUFFERED: "1"
       UAS_FLEET: ${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2}
       # The first simulated vehicle is UAS_BASE + 1. Every entry point derives
       # its identifiers from it, so the host and the container have to read the
