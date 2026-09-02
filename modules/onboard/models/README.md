@@ -1,7 +1,9 @@
 # Detector models
 
-The onboard and offboard containers mount this directory at `/models`, and
-`onboard_sim_params.yaml` in 5g_drone names the files inside it.
+The onboard containers mount this directory at `/models`, and
+`onboard_sim_params.yaml` in 5g_drone names the files inside it. The offboard
+ground station does not: its ds_node runs with `preview.only` and
+`detect.enabled` false, so it loads no engine and has no model volume.
 
 Put the detector and classifier artifacts here, from
 `scripts/convert_to_engine.py` in 5g_drone. nvinfer builds the TensorRT engine
