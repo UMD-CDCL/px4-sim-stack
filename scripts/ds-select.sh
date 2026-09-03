@@ -228,8 +228,8 @@ case "${1:-}" in
 	echo "DS_CODENAME=$codename"
 	echo "DS_TRT_VERSION=$trt"
 	echo "DS_TRT_CUDA=$trt_cuda"
-	echo "DS_TRT_APT_SOURCE=$trt_apt_source"
-	echo "DS_TRT_APT_KEY=$trt_apt_key"
+	printf 'DS_TRT_APT_SOURCE=%q\n' "$trt_apt_source"
+	printf 'DS_TRT_APT_KEY=%q\n' "$trt_apt_key"
 	printf 'DS_REASON=%q\n' "$reason"
 	;;
 *) die "unknown option $1" ;;
