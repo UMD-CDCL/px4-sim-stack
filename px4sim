@@ -829,9 +829,8 @@ start|up|core)
 	add_fleet_profiles
 	[ "$FLEET_IS_SIMULATED" = true ] && need_sources
 	./scripts/x11-allow.sh
-	# The log volumes bind here. Compose makes a missing one root-owned, and
-	# the uid 1000 container then writes nothing into it.
-	mkdir -p logs/onboard logs/offboard logs/px4 logs/qgc
+	# The log volumes bind here. scripts/fleet.sh says why, and who owns them.
+	make_bind_dirs logs logs/onboard logs/offboard logs/px4 logs/qgc
 	if [ "$FLEET_IS_SIMULATED" = false ] && unit_owns_stack; then
 		warn "onboard.service already runs this stack. This start reuses its container."
 	fi

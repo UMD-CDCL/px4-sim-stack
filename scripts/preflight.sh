@@ -487,16 +487,16 @@ model_name() { # key -- what the parameter files finally set it to
 	printf '%s' "$value"
 }
 
-# The log volumes bind to these directories. Compose makes a missing one
-# root-owned, and the uid 1000 container then writes nothing into it.
-mkdir -p logs/onboard logs/offboard logs/px4 logs/qgc 2>/dev/null ||
+# The log volumes bind to these directories. scripts/fleet.sh says why they
+# are made here, and who owns them after a run under sudo.
+make_bind_dirs logs logs/onboard logs/offboard logs/px4 logs/qgc 2>/dev/null ||
 	bad "cannot create logs/onboard logs/offboard logs/px4 logs/qgc here."
 
 if [ ! -d "$models" ]; then
 	# Compose creates a missing bind-mount source as a root-owned directory,
 	# and the container then cannot write the engine it builds. Make it now,
 	# owned by whoever runs this.
-	mkdir -p "$models" 2>/dev/null &&
+	make_bind_dirs "$models" 2>/dev/null &&
 		note "created $models. Put the detector artifacts in it.
         See modules/onboard/models/README.md." ||
 		bad "$models does not exist and could not be created."

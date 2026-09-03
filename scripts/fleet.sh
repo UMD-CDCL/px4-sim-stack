@@ -20,6 +20,16 @@ real_profiles_selected() { case ",${COMPOSE_PROFILES:-}," in *,ground,* | *,airc
 # Whether this machine is the vehicle itself, which serves its own cameras and
 # runs its own companion. px4sim and scripts/preflight.sh both ask.
 aircraft_selected() { case ",${COMPOSE_PROFILES:-}," in *,aircraft,*) return 0 ;; esac; return 1; }
+# The directories compose binds a volume to, made before compose reaches them.
+# Compose makes a missing one root-owned, and the uid 1000 container then
+# writes nothing into it. Under `sudo ./px4sim start` the mkdir here runs as
+# root as well, so hand each directory back to the operator, the way
+# scripts/preflight.sh hands back .env.
+make_bind_dirs() { # dir...
+	mkdir -p "$@" || return 1
+	[ -n "${SUDO_UID:-}" ] || return 0
+	chown "${SUDO_UID}:${SUDO_GID:-$SUDO_UID}" "$@"
+}
 # Where the vehicles are. The real fleet flies 10.200.142.6<N> with the
 # ground station at .60. The simulated one sits in its own block of the same
 # range, or of SIMNET_PREFIX where the host is itself on the radio network.
