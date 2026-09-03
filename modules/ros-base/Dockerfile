@@ -445,6 +445,36 @@ RUN if python3 -m pip install --help 2>/dev/null | grep -q -- --break-system-pac
 # MAVROS refuses to convert between AMSL and ellipsoid height without these.
 RUN /opt/ros/${ROS_DISTRO}/lib/mavros/install_geographiclib_datasets.sh
 
+# ---------------------------------------------------------------------------
+# MAVROS, patched for PX4 v1.18.
+#
+# The apt package asks for the autopilot capabilities with a command that PX4
+# v1.18 removed. It learns nothing, and the waypoint plugin drops to
+# MISSION_ITEM floats. chimera-deploy/remote/mavros_patch is the one source of
+# the fix: its apply.sh checks the release, applies the patch and builds an
+# overlay. This block runs that script unchanged, against the mavros and
+# angles submodules beside it, so the aircraft and the simulator load one
+# MAVROS. chimera_deploy is a named build context, CHIMERA_DEPLOY_DIR in .env.
+#
+# The overlay lands in /opt/mavros, and ros-env.sh sources it between /opt/ros
+# and the workspace. The build dependencies arrive with the apt mavros above,
+# so this block installs only patch. MAVROS_PATCH=0 skips the build. apply.sh
+# pins MAVROS 2.14.0 on /opt/ros/humble, so a Jazzy base skips it too.
+# ---------------------------------------------------------------------------
+ARG MAVROS_PATCH=1
+COPY --from=chimera_deploy remote/mavros_patch /tmp/chimera-deploy/remote/mavros_patch
+COPY --from=chimera_deploy submodules/mavros   /tmp/chimera-deploy/submodules/mavros
+COPY --from=chimera_deploy submodules/angles   /tmp/chimera-deploy/submodules/angles
+RUN set -eux; \
+    if [ "${MAVROS_PATCH}" = 1 ] && [ "${ROS_DISTRO}" = humble ]; then \
+        apt-get update; \
+        apt-get install -y --no-install-recommends patch; \
+        MAVROS_PATCH_WS=/opt/mavros bash /tmp/chimera-deploy/remote/mavros_patch/apply.sh; \
+        rm -rf /opt/mavros/src /opt/mavros/build /opt/mavros/log; \
+        rm -rf /var/lib/apt/lists/*; \
+    fi; \
+    rm -rf /tmp/chimera-deploy
+
 # pymap3d is what tf_loc and MAVInsight convert LLA with. folium is the mosaic
 # map export.
 #

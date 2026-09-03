@@ -274,8 +274,12 @@ services:
         # Where 5g_drone, cdcl_umd_msgs and MAVInsight are checked out. colcon
         # builds them into the image, so nothing is mounted at run time.
         ros2_ws: ${ROS2_WS_DIR:-../ros2_ws}
+        # remote/mavros_patch and the mavros and angles submodules, for the
+        # MAVROS that talks to PX4 v1.18. See modules/ros-base/Dockerfile.
+        chimera_deploy: ${CHIMERA_DEPLOY_DIR:-../chimera-deploy}
       args:
         <<: [*ids, *deepstream]
+        MAVROS_PATCH: ${MAVROS_PATCH:-1}
     image: px4simstack/ros-base:${DS_TAG:-7.1}
     command: ["true"]
 
