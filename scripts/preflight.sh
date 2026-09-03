@@ -196,7 +196,10 @@ env_names() { # file -- every name the file mentions, set or commented out
 	sed -n 's/^[[:space:]]*#\?[[:space:]]*\([A-Za-z_][A-Za-z_0-9]*\)=.*/\1/p' "$1" |
 		sort -u
 }
-missing=$(comm -23 <(env_names .env.example) <(env_names .env) | paste -sd' ' -)
+# ONBOARD_LENS_DEVICE names the aircraft's zoom lens. A ground station and a
+# simulator have no lens, so that name is not one their .env lacks.
+wanted_names() { if aircraft_selected; then cat; else grep -v '^ONBOARD_LENS_DEVICE$'; fi; }
+missing=$(comm -23 <(env_names .env.example | wanted_names) <(env_names .env) | paste -sd' ' -)
 if [ -n "$missing" ]; then
 	note ".env does not mention: $missing
         These were added to .env.example after this .env was made from it.

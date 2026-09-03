@@ -17,6 +17,9 @@ if [ "$UAS_BASE" -ge 10 ]; then FLEET_IS_SIMULATED=true; else FLEET_IS_SIMULATED
 # Whether .env selects a real machine. px4sim and scripts/preflight.sh both
 # ask, so the profile names are written once.
 real_profiles_selected() { case ",${COMPOSE_PROFILES:-}," in *,ground,* | *,aircraft,*) return 0 ;; esac; return 1; }
+# Whether this machine is the vehicle itself, which serves its own cameras and
+# runs its own companion. px4sim and scripts/preflight.sh both ask.
+aircraft_selected() { case ",${COMPOSE_PROFILES:-}," in *,aircraft,*) return 0 ;; esac; return 1; }
 # Where the vehicles are. The real fleet flies 10.200.142.6<N> with the
 # ground station at .60. The simulated one sits in its own block of the same
 # range, or of SIMNET_PREFIX where the host is itself on the radio network.
@@ -85,10 +88,17 @@ cameras_of() {
 	esac
 }
 # Every stream a vehicle offers this machine. The simulator serves both rates
-# from one router. The real ground sees only what lcam pulls, the low rate.
+# from one router, and UAS_STREAMS says how many cameras it encodes. The real
+# ground reads lcam, which pulls the low rate of every camera the airframe
+# carries, whatever this stack encodes.
 streams_of() {
-	local camera
-	for camera in $(cameras_of "$1"); do
+	local camera cameras
+	if [ "$FLEET_IS_SIMULATED" = false ] && ! aircraft_selected; then
+		cameras=$(cameras_of_mark "$1")
+	else
+		cameras=$(cameras_of "$1")
+	fi
+	for camera in $cameras; do
 		if [ "$FLEET_IS_SIMULATED" = true ]; then
 			printf '%s%s %sl%s ' "$camera" "$1" "$camera" "$1"
 		else

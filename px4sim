@@ -173,8 +173,6 @@ export GROUND_DOMAIN
 # shellcheck disable=SC1091
 . ./scripts/zoom.sh
 
-aircraft_selected() { case ",${COMPOSE_PROFILES:-}," in *,aircraft,*) return 0 ;; esac; return 1; }
-
 # Whether the boot unit holds this stack. systemd sets INVOCATION_ID inside a
 # unit, so this is true only for a person who runs px4sim by hand.
 unit_owns_stack() { [ -z "${INVOCATION_ID:-}" ] && systemctl is-active --quiet onboard.service 2>/dev/null; }
@@ -203,6 +201,26 @@ check_mode() {
 # its router is native. The real ground station is `ground`.
 companion_service() { if [ "$FLEET_IS_SIMULATED" = true ]; then echo "onboard$1"; else echo onboard; fi; }
 ground_service()    { if [ "$FLEET_IS_SIMULATED" = true ]; then echo offboard; else echo ground; fi; }
+
+# The ROS domain a reader answers on. The ground station joins every vehicle's
+# domain with its domain bridge and carries all of them on $GROUND_DOMAIN. A
+# companion holds its own vehicle's domain alone.
+reader_domain() {   # <compose service> <uas number>
+	if [ "$1" = "$(ground_service)" ]; then echo "$GROUND_DOMAIN"; else uas_domain "$2"; fi
+}
+# Which running container answers for a vehicle from this machine: its own
+# companion, or the ground station where the companion is not here, which is
+# how the real ground reaches a vehicle whose companion flies on the aircraft.
+vehicle_reader() {   # <uas number>, sets reader, container and domain
+	reader=$(companion_service "$1")
+	container=$($DC ps -q "$reader" 2>/dev/null)
+	if [ -z "$container" ]; then
+		reader=$(ground_service)
+		container=$($DC ps -q "$reader" 2>/dev/null)
+		[ -n "$container" ] || die "$(companion_service "$1") is not running. Start it: ./px4sim start"
+	fi
+	domain=$(reader_domain "$reader" "$1")
+}
 
 # The commands that fly the simulator. Every one of them execs into `sim`,
 # respawns the world or arms a vehicle by number, and with UAS_BASE=0 that
@@ -1027,7 +1045,7 @@ view)
 topics)
 	# A vehicle holds ROS domain 60 + N and its companion sources the
 	# workspace in its entry point, which `exec` does not run. So both are
-	# given here. The ground station is domain $GROUND_DOMAIN in the offboard container.
+	# given here, and reader_domain says which domain the reader answers on.
 	#
 	# On the real ground the vehicle's companion runs on the aircraft. The
 	# ground container joins every vehicle's domain with its domain bridge,
@@ -1039,7 +1057,7 @@ topics)
 		reader=$(companion_service "$n")
 	fi
 	has_service "$reader" || die "compose.yaml defines no $reader, so uas$n has no ROS stack."
-	COMPOSE_PROFILES="$ALL_PROFILES" $DC exec -e ROS_DOMAIN_ID="$(uas_domain "$n")" "$reader" bash -lc \
+	COMPOSE_PROFILES="$ALL_PROFILES" $DC exec -e ROS_DOMAIN_ID="$(reader_domain "$reader" "$n")" "$reader" bash -lc \
 		'. /usr/local/bin/ros-env.sh; ros2 topic list' \
 		|| die "$reader did not answer. Is it running?  ./px4sim status"
 	;;
@@ -1337,12 +1355,11 @@ zoom)
 		|| die "No framing '$preset'. This lens has: $UAS_ZOOM_PRESETS"
 	[ "$(mark_of "$n")" = v3 ] || die "uas$n is a $(mark_of "$n"), and only a v3 lens zooms."
 	add_fleet_profiles
-	container=$($DC ps -q "$(companion_service "$n")" 2>/dev/null)
-	[ -n "$container" ] || die "$(companion_service "$n") is not running. Start it: ./px4sim start"
+	vehicle_reader "$n"
 	docker cp verify/component/zoom.py "$container:/tmp/zoom.py" >/dev/null
 	docker cp verify/component/udp-only.xml "$container:/tmp/udp-only.xml" >/dev/null
 	say "asking uas$n for the $preset framing, $hfov degrees"
-	docker exec -e ROS_DOMAIN_ID="$(uas_domain "$n")" \
+	docker exec -e ROS_DOMAIN_ID="$domain" \
 		-e FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/udp-only.xml "$container" bash -lc '
 		set -e
 		. /usr/local/bin/ros-env.sh
@@ -1379,9 +1396,7 @@ uas|probe|foxglove)
 		n=$FIRST_UAS
 	else
 		n=$(vehicle_arg "${1:-}"); shift || true
-		container=$($DC ps -q "$(companion_service "$n")" 2>/dev/null)
-		[ -n "$container" ] || die "$(companion_service "$n") is not running. Start it: ./px4sim start"
-		domain=$(uas_domain "$n")
+		vehicle_reader "$n"
 	fi
 	case "$cmd" in
 	probe)    tool=graph_probe.py ;;
