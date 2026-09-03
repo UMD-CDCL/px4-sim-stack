@@ -158,8 +158,11 @@ if [ ! -f .env ]; then
 	echo "  Created .env from .env.example."
 fi
 
-sed -i "s|^HOST_UID=.*|HOST_UID=$(id -u)|" .env
-sed -i "s|^HOST_GID=.*|HOST_GID=$(id -g)|" .env
+# The operator's ids, also when doctor runs under sudo to reach docker.
+host_uid=${SUDO_UID:-$(id -u)}
+host_gid=${SUDO_GID:-$(id -g)}
+sed -i "s|^HOST_UID=.*|HOST_UID=$host_uid|" .env
+sed -i "s|^HOST_GID=.*|HOST_GID=$host_gid|" .env
 # One host value in .env. Append rather than edit where the line is absent,
 # because an .env copied from an older example does not have it yet.
 set_env_key() { # name value
@@ -180,7 +183,8 @@ render_gid=$(getent group render | cut -d: -f3 || true)
 # DISPLAY stays out of .env. The containers take it from the session that
 # starts them, because a value in the file goes stale on another machine.
 sed -i "/^DISPLAY=/d" .env
-ok ".env host values set (HOST_UID=$(id -u) HOST_GID=$(id -g))"
+[ -n "${SUDO_UID:-}" ] && chown "$host_uid:$host_gid" .env
+ok ".env host values set (HOST_UID=$host_uid HOST_GID=$host_gid)"
 
 # .env.example is the list of every line the stack reads. An .env copied from
 # an older one is missing whatever was added since, and a missing line is not
