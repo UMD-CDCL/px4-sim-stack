@@ -16,6 +16,12 @@ note() { printf '  %swarn%s  %s\n'   "$YEL" "$OFF" "$1"; warn=$((warn+1)); }
 echo "px4-sim-stack preflight"
 echo ""
 
+# What ./px4sim doctor selected, with the fleet profiles added. The checks
+# below ask which world that is.
+selected=",${COMPOSE_PROFILES:-},"
+sim_selected()  { case "$selected" in *,sim,*) return 0 ;; esac; return 1; }
+real_selected() { case "$selected" in *,ground,* | *,aircraft,*) return 0 ;; esac; return 1; }
+
 # ---------------------------------------------------------------- NVIDIA driver
 # The GPU and its driver decide which DeepStream release this machine can run,
 # and a DeepStream release brings its Ubuntu and so its ROS 2 distribution with
@@ -102,8 +108,12 @@ fi
 # ------------------------------------------------------------------- Docker
 if docker version >/dev/null 2>&1; then
 	ok "docker $(docker version --format '{{.Server.Version}}') reachable without sudo"
+elif id -nG | grep -qw docker; then
+	bad "cannot talk to the docker daemon, and you are in group docker. Is it running?
+        sudo systemctl start docker"
 else
-	bad "cannot talk to the docker daemon. Add yourself to the docker group."
+	bad "docker needs sudo here: $USER is not in group docker. Fix it once, then log in again:
+        sudo usermod -aG docker $USER"
 fi
 
 if docker compose version >/dev/null 2>&1; then
@@ -118,22 +128,6 @@ if docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q '"nvidia"'; t
 else
 	bad "nvidia runtime missing. Install nvidia-container-toolkit, then run:
         sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker"
-fi
-
-# ---------------------------------------------------------------------- X11
-if [ -z "${DISPLAY:-}" ]; then
-	bad "DISPLAY is empty. Gazebo and QGroundControl need an X server."
-else
-	ok "DISPLAY=$DISPLAY"
-fi
-if [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; then
-	note "Wayland session. XWayland works, but GPU rendering can fall back to
-        software. An X11 session is the tested path."
-fi
-if command -v xauth >/dev/null 2>&1; then
-	ok "xauth present"
-else
-	bad "xauth not found. Run: sudo apt install xauth"
 fi
 
 # --------------------------------------------------------------------- disk
@@ -173,6 +167,16 @@ if [ -n "${input_gid:-}" ]; then
 		echo "INPUT_GID=$input_gid" >> .env
 	fi
 fi
+# The group that owns /dev/dri/renderD128 on a Jetson. The aircraft container
+# joins it beside video and dialout. Written the way INPUT_GID is.
+render_gid=$(getent group render | cut -d: -f3 || true)
+if [ -n "${render_gid:-}" ]; then
+	if grep -q '^RENDER_GID=' .env; then
+		sed -i "s|^RENDER_GID=.*|RENDER_GID=$render_gid|" .env
+	else
+		echo "RENDER_GID=$render_gid" >> .env
+	fi
+fi
 # DISPLAY stays out of .env. The containers take it from the session that
 # starts them, because a value in the file goes stale on another machine.
 sed -i "/^DISPLAY=/d" .env
@@ -197,6 +201,62 @@ if [ -n "$missing" ]; then
 else
 	ok ".env mentions every name .env.example does"
 fi
+
+# ---------------------------------------------------------------------- X11
+# Only a service that mounts the X socket wants a display, and x11-allow.sh
+# reads the compose file for that answer. A missing display is never a
+# failure: Gazebo runs headless with GZ_GUI=0, the ground station starts
+# without its USPI window, and the aircraft has no display at all.
+if ./scripts/x11-allow.sh --needed; then
+	if [ -n "${DISPLAY:-}" ]; then
+		ok "DISPLAY=$DISPLAY"
+	else
+		note "DISPLAY is empty. A selected service mounts the X socket, so its windows cannot open."
+	fi
+	if command -v xauth >/dev/null 2>&1; then
+		ok "xauth present"
+	else
+		note "xauth not found, so no X11 cookie can be written. Run: sudo apt install xauth"
+	fi
+	if [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; then
+		note "Wayland session. XWayland works, but GPU rendering can fall back to
+        software. An X11 session is the tested path."
+	fi
+else
+	ok "no selected service draws on X, so DISPLAY is not checked"
+fi
+
+# ----------------------------------------------------------------- the world
+# UAS_BASE and COMPOSE_PROFILES have to describe one world, and the real
+# profiles need their numbers. A wrong number here is a station that hears
+# nothing and says nothing.
+if real_selected && [ "${UAS_BASE:-10}" -ge 10 ]; then
+	bad "COMPOSE_PROFILES selects the real ground or the aircraft and UAS_BASE is ${UAS_BASE:-10}. Set UAS_BASE=0 in .env."
+elif ! real_selected && [ "${UAS_BASE:-10}" -lt 10 ]; then
+	bad "UAS_BASE=${UAS_BASE:-10} numbers the real fleet and COMPOSE_PROFILES selects no real profile. Set COMPOSE_PROFILES=ground or aircraft in .env."
+else
+	ok "UAS_BASE=${UAS_BASE:-10} and profiles '${COMPOSE_PROFILES:-}' describe one world"
+fi
+case "$selected" in
+*,ground,*)
+	[ "${GROUND_DOMAIN:-60}" = 60 ] \
+		|| note "the fielded ground station is ROS domain 60 and GROUND_DOMAIN is ${GROUND_DOMAIN}. Native ROS on this machine is on 60."
+	;;
+*,aircraft,*)
+	if [ -n "${UAS_NUM:-}" ]; then
+		ok "UAS_NUM=$UAS_NUM from the login environment"
+	else
+		bad "UAS_NUM is not set. chimera-deploy/deploy.sh writes it into /etc/environment. Log in again."
+	fi
+	if [ -z "${ONBOARD_LENS_DEVICE:-}" ]; then
+		note "ONBOARD_LENS_DEVICE is unset, so the container gets /dev/null as its lens. A v3 needs it: see .env.example."
+	elif [ -e "${ONBOARD_LENS_DEVICE}" ]; then
+		ok "SCF4 zoom lens at ${ONBOARD_LENS_DEVICE} -> $(readlink -f "${ONBOARD_LENS_DEVICE}")"
+	else
+		bad "ONBOARD_LENS_DEVICE=${ONBOARD_LENS_DEVICE} does not exist. ls /dev/serial/by-id/"
+	fi
+	;;
+esac
 
 # --------------------------------------------------------------- host ports
 # Every published port is a claim on the host, and this stack is not the only
@@ -289,11 +349,59 @@ EOF
 	fi
 fi
 
+# ----------------------------------------------------------- the simnet subnet
+# A bridge on the range the fleet flies shadows every route into it, .61
+# included, and nothing reports it: the drone is simply not reachable. Only
+# a selected service on simnet creates the bridge, so only then is it a
+# fault. The ground and aircraft profiles are on the host network.
+if [ -n "$config" ] && printf '%s' "$config" | python3 -c '
+import json, sys
+services = json.load(sys.stdin).get("services") or {}
+sys.exit(0 if any("simnet" in (s.get("networks") or {}) for s in services.values()) else 1)'; then
+	subnet="${SIMNET_PREFIX:-10.200.142}.0/24"
+	shadowed=$(ip -4 route show 2>/dev/null | awk '$1 ~ /\// && $0 !~ /docker|br-|veth/ {print $1}' |
+		python3 -c '
+import ipaddress, sys
+simnet = ipaddress.ip_network(sys.argv[1])
+print(" ".join(r for r in sys.stdin.read().split() if ipaddress.ip_network(r, strict=False).overlaps(simnet)))' "$subnet")
+	if [ -n "$shadowed" ]; then
+		bad "simnet $subnet overlaps this host's route $shadowed. Set SIMNET_PREFIX=172.28.0 in .env."
+	else
+		ok "simnet $subnet overlaps no host route"
+	fi
+fi
+
+# ------------------------------------------------------ host network ports
+# A service on the host network publishes nothing, so the port check above
+# sees nothing. MAVROS binds 14402/udp and the Foxglove bridge 8765/tcp. A
+# container of this stack that already holds them is not a conflict.
+if real_selected && command -v ss >/dev/null 2>&1; then
+	ours=$(docker ps --filter "label=com.docker.compose.project=${project:-px4simstack}" \
+	                 --format '{{.Names}} {{.Networks}}' 2>/dev/null | awk '$2 == "host"')
+	while read -r number protocol what; do
+		if [ "$protocol" = udp ]; then flag=-lnu; else flag=-lnt; fi
+		held=$(ss "$flag" -p 2>/dev/null | awk -v want=":$number\$" '$4 ~ want { print; exit }')
+		if [ -z "$held" ]; then
+			ok "$number/$protocol free for $what"
+		elif [ -n "$ours" ]; then
+			ok "$number/$protocol held by this stack's own container ($what)"
+		else
+			bad "$number/$protocol is held on this host, and $what binds it on the host network:
+        $held"
+		fi
+	done <<-EOF
+		14402 udp MAVROS
+		8765 tcp the Foxglove bridge
+	EOF
+fi
+
 # --------------------------------------------------------------- source trees
-if [ -d src/PX4-Autopilot ]; then
-	ok "src/PX4-Autopilot present"
-else
-	note "src/PX4-Autopilot missing. Run: ./px4sim setup"
+if sim_selected; then
+	if [ -d src/PX4-Autopilot ]; then
+		ok "src/PX4-Autopilot present"
+	else
+		note "src/PX4-Autopilot missing. Run: ./px4sim setup"
+	fi
 fi
 # The flight code. The onboard and offboard images build it from here, and a
 # missing checkout fails the build rather than the run.
@@ -303,6 +411,17 @@ if [ -d "$ws/src/5g_drone" ]; then
 else
 	note "$ws/src/5g_drone missing. The onboard and offboard images build it.
         Check it out, or set ROS2_WS_DIR in .env."
+fi
+# The MAVROS patch. ros-base builds it from chimera-deploy's submodules, and
+# an empty submodule fails the build with a readable message. Say it earlier.
+if [ "${MAVROS_PATCH:-1}" = 1 ]; then
+	deploy=${CHIMERA_DEPLOY_DIR:-../chimera-deploy}
+	if [ -f "$deploy/submodules/mavros/mavros/package.xml" ] && [ -d "$deploy/submodules/angles/angles" ]; then
+		ok "$deploy present, with the mavros and angles submodules"
+	else
+		note "$deploy/submodules/mavros or angles is empty. ros-base builds the PX4 v1.18
+        MAVROS patch from them:  git -C $deploy submodule update --init submodules/mavros submodules/angles"
+	fi
 fi
 
 # ------------------------------------------------------------- detector models
@@ -314,7 +433,7 @@ fi
 #
 # Nothing about it is written down here. The flight code's own parameter files
 # carry the names AND the directory, and the launch loads those in this order,
-# each one beating the last -- so read the same three, in the same order, and
+# each one beating the last -- so read the same files, in the same order, and
 # take what the last one said.
 models=${ONBOARD_MODEL_DIR:-./modules/onboard/models}
 
@@ -334,6 +453,7 @@ model_name() { # key -- what the parameter files finally set it to
 	local key=$1 value="" file found
 	for file in \
 		"$ws/src/5g_drone/config/param_files/onboard_common_params.yaml" \
+		"$ws/src/5g_drone/config/param_files/onboard_container_params.yaml" \
 		"$ws/src/5g_drone/config/param_files/sim/onboard_sim_params.yaml" \
 		"$(host_path "${ONBOARD_PARAMS_FILE:-}")"
 	do
@@ -396,6 +516,54 @@ else
 			ok "detector artifacts present in $dir"
 		fi
 	fi
+fi
+
+# ----------------------------------------------------------------- aircraft
+case "$selected" in
+*,aircraft,*)
+	for unit in rcam mavlink-router; do
+		if systemctl is-active --quiet "$unit"; then
+			ok "$unit.service active"
+		else
+			bad "$unit.service is not active. The container reads its cameras and its MAVLink from it:  sudo systemctl start $unit"
+		fi
+	done
+	socks=$(for sock in /tmp/*ds_nv.sock; do [ -e "$sock" ] && basename "$sock" _nv.sock; done | paste -sd' ' -)
+	if [ -n "$socks" ]; then
+		ok "rcam sockets: $socks"
+	else
+		bad "no /tmp/*ds_nv.sock. rcam forks the cameras onto them at start:  journalctl -u rcam -n 30"
+	fi
+	if [ "$(date +%Y)" -ge 2020 ]; then
+		ok "clock $(date -Is)"
+	else
+		note "clock says $(date +%Y). chrony has not stepped it. Logs and bags carry 1970 stamps until it does."
+	fi
+	command -v nvpmodel >/dev/null 2>&1 \
+		&& note "power mode: $(nvpmodel -q 2>/dev/null | head -1). Measure detection at this mode before changing it."
+	fetch=$ws/src/5g_drone/scripts/fetch_models.py
+	if [ -x "$fetch" ]; then
+		group=$("$fetch" resolve 2>/dev/null || true)
+		if [ "$group" = orin ]; then
+			ok "perception_models group: orin"
+		else
+			note "fetch_models.py resolve says '${group:-nothing}', not orin. /models/local may point at another machine's engines."
+		fi
+	fi
+	;;
+*,ground,*)
+	for unit in lcam mavlink-router; do
+		if systemctl is-active --quiet "$unit"; then
+			ok "$unit.service active"
+		else
+			note "$unit.service is not active. The ground reads video and MAVLink from it."
+		fi
+	done
+	;;
+esac
+# lcam and rcam have no API, so ./px4sim streams probes each mount with this.
+if real_selected && ! command -v gst-discoverer-1.0 >/dev/null 2>&1; then
+	note "gst-discoverer-1.0 not found, so ./px4sim streams cannot probe the RTSP mounts. Run: sudo apt install gstreamer1.0-plugins-base-apps"
 fi
 
 # The onboard and offboard images carry a copy of the flight code, taken when

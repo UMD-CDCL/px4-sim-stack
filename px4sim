@@ -69,14 +69,6 @@ for name in $OVERRIDABLE; do
 	fi
 done
 
-# The ground station's ROS domain. compose.yaml and the offboard entry point
-# both default it to 70, and the commands below hand it to `docker exec` as
-# ROS_DOMAIN_ID. Unset, that exec gets an empty string, which rmw reads as
-# domain 0 -- so `capture` published where nothing listens and reported
-# success, because `ros2 topic pub` does not need a subscriber. Defaulted here
-# so a .env written before this variable existed still reaches the station.
-export GROUND_DOMAIN=${GROUND_DOMAIN:-70}
-
 # Whether the fleet that is flying is the one the file holds. This script
 # exports what it reads, so a px4sim that this one runs -- the console, or
 # `fly` calling `place` -- finds the file's own value in its environment and
@@ -126,7 +118,7 @@ fi
 ds_resolved=$(./scripts/ds-select.sh) ||
 	die "ds-select.sh could not choose a DeepStream release. See the message above."
 eval "$ds_resolved"
-export DS_VERSION DS_IMAGE DS_TAG ROS_DISTRO DS_CODENAME DS_TRT_VERSION DS_TRT_CUDA DS_REASON
+export DS_VERSION DS_IMAGE DS_TAG ROS_DISTRO DS_CODENAME DS_TRT_VERSION DS_TRT_CUDA DS_TRT_APT_SOURCE DS_TRT_APT_KEY DS_REASON
 
 # The world origin and the survey marker come from the scene and the
 # scenario, never from .env. SCENE and SCENARIO carry them. Every command
@@ -174,14 +166,74 @@ resolve_origin
 # nothing else. UAS_FLEET is the single place the fleet size is written.
 # shellcheck disable=SC1091
 . ./scripts/fleet.sh
+# The ground station's ROS domain, derived by fleet.sh from UAS_BASE. The
+# commands below hand it to `docker exec` as ROS_DOMAIN_ID. Unset, that exec
+# gets an empty string, which rmw reads as domain 0.
+export GROUND_DOMAIN
 # shellcheck disable=SC1091
 . ./scripts/zoom.sh
 
-# A vehicle is named by its UAS number, 11 upwards. A single digit is its place
-# in UAS_FLEET, which is how that line reads, so `1` and `11` both reach the
-# first vehicle. Every command that takes one vehicle resolves it here.
+aircraft_selected() { case ",${COMPOSE_PROFILES:-}," in *,aircraft,*) return 0 ;; esac; return 1; }
+
+# UAS_BASE and COMPOSE_PROFILES have to describe one world. A simulated fleet
+# through the real profiles would exec a real container that is not there,
+# and the real fleet through the sim profiles would number a vehicle 11.
+# `start` runs this again after a profile list on the command line.
+check_mode() {
+	local real=false
+	case ",${COMPOSE_PROFILES:-}," in *,ground,* | *,aircraft,*) real=true ;; esac
+	if [ "$real" = true ] && [ "$FLEET_IS_SIMULATED" = true ]; then
+		die "COMPOSE_PROFILES ('${COMPOSE_PROFILES:-}') selects the real ground or the aircraft,
+    and UAS_BASE=$UAS_BASE numbers a simulated fleet. Set UAS_BASE=0 in .env. See .env.example."
+	fi
+	if [ "$real" = false ] && [ "$FLEET_IS_SIMULATED" = false ]; then
+		die "UAS_BASE=$UAS_BASE numbers the real fleet, and COMPOSE_PROFILES ('${COMPOSE_PROFILES:-}')
+    selects no real profile. Set COMPOSE_PROFILES=ground or aircraft in .env. See .env.example."
+	fi
+	if aircraft_selected && [ -z "${UAS_NUM:-}" ]; then
+		die "UAS_NUM is not in the environment. /etc/environment sets it on the aircraft. Log in again."
+	fi
+}
+
+# Which compose service holds a vehicle's companion, its router and the
+# ground station. A simulated vehicle has a router and a companion of its
+# own. The aircraft is one machine, so its companion carries no number and
+# its router is native. The real ground station is `ground`.
+companion_service() { if [ "$FLEET_IS_SIMULATED" = true ]; then echo "onboard$1"; else echo onboard; fi; }
+ground_service()    { if [ "$FLEET_IS_SIMULATED" = true ]; then echo offboard; else echo ground; fi; }
+
+# The commands that fly the simulator. Every one of them execs into `sim`,
+# respawns the world or arms a vehicle by number, and with UAS_BASE=0 that
+# number is a real aircraft on the bench. The simulator's profiles are added
+# here, because each of these reaches the sim service.
+require_sim() {   # <what was asked>
+	if [ "$FLEET_IS_SIMULATED" = true ]; then add_fleet_profiles; return 0; fi
+	die "'$1' flies the simulator, and this stack is not one (UAS_BASE=$UAS_BASE,
+    profiles '${COMPOSE_PROFILES:-none}'). Nothing was sent."
+}
+
+# The names this machine's RTSP server serves: the video router's in the
+# simulator, lcam's numbered low rate mounts on the real ground, rcam's own
+# cameras on the aircraft. A number plays the gimbal camera, which a v2 and a
+# v3 both carry and the detector reads: rcam's is the first name it serves.
+local_streams() {
+	local n
+	if aircraft_selected; then aircraft_streams "$UAS_NUM"; return 0; fi
+	for n in $(fleet_numbers); do streams_of "$n"; done
+}
+default_stream() {
+	if [ "$FLEET_IS_SIMULATED" = true ]; then gimbal_stream "$1"
+	elif aircraft_selected; then local_streams | cut -d' ' -f1
+	else ground_stream "$1"; fi
+}
+
+# A vehicle is named by its UAS number: 11 upwards in the simulator, 1 upwards
+# in the real fleet. A single digit is its place in UAS_FLEET, which is how
+# that line reads, so `1` and `11` both reach the first simulated vehicle. On
+# the aircraft the default is its own number. Every command that takes one
+# vehicle resolves it here.
 vehicle_arg() {
-	local given=${1:-$FIRST_UAS} n
+	local given=${1:-${UAS_NUM:-$FIRST_UAS}} n
 	case "$given" in
 	'' | *[!0-9]*) die "'$given' is not a vehicle number. This fleet is uas$FIRST_UAS to uas$LAST_UAS." ;;
 	esac
@@ -200,9 +252,11 @@ for n in $(fleet_numbers); do
 	if [ -z "$(mark_of "$n")" ]; then
 		warn "UAS_FLEET names '$(model_of "$n")' for uas$n, which is neither a v2 nor a v3."
 		warn "The simulator, the companion and the ground station all refuse it."
-	elif [ ! -d "modules/sim/scenes/models/$(model_of "$n")" ]; then
+	elif [ "$FLEET_IS_SIMULATED" = true ] && [ ! -d "modules/sim/scenes/models/$(model_of "$n")" ]; then
 		warn "uas$n names model '$(model_of "$n")', which is not in modules/sim/scenes/models."
 	fi
+	# The real fleet has no uas<N> service and no numbered companion by design.
+	[ "$FLEET_IS_SIMULATED" = true ] || continue
 	if ! has_service "uas$n"; then
 		warn "compose.yaml defines no uas$n. This stack numbers its vehicles"
 		warn "uas$FIRST_UAS to uas19, so UAS_FLEET holds nine entries at the most."
@@ -216,30 +270,34 @@ done
 # airframe. compose defaults it to uas11's v3 name, so derive it here instead
 # and leave a value from .env or the environment alone.
 QGC_VIDEO_URL_FOLLOWS_FLEET=false
-if [ -z "${QGC_VIDEO_URL:-}" ] && [ -n "$(gimbal_stream "$FIRST_UAS")" ]; then
+if [ "$FLEET_IS_SIMULATED" = true ] && [ -z "${QGC_VIDEO_URL:-}" ] && [ -n "$(gimbal_stream "$FIRST_UAS")" ]; then
 	export QGC_VIDEO_URL="rtsp://video-router:8554/$(gimbal_stream "$FIRST_UAS")"
 	QGC_VIDEO_URL_FOLLOWS_FLEET=true
 fi
 
-# Every vehicle needs its router AND its companion. Without the onboard
-# profile the routers start, PX4 pushes into them, and no ROS stack ever
-# listens, which reads as a healthy stack with no topics.
+# Every vehicle needs its router AND its companion, and a simulated fleet
+# needs the simulator. Without the onboard profile the routers start, PX4
+# pushes into them, and no ROS stack ever listens, which reads as a healthy
+# stack with no topics. The real fleet adds nothing: its profile is in .env.
 fleet_profiles() {
-	local list="" n
+	[ "$FLEET_IS_SIMULATED" = true ] || return 0
+	local list="sim" n
 	for n in $(fleet_numbers); do
 		if has_service "uas$n";     then list="$list,uas$n"; fi
 		if has_service "onboard$n"; then list="$list,onboard$n"; fi
 	done
-	echo "${list#,}"
+	echo "$list"
 }
+# A name already in the list is not added again, so a px4sim that this one
+# runs, and a command that adds them twice, hand compose each profile once.
 add_fleet_profiles() {
 	local extra
-	extra=$(fleet_profiles)
-	if [ -n "${COMPOSE_PROFILES:-}" ]; then
-		export COMPOSE_PROFILES="$COMPOSE_PROFILES,$extra"
-	else
-		export COMPOSE_PROFILES="$extra"
-	fi
+	for extra in $(fleet_profiles | tr ',' ' '); do
+		case ",${COMPOSE_PROFILES:-}," in
+		*,"$extra",*) ;;
+		*) export COMPOSE_PROFILES="${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}$extra" ;;
+		esac
+	done
 }
 
 # Reload the world, and everything that reads it. Both `scene` and `place`
@@ -284,9 +342,9 @@ PICTURE_SOURCES="sim video-router"
 picture_consumers() {
 	local number list=""
 	for number in $(fleet_numbers); do
-		has_service "onboard$number" && list="$list onboard$number"
+		has_service "$(companion_service "$number")" && list="$list $(companion_service "$number")"
 	done
-	has_service offboard && list="$list offboard"
+	has_service "$(ground_service)" && list="$list $(ground_service)"
 	echo "${list# }"
 }
 
@@ -342,8 +400,8 @@ need_sources() {
 service_name() {
 	case "$1" in
 	router)  echo "uas$FIRST_UAS" ;;
-	onboard) echo "onboard$FIRST_UAS" ;;
-	ground)  echo offboard ;;
+	onboard) companion_service "$FIRST_UAS" ;;
+	ground)  ground_service ;;
 	video)   echo video-router ;;
 	*) echo "$1" ;;
 	esac
@@ -395,7 +453,8 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     build               Build the images (about 20 minutes the first time)
 
   ${BOLD}Every day${OFF}
-    start [profiles]    Start everything. Default profiles: ${COMPOSE_PROFILES:-none}
+    start [profiles]    Start what .env selects. Now: ${COMPOSE_PROFILES:-none}
+                        sim,offboard here, ground on a base station, aircraft on the vehicle
     core                Start the vehicles and QGC, with no ground station
     stop                Stop and remove the containers. Volumes stay.
     restart [service]   Restart one service, or all of them
@@ -458,12 +517,26 @@ EOF
 endpoints() {
 	echo
 	printf '  %sFleet%s   %s\n' "$BOLD" "$OFF" "${DIM}./px4sim fleet prints the stream names too${OFF}"
-	local n prefix=${SIMNET_PREFIX:-10.200.142}
+	local n
 	for n in $(fleet_numbers); do
-		printf '    uas%-3s %-12s %s.2%s   sysid %s   domain %s   tcp %s   udp %s\n' \
-			"$n" "$(model_of "$n")" "$prefix" "$n" "$n" "$(uas_domain "$n")" \
+		printf '    uas%-3s %-12s %s   sysid %s   domain %s   tcp %s   udp %s\n' \
+			"$n" "$(model_of "$n")" "$(uas_address "$n")" "$n" "$(uas_domain "$n")" \
 			"$(uas_tcp_port "$n")" "$(uas_gcs_port "$n")"
 	done
+	if [ "$FLEET_IS_SIMULATED" = false ]; then
+		cat <<EOF
+
+  ${BOLD}MAVLink${OFF}     udp://$FLEET_PREFIX.60:$(uas_gcs_port "$FIRST_UAS") upwards   each vehicle's router pushes here, into the native ground router
+              udp://127.0.0.1:14402     the native router feeds MAVROS here, on the aircraft and on the ground
+              tcp://127.0.0.1:5760      this machine's native router, every vehicle it hears. MAVSDK, pymavlink
+  ${BOLD}Video${OFF}       $(host_rtsp_base)/$(ground_stream "$FIRST_UAS")   the low rate mounts lcam restreams: rgbl<N>, pilotl<N>, thermall<N>
+              rtsp://$(uas_address "$FIRST_UAS"):8554/rgb      the full mounts, on the vehicle: rgb, pilot, thermal
+  ${BOLD}Foxglove${OFF}    ws://localhost:8765       the ground station here, or the aircraft when run there
+              $(uas_foxglove_url "$FIRST_UAS")       uas$FIRST_UAS's own bridge
+
+EOF
+		return 0
+	fi
 	cat <<EOF
 
   ${BOLD}MAVLink${OFF}     udp://<gcs>:$(uas_gcs_port "$FIRST_UAS") upwards   the ground station endpoint, from GCS_ADDRESS
@@ -509,7 +582,7 @@ fleet_facts() {
 		expected=$($DC config --services 2>/dev/null | paste -sd, -)
 	EOF
 	for n in $(fleet_numbers); do
-		companion=$(has_service "onboard$n" && echo "onboard$n" || true)
+		companion=$(has_service "$(companion_service "$n")" && companion_service "$n" || true)
 		printf 'vehicle n=%s sysid=%s model=%s mark=%s domain=%s tcp=%s gcs=%s foxglove=%s address=%s router=uas%s companion=%s gimbal=%s streams=%s zoom=%s\n' \
 			"$n" "$n" "$(model_of "$n")" "$(mark_of "$n")" "$(uas_domain "$n")" \
 			"$(uas_tcp_port "$n")" "$(uas_gcs_port "$n")" "$(uas_foxglove_port "$n")" \
@@ -662,6 +735,20 @@ main() {
 cmd=${1:-help}
 [ $# -gt 0 ] && shift || true
 
+# A .env whose two switches disagree is refused before any command reads it,
+# except the ones that explain or undo: doctor says what is wrong, and stop
+# takes every profile down whatever .env says.
+case "$cmd" in
+help | -h | --help | doctor | check | x11 | setup | stop | down | clean | clean-src | nuke) ;;
+*) check_mode ;;
+esac
+
+# The simulator's own commands. None of them may reach a real vehicle.
+case "$cmd" in
+fly | place | scene | scenario | fiducial | reset | px4 | console | snap | verify | genscene) require_sim "$cmd" ;;
+uas) case "${2:-}" in arm | takeoff | land | goto) require_sim "uas $2" ;; esac ;;
+esac
+
 case "$cmd" in
 
 # The fleet profiles carry a router and a companion for each vehicle, and
@@ -675,7 +762,6 @@ build)
 	# and the companion image is never built. `build onboard` and `build
 	# router` build the image every vehicle shares.
 	add_fleet_profiles
-	./scripts/x11-allow.sh
 	resolve_services "$@"
 
 	# ros-base is what onboard and offboard are made of, and compose has no way
@@ -685,7 +771,7 @@ build)
 	needs_base=false
 	[ ${#SERVICES[@]} -eq 0 ] && needs_base=true
 	for svc in "${SERVICES[@]}"; do
-		case "$svc" in onboard* | offboard | ros-base) needs_base=true ;; esac
+		case "$svc" in onboard* | offboard | ground | ros-base) needs_base=true ;; esac
 	done
 	if [ "$needs_base" = true ]; then
 		COMPOSE_PROFILES=base $DC build ros-base
@@ -707,33 +793,44 @@ build)
 x11)      ./scripts/x11-allow.sh ;;
 
 start|up|core)
-	# A profile list can be given: ./px4sim start offboard,xrce
+	# A profile list can be given: ./px4sim start ground
 	# `core` drops every named profile. The fleet is added below either way,
-	# so it is the vehicles, the transport and QGC, with no ground station.
+	# so it is the simulator, the vehicles and QGC, with no ground station.
 	[ "$cmd" = core ] && export COMPOSE_PROFILES=""
 	[ $# -gt 0 ] && export COMPOSE_PROFILES="$1"
+	check_mode
 	add_fleet_profiles
-	need_sources
+	[ "$FLEET_IS_SIMULATED" = true ] && need_sources
 	./scripts/x11-allow.sh
+	if [ "$FLEET_IS_SIMULATED" = false ] && [ -z "${INVOCATION_ID:-}" ] \
+	   && systemctl is-active --quiet onboard.service 2>/dev/null; then
+		warn "onboard.service already runs this stack. This start reuses its container."
+	fi
 	say "Starting: $COMPOSE_PROFILES"
 	echo "  fleet ${UAS_FLEET:-?}"
-	if [ -n "${HOME_LAT:-}" ]; then
-		echo "  scene ${SCENE:-?}, scenario ${SCENARIO:-?}, origin $HOME_LAT, $HOME_LON"
-	else
-		warn "No origin for scene '${SCENE:-unset}', scenario '${SCENARIO:-unset}'."
-		warn "PX4 will fly the coordinates inside the world file. ./px4sim origin"
+	if [ "$FLEET_IS_SIMULATED" = true ]; then
+		if [ -n "${HOME_LAT:-}" ]; then
+			echo "  scene ${SCENE:-?}, scenario ${SCENARIO:-?}, origin $HOME_LAT, $HOME_LON"
+		else
+			warn "No origin for scene '${SCENE:-unset}', scenario '${SCENARIO:-unset}'."
+			warn "PX4 will fly the coordinates inside the world file. ./px4sim origin"
+		fi
 	fi
 	$DC up -d
 	echo
 	$DC ps --format 'table {{.Service}}\t{{.Status}}'
 	endpoints
-	if [ ! -x src/PX4-Autopilot/build/px4_sitl_default/bin/px4 ]; then
+	if [ "$FLEET_IS_SIMULATED" = true ] && [ ! -x src/PX4-Autopilot/build/px4_sitl_default/bin/px4 ]; then
 		warn "PX4 has not been built yet. The first start compiles it, which"
 		warn "takes 10 to 20 minutes. Watch it with: ./px4sim logs sim"
 	fi
 	;;
 
 stop|down)
+	if [ -z "${INVOCATION_ID:-}" ] && systemctl is-active --quiet onboard.service 2>/dev/null; then
+		warn "onboard.service stays active with no container. It starts the stack again"
+		warn "at the next boot, or now with:  sudo systemctl restart onboard"
+	fi
 	say "Stopping everything"
 	COMPOSE_PROFILES="$ALL_PROFILES" $DC down --remove-orphans
 
@@ -870,14 +967,21 @@ px4)
 
 shell|sh)          enter_service "${1:-sim}" "${@:2}" ;;
 sim|qgc|ground)    enter_service "$cmd" "$@" ;;
-router)            n=$(vehicle_arg "${1:-}"); shift || true; enter_service "uas$n" "$@" ;;
-onboard)           n=$(vehicle_arg "${1:-}"); shift || true; enter_service "onboard$n" "$@" ;;
+router)            [ "$FLEET_IS_SIMULATED" = true ] || die "the real fleet's router is native:  systemctl status mavlink-router"
+                   n=$(vehicle_arg "${1:-}"); shift || true; enter_service "uas$n" "$@" ;;
+onboard)           n=$(vehicle_arg "${1:-}"); shift || true; enter_service "$(companion_service "$n")" "$@" ;;
 
 streams)
 	say "Video paths"
-	./scripts/list-streams.py "${MEDIAMTX_API:-http://localhost:9997}"
+	if [ "$FLEET_IS_SIMULATED" = true ]; then
+		./scripts/list-streams.py "${MEDIAMTX_API:-http://localhost:9997}"
+	else
+		# lcam and rcam have no API, so each mount is asked for by name.
+		# shellcheck disable=SC2046
+		./scripts/list-streams.py --rtsp "$(host_rtsp_base)" $(local_streams)
+	fi
 	echo
-	echo "  Play one with:  ./px4sim view $(gimbal_stream "$FIRST_UAS")"
+	echo "  Play one with:  ./px4sim view $(default_stream "$FIRST_UAS")"
 	;;
 
 view)
@@ -886,19 +990,19 @@ view)
 	case "${1:-}" in
 	'' | [0-9] | [0-9][0-9])
 		n=$(vehicle_arg "${1:-}")
-		stream=$(gimbal_stream "$n")
+		stream=$(default_stream "$n")
 		[ -n "$stream" ] || die "uas$n names no airframe this stack knows, so no stream name follows from it."
 		;;
 	*) stream=$1 ;;
 	esac
 	# Warn rather than stop: mediamtx serves whatever publishes to it, and a
 	# name of one's own is a fair thing to try.
-	served=$(for n in $(fleet_numbers); do streams_of "$n"; done | tr '\n' ' ')
+	served=$(local_streams | tr '\n' ' ')
 	case " $served " in
 	*" $stream "*) ;;
 	*) warn "No vehicle in this fleet serves '$stream'. ./px4sim fleet lists what each one does." ;;
 	esac
-	url="rtsp://127.0.0.1:${RTSP_HOST_PORT:-8554}/$stream"
+	url="$(host_rtsp_base)/$stream"
 	command -v ffplay >/dev/null || die "ffplay is not installed. Run: sudo apt install ffmpeg"
 	say "Playing $url   (close the window or press q)"
 	# Force TCP and drop every buffer we can. Without -rtsp_transport tcp a
@@ -914,10 +1018,11 @@ topics)
 	# workspace in its entry point, which `exec` does not run. So both are
 	# given here. The ground station is domain $GROUND_DOMAIN in the offboard container.
 	n=$(vehicle_arg "${1:-}")
-	has_service "onboard$n" || die "compose.yaml defines no onboard$n, so uas$n has no ROS stack."
-	COMPOSE_PROFILES="$ALL_PROFILES" $DC exec -e ROS_DOMAIN_ID=$((60 + n)) "onboard$n" bash -lc \
-		'. /opt/ros/$ROS_DISTRO/setup.bash; . /home/user/ros2_ws/install/setup.bash; ros2 topic list' \
-		|| die "onboard$n did not answer. Is it running?  ./px4sim status"
+	companion=$(companion_service "$n")
+	has_service "$companion" || die "compose.yaml defines no $companion, so uas$n has no ROS stack."
+	COMPOSE_PROFILES="$ALL_PROFILES" $DC exec -e ROS_DOMAIN_ID="$(uas_domain "$n")" "$companion" bash -lc \
+		'. /usr/local/bin/ros-env.sh; ros2 topic list' \
+		|| die "$companion did not answer. Is it running?  ./px4sim status"
 	;;
 
 layout)
@@ -929,8 +1034,8 @@ layout)
 	echo "  2. Connect to ws://localhost:8765 for the ground station, which holds"
 	echo "     every vehicle, or to one vehicle's own bridge:"
 	for n in $(fleet_numbers); do
-		if has_service "onboard$n"; then
-			echo "       uas$n  ws://localhost:$((8760 + n))"
+		if has_service "$(companion_service "$n")"; then
+			echo "       uas$n  $(uas_foxglove_url "$n")"
 		fi
 	done
 	echo "  3. Layout, then Import from file, and pick the file above"
@@ -985,30 +1090,38 @@ fleet)
 	# The whole map for one vehicle at a time. Everything here follows from
 	# the UAS number by arithmetic, and the stream names follow from the
 	# airframe. docs/uas-contract.md is the specification.
-	prefix=${SIMNET_PREFIX:-10.200.142}
 	say "Fleet: $UAS_COUNT vehicles, from UAS_FLEET"
 	for n in $(fleet_numbers); do
 		echo
-		printf '  %suas%s%s  %s   %s.2%s\n' \
-			"$BOLD" "$n" "$OFF" "$(model_of "$n")" "$prefix" "$n"
+		printf '  %suas%s%s  %s   %s\n' \
+			"$BOLD" "$n" "$OFF" "$(model_of "$n")" "$(uas_address "$n")"
 		printf '    mavlink   system id %s   udp %s to the ground station   tcp://localhost:%s\n' \
 			"$n" "$(uas_gcs_port "$n")" "$(uas_tcp_port "$n")"
 		printf '    ros       domain %s   namespace /uas%s   frames d%s_ and uas%s_\n' \
 			"$(uas_domain "$n")" "$n" "$n" "$n"
-		if has_service "onboard$n"; then
-			printf '    foxglove  ws://localhost:%s\n' "$(uas_foxglove_port "$n")"
+		if ! has_service "$(companion_service "$n")"; then
+			printf '    foxglove  none. compose.yaml defines no %s\n' "$(companion_service "$n")"
+			printf '    compose   uas%s alone, with no companion\n' "$n"
+		elif [ "$FLEET_IS_SIMULATED" = true ]; then
+			printf '    foxglove  %s\n' "$(uas_foxglove_url "$n")"
 			printf '    compose   uas%s and onboard%s\n' "$n" "$n"
 		else
-			printf '    foxglove  none. compose.yaml defines no onboard%s\n' "$n"
-			printf '    compose   uas%s alone, with no companion\n' "$n"
+			printf '    foxglove  %s\n' "$(uas_foxglove_url "$n")"
+			printf '    compose   onboard, on the vehicle, beside its native mavlink-router\n'
 		fi
 		printf '    video     %s\n' "$(streams_of "$n")"
 	done
+	if [ "$FLEET_IS_SIMULATED" = true ]; then
+		video="$(host_rtsp_base)/<name>, or http://localhost:8889/<name> in a
+  browser. The full stream is 1920x1080 and the l stream is 640x360, thermal
+  excepted: it is 640x512 both ways."
+	else
+		video="$(host_rtsp_base)/<name>, the low rate mounts lcam pulls from each
+  vehicle, 640x360. The full mounts are on the vehicle: rtsp://<address>:8554/rgb."
+	fi
 	cat <<EOF
 
-${DIM}  Video is rtsp://localhost:${RTSP_HOST_PORT:-8554}/<name>, or http://localhost:8889/<name> in a
-  browser. The full stream is 1920x1080 and the l stream is 640x360, thermal
-  excepted: it is 640x512 both ways.
+${DIM}  Video is $video
 
   The ground station holds every vehicle at once: ws://localhost:8765, ROS
   domain $GROUND_DOMAIN, MAVLink in on $(uas_gcs_port "$FIRST_UAS") upwards.${OFF}
@@ -1096,7 +1209,7 @@ fly)
 	picture=false
 	while true; do
 		sim_id=$($DC ps -q sim 2>/dev/null)
-		companion=$($DC ps -q "onboard$n" 2>/dev/null)
+		companion=$($DC ps -q "$(companion_service "$n")" 2>/dev/null)
 		# grep -c, never grep -q, and the reason is this script's own
 		# `set -o pipefail`. `grep -q` stops at the first match and closes the
 		# pipe, so `docker logs` dies of SIGPIPE with status 141 while it still
@@ -1116,7 +1229,7 @@ fly)
 		if [ "$SECONDS" -ge "$ready_by" ]; then
 			warn "uas$n was not ready in ${FLY_READY_S:-150}s:"
 			[ "$world" = true ] || warn "  the world never said 'Ready for takeoff'. ./px4sim logs sim"
-			[ "$picture" = true ] || warn "  the camera never opened. ./px4sim logs onboard$n"
+			[ "$picture" = true ] || warn "  the camera never opened. ./px4sim logs $(companion_service "$n")"
 			die "nothing was flown"
 		fi
 		sleep 2
@@ -1126,9 +1239,8 @@ fly)
 	# The autopilot forgets who holds the gimbal across the reboot the respawn
 	# causes, while the manager status still names the old owner. Without this
 	# the gimbal silently ignores every command and the state looks healthy.
-	timeout 60 $DC exec -T "onboard$n" bash -lc '
-		. /opt/ros/$ROS_DISTRO/setup.bash
-		. /home/user/ros2_ws/install/setup.bash
+	timeout 60 $DC exec -T "$(companion_service "$n")" bash -lc '
+		. /usr/local/bin/ros-env.sh
 		exec ros2 topic pub --once -w 1 "$1" std_msgs/msg/Float32 "{data: -361.0}"
 		' _ "/uas$n/reassert_gimbal_cmd" >/dev/null 2>&1 || true
 
@@ -1136,7 +1248,7 @@ fly)
 		say "uas$n is flying at $height m, from a fresh world"
 		exit 0
 	fi
-	die "uas$n will not climb even from a fresh world. ./px4sim logs sim, ./px4sim logs onboard$n"
+	die "uas$n will not climb even from a fresh world. ./px4sim logs sim, ./px4sim logs $(companion_service "$n")"
 	;;
 
 place)
@@ -1179,9 +1291,8 @@ capture)
 	*) die "capture takes $(echo "$CAPTURE_KINDS" | sed 's/ /, /g'), not '$kind'" ;;
 	esac
 	say "asking uas$n for a $kind capture, from the ground"
-	$DC exec -e ROS_DOMAIN_ID="$GROUND_DOMAIN" offboard bash -lc '
-		. /opt/ros/$ROS_DISTRO/setup.bash
-		. /home/user/ros2_ws/install/setup.bash
+	$DC exec -e ROS_DOMAIN_ID="$GROUND_DOMAIN" "$(ground_service)" bash -lc '
+		. /usr/local/bin/ros-env.sh
 		exec timeout 10 ros2 topic pub --once "$1" std_msgs/msg/Bool "{data: true}"' \
 		_ "/uas$n/${kind}_capture_cmd" >/dev/null \
 		&& echo "  asked for $kind on /uas$n/${kind}_capture_cmd" \
@@ -1207,16 +1318,15 @@ zoom)
 		|| die "No framing '$preset'. This lens has: $UAS_ZOOM_PRESETS"
 	[ "$(mark_of "$n")" = v3 ] || die "uas$n is a $(mark_of "$n"), and only a v3 lens zooms."
 	add_fleet_profiles
-	container=$($DC ps -q "onboard$n" 2>/dev/null)
-	[ -n "$container" ] || die "onboard$n is not running. Start it: ./px4sim start"
+	container=$($DC ps -q "$(companion_service "$n")" 2>/dev/null)
+	[ -n "$container" ] || die "$(companion_service "$n") is not running. Start it: ./px4sim start"
 	docker cp verify/component/zoom.py "$container:/tmp/zoom.py" >/dev/null
 	docker cp verify/component/udp-only.xml "$container:/tmp/udp-only.xml" >/dev/null
 	say "asking uas$n for the $preset framing, $hfov degrees"
 	docker exec -e ROS_DOMAIN_ID="$(uas_domain "$n")" \
 		-e FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/udp-only.xml "$container" bash -lc '
 		set -e
-		. /opt/ros/$ROS_DISTRO/setup.bash
-		. /home/user/ros2_ws/install/setup.bash
+		. /usr/local/bin/ros-env.sh
 		exec python3 /tmp/zoom.py "$@"' _ "$n" "$preset" --hfov "$hfov" \
 		|| die "uas$n is not at the $preset framing."
 	;;
@@ -1244,14 +1354,14 @@ uas|probe|foxglove)
 	# `ground` reaches the ground station, which holds every vehicle at once.
 	if [ "${1:-}" = ground ]; then
 		shift
-		container=$($DC ps -q offboard 2>/dev/null)
-		[ -n "$container" ] || die "the ground station is not running. Start it: ./px4sim start offboard"
+		container=$($DC ps -q "$(ground_service)" 2>/dev/null)
+		[ -n "$container" ] || die "the ground station is not running. Start it: ./px4sim start"
 		domain=$GROUND_DOMAIN
 		n=$FIRST_UAS
 	else
 		n=$(vehicle_arg "${1:-}"); shift || true
-		container=$($DC ps -q "onboard$n" 2>/dev/null)
-		[ -n "$container" ] || die "onboard$n is not running. Start it: ./px4sim start"
+		container=$($DC ps -q "$(companion_service "$n")" 2>/dev/null)
+		[ -n "$container" ] || die "$(companion_service "$n") is not running. Start it: ./px4sim start"
 		domain=$(uas_domain "$n")
 	fi
 	case "$cmd" in
@@ -1286,8 +1396,7 @@ uas|probe|foxglove)
 	docker exec -e ROS_DOMAIN_ID="$domain" \
 		-e FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/udp-only.xml "$container" bash -lc '
 		set -e
-		. /opt/ros/$ROS_DISTRO/setup.bash
-		. /home/user/ros2_ws/install/setup.bash
+		. /usr/local/bin/ros-env.sh
 		exec python3 /tmp/'"$tool"' "$@"' _ "$@" | probe_answer
 	;;
 
@@ -1302,18 +1411,20 @@ check)
 		[ -x "scripts/$script$ext" ] \
 			|| { warn "scripts/$script$ext is missing or not executable."; problems=$((problems + 1)); }
 	done
-	for service in sim video-router qgc offboard scenegen; do
+	for service in sim video-router qgc offboard ground onboard scenegen; do
 		has_service "$service" \
 			|| { warn "compose.yaml has no $service service, which ./px4sim names."; problems=$((problems + 1)); }
 	done
-	for n in $(fleet_numbers); do
-		for service in "uas$n" "onboard$n"; do
-			has_service "$service" \
-				|| { warn "compose.yaml has no $service for a fleet of $UAS_COUNT."; problems=$((problems + 1)); }
+	if [ "$FLEET_IS_SIMULATED" = true ]; then
+		for n in $(fleet_numbers); do
+			for service in "uas$n" "onboard$n"; do
+				has_service "$service" \
+					|| { warn "compose.yaml has no $service for a fleet of $UAS_COUNT."; problems=$((problems + 1)); }
+			done
+			[ -d "modules/sim/scenes/models/$(model_of "$n")" ] \
+				|| { warn "no model directory for uas$n's '$(model_of "$n")'."; problems=$((problems + 1)); }
 		done
-		[ -d "modules/sim/scenes/models/$(model_of "$n")" ] \
-			|| { warn "no model directory for uas$n's '$(model_of "$n")'."; problems=$((problems + 1)); }
-	done
+	fi
 	# A shared table is read on the host AND inside the containers, and the two
 	# read the same file only if compose passes the variables. It did not pass
 	# the framing table, so .env's table never reached a container and both
