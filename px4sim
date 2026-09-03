@@ -1357,7 +1357,16 @@ zoom)
 	vehicle_reader "$n"
 	docker cp verify/component/zoom.py "$container:/tmp/zoom.py" >/dev/null
 	docker cp verify/component/udp-only.xml "$container:/tmp/udp-only.xml" >/dev/null
-	say "asking uas$n for the $preset framing, $hfov degrees"
+	# scripts/zoom.sh holds the SIMULATED lens. A real lens takes its framings
+	# from its own calibration files, so on the aircraft the framing name is the
+	# whole answer, and zoom.py prints the degrees the vehicle reports. 0.0 is
+	# that tool's documented "do not check" value.
+	if [ "$FLEET_IS_SIMULATED" = true ]; then
+		say "asking uas$n for the $preset framing, $hfov degrees"
+	else
+		say "asking uas$n for the $preset framing"
+		hfov=0.0
+	fi
 	docker exec -e ROS_DOMAIN_ID="$domain" \
 		-e FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/udp-only.xml "$container" bash -lc '
 		set -e
