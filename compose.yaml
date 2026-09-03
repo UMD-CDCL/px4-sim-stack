@@ -57,7 +57,7 @@ x-deepstream: &deepstream
   # Where that TensorRT comes from, when the base's own apt sources do not
   # carry it. A Jetson takes the host's JetPack repository. Empty on x86.
   TRT_APT_SOURCE: ${DS_TRT_APT_SOURCE:-}
-  TRT_APT_KEY: ${DS_TRT_APT_KEY:-}
+  TRT_APT_PUBLIC_KEY: ${DS_TRT_APT_KEY:-}
 
 x-ids: &ids
   # Named HOST_UID, not UID. A build argument reaches every RUN as an
