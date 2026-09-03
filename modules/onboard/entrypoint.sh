@@ -6,7 +6,8 @@
 # and the d${N}_ and uas${N}_ frame prefixes. See docs/uas-contract.md.
 set -euo pipefail
 
-UAS_NUM=${UAS_NUM:?must be set: 1 to 9 for a real vehicle, 11 to 19 for a simulated one}
+# An empty or unset UAS_NUM falls to the case below, which states the rule.
+UAS_NUM=${UAS_NUM:-}
 # The number says which world this is. Contract section 1: a simulated
 # vehicle is its real counterpart plus ten.
 case "${UAS_NUM}" in
@@ -80,6 +81,9 @@ fi
 
 SITE_PARAMS=""
 LENS_PARAMS=""
+# The bound on both camera waits below: the simulator's stream and the
+# aircraft's rcam sockets.
+STREAM_WAIT_S=${STREAM_WAIT_S:-300}
 if [ "${SIM}" = true ]; then
 	# ---------------------------------------------------------------------
 	# Everything the simulator stands in for. None of it exists on the
@@ -182,7 +186,7 @@ if [ "${SIM}" = true ]; then
 		calibrate "${CAMERA_HFOV_DEG}" simulated "${CAMERA_DIR}/gimbal.yaml"
 	fi
 
-	SITE_PARAMS=${SITE_PARAMS:-/camera/site.yaml}
+	SITE_PARAMS=/camera/site.yaml
 	source /usr/local/bin/site-params.sh
 
 	# Where the survey marker really is. A fiducial capture is localized and the
@@ -204,7 +208,6 @@ if [ "${SIM}" = true ]; then
 	# pulled from it, with the same GStreamer the detector opens it with.
 	GIMBAL_STREAM=${GIMBAL_STREAM:-$([ "${MODEL}" = v3 ] && echo "rgb${UAS_NUM}" || echo "pilot${UAS_NUM}")}
 	CAMERA_URI="${RTSP_BASE:-rtsp://video-router:8554}/${GIMBAL_STREAM}"
-	STREAM_WAIT_S=${STREAM_WAIT_S:-300}
 	waited=0
 	until timeout 15 gst-launch-1.0 -q rtspsrc "location=${CAMERA_URI}" latency=100 \
 		! fakesink num-buffers=1 >/dev/null 2>&1; do
@@ -235,7 +238,6 @@ else
 	# picks the one this airframe reads. The detector opens its camera once,
 	# so wait for the sockets the way the simulator waits for its stream.
 	# ---------------------------------------------------------------------
-	STREAM_WAIT_S=${STREAM_WAIT_S:-300}
 	waited=0
 	until ls /tmp/*ds_nv.sock >/dev/null 2>&1; do
 		if [ "${waited}" -ge "${STREAM_WAIT_S}" ]; then

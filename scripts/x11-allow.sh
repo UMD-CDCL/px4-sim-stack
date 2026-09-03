@@ -21,7 +21,12 @@ DISP=${DISPLAY:-}
 # Does any selected service draw on X? The compose file says which ones
 # mount the X socket, so the answer is read there and written nowhere else.
 gui_selected() {
-	docker compose config --format json 2>/dev/null | python3 -c '
+	# A compose file that does not render answers "no". Compose itself reports
+	# the real error to the operator a moment later.
+	local rendered
+	rendered=$(docker compose config --format json 2>/dev/null) || return 1
+	[ -n "$rendered" ] || return 1
+	printf '%s' "$rendered" | python3 -c '
 import json, sys
 services = (json.load(sys.stdin).get("services") or {}).values()
 mounts = (m.get("source") for s in services for m in (s.get("volumes") or []))

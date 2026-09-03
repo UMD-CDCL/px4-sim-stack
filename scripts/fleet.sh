@@ -14,6 +14,9 @@ UAS_BASE=${UAS_BASE:-10}
 FIRST_UAS=$((UAS_BASE + 1))
 LAST_UAS=$((UAS_BASE + UAS_COUNT))
 if [ "$UAS_BASE" -ge 10 ]; then FLEET_IS_SIMULATED=true; else FLEET_IS_SIMULATED=false; fi
+# Whether .env selects a real machine. px4sim and scripts/preflight.sh both
+# ask, so the profile names are written once.
+real_profiles_selected() { case ",${COMPOSE_PROFILES:-}," in *,ground,* | *,aircraft,*) return 0 ;; esac; return 1; }
 # Where the vehicles are. The real fleet flies 10.200.142.6<N> with the
 # ground station at .60. The simulated one sits in its own block of the same
 # range, or of SIMNET_PREFIX where the host is itself on the radio network.
@@ -115,6 +118,9 @@ uas_gcs_port() { echo "$((14550 + $1))"; }
 uas_address() {
 	if [ "$FLEET_IS_SIMULATED" = true ]; then echo "$SIMNET_PREFIX.$((200 + $1))"; else echo "$FLEET_PREFIX.$((60 + $1))"; fi
 }
+# The ground station of the real fleet. It holds slot zero of the same rule,
+# so the real fleet answers on .60 and the vehicles above it.
+ground_address() { uas_address 0; }
 uas_tcp_port() {
 	if [ "$FLEET_IS_SIMULATED" = true ]; then echo "$((5750 + $1))"; else echo 5760; fi
 }
@@ -123,7 +129,7 @@ uas_foxglove_port() {
 }
 # Where an operator opens a vehicle's own bridge from this machine.
 uas_foxglove_url() {
-	if [ "$FLEET_IS_SIMULATED" = true ]; then echo "ws://localhost:$(uas_foxglove_port "$1")"; else echo "ws://$(uas_address "$1"):8765"; fi
+	if [ "$FLEET_IS_SIMULATED" = true ]; then echo "ws://localhost:$(uas_foxglove_port "$1")"; else echo "ws://$(uas_address "$1"):$(uas_foxglove_port "$1")"; fi
 }
 # Where this host plays a stream from: the video router's published port in
 # the simulator, lcam on the real ground, rcam on the aircraft.

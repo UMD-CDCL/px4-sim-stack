@@ -175,18 +175,20 @@ export GROUND_DOMAIN
 
 aircraft_selected() { case ",${COMPOSE_PROFILES:-}," in *,aircraft,*) return 0 ;; esac; return 1; }
 
+# Whether the boot unit holds this stack. systemd sets INVOCATION_ID inside a
+# unit, so this is true only for a person who runs px4sim by hand.
+unit_owns_stack() { [ -z "${INVOCATION_ID:-}" ] && systemctl is-active --quiet onboard.service 2>/dev/null; }
+
 # UAS_BASE and COMPOSE_PROFILES have to describe one world. A simulated fleet
 # through the real profiles would exec a real container that is not there,
 # and the real fleet through the sim profiles would number a vehicle 11.
 # `start` runs this again after a profile list on the command line.
 check_mode() {
-	local real=false
-	case ",${COMPOSE_PROFILES:-}," in *,ground,* | *,aircraft,*) real=true ;; esac
-	if [ "$real" = true ] && [ "$FLEET_IS_SIMULATED" = true ]; then
+	if real_profiles_selected && [ "$FLEET_IS_SIMULATED" = true ]; then
 		die "COMPOSE_PROFILES ('${COMPOSE_PROFILES:-}') selects the real ground or the aircraft,
     and UAS_BASE=$UAS_BASE numbers a simulated fleet. Set UAS_BASE=0 in .env. See .env.example."
 	fi
-	if [ "$real" = false ] && [ "$FLEET_IS_SIMULATED" = false ]; then
+	if ! real_profiles_selected && [ "$FLEET_IS_SIMULATED" = false ]; then
 		die "UAS_BASE=$UAS_BASE numbers the real fleet, and COMPOSE_PROFILES ('${COMPOSE_PROFILES:-}')
     selects no real profile. Set COMPOSE_PROFILES=ground or aircraft in .env. See .env.example."
 	fi
@@ -526,12 +528,12 @@ endpoints() {
 	if [ "$FLEET_IS_SIMULATED" = false ]; then
 		cat <<EOF
 
-  ${BOLD}MAVLink${OFF}     udp://$FLEET_PREFIX.60:$(uas_gcs_port "$FIRST_UAS") upwards   each vehicle's router pushes here, into the native ground router
+  ${BOLD}MAVLink${OFF}     udp://$(ground_address):$(uas_gcs_port "$FIRST_UAS") upwards   each vehicle's router pushes here, into the native ground router
               udp://127.0.0.1:14402     the native router feeds MAVROS here, on the aircraft and on the ground
               tcp://127.0.0.1:5760      this machine's native router, every vehicle it hears. MAVSDK, pymavlink
   ${BOLD}Video${OFF}       $(host_rtsp_base)/$(ground_stream "$FIRST_UAS")   the low rate mounts lcam restreams: rgbl<N>, pilotl<N>, thermall<N>
               rtsp://$(uas_address "$FIRST_UAS"):8554/rgb      the full mounts, on the vehicle: rgb, pilot, thermal
-  ${BOLD}Foxglove${OFF}    ws://localhost:8765       the ground station here, or the aircraft when run there
+  ${BOLD}Foxglove${OFF}    ws://localhost:$(uas_foxglove_port "$FIRST_UAS")       the ground station here, or the aircraft when run there
               $(uas_foxglove_url "$FIRST_UAS")       uas$FIRST_UAS's own bridge
 
 EOF
@@ -583,9 +585,10 @@ fleet_facts() {
 	EOF
 	for n in $(fleet_numbers); do
 		companion=$(has_service "$(companion_service "$n")" && companion_service "$n" || true)
-		printf 'vehicle n=%s sysid=%s model=%s mark=%s domain=%s tcp=%s gcs=%s foxglove=%s address=%s router=uas%s companion=%s gimbal=%s streams=%s zoom=%s\n' \
+		printf 'vehicle n=%s sysid=%s model=%s mark=%s domain=%s tcp=%s gcs=%s foxglove=%s foxglove_url=%s address=%s router=uas%s companion=%s gimbal=%s streams=%s zoom=%s\n' \
 			"$n" "$n" "$(model_of "$n")" "$(mark_of "$n")" "$(uas_domain "$n")" \
 			"$(uas_tcp_port "$n")" "$(uas_gcs_port "$n")" "$(uas_foxglove_port "$n")" \
+			"$(uas_foxglove_url "$n")" \
 			"$(uas_address "$n")" "$n" "$companion" "$(gimbal_stream "$n")" \
 			"$(streams_of "$n" | tr ' ' ',' | sed 's/,$//')" \
 			"$(zoom_preset_of_slot $((n - UAS_BASE - 1)) || true)"
@@ -746,7 +749,13 @@ esac
 # The simulator's own commands. None of them may reach a real vehicle.
 case "$cmd" in
 fly | place | scene | scenario | fiducial | reset | px4 | console | snap | verify | genscene) require_sim "$cmd" ;;
-uas) case "${2:-}" in arm | takeoff | land | goto) require_sim "uas $2" ;; esac ;;
+uas)
+	# The verb can stand anywhere. uas.py reads `--` as the end of the
+	# options and dispatches the word after it, so `uas 1 -- arm` arms.
+	for word in "$@"; do
+		case "$word" in arm | takeoff | land | goto) require_sim "uas $word" ;; esac
+	done
+	;;
 esac
 
 case "$cmd" in
@@ -790,7 +799,7 @@ build)
 	fi
 	;;
 
-x11)      ./scripts/x11-allow.sh ;;
+x11)      add_fleet_profiles; ./scripts/x11-allow.sh ;;
 
 start|up|core)
 	# A profile list can be given: ./px4sim start ground
@@ -802,8 +811,10 @@ start|up|core)
 	add_fleet_profiles
 	[ "$FLEET_IS_SIMULATED" = true ] && need_sources
 	./scripts/x11-allow.sh
-	if [ "$FLEET_IS_SIMULATED" = false ] && [ -z "${INVOCATION_ID:-}" ] \
-	   && systemctl is-active --quiet onboard.service 2>/dev/null; then
+	# The log volumes bind here. Compose makes a missing one root-owned, and
+	# the uid 1000 container then writes nothing into it.
+	mkdir -p logs/onboard logs/offboard logs/px4 logs/qgc
+	if [ "$FLEET_IS_SIMULATED" = false ] && unit_owns_stack; then
 		warn "onboard.service already runs this stack. This start reuses its container."
 	fi
 	say "Starting: $COMPOSE_PROFILES"
@@ -827,7 +838,7 @@ start|up|core)
 	;;
 
 stop|down)
-	if [ -z "${INVOCATION_ID:-}" ] && systemctl is-active --quiet onboard.service 2>/dev/null; then
+	if unit_owns_stack; then
 		warn "onboard.service stays active with no container. It starts the stack again"
 		warn "at the next boot, or now with:  sudo systemctl restart onboard"
 	fi
@@ -845,7 +856,7 @@ stop|down)
 		fuser -s "$segment" 2>/dev/null && continue
 		rm -f "$segment" && leaked=$((leaked + 1))
 	done
-	[ "$leaked" -gt 0 ] && echo "  released $leaked shared memory segments"
+	if [ "$leaked" -gt 0 ]; then echo "  released $leaked shared memory segments"; fi
 	;;
 
 restart)
@@ -1017,12 +1028,20 @@ topics)
 	# A vehicle holds ROS domain 60 + N and its companion sources the
 	# workspace in its entry point, which `exec` does not run. So both are
 	# given here. The ground station is domain $GROUND_DOMAIN in the offboard container.
+	#
+	# On the real ground the vehicle's companion runs on the aircraft. The
+	# ground container joins every vehicle's domain with its domain bridge,
+	# so it answers for the vehicle from here.
 	n=$(vehicle_arg "${1:-}")
-	companion=$(companion_service "$n")
-	has_service "$companion" || die "compose.yaml defines no $companion, so uas$n has no ROS stack."
-	COMPOSE_PROFILES="$ALL_PROFILES" $DC exec -e ROS_DOMAIN_ID="$(uas_domain "$n")" "$companion" bash -lc \
+	if [ "$FLEET_IS_SIMULATED" = false ] && ! aircraft_selected; then
+		reader=$(ground_service)
+	else
+		reader=$(companion_service "$n")
+	fi
+	has_service "$reader" || die "compose.yaml defines no $reader, so uas$n has no ROS stack."
+	COMPOSE_PROFILES="$ALL_PROFILES" $DC exec -e ROS_DOMAIN_ID="$(uas_domain "$n")" "$reader" bash -lc \
 		'. /usr/local/bin/ros-env.sh; ros2 topic list' \
-		|| die "$companion did not answer. Is it running?  ./px4sim status"
+		|| die "$reader did not answer. Is it running?  ./px4sim status"
 	;;
 
 layout)

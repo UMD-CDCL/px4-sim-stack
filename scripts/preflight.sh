@@ -20,7 +20,11 @@ echo ""
 # below ask which world that is.
 selected=",${COMPOSE_PROFILES:-},"
 sim_selected()  { case "$selected" in *,sim,*) return 0 ;; esac; return 1; }
-real_selected() { case "$selected" in *,ground,* | *,aircraft,*) return 0 ;; esac; return 1; }
+# The fleet numbers and whether they are the simulated ones. fleet.sh holds
+# that rule for ./px4sim, and this reads the same answer rather than a second
+# copy of the arithmetic.
+# shellcheck disable=SC1091
+. ./scripts/fleet.sh
 
 # ---------------------------------------------------------------- NVIDIA driver
 # The GPU and its driver decide which DeepStream release this machine can run,
@@ -156,27 +160,23 @@ fi
 
 sed -i "s|^HOST_UID=.*|HOST_UID=$(id -u)|" .env
 sed -i "s|^HOST_GID=.*|HOST_GID=$(id -g)|" .env
+# One host value in .env. Append rather than edit where the line is absent,
+# because an .env copied from an older example does not have it yet.
+set_env_key() { # name value
+	if grep -q "^$1=" .env; then
+		sed -i "s|^$1=.*|$1=$2|" .env
+	else
+		printf '%s=%s\n' "$1" "$2" >> .env
+	fi
+}
 # The group that owns /dev/input/event*. The qgc container joins it so
-# QGroundControl can read a joystick. Append rather than edit, because an .env
-# copied from an older example does not have the line yet.
+# QGroundControl can read a joystick.
 input_gid=$(getent group input | cut -d: -f3 || true)
-if [ -n "${input_gid:-}" ]; then
-	if grep -q '^INPUT_GID=' .env; then
-		sed -i "s|^INPUT_GID=.*|INPUT_GID=$input_gid|" .env
-	else
-		echo "INPUT_GID=$input_gid" >> .env
-	fi
-fi
+[ -n "${input_gid:-}" ] && set_env_key INPUT_GID "$input_gid"
 # The group that owns /dev/dri/renderD128 on a Jetson. The aircraft container
-# joins it beside video and dialout. Written the way INPUT_GID is.
+# joins it beside video and dialout.
 render_gid=$(getent group render | cut -d: -f3 || true)
-if [ -n "${render_gid:-}" ]; then
-	if grep -q '^RENDER_GID=' .env; then
-		sed -i "s|^RENDER_GID=.*|RENDER_GID=$render_gid|" .env
-	else
-		echo "RENDER_GID=$render_gid" >> .env
-	fi
-fi
+[ -n "${render_gid:-}" ] && set_env_key RENDER_GID "$render_gid"
 # DISPLAY stays out of .env. The containers take it from the session that
 # starts them, because a value in the file goes stale on another machine.
 sed -i "/^DISPLAY=/d" .env
@@ -230,12 +230,12 @@ fi
 # UAS_BASE and COMPOSE_PROFILES have to describe one world, and the real
 # profiles need their numbers. A wrong number here is a station that hears
 # nothing and says nothing.
-if real_selected && [ "${UAS_BASE:-10}" -ge 10 ]; then
-	bad "COMPOSE_PROFILES selects the real ground or the aircraft and UAS_BASE is ${UAS_BASE:-10}. Set UAS_BASE=0 in .env."
-elif ! real_selected && [ "${UAS_BASE:-10}" -lt 10 ]; then
-	bad "UAS_BASE=${UAS_BASE:-10} numbers the real fleet and COMPOSE_PROFILES selects no real profile. Set COMPOSE_PROFILES=ground or aircraft in .env."
+if real_profiles_selected && [ "$FLEET_IS_SIMULATED" = true ]; then
+	bad "COMPOSE_PROFILES selects the real ground or the aircraft and UAS_BASE is $UAS_BASE. Set UAS_BASE=0 in .env."
+elif ! real_profiles_selected && [ "$FLEET_IS_SIMULATED" = false ]; then
+	bad "UAS_BASE=$UAS_BASE numbers the real fleet and COMPOSE_PROFILES selects no real profile. Set COMPOSE_PROFILES=ground or aircraft in .env."
 else
-	ok "UAS_BASE=${UAS_BASE:-10} and profiles '${COMPOSE_PROFILES:-}' describe one world"
+	ok "UAS_BASE=$UAS_BASE and profiles '${COMPOSE_PROFILES:-}' describe one world"
 fi
 case "$selected" in
 *,ground,*)
@@ -283,6 +283,14 @@ overrides=$(sed -n 's/^[[:space:]]*-[[:space:]]*"\${\([A-Za-z_][A-Za-z_0-9]*\):-
 	done)
 
 config=$(docker compose config --format json 2>/dev/null)
+# The name compose labels every container of this stack with. Both port checks
+# below tell one of ours from a stranger's by it, so it is read once, from the
+# rendered file rather than from a copy of the name.
+project=""
+if [ -n "$config" ] && command -v python3 >/dev/null 2>&1; then
+	project=$(printf '%s' "$config" |
+		python3 -c 'import json,sys; print(json.load(sys.stdin).get("name",""))')
+fi
 if ! command -v ss >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
 	note "no ss or python3 here, so no host port was checked."
 elif [ -z "$config" ]; then
@@ -290,8 +298,6 @@ elif [ -z "$config" ]; then
         Say why:  ./px4sim check"
 else
 	# What this stack already publishes is its own, not a conflict with itself.
-	project=$(printf '%s' "$config" |
-		python3 -c 'import json,sys; print(json.load(sys.stdin).get("name",""))')
 	# docker prints a run of ports as one range, 14561-14569->14561-14569/udp,
 	# so each mapping is spread back out. Read one number where a range is
 	# meant and this stack reports its own ground station as a stranger.
@@ -375,9 +381,11 @@ fi
 # A service on the host network publishes nothing, so the port check above
 # sees nothing. MAVROS binds 14402/udp and the Foxglove bridge 8765/tcp. A
 # container of this stack that already holds them is not a conflict.
-if real_selected && command -v ss >/dev/null 2>&1; then
-	ours=$(docker ps --filter "label=com.docker.compose.project=${project:-px4simstack}" \
-	                 --format '{{.Names}} {{.Networks}}' 2>/dev/null | awk '$2 == "host"')
+if real_profiles_selected && command -v ss >/dev/null 2>&1; then
+	ours=""
+	[ -n "$project" ] &&
+		ours=$(docker ps --filter "label=com.docker.compose.project=$project" \
+		                 --format '{{.Names}} {{.Networks}}' 2>/dev/null | awk '$2 == "host"')
 	while read -r number protocol what; do
 		if [ "$protocol" = udp ]; then flag=-lnu; else flag=-lnt; fi
 		held=$(ss "$flag" -p 2>/dev/null | awk -v want=":$number\$" '$4 ~ want { print; exit }')
@@ -412,10 +420,17 @@ else
 	note "$ws/src/5g_drone missing. The onboard and offboard images build it.
         Check it out, or set ROS2_WS_DIR in .env."
 fi
+# The chimera-deploy checkout. compose passes it as a named build context for
+# every ros-base build, MAVROS_PATCH=0 included, because docker resolves a
+# named context before it reads the Dockerfile.
+deploy=${CHIMERA_DEPLOY_DIR:-../chimera-deploy}
+if [ ! -d "$deploy" ]; then
+	note "$deploy is missing. ros-base cannot build without it:
+        git clone git@github.com:UMD-UROC/chimera-deploy.git $deploy   (or set CHIMERA_DEPLOY_DIR)"
+fi
 # The MAVROS patch. ros-base builds it from chimera-deploy's submodules, and
 # an empty submodule fails the build with a readable message. Say it earlier.
 if [ "${MAVROS_PATCH:-1}" = 1 ]; then
-	deploy=${CHIMERA_DEPLOY_DIR:-../chimera-deploy}
 	if [ -f "$deploy/submodules/mavros/mavros/package.xml" ] && [ -d "$deploy/submodules/angles/angles" ]; then
 		ok "$deploy present, with the mavros and angles submodules"
 	else
@@ -464,6 +479,11 @@ model_name() { # key -- what the parameter files finally set it to
 	done
 	printf '%s' "$value"
 }
+
+# The log volumes bind to these directories. Compose makes a missing one
+# root-owned, and the uid 1000 container then writes nothing into it.
+mkdir -p logs/onboard logs/offboard logs/px4 logs/qgc 2>/dev/null ||
+	bad "cannot create logs/onboard logs/offboard logs/px4 logs/qgc here."
 
 if [ ! -d "$models" ]; then
 	# Compose creates a missing bind-mount source as a root-owned directory,
@@ -562,7 +582,7 @@ case "$selected" in
 	;;
 esac
 # lcam and rcam have no API, so ./px4sim streams probes each mount with this.
-if real_selected && ! command -v gst-discoverer-1.0 >/dev/null 2>&1; then
+if real_profiles_selected && ! command -v gst-discoverer-1.0 >/dev/null 2>&1; then
 	note "gst-discoverer-1.0 not found, so ./px4sim streams cannot probe the RTSP mounts. Run: sudo apt install gstreamer1.0-plugins-base-apps"
 fi
 

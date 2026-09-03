@@ -35,6 +35,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -418,29 +419,30 @@ class Links:
         self.watcher.close()
 
 
-def listening(ports: list[int], timeout: float = PORT_PROBE_S) -> dict[int, bool]:
-    """Which ports accept a connection right now. Every port is tried at once."""
-    answers = {port: False for port in ports}
+def listening(targets: list[tuple[str, int]],
+              timeout: float = PORT_PROBE_S) -> dict[tuple[str, int], bool]:
+    """Which host and port pairs accept a connection right now, all at once."""
+    answers = {target: False for target in targets}
     trying = {}
-    for port in ports:
+    for target in answers:
         opening = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         opening.setblocking(False)
-        result = opening.connect_ex((LOOPBACK, port))
+        result = opening.connect_ex(target)
         if result in (0, errno.EINPROGRESS, errno.EALREADY, errno.EWOULDBLOCK):
-            trying[port] = opening
+            trying[target] = opening
         else:
             opening.close()
     deadline = time.monotonic() + timeout
     with selectors.DefaultSelector() as watcher:
-        for port, opening in trying.items():
-            watcher.register(opening, selectors.EVENT_WRITE, port)
+        for target, opening in trying.items():
+            watcher.register(opening, selectors.EVENT_WRITE, target)
         while watcher.get_map():
             left = deadline - time.monotonic()
             if left <= 0:
                 break
             for key, _events in watcher.select(timeout=left):
-                port = key.data
-                answers[port] = trying[port].getsockopt(
+                target = key.data
+                answers[target] = trying[target].getsockopt(
                     socket.SOL_SOCKET, socket.SO_ERROR) == 0
                 watcher.unregister(key.fileobj)
     for opening in trying.values():
@@ -458,18 +460,25 @@ class Bridges:
     """
 
     def __init__(self, context: dict):
-        self.named = [{"name": "ground",
+        # The ground bridge is this machine's own. A vehicle's is wherever
+        # px4sim says it is, which is the vehicle itself on the real fleet.
+        self.named = [{"name": "ground", "host": LOOPBACK,
                        "port": int(context.get("ground_foxglove", 8765))}]
         for vehicle in context["fleet"]:
             if vehicle.get("companion"):
+                where = urllib.parse.urlsplit(vehicle.get("foxglove_url", ""))
                 self.named.append({"name": f"uas{vehicle['n']}",
-                                   "port": int(vehicle["foxglove"])})
-        self.open_ports: dict[int, bool] = {}
+                                   "host": where.hostname or LOOPBACK,
+                                   "port": where.port or int(vehicle["foxglove"])})
+        self.open_ports: dict[tuple[str, int], bool] = {}
 
     def read(self, tick: int) -> list[dict]:
         if tick % BRIDGE_PERIOD_TICKS == 0 or not self.open_ports:
-            self.open_ports = listening([bridge["port"] for bridge in self.named])
-        return [dict(bridge, listening=self.open_ports.get(bridge["port"], False))
+            self.open_ports = listening(
+                [(bridge["host"], bridge["port"]) for bridge in self.named])
+        return [dict(bridge,
+                     listening=self.open_ports.get(
+                         (bridge["host"], bridge["port"]), False))
                 for bridge in self.named]
 
 

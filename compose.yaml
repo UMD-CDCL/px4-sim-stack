@@ -276,6 +276,8 @@ services:
         ros2_ws: ${ROS2_WS_DIR:-../ros2_ws}
         # remote/mavros_patch and the mavros and angles submodules, for the
         # MAVROS that talks to PX4 v1.18. See modules/ros-base/Dockerfile.
+        # Every ros-base build needs this path, MAVROS_PATCH=0 included:
+        # docker resolves a named context before it reads the Dockerfile.
         chimera_deploy: ${CHIMERA_DEPLOY_DIR:-../chimera-deploy}
       args:
         <<: [*ids, *deepstream]
@@ -610,9 +612,9 @@ services:
     <<: *onboard
     profiles: [aircraft]
     network_mode: host
-    # A crash comes back five times. The boot unit in chimera-deploy starts
-    # this container after rcam, the router and the clock. Docker does not
-    # restore an on-failure container at boot, so the two never fight.
+    # A crash comes back five times. Docker also starts this container again
+    # at boot after a power cut, so the boot unit removes it before the clock
+    # wait and makes it again after (chimera-deploy remote/onboard.service).
     restart: on-failure:5
     environment:
       <<: *onboard-env
@@ -676,6 +678,11 @@ services:
   # 127.0.0.1:14402 and DDS reaches the aircraft on the wire. lcam serves the
   # low rate streams on 8554 under the names offboard.launch.py builds.
   # No ground-router, no video-router, no qgc: the native ones do that work.
+  #
+  # One vehicle today. Vehicle N's MAVROS binds 127.0.0.<N>:14402, and the
+  # fielded router sends every vehicle to 127.0.0.1:14402. A longer UAS_FLEET
+  # needs one mavros endpoint for each vehicle in
+  # chimera-deploy/local/main.conf, the shape ground-router writes below.
   # -------------------------------------------------------------------------
   ground:
     <<: *offboard
@@ -684,6 +691,10 @@ services:
     environment:
       <<: *offboard-env
       RTSP_BASE: ${RTSP_BASE:-rtsp://127.0.0.1:8554}
+      # 60 beside the real fleet, which flies 61 to 69. The anchor's 70
+      # belongs to a simulated fleet. scripts/fleet.sh derives the same pair
+      # for the host, so a .env with no GROUND_DOMAIN line still agrees.
+      GROUND_DOMAIN: ${GROUND_DOMAIN:-60}
       # The dash form keeps an empty value empty: SCENE= in .env draws no
       # terrain on a bench, SCENE=lorton draws the site at the field.
       SCENE: ${SCENE-lorton}
@@ -691,8 +702,8 @@ services:
   # -------------------------------------------------------------------------
   # ground-router - the ground station's mavlink-router, from
   # chimera-deploy/local/main.conf. Every vehicle arrives on 14550 + N and
-  # leaves to loopback: 14401 for QGroundControl and 1440<N+1> for that
-  # vehicle's MAVROS.
+  # leaves to loopback: 14401 for QGroundControl and 127.0.0.<N>:14402 for
+  # that vehicle's MAVROS, the same port MAVROS binds on the aircraft.
   #
   # It shares the offboard container's network namespace, because those
   # endpoints are loopback ones and MAVROS binds them there. That is also why

@@ -20,6 +20,8 @@ import urllib.request
 
 API = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:9997"
 PROBE_SECONDS = 5
+# gst-discoverer text when no server or no mount accepts the connection.
+REFUSED_TEXT = "Could not open resource for reading"
 
 
 def main() -> int:
@@ -80,11 +82,13 @@ def describe_video(report: str) -> str:
 def probe_rtsp(base: str, names: list[str]) -> int:
     print(f"  {'PATH':<20} {'STATE':<9} SOURCE")
     live = 0
+    refused = 0
     for name in names:
         try:
             result = subprocess.run(["gst-discoverer-1.0", "-t", str(PROBE_SECONDS), f"{base}/{name}"],
                                     capture_output=True, text=True, timeout=PROBE_SECONDS * 3)
             video = describe_video(result.stdout)
+            refused += REFUSED_TEXT in result.stdout
         except FileNotFoundError:
             print("  gst-discoverer-1.0 is not installed. It comes with gstreamer1.0-plugins-base-apps.")
             return 1
@@ -94,8 +98,12 @@ def probe_rtsp(base: str, names: list[str]) -> int:
         print(f"  {name:<20} {'online' if video else 'offline':<9} {video or '-'}")
     if live == 0:
         print()
-        print(f"  Nothing answers at {base}. The ground station serves it with lcam.service,")
-        print("  the aircraft with rcam.service:  systemctl status lcam rcam")
+        if refused == len(names):
+            print(f"  Nothing answers at {base}. The ground station serves it with lcam.service,")
+            print("  the aircraft with rcam.service:  systemctl status lcam rcam")
+        else:
+            print(f"  {base} answers, but no stream sends frames.")
+            print("  Check the camera on the vehicle.")
     return 0
 
 

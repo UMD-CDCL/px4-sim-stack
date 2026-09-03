@@ -456,24 +456,28 @@ RUN /opt/ros/${ROS_DISTRO}/lib/mavros/install_geographiclib_datasets.sh
 # angles submodules beside it, so the aircraft and the simulator load one
 # MAVROS. chimera_deploy is a named build context, CHIMERA_DEPLOY_DIR in .env.
 #
+# The three source directories arrive as build mounts, not as copies, so no
+# source lands in a layer that the derived images then carry.
+#
 # The overlay lands in /opt/mavros, and ros-env.sh sources it between /opt/ros
 # and the workspace. The build dependencies arrive with the apt mavros above,
-# so this block installs only patch. MAVROS_PATCH=0 skips the build. apply.sh
-# pins MAVROS 2.14.0 on /opt/ros/humble, so a Jazzy base skips it too.
+# so this block installs patch and the colcon extension that supplies
+# --allow-overriding, which the image does not have. MAVROS_PATCH=0 skips the
+# build. apply.sh pins MAVROS 2.14.0 on /opt/ros/humble, so a Jazzy base skips
+# it too.
 # ---------------------------------------------------------------------------
 ARG MAVROS_PATCH=1
-COPY --from=chimera_deploy remote/mavros_patch /tmp/chimera-deploy/remote/mavros_patch
-COPY --from=chimera_deploy submodules/mavros   /tmp/chimera-deploy/submodules/mavros
-COPY --from=chimera_deploy submodules/angles   /tmp/chimera-deploy/submodules/angles
-RUN set -eux; \
+RUN --mount=type=bind,from=chimera_deploy,source=remote/mavros_patch,target=/tmp/chimera-deploy/remote/mavros_patch \
+    --mount=type=bind,from=chimera_deploy,source=submodules/mavros,target=/tmp/chimera-deploy/submodules/mavros \
+    --mount=type=bind,from=chimera_deploy,source=submodules/angles,target=/tmp/chimera-deploy/submodules/angles \
+    set -eux; \
     if [ "${MAVROS_PATCH}" = 1 ] && [ "${ROS_DISTRO}" = humble ]; then \
         apt-get update; \
-        apt-get install -y --no-install-recommends patch; \
+        apt-get install -y --no-install-recommends patch python3-colcon-override-check; \
         MAVROS_PATCH_WS=/opt/mavros bash /tmp/chimera-deploy/remote/mavros_patch/apply.sh; \
         rm -rf /opt/mavros/src /opt/mavros/build /opt/mavros/log; \
         rm -rf /var/lib/apt/lists/*; \
-    fi; \
-    rm -rf /tmp/chimera-deploy
+    fi
 
 # pymap3d is what tf_loc and MAVInsight convert LLA with. folium is the mosaic
 # map export.
