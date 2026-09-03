@@ -3,7 +3,9 @@
 A container stack that flies the Chimera flight code against PX4 SITL and
 Gazebo Harmonic. The simulator presents MAVLink, RTSP video and a rangefinder.
 The flight code from 5g_drone and MAVInsight runs unchanged, on the same ROS
-domains, ports and frame names it uses on the aircraft.
+domains, ports and frame names it uses on the aircraft. The same onboard and
+offboard images also run on the aircraft and on the fielded ground station,
+beside the native services there.
 
 `docs/uas-contract.md` states what a simulated vehicle must present. The
 simulator satisfies that contract. The flight code does not accommodate the
@@ -40,21 +42,35 @@ simulator.
 
 | Service | Contents | Profile |
 |---|---|---|
-| `sim` | Gazebo Harmonic, one PX4 SITL instance for each vehicle, the camera encoders | always |
+| `sim` | Gazebo Harmonic, one PX4 SITL instance for each vehicle, the camera encoders | `sim` |
 | `uas11` to `uas19` | mavlink-router, one container for each vehicle | from `UAS_FLEET` |
 | `onboard11` to `onboard14` | The companion computer: MAVROS, `ds_node`, MAVInsight | from `UAS_FLEET` |
-| `offboard` | The ground station for the whole fleet, plus its `ground-router` | `offboard` |
-| `video-router` | MediaMTX. Every camera enters here and leaves as RTSP | always |
-| `qgc` | QGroundControl v5.0.8, released build | always |
+| `offboard` | The simulated ground station for the whole fleet, plus its `ground-router` | `offboard` |
+| `video-router` | MediaMTX. Every camera enters here and leaves as RTSP | `sim`, `offboard` |
+| `qgc` | QGroundControl v5.0.8, released build | `sim` |
+| `ground` | The real ground station on t500: the offboard image on the host network, beside the native mavlink-router and lcam | `ground` |
+| `onboard` | The aircraft: the companion image on the host network, beside the native mavlink-router and rcam | `aircraft` |
 | `scenegen` | Builds a scene from map data. Runs on demand and exits | `scenegen` |
 | `xrce-agent` | The uXRCE-DDS bridge, for a stack that needs `px4_msgs` | `xrce` |
 
 A vehicle is one machine: the companion container shares its router's network
 namespace, so the router reaches MAVROS on loopback, as it does on the Orin.
 The ground station is one machine too, so `offboard` holds one MAVROS for each
-vehicle and `ground-router` shares its namespace.
+vehicle and `ground-router` shares its namespace. On the real machines the
+container shares the host's namespace instead, and the native router pushes to
+`127.0.0.1:14402` as it does today.
+
+`UAS_BASE` in `.env` says which world the numbers belong to: 10 numbers a
+simulated fleet from uas11, 0 the real one from uas1. `COMPOSE_PROFILES` says
+what runs. `./px4sim` refuses a `.env` where the two disagree.
 
 ## Start here
+
+`.env` says which machine this is. `.env.example` holds the three pairs of
+`COMPOSE_PROFILES` and `UAS_BASE`, one for each machine.
+
+The simulator, on one laptop, with `COMPOSE_PROFILES=sim,offboard` and
+`UAS_BASE=10`:
 
 ```bash
 ./px4sim doctor    # check the driver, docker, GPU runtime and X11
@@ -62,6 +78,27 @@ vehicle and `ground-router` shares its namespace.
 ./px4sim build     # build the images, about 20 minutes
 ./px4sim start     # start the stack
 ```
+
+The real ground station on t500, with `COMPOSE_PROFILES=ground`, `UAS_BASE=0`
+and `GROUND_DOMAIN=60`:
+
+```bash
+./px4sim doctor    # also lcam, mavlink-router, and the host ports 14402 and 8765
+./px4sim build     # ros-base and the ground image
+./px4sim start     # one container, ground, on the host network
+```
+
+The aircraft, with `COMPOSE_PROFILES=aircraft` and `UAS_BASE=0`, after
+`chimera-deploy/remote/deploy_onboard.sh` wrote its `.env`:
+
+```bash
+./px4sim doctor    # also rcam, its sockets, the clock, the power mode and the lens
+./px4sim build     # the arm64 images, on the Orin itself. 60 to 120 minutes the first time
+./px4sim start     # one container, onboard, on the host network
+```
+
+Each machine builds its own architecture from its own checkout. No machine
+copies an image from another.
 
 To stop it:
 
@@ -100,6 +137,16 @@ already plugged in.
 | Low-rate video | the same names with `l` appended: `rgbl11` |
 | Foxglove, ground station | `ws://localhost:8765` |
 | Foxglove, one vehicle | `ws://localhost:8771` for uas11 |
+
+The real fleet, `N` 1 to 9, with `UAS_BASE=0`:
+
+| What | Address |
+|---|---|
+| MAVLink, to the ground station | `udp://10.200.142.60:14550 + N`, so 14551 for uas1, into the native router |
+| MAVLink, to MAVROS | `udp://127.0.0.1:14402`, from the native router, on the aircraft and on the ground alike |
+| MAVLink, for scripts | `tcp://127.0.0.1:5760`, this machine's native router |
+| Low-rate video, on the ground | `rtsp://127.0.0.1:8554/rgbl1` from lcam, `pilotl1`, `thermall1` |
+| Foxglove | `ws://localhost:8765` on each machine. From the ground, `ws://10.200.142.61:8765` is uas1's |
 
 `./px4sim status` prints this list for the fleet that is running.
 
@@ -141,6 +188,11 @@ Fly a vehicle and see what its nodes make of it:
 ./px4sim zoom 11 wide         # a v3 lens: narrow, mid or wide
 ./px4sim snap rgb11           # one frame of a stream, to look at
 ```
+
+With `UAS_BASE=0` a vehicle number is a real aircraft, so `./px4sim` refuses
+every command that flies the simulator: `fly`, `place`, `scene`, `scenario`,
+`fiducial`, `reset`, `px4`, `console`, `snap`, `verify`, `genscene`, and
+`uas N arm`, `takeoff`, `land` and `goto`. Nothing is sent.
 
 ## The console
 
@@ -216,7 +268,7 @@ Start a subset by naming the profiles:
 
 ```bash
 ./px4sim start ""             # the vehicles and QGC, with no ground station
-./px4sim start offboard       # the default, from COMPOSE_PROFILES in .env
+./px4sim start offboard       # the default. ./px4sim adds sim itself in the simulator
 ```
 
 The routers and the companions come from `UAS_FLEET`, so they need no profile
@@ -245,17 +297,23 @@ name here.
 | ROS 2 | Humble | What the aircraft runs. `cdcl_umd_msgs` does not decode across distributions, so the whole fleet is Humble and nothing here may choose otherwise. |
 | Gazebo | Harmonic | The Gazebo release that PX4 v1.17 installs. |
 | QGroundControl | v5.0.8 | The mature v5.0 line. Set `QGC_REF` in `.env` to move. |
-| DeepStream | 7.1 | The last release on Ubuntu 22.04, which is what Humble needs, and what the Orin runs. On a GPU newer than its TensorRT, `scripts/ds-select.sh` installs a TensorRT that fits and changes nothing else. `./px4sim doctor` explains. |
+| DeepStream | 7.1 | The last release on Ubuntu 22.04, which is what Humble needs, and what the Orin runs. On a GPU newer than its TensorRT, `scripts/ds-select.sh` installs a TensorRT that fits and changes nothing else. On a Jetson it installs the host's own TensorRT build. `./px4sim doctor` explains. |
 
 ## Requirements
 
-- Linux with an X11 session. Wayland works through XWayland, and is less tested.
+- Linux with an X11 session, where a window is wanted. Wayland works through
+  XWayland, and is less tested. The aircraft runs with no display.
 - An NVIDIA GPU, driver 535.183 or later, and `nvidia-container-toolkit`. A
   Blackwell card needs 570.133 or later, for the TensorRT that can build engines
   for it.
 - Docker 24 or later with Compose v2.
 - About 120 GB of disk and 32 GB of RAM. Every vehicle costs GPU: a fleet of
   four renders ten cameras, encodes twenty streams and runs four detectors.
+- `chimera-deploy` beside this checkout, with its `mavros` and `angles`
+  submodules checked out. `ros-base` builds the PX4 v1.18 MAVROS patch from
+  them. `MAVROS_PATCH=0` in `.env` removes that need.
+- On the aircraft, `user` in group `docker`, and `UAS_NUM` in
+  `/etc/environment`. `chimera-deploy/remote/deploy_onboard.sh` sets both up.
 
 `make preflight` checks all of it and says what is missing.
 
