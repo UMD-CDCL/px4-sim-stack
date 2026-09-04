@@ -110,7 +110,16 @@ else
 fi
 
 # ------------------------------------------------------------------- Docker
-if docker version >/dev/null 2>&1; then
+# Under `sudo ./px4sim doctor` this process is root, and root reaches the
+# daemon whatever the operator's groups hold. The aircraft's boot unit runs as
+# the operator (chimera-deploy remote/onboard.service), so it is that account
+# that has to be in the group. Ask about it by name.
+if [ -n "${SUDO_USER:-}" ] && ! id -nG "$SUDO_USER" 2>/dev/null | grep -qw docker; then
+	note "docker works here under sudo only: $SUDO_USER is not in group docker.
+        onboard.service runs as that user, so it cannot start this stack.
+        The operator fixes it once, and then logs in again:
+        sudo usermod -aG docker $SUDO_USER"
+elif docker version >/dev/null 2>&1; then
 	ok "docker $(docker version --format '{{.Server.Version}}') reachable without sudo"
 elif id -nG | grep -qw docker; then
 	bad "cannot talk to the docker daemon, and you are in group docker. Is it running?
@@ -625,4 +634,11 @@ if [ "$fail" -gt 0 ]; then
 	echo "${RED}$fail check(s) failed.${OFF} Fix them before you start the stack."
 	exit 1
 fi
-echo "${GRN}Ready.${OFF} $warn warning(s). Next: ./px4sim setup, then ./px4sim build, then ./px4sim start."
+# `setup` clones the PX4 and QGroundControl sources, which only the simulator
+# builds. A real machine is one build and one start away from flying.
+if [ "$FLEET_IS_SIMULATED" = true ]; then
+	next="./px4sim setup, then ./px4sim build, then ./px4sim start"
+else
+	next="./px4sim build, then ./px4sim start"
+fi
+echo "${GRN}Ready.${OFF} $warn warning(s). Next: $next."
