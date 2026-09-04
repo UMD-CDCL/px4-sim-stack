@@ -69,7 +69,14 @@ FOOTPRINT_TOLERANCE_DEG = 20.0
 FOOTPRINT_MIN_DEPRESSION_DEG = 15.0
 METRES_PER_DEGREE = 111320.0
 TEXTURE_EDGE = 0.05
+# How far the drawn ground may sit from the height the surface file gives it.
+# The scene is anchored on the vehicle's own home fix, so this measures the
+# receiver's altitude error as much as the drawing. A simulated fix is exact
+# and 5 m is a drawing fault; a real receiver is metres out on a good day, and
+# the figure that still catches the mistakes worth catching is the geoid
+# separation, 33 m in Maryland, and a scene placed at the wrong site.
 SCENE_HEIGHT_TOLERANCE_M = 5.0
+SCENE_HEIGHT_TOLERANCE_REAL_M = 15.0
 # Colours closer together than this came from a default, not from an image.
 FLAT_COLOUR = 0.02
 
@@ -1320,7 +1327,7 @@ def command_scene(uas: Uas, args) -> int:
           f"\twest u {drawn['west_edge_u']:.2f}")
 
     faults = []
-    if abs(height) > SCENE_HEIGHT_TOLERANCE_M:
+    if abs(height) > args.height_tolerance:
         faults.append(f"drawn {height:+.1f} m from the surface file")
     if abs(drawn_relief - relief) > SCENE_HEIGHT_TOLERANCE_M:
         faults.append(f"relief {drawn_relief:.1f} m against {relief:.1f} m")
@@ -1560,6 +1567,12 @@ def main() -> int:
                        help="relative to the vehicle's namespace")
     scene.add_argument("--surface",
                        default=f"/scenes/worlds/{os.environ.get('SCENE', '')}_surface.json")
+    scene.add_argument("--height-tolerance", type=float,
+                       default=SCENE_HEIGHT_TOLERANCE_M,
+                       help="how far the drawn ground may sit from the surface "
+                            f"file. Default {SCENE_HEIGHT_TOLERANCE_M} m, which "
+                            "suits an exact fix. A real receiver needs "
+                            f"{SCENE_HEIGHT_TOLERANCE_REAL_M} m.")
     scene.add_argument("--deadline", type=float, default=30.0)
     topic = sub.add_parser("topic")
     topic.add_argument("topic", help="absolute, or relative to the namespace")

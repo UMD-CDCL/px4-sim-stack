@@ -84,9 +84,18 @@ expect_eq "the live view is calibrated, so the boxes land on it" data "${verdict
 # its axes and its map face; a turned or mirrored one publishes just as
 # convincingly as a correct one. With no scene there is no mesh and no map,
 # which is what a bench outside the survey area runs.
+#
+# The scene is anchored on the vehicle's own home fix, so the height this
+# compares carries the receiver's altitude error. A simulated fix is exact; a
+# real one is metres out, and the wider figure still catches the mistakes that
+# matter: a missing geoid separation, or a scene placed at the wrong site.
+scene_tolerance=()
+if [ "$FLEET_IS_SIMULATED" = false ]; then
+	scene_tolerance=(--height-tolerance 15)
+fi
 if [ -z "${SCENE:-}" ]; then
 	skip "no scene, so no terrain is drawn"
-elif scene=$(./px4sim uas "$reader" scene 2>&1); then
+elif scene=$(./px4sim uas "$reader" scene "${scene_tolerance[@]}" 2>&1); then
 	pass "the satellite map is drawn north up over the terrain"
 	note "$(printf '%s' "$scene" | tr '\n' ' ' | cut -c1-160)"
 else
