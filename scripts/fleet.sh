@@ -20,6 +20,14 @@ real_profiles_selected() { case ",${COMPOSE_PROFILES:-}," in *,ground,* | *,airc
 # Whether this machine is the vehicle itself, which serves its own cameras and
 # runs its own companion. px4sim and scripts/preflight.sh both ask.
 aircraft_selected() { case ",${COMPOSE_PROFILES:-}," in *,aircraft,*) return 0 ;; esac; return 1; }
+
+# Which compose service holds a vehicle's companion, and which holds the ground
+# station. A simulated vehicle has a companion of its own, numbered like it.
+# The aircraft is one machine, so its companion carries no number. The real
+# ground station is `ground`. px4sim and the verification stages both ask, so
+# the service names are written once.
+companion_service() { if [ "$FLEET_IS_SIMULATED" = true ]; then echo "onboard$1"; else echo onboard; fi; }
+ground_service()    { if [ "$FLEET_IS_SIMULATED" = true ]; then echo offboard; else echo ground; fi; }
 # The directories compose binds a volume to, made before compose reaches them.
 # Compose makes a missing one root-owned, and the uid 1000 container then
 # writes nothing into it. Under `sudo ./px4sim start` the mkdir here runs as

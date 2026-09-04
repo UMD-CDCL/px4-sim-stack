@@ -17,8 +17,9 @@ if [ ! -f "$layout" ]; then
 	fail "no layout at $layout"
 	return 0
 fi
-if [ -z "$(COMPOSE_PROFILES=offboard docker compose ps -q offboard 2>/dev/null)" ]; then
-	fail "the ground station is not running. Start it: ./px4sim start offboard"
+ground=$(ground_service)
+if [ -z "$(COMPOSE_PROFILES="$ground" docker compose ps -q "$ground" 2>/dev/null)" ]; then
+	fail "the ground station is not running. Start it: ./px4sim start $ground"
 	return 0
 fi
 

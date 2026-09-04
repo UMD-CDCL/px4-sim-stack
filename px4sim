@@ -195,13 +195,6 @@ check_mode() {
 	fi
 }
 
-# Which compose service holds a vehicle's companion, its router and the
-# ground station. A simulated vehicle has a router and a companion of its
-# own. The aircraft is one machine, so its companion carries no number and
-# its router is native. The real ground station is `ground`.
-companion_service() { if [ "$FLEET_IS_SIMULATED" = true ]; then echo "onboard$1"; else echo onboard; fi; }
-ground_service()    { if [ "$FLEET_IS_SIMULATED" = true ]; then echo offboard; else echo ground; fi; }
-
 # The ROS domain a reader answers on. The ground station joins every vehicle's
 # domain with its domain bridge and carries all of them on $GROUND_DOMAIN. A
 # companion holds its own vehicle's domain alone.
