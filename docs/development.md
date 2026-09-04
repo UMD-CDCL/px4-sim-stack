@@ -544,7 +544,7 @@ colcon. So a change there is a rebuild, not a restart:
 
 ```bash
 ./px4sim build onboard offboard
-docker compose up -d --force-recreate onboard11 offboard
+./px4sim restart onboard11 offboard
 ```
 
 Both images build the same workspace, so a change in a shared package needs
@@ -556,7 +556,7 @@ in from `UAS_NUM` and `UAS_FLEET`:
 ```bash
 # the simulated companion and the aircraft
 ros2 launch umd_uas onboard.launch.py uas:=11 model:=v3 sim:=true container:=true params:=/camera/site.yaml,/camera/lens.yaml
-ros2 launch umd_uas onboard.launch.py uas:=1 sim:=false container:=true
+ros2 launch umd_uas onboard.launch.py uas:=1 sim:=false container:=true params:=/camera/site.yaml
 # the simulated ground station and the real one
 ros2 launch umd_uas offboard.launch.py uas:=11,12,13,14 models:=v3,v3,v2,v2 sim:=true params:=/camera/site.yaml
 ros2 launch umd_uas offboard.launch.py uas:=1 models:=v3 sim:=false params:=/camera/site.yaml
@@ -651,8 +651,9 @@ version must match the one that release of QGroundControl expects. Look at
 
 ## Verification
 
-`./px4sim verify` runs every stage. Four need nothing running, four fly the
-stack.
+`./px4sim verify` runs every stage. The first four need nothing running. The
+other six read the running stack, and `fleet` and `captures` wait for
+`VERIFY_FULL=1`.
 
 | Stage | What it establishes |
 |---|---|
@@ -661,12 +662,15 @@ stack.
 | `units` | The terrain rays, the roofs and the ground the fleet shares |
 | `localize` | A hardcoded box lands where the geometry says, on the plane and on a roof |
 | `vehicle` | Telemetry, the gimbal, the outline, the drape, and a localized target |
+| `flight` | One takeoff, the gimbal, the lens, a localization, the mosaic and the survey |
 | `ground` | The ground station shows what the vehicle worked out, not its own version |
 | `fleet` | Every vehicle over one target reports one position for it |
 | `captures` | The mosaic is drawn, the fiducial surveys, the VLM frame crosses the link |
+| `foxglove` | The layout, the bridge and the live view the operator gets |
 
-`./px4sim verify` is a simulator command, so the front door refuses it with
-`UAS_BASE=0`.
+A real machine answers `ground` and `foxglove`. The other stages expand the
+simulator's airframes or fly a vehicle, and `verify` refuses each one by name
+and says which two it runs.
 
 The stages that fly are written against `./px4sim uas`, which flies a vehicle
 through the interfaces the aircraft uses: MAVROS for flight, the 5g_drone
@@ -894,13 +898,7 @@ vehicle to `127.0.0.1:14402`, and MAVROS binds it there. `lcam.service` holds
 `thermall<N>`, and `ds_node` previews from them. The fielded QGroundControl
 stays native. No `ground-router`, `video-router` or `qgc` container starts.
 
-```bash
-./px4sim doctor      # lcam and mavlink-router active, 14402/udp and 8765/tcp free
-./px4sim build       # ros-base and the ground image
-./px4sim start       # the one container
-./px4sim streams     # lcam's mounts, asked for by name
-./px4sim uas ground status
-```
+[front-doors.md](front-doors.md) carries the command line for this world.
 
 ### The aircraft
 
@@ -915,36 +913,26 @@ sockets. `UAS_NUM` comes from `/etc/environment`, which
 lens that `ONBOARD_LENS_DEVICE` names to `/dev/lens` inside, and
 `onboard_container_params.yaml` pins `zoom.serial.port` to that name.
 
-`chimera-deploy/remote/deploy_onboard.sh` puts it all in place: the docker
-group, the `5g_drone` directory name, the clone of this repository from the
-laptop's git daemon, `.env` from `.env.example` with the aircraft keys, the
-model links through `fetch_models.py resolve --link`, and the boot unit
-`remote/onboard.service`. Then:
-
-```bash
-./px4sim doctor      # rcam, mavlink-router, the sockets, the clock, the power mode, the lens
-./px4sim build       # ros-base and the onboard image, on the Orin itself
-./px4sim start       # the one container
-./px4sim logs onboard
-```
-
-`onboard.service` is a `oneshot` unit. It runs `./px4sim start` at boot, after
-docker, rcam, the router and a clock step from chrony, and `./px4sim stop` at
-shutdown. `ENABLE_BOOT_UNIT=1 ./remote/deploy_onboard.sh` enables it. The
-aliases `onboard`, `onboard-logs` and `onboard-native` in
-`chimera-deploy/remote/.bash_aliases` are the hand versions. Never run the
-native launch and the container at once: one MAVROS can bind 14402, and one
-node can hold the SCF4.
+`chimera-deploy/remote/deploy_onboard.sh` puts it all in place, and
+`remote/onboard.service` starts it at boot. [front-doors.md](front-doors.md)
+carries both, with the command line for this world. Never run the native launch
+and the container at once: one MAVROS can bind 14402, and one node can hold the
+SCF4.
 
 ### What the front door refuses
 
 With `UAS_BASE=0` a vehicle number is a real aircraft, so `./px4sim` refuses
-every command that flies the simulator: `fly`, `place`, `scene`, `scenario`,
-`fiducial`, `reset`, `px4`, `console`, `snap`, `verify`, `genscene`, and
-`uas N arm`, `takeoff`, `land` and `goto`. Nothing is sent. The front door
-also refuses `router`, because the real fleet's router is native:
+every command that flies the simulator: `core`, `fly`, `place`, `scene`,
+`scenario`, `fiducial`, `reset`, `px4`, `console`, `snap`, `genscene`, and
+`uas N arm`, `takeoff`, `land` and `goto`. Nothing is sent. It refuses the
+commands that maintain the simulator too, and each of those says what it did
+not change: `setup`, `clean-src`, `nuke`, `fleet add` and `fleet remove`. It
+refuses `router`, because the real fleet's router is native:
 `systemctl status mavlink-router`. `view` needs `ffplay`, which the Orin does
 not have, and says so.
+
+`verify` is not refused. It runs the `ground` and `foxglove` stages and names
+the ones it left out.
 
 What stays native on each machine this round: on t500 `lcam`,
 `mavlink-router`, QGroundControl and `git-daemon`. On the Orin `rcam` and

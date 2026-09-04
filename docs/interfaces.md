@@ -90,9 +90,11 @@ print(link.target_system, link.target_component)
 ```
 
 A ground station outside this stack: run the router from
-`chimera-deploy/local/main.conf` on the host. It listens on 14551 upwards and
-feeds QGroundControl and MAVROS on the loopback. `GCS_ADDRESS` in `.env` decides
-where the fleet sends. The default is the simnet gateway, which is this host.
+`chimera-deploy/local/main.conf` on the host. It listens on 14551 to 14554,
+serves TCP 5760, and sends to QGroundControl on `127.0.0.1:14401` and to each
+vehicle's MAVROS on `127.0.0.<N>:14402`, filtered by `AllowSrcSysIn`.
+`GCS_ADDRESS` in `.env` decides where the fleet sends. The default is the
+simnet gateway, which is this host.
 
 ### The startup handshake
 
@@ -224,7 +226,9 @@ full size.
 Inside the compose network, use `video-router` in place of `localhost`.
 
 On the real ground station lcam serves the low rate names alone:
-`rtsp://127.0.0.1:8554/rgbl1`, `pilotl1` and `thermall1`. lcam has no API, so
+`rtsp://127.0.0.1:8554/rgbl1`, `pilotl1` and `thermall1`. On the aircraft rcam
+serves every camera of that airframe at both rates, with no number: `rgb`,
+`rgbl`, `pilot`, `pilotl`, `thermal` and `thermall`. Neither one has an API, so
 `./px4sim streams` asks for each name with `scripts/list-streams.py --rtsp`.
 
 Check a stream from the host:

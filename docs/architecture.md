@@ -83,7 +83,8 @@ there is only one.
 
 ## Profiles
 
-One `compose.yaml` serves three machines. `COMPOSE_PROFILES` in `.env` says
+One `compose.yaml` serves three machines. [front-doors.md](front-doors.md)
+works one example for each of them. `COMPOSE_PROFILES` in `.env` says
 what runs, and `UAS_BASE` says which world the numbers belong to. The two must
 agree, and `./px4sim` refuses a file where they do not.
 
@@ -188,7 +189,7 @@ tree.
 ```
 gz camera sensor
   → gz-transport image topic, named after the model instance
-  → gz_video_streamer: NVENC H.265, one full stream and one low-rate stream
+  → gz_video_streamer: H.265, one full stream and one low-rate stream
   → RTSP publish to video-router
   → ds_node in onboard<N>: decode, infer, track
   → /uas<N>/target_detections, boxes in image space
@@ -198,7 +199,9 @@ gz camera sensor
   → image_rehydrate on the ground refills the image from its own preview
 ```
 
-Every arrow is a hop that the aircraft also has.
+Every arrow is a hop that the aircraft also has. The encoder is the first that
+works on this machine, hardware where the machine has one and software where it
+has not.
 
 ### From a stick input to a motor
 
@@ -233,8 +236,8 @@ carries the whole argument.
 
 ## What this design costs
 
-- **More containers.** Four, plus two for each vehicle. Start time is longer
-  than one big image.
+- **More containers.** Five in the simulator, plus two for each vehicle. A real
+  machine runs one. Start time is longer than one big image.
 - **H.265 loses detail.** The detector sees a compressed frame, as it would on
   the aircraft. For pixel-exact frames, read the Gazebo topic directly and
   accept that the path is then simulation only.

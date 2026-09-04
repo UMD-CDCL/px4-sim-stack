@@ -9,6 +9,9 @@ Start here:
 ./px4sim logs sim  # the service you suspect
 ```
 
+[front-doors.md](front-doors.md) says what each command reads and what it
+refuses, in each of the three worlds.
+
 ## The start
 
 ### `start` creates some of the stack, or none of it
@@ -783,9 +786,15 @@ ls /tmp/*ds_nv.sock
 ```
 
 A socket that exists and gives no frames is a producer fault, not a container
-fault. On the bench the C1 PRO producer (`rgb`, `rgbl`, `rgbds`) gave no frames
-natively either, while `pilot` and `thermal` did. Try `sudo systemctl restart
-rcam` first. A USB re-plug is the second step.
+fault. Probe it on the host, which is what the container does:
+
+```bash
+gst-launch-1.0 nvunixfdsrc socket-path=/tmp/rgbds_nv.sock ! fakesink num-buffers=30
+```
+
+On the last bench run all three DeepStream sockets gave frames, and the thermal
+mount alone answered 503. Try `sudo systemctl restart rcam` first. A USB
+re-plug is the second step.
 
 ### `lens: /dev/lens is /dev/null`
 
@@ -808,9 +817,17 @@ lens, so the warning means nothing there.
 sudo usermod -aG docker $USER
 ```
 
-Then log out and in. Until then `sudo -E ./px4sim ...` works and keeps
-`UAS_NUM` and `HOME`, but the doctor then writes `.env` as root. Run
-`chown user .env` after.
+Then log out and in. Until then this shape works and keeps `UAS_NUM` and
+`HOME`:
+
+```bash
+sudo -E env HOME=/home/user UAS_NUM=1 ./px4sim start
+```
+
+`./px4sim doctor` and `./px4sim start` both hand `.env` and the log directories
+back to the operator after a run under sudo, so the uid 1000 container can
+still write them. The boot unit needs no group: `onboard.service` carries
+`SupplementaryGroups=docker`.
 
 ### `clock says 1970`
 
@@ -841,8 +858,8 @@ engines come from 10.3.0.30, and the generic arm64 DeepStream image carries
 10.3.0.26. The image must carry the host's build:
 
 ```bash
-./scripts/ds-select.sh --tag                        # 7.1-trt10.3 on a Jetson
-docker compose exec onboard dpkg -l libnvinfer10    # 10.3.0.30-1+cuda12.5
+./scripts/ds-select.sh --tag                          # 7.1-trt10.3 on a Jetson
+./px4sim shell onboard dpkg -l libnvinfer10           # 10.3.0.30-1+cuda12.5
 ```
 
 Another version means the build had no JetPack apt source.
@@ -854,8 +871,21 @@ onboard image.
 The detector engines come from `perception_models/orin` and load as they are.
 The classifier wants `injury-336.onnx_b8_gpu0_fp16.engine`, which the model
 manifest does not carry, so `nvinfer` builds it from the ONNX at the first
-start. At 15 W that takes tens of minutes. `./px4sim logs onboard` shows the
-build while it runs. Let it finish once. The engine stays beside the ONNX.
+start. On the bench that took 8 minutes 55 seconds at 15 W.
+`./px4sim logs onboard` shows the build while it runs. Let it finish once.
+
+`nvinfer` writes the engine beside the ONNX it resolved, which is
+`perception_models/shared`. The group directory is what `/models/local` points
+at, so move it there once and link the tree again:
+
+```bash
+cd ~/ros2_ws/src/5g_drone/perception_models
+mv shared/injury-336.onnx_b8_gpu0_fp16.engine orin/
+../scripts/fetch_models.py resolve --link
+```
+
+A later start then deserializes it, and `ds_node` reaches `pipelines PLAYING`
+in about 57 seconds.
 
 ### `terrain: no scene`
 
@@ -888,9 +918,10 @@ profile agree.
 ### `rgbl1` answers 503 or hangs
 
 lcam restreams the vehicle's `rgbl` mount from `rtsp://10.200.142.61:8554`. A
-503, or a hang at DESCRIBE, means the producer on the drone gives no frames. On
-the bench that was the C1 PRO producer, while `pilotl1` and `thermall1` were
-live at the same time.
+503, or a hang at DESCRIBE, means the producer on the drone gives no frames.
+Ask the vehicle's own mount the same question: a 503 there as well is the
+producer, not this stack. On the last bench run `rgbl1` and `pilotl1` were live
+and `thermall1` answered 503 on three tries.
 
 ```bash
 ./px4sim streams                    # every lcam mount, by name

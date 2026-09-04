@@ -272,7 +272,7 @@ position and the verdicts are all computed again there.
 One rule decides every entry below: a thing crosses only when the ground cannot
 rebuild it, or when rebuilding it would cost more than sending it.
 
-### Vehicle to ground, domain `60 + N` to 99 to 70
+### Vehicle to ground, domain `60 + N` to 99 to the ground domain
 
 | Topic | Type | Why |
 |---|---|---|
@@ -303,13 +303,13 @@ link delay, so it is less exact. The operator interface also reads that
 telemetry out of the message rather than from topics of its own, which is why
 six of its ten inputs need no bridge.
 
-### Ground to vehicle, domain 70 to 99 to `60 + N`
+### Ground to vehicle, the ground domain to 99 to `60 + N`
 
 `gimbal_point_cmd`, `roi_point_cmd`, `raw_roi_point_cmd`, `gimbal_raw_command`,
 `gimbal_angle_cmd`, `reassert_gimbal_cmd`, `release_gimbal_cmd` and
 `hil_detection/detected`. On a v3, `zoom/preset_cmd` as well.
 
-### Ground to vehicle, domain 70 straight to `60 + N`
+### Ground to vehicle, the ground domain straight to `60 + N`
 
 `start_survey_cmd`, `vlm_capture_cmd`, `mosaic_capture_cmd`,
 `fiducial_capture_cmd`, `advance_mission_cmd` and `continuous_detection_cmd`,
