@@ -1323,8 +1323,14 @@ capture)
 	*" $kind "*) ;;
 	*) die "capture takes $(echo "$CAPTURE_KINDS" | sed 's/ /, /g'), not '$kind'" ;;
 	esac
-	say "asking uas$n for a $kind capture, from the ground"
-	$DC exec -e ROS_DOMAIN_ID="$GROUND_DOMAIN" "$(ground_service)" bash -lc '
+	# The aircraft holds no ground station, so there it asks its own companion
+	# on the vehicle's own domain. Everywhere else the ground station is the
+	# door, and reader_domain says which domain that reader answers on.
+	if aircraft_selected; then reader=$(companion_service "$n"); else reader=$(ground_service); fi
+	container=$($DC ps -q "$reader" 2>/dev/null)
+	[ -n "$container" ] || die "$reader is not running. Start it: ./px4sim start"
+	say "asking uas$n for a $kind capture, through $reader"
+	docker exec -e ROS_DOMAIN_ID="$(reader_domain "$reader" "$n")" "$container" bash -lc '
 		. /usr/local/bin/ros-env.sh
 		exec timeout 10 ros2 topic pub --once "$1" std_msgs/msg/Bool "{data: true}"' \
 		_ "/uas$n/${kind}_capture_cmd" >/dev/null \
@@ -1393,12 +1399,15 @@ uas|probe|foxglove)
 	# started with no extra volume.
 	add_fleet_profiles
 	# `ground` reaches the ground station, which holds every vehicle at once.
+	asked=vehicle
 	if [ "${1:-}" = ground ]; then
 		shift
-		container=$($DC ps -q "$(ground_service)" 2>/dev/null)
+		reader=$(ground_service)
+		container=$($DC ps -q "$reader" 2>/dev/null)
 		[ -n "$container" ] || die "the ground station is not running. Start it: ./px4sim start"
 		domain=$GROUND_DOMAIN
 		n=$FIRST_UAS
+		asked=ground
 	else
 		n=$(vehicle_arg "${1:-}"); shift || true
 		vehicle_reader "$n"
@@ -1408,6 +1417,14 @@ uas|probe|foxglove)
 	foxglove) tool=foxglove_probe.py ;;
 	*)        tool=uas.py ;;
 	esac
+	# A Foxglove bridge belongs to a machine and not to a ROS domain: each
+	# vehicle serves its own, on the aircraft. Where the ground station answers
+	# for a vehicle, the probe reaches that vehicle's bridge rather than the
+	# ground's own on localhost. A --url from the caller comes later on the
+	# line, and argparse keeps the last one.
+	if [ "$cmd" = foxglove ] && [ "$asked" = vehicle ] && [ "$reader" = "$(ground_service)" ]; then
+		set -- --url "$(uas_foxglove_url "$n")" "$@"
+	fi
 	# The default list stands in when no topic is named. An option is not a
 	# topic, so `probe 11 --deadline 5` still gets the list.
 	named_a_topic=false
