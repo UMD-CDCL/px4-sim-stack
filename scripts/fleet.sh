@@ -28,6 +28,15 @@ world_of() {
 	elif aircraft_selected; then echo aircraft
 	else echo ground; fi
 }
+# The native services this machine boots beside the containers. A stopped one
+# is why no video or no telemetry arrives, so the console reads them. The
+# simulator holds every one of them in a container instead, and has none.
+native_units() {
+	case "$(world_of)" in
+	aircraft) echo "rcam mavlink-router onboard" ;;
+	ground)   echo "lcam mavlink-router" ;;
+	esac
+}
 
 # Which compose service holds a vehicle's companion, and which holds the ground
 # station. A simulated vehicle has a companion of its own, numbered like it.

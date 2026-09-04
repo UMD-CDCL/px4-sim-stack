@@ -640,6 +640,7 @@ fleet_facts() {
 		fiducial_alt=${FIDUCIAL_SURVEYED_ALT:-}
 		profiles=${COMPOSE_PROFILES:-}
 		world=$(world_of)
+		units=$(native_units | tr ' ' ',' | sed 's/,$//')
 		compose=$DC
 		ground_domain=$GROUND_DOMAIN
 		ground_foxglove=8765

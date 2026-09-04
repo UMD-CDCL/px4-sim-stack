@@ -14,6 +14,7 @@ the thing itself, never from a log message:
              or the mounts themselves where the server answers no API
   vehicles   MAVLink from the vehicle, read on the TCP port the routers publish
   bridges    a connection to each Foxglove port, opened and closed
+  units      systemd, for the native services a real machine boots
   gpu        nvidia-smi, which counts the encoder sessions the cameras hold
 
 A warning from the front door can come before the first object, because the
@@ -61,6 +62,8 @@ STREAMS_RETRY_TICKS = 5
 STREAMS_PROBE_TIMEOUT_S = 30.0
 STREAMS_PROBE_TICKS = 15
 DOCKER_TIMEOUT_S = 15.0
+UNITS_TIMEOUT_S = 5.0
+UNITS_PERIOD_TICKS = 5
 GPU_TIMEOUT_S = 5.0
 GPU_READINGS = "utilization.gpu,memory.used,memory.total,encoder.stats.sessionCount"
 LOOPBACK = "127.0.0.1"
@@ -307,15 +310,56 @@ class ProbedStreams:
         return self.paths
 
 
+class Units:
+    """The native services a real machine boots beside the containers.
+
+    lcam and mavlink-router carry the video and the telemetry on the ground.
+    rcam, mavlink-router and onboard.service do the same on the aircraft, and
+    onboard.service is the unit that holds the stack there. A stopped one of
+    these explains an empty stream or a silent link, and no container knows it.
+    The simulator holds every one of them in a container, and names none.
+    """
+
+    def __init__(self, names: list[str]):
+        self.names = names
+        self.rows = [{"name": name, "state": "unknown"} for name in names]
+        self.read_at_tick = 0
+
+    def read(self, tick: int) -> list[dict]:
+        if not self.names or tick < self.read_at_tick:
+            return self.rows
+        self.read_at_tick = tick + UNITS_PERIOD_TICKS
+        try:
+            done = subprocess.run(["systemctl", "is-active", *self.names],
+                                  capture_output=True, text=True,
+                                  timeout=UNITS_TIMEOUT_S)
+        except (OSError, subprocess.SubprocessError):
+            return self.rows
+        # is-active answers one word for each unit, in the order it was asked,
+        # and exits non-zero when any of them is not active. A missing unit
+        # answers "inactive" like a stopped one.
+        said = done.stdout.split()
+        self.rows = [{"name": name, "state": said[index] if index < len(said)
+                      else "unknown"}
+                     for index, name in enumerate(self.names)]
+        return self.rows
+
+
 class Link:
-    """A passive MAVLink client on one vehicle's published TCP port.
+    """A passive MAVLink client on one vehicle's TCP port, on this machine.
 
     It sends nothing. The vehicle number is the MAVLink system id, so a frame
     from another system counts as a system that is present and nothing more.
+
+    A simulated vehicle publishes a port of its own, 5750 + N. A real fleet
+    has one router for each machine: the native mavlink-router serves TCP 5760
+    here and carries every vehicle it hears, so the system id picks the
+    vehicle out and every link reads the same port.
     """
 
     def __init__(self, number: int, port: int, system: int):
         self.number = number
+        self.host = LOOPBACK
         self.port = port
         self.system = system
         self.socket: socket.socket | None = None
@@ -341,7 +385,7 @@ class Link:
             return
         opening = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         opening.setblocking(False)
-        result = opening.connect_ex((LOOPBACK, self.port))
+        result = opening.connect_ex((self.host, self.port))
         if result not in (0, errno.EINPROGRESS, errno.EALREADY, errno.EWOULDBLOCK):
             opening.close()
             self.error = errno.errorcode.get(result, str(result))
@@ -415,7 +459,8 @@ class Link:
             link = "silent"
         else:
             link = "up"
-        told = {"number": self.number, "port": self.port, "link": link,
+        told = {"number": self.number, "host": self.host, "port": self.port,
+                "link": link,
                 "silent_for": silent_for, "messages_per_s": rate,
                 "systems": sorted(self.systems), "error": self.error}
         told.update(self.fields)
@@ -526,10 +571,15 @@ class Bridges:
     """
 
     def __init__(self, context: dict):
-        # The ground bridge is this machine's own. A vehicle's is wherever
-        # px4sim says it is, which is the vehicle itself on the real fleet.
-        self.named = [{"name": "ground", "host": LOOPBACK,
-                       "port": int(context.get("ground_foxglove", 8765))}]
+        # The ground bridge is this machine's own, where this machine holds a
+        # ground station. The aircraft holds one bridge and it is the
+        # vehicle's, so a ground row there would name the same port twice. A
+        # vehicle's bridge is wherever px4sim says it is, which is the vehicle
+        # itself on the real fleet.
+        self.named = []
+        if context.get("world") != "aircraft":
+            self.named.append({"name": "ground", "host": LOOPBACK,
+                               "port": int(context.get("ground_foxglove", 8765))})
         for vehicle in context["fleet"]:
             if vehicle.get("companion"):
                 where = urllib.parse.urlsplit(vehicle.get("foxglove_url", ""))
@@ -554,7 +604,7 @@ def stream_owners(fleet: list[dict]) -> dict[str, int]:
 
 
 def snapshot(context: dict, project_dir: Path, streams: Streams, links: Links,
-             bridges: Bridges, tick: int) -> dict:
+             bridges: Bridges, units: Units, tick: int) -> dict:
     # The vehicles answer first. Reading the containers and the card takes
     # seconds on a busy host, and nothing reads a socket while it happens, so a
     # vehicle asked afterwards looks silent while its telemetry is arriving.
@@ -571,6 +621,7 @@ def snapshot(context: dict, project_dir: Path, streams: Streams, links: Links,
         "streams_error": streams.error,
         "vehicles": vehicles,
         "bridges": bridges.read(tick),
+        "units": units.read(tick),
         "gpu": graphics_card(),
     }
 
@@ -595,10 +646,11 @@ def main() -> int:
                Streams(str(context.get("mediamtx", "http://localhost:9997")), owners))
     links = Links(context["fleet"])
     bridges = Bridges(context)
+    units = Units(as_list(context.get("units", "")))
 
     def tell(tick: int) -> None:
-        json.dump(snapshot(context, project_dir, streams, links, bridges, tick),
-                  sys.stdout)
+        json.dump(snapshot(context, project_dir, streams, links, bridges, units,
+                           tick), sys.stdout)
         sys.stdout.write("\n")
         sys.stdout.flush()
 
