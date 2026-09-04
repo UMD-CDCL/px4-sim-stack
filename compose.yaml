@@ -142,7 +142,7 @@ x-onboard: &onboard
     - *models-volume
     - *logs-volume
     # Terrain surfaces from `px4sim genscene`. The entry point links the one
-    # for SCENE into /terrain in the simulator. The aircraft mounts none.
+    # for SCENE into /terrain. The aircraft names this again by alias.
     - ./modules/sim/scenes:/scenes:ro
   # The world origin, so sim_ground_truth can put the scenario's targets on the
   # Earth. It reads PX4_HOME_LAT, _LON and _ALT and refuses to guess without
@@ -623,12 +623,17 @@ services:
       # variable here would stop the simulator. The entry point refuses an
       # empty value instead.
       UAS_NUM: ${UAS_NUM:-}
-      # No scene. The aircraft flies the real ground and keeps the nodes' own
-      # terrain cache. Empty draws no buildings and links no surface.
-      SCENE: ""
+      # The scene the ground station draws, so the vehicle casts at the
+      # surface the ground casts at. The dash form keeps an empty value
+      # empty, the way `ground` reads it: SCENE= on a bench leaves both
+      # sides on the flat plane, SCENE=lorton gives both sides the site.
+      SCENE: ${SCENE-lorton}
     volumes:
       - *models-volume
       - *logs-volume
+      # The surface for SCENE, the same directory the ground station mounts.
+      # The entry point links the one scene in play into /terrain.
+      - ./modules/sim/scenes:/scenes:ro
       # rcam makes its sockets again at every start, so the directory is
       # mounted and not the files. The nvidia runtime mounts
       # /etc/nv_tegra_release by itself.

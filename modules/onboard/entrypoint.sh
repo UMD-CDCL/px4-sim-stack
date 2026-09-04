@@ -79,31 +79,44 @@ elif [ ! -e "${PARSER_DEST}" ]; then
 	echo "        compile one, which needs a CUDA compiler this image has not got." >&2
 fi
 
-SITE_PARAMS=""
 LENS_PARAMS=""
 # The bound on both camera waits below: the simulator's stream and the
 # aircraft's rcam sockets.
 STREAM_WAIT_S=${STREAM_WAIT_S:-300}
+
+# The scene, in both worlds. The ground station links the same surface out of
+# the same directory (modules/offboard/entrypoint.sh), so the vehicle and the
+# ground meet one ground. A vehicle on another surface reports detections that
+# fall outside the outline the ground draws.
+#
+# The terrain cache reads every *.json in one directory and takes the first
+# tile whose square holds the ray origin, so two scenes in there would make the
+# choice arbitrary. /scenes holds a surface for every scene, so link the one
+# scene in play into a directory of its own. An empty directory is not an
+# error: every ray then meets the flat plane, which is what SCENE= asks for.
+mkdir -p "${TERRAIN_DIR}"
+rm -f "${TERRAIN_DIR}"/*.json
+SURFACE="/scenes/worlds/${SCENE}_surface.json"
+if [ -z "${SCENE}" ]; then
+	echo "terrain: no scene. Localization uses the flat plane."
+elif [ -f "${SURFACE}" ]; then
+	ln -s "${SURFACE}" "${TERRAIN_DIR}/"
+	echo "terrain: ${SURFACE}"
+else
+	echo "terrain: no surface for scene '${SCENE}'. Localization uses the flat plane." >&2
+fi
+
+# The datum the scene is drawn against, which the ground station works out
+# from the same surface. With no scene the geoid height is 0.0.
+SITE_PARAMS=${SITE_PARAMS:-/camera/site.yaml}
+# shellcheck disable=SC1091
+source /usr/local/bin/site-params.sh
+
 if [ "${SIM}" = true ]; then
 	# ---------------------------------------------------------------------
 	# Everything the simulator stands in for. None of it exists on the
 	# aircraft, so none of it runs there.
 	# ---------------------------------------------------------------------
-
-	# The terrain cache reads every *.json in one directory and takes the first
-	# tile whose square holds the ray origin, so two scenes in there would make the
-	# choice arbitrary. /scenes holds a surface for every scene, so link the one
-	# scene in play into a directory of its own. An empty directory is not an
-	# error: every ray then meets the flat plane.
-	mkdir -p "${TERRAIN_DIR}"
-	rm -f "${TERRAIN_DIR}"/*.json
-	SURFACE="/scenes/worlds/${SCENE}_surface.json"
-	if [ -f "${SURFACE}" ]; then
-		ln -s "${SURFACE}" "${TERRAIN_DIR}/"
-		echo "terrain: ${SURFACE}"
-	else
-		echo "terrain: no surface for scene '${SCENE}'. Localization uses the flat plane." >&2
-	fi
 
 	# The calibration of the camera that really made the picture. A simulated camera
 	# is an ideal pinhole at the field of view its airframe was rendered with, so
@@ -185,9 +198,6 @@ if [ "${SIM}" = true ]; then
 		# One fixed lens, one calibration, published by cam_info.
 		calibrate "${CAMERA_HFOV_DEG}" simulated "${CAMERA_DIR}/gimbal.yaml"
 	fi
-
-	SITE_PARAMS=/camera/site.yaml
-	source /usr/local/bin/site-params.sh
 
 	# Where the survey marker really is. A fiducial capture is localized and the
 	# difference between that and this is the correction the whole fleet's frame
