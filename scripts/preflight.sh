@@ -135,6 +135,21 @@ else
 	bad "docker compose v2 not found."
 fi
 
+# A build under sudo leaves root's files in this user's ~/.docker. The same
+# build without sudo, which is what a machine with the operator in group
+# docker runs, then cannot take the buildx lock. `docker compose build` prints
+# the reason and still exits 0, so the build appears to succeed and the image
+# is quietly the old one.
+docker_root_owned=$(find "${HOME}/.docker" ! -user "$(id -un)" 2>/dev/null | head -3)
+if [ -n "$docker_root_owned" ]; then
+	bad "another user owns files in ${HOME}/.docker, so a build here cannot take
+        the buildx lock. It prints one line and exits 0, and the image stays
+        as it was. $(echo "$docker_root_owned" | tr '\n' ' ')
+        sudo chown -R $(id -un):$(id -gn) ${HOME}/.docker"
+else
+	ok "${HOME}/.docker belongs to $(id -un), so a build can take the buildx lock"
+fi
+
 # ------------------------------------------------------- NVIDIA container runtime
 if docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q '"nvidia"'; then
 	ok "nvidia container runtime registered"
