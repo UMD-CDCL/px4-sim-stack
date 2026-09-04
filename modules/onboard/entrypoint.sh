@@ -285,14 +285,19 @@ if [ "${1:-launch}" = "launch" ]; then
 	params="${SITE_PARAMS}${LENS_PARAMS:+,${LENS_PARAMS}}${ONBOARD_PARAMS_FILE:+,${ONBOARD_PARAMS_FILE}}"
 	params=${params#,}
 	# ros2 launch refuses `name:=` with an empty value, so an empty model or
-	# an empty file list is left out rather than passed empty.
-	exec ros2 launch umd_uas onboard.launch.py \
-		uas:="${UAS_NUM}" \
-		${MODEL:+model:="${MODEL}"} \
-		sim:="${SIM}" \
-		container:=true \
-		${params:+params:="${params}"} \
-		"$@"
+	# an empty file list is left out rather than passed empty. The command
+	# goes to the log first: a reader with the log and no container has no
+	# other way to see the arguments this vehicle started with.
+	# shellcheck disable=SC2206
+	launch=(ros2 launch umd_uas onboard.launch.py
+		uas:="${UAS_NUM}"
+		${MODEL:+model:="${MODEL}"}
+		sim:="${SIM}"
+		container:=true
+		${params:+params:="${params}"}
+		"$@")
+	echo "launch: ${launch[*]}"
+	exec "${launch[@]}"
 fi
 
 exec "$@"
