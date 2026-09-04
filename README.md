@@ -1,15 +1,19 @@
 # px4-sim-stack
 
-A container stack that flies the Chimera flight code against PX4 SITL and
-Gazebo Harmonic. The simulator presents MAVLink, RTSP video and a rangefinder.
-The flight code from 5g_drone and MAVInsight runs unchanged, on the same ROS
-domains, ports and frame names it uses on the aircraft. The same onboard and
-offboard images also run on the aircraft and on the fielded ground station,
-beside the native services there.
+One container stack for three machines. It flies the Chimera flight code
+against PX4 SITL and Gazebo Harmonic, it runs the real vehicle's companion
+computer on the aircraft, and it runs the fielded ground station on the base
+station laptop. The flight code from 5g_drone and MAVInsight is the same code
+in all three, on the same ROS domains, ports and frame names.
+
+`.env` says which of the three worlds this machine is. `COMPOSE_PROFILES` says
+what runs and `UAS_BASE` says which world the numbers belong to.
+[docs/front-doors.md](docs/front-doors.md) works one example for each world.
 
 `docs/uas-contract.md` states what a simulated vehicle must present. The
 simulator satisfies that contract. The flight code does not accommodate the
-simulator.
+simulator. The diagram below is the simulator, which is the world with the
+most parts.
 
 ```
                      ┌──────────────────┐
@@ -68,6 +72,8 @@ what runs. `./px4sim` refuses a `.env` where the two disagree.
 
 `.env` says which machine this is. `.env.example` holds the three pairs of
 `COMPOSE_PROFILES` and `UAS_BASE`, one for each machine.
+[docs/front-doors.md](docs/front-doors.md) gives the whole command line for
+each world, and for every other door into this system.
 
 The simulator, on one laptop, with `COMPOSE_PROFILES=sim,offboard` and
 `UAS_BASE=10`:
@@ -93,9 +99,15 @@ The aircraft, with `COMPOSE_PROFILES=aircraft` and `UAS_BASE=0`, after
 
 ```bash
 ./px4sim doctor    # also rcam, its sockets, the clock, the power mode and the lens
-./px4sim build     # the arm64 images, on the Orin itself. 60 to 120 minutes the first time
+./px4sim build     # the arm64 images, on the Orin itself
 ./px4sim start     # one container, onboard, on the host network
 ```
+
+The first build on the Orin compiles the whole ROS workspace at 15 W and takes
+tens of minutes. A rebuild after a change in the flight code took 3 minutes on
+the bench. Until `user` is in group `docker` there, every call needs sudo:
+`sudo -E env HOME=/home/user UAS_NUM=1 ./px4sim start`. The boot unit does not
+need that group.
 
 Each machine builds its own architecture from its own checkout. No machine
 copies an image from another.
@@ -114,9 +126,11 @@ The onboard and offboard images build 5g_drone, cdcl_umd_msgs and MAVInsight
 with colcon. `ROS2_WS_DIR` in `.env` says where those sources are checked out,
 and a change there needs `./px4sim build onboard offboard`.
 
-`./px4sim` with no arguments prints every command. It is the front door: it
-reads `.env` and resolves the world origin from the scene and the scenario. The
-`Makefile` keeps the same target names and forwards each one to it.
+`./px4sim` with no arguments prints every command, and names which of the three
+worlds this machine is. It is the front door: it reads `.env`, resolves the
+DeepStream release for this GPU, and resolves the world origin from the scene
+and the scenario. The `Makefile` keeps the same target names and forwards each
+one to it.
 
 A joystick plugged into the host works in QGroundControl. The container mounts
 `/dev/input` and joins the host `input` group, whose id `./px4sim doctor` writes
@@ -133,7 +147,7 @@ already plugged in.
 | MAVLink, to the ground station | `udp://<gcs>:14550 + N`, so 14561 for uas11 |
 | MAVLink, to the companion | `udp://127.0.0.1:14402`, inside the vehicle |
 | MAVLink, for scripts | `tcp://localhost:5761` upwards |
-| Video | `rtsp://localhost:8554/rgb11`, `/pilot11`, `/thermal11` |
+| Video | `rtsp://localhost:8554/rgb11`, `/pilot11`, `/thermal11`. `RTSP_HOST_PORT` moves the host side |
 | Low-rate video | the same names with `l` appended: `rgbl11` |
 | Foxglove, ground station | `ws://localhost:8765` |
 | Foxglove, one vehicle | `ws://localhost:8771` for uas11 |
@@ -146,46 +160,57 @@ The real fleet, `N` 1 to 9, with `UAS_BASE=0`:
 | MAVLink, to MAVROS | `udp://127.0.0.1:14402`, from the native router, on the aircraft and on the ground alike |
 | MAVLink, for scripts | `tcp://127.0.0.1:5760`, this machine's native router |
 | Low-rate video, on the ground | `rtsp://127.0.0.1:8554/rgbl1` from lcam, `pilotl1`, `thermall1` |
+| Video, on the aircraft | `rtsp://127.0.0.1:8554/rgb` from rcam, and `rgbl`, `pilot`, `pilotl`, `thermal`, `thermall` |
 | Foxglove | `ws://localhost:8765` on each machine. From the ground, `ws://10.200.142.61:8765` is uas1's |
 
 `./px4sim status` prints this list for the fleet that is running.
 
 ## Daily commands
 
+`./px4sim help` is the one truthful list, and it names the world this machine
+is. These work in all three worlds:
+
 ```bash
 ./px4sim ui                   # the console: what is running, and a key for every command
-./px4sim start                # start everything
+./px4sim start                # start what .env selects
 ./px4sim stop                 # stop everything
 ./px4sim status               # what is running, and the addresses
-./px4sim logs onboard11       # follow one service
-./px4sim console              # the pxh> prompt. Detach with Ctrl-P Ctrl-Q
-./px4sim fleet add            # fly one more vehicle. `fleet remove 13` retires one
-./px4sim scene uroc          # change the world and restart the sim
-./px4sim scenario <name>      # change the targets and reload what scores them
-./px4sim scenario             # place the same targets again, no restart
+./px4sim logs onboard11       # follow one service. `logs --since 5m ground` reads back
 ./px4sim streams              # which video streams are live
-./px4sim view rgb11           # play one
-./px4sim topics 11            # the ROS topics of uas11
-./px4sim layout               # where the Foxglove layout is
-./px4sim shell onboard11      # a shell in any container
+./px4sim view 1               # play a vehicle's gimbal camera
+./px4sim topics 1             # a vehicle's ROS topics
+./px4sim layout               # render the Foxglove layout for this fleet
+./px4sim shell ground         # a shell in any container
 ./px4sim check                # validate the compose file and lint the docs
 ./px4sim clean                # remove containers, networks and volumes
 ```
 
-Fly a vehicle and see what its nodes make of it:
+Ask one vehicle what its nodes make of the world. On a real fleet the ground
+station answers for the vehicle, and each command reaches the machine that
+holds the answer:
 
 ```bash
-./px4sim uas 11 takeoff 40    # status, arm, takeoff, goto, land
-./px4sim uas 11 gimbal -30    # degrees below the horizon
-./px4sim uas 11 detect on     # continuous detection, off until asked
-./px4sim uas 11 detections    # what it found, and where that landed
-./px4sim uas 11 capture mosaic   # mosaic, fiducial, vlm, snapshot
-./px4sim probe 11             # what its ROS graph carries right now
+./px4sim uas 1 status         # mode, arming, position, battery, GPS, gimbal
+./px4sim uas 1 gimbal -30     # degrees below the horizon
+./px4sim uas 1 detect on      # continuous detection, off until asked
+./px4sim uas 1 detections     # what it found, and where that landed
+./px4sim uas 1 heading        # which way the vehicle, its camera and its footprint point
+./px4sim capture 1 mosaic     # mosaic, vlm or fiducial
+./px4sim zoom 1 wide          # a v3 lens: narrow, mid or wide
+./px4sim probe 1              # what its ROS graph carries right now
 ./px4sim probe ground         # the same, on the ground station
-./px4sim foxglove ground      # what a panel is offered, over Foxglove's own protocol
-./px4sim uas 11 heading       # which way the vehicle, its camera and its footprint point
-./px4sim uas 11 scene         # the ground, roofs and targets the 3D panel is given
-./px4sim zoom 11 wide         # a v3 lens: narrow, mid or wide
+./px4sim foxglove 1           # what a panel is offered, over Foxglove's own protocol
+```
+
+The simulator adds the commands that fly it and maintain it:
+
+```bash
+./px4sim uas 11 takeoff 40    # arm, takeoff, goto, land
+./px4sim fly 11 20            # respawn, then climb
+./px4sim console              # the pxh> prompt. Detach with Ctrl-P Ctrl-Q
+./px4sim scene uroc           # change the world and restart the simulator
+./px4sim scenario <name>      # change the targets and reload what scores them
+./px4sim fleet add            # fly one more vehicle. `fleet remove 13` retires one
 ./px4sim snap rgb11           # one frame of a stream, to look at
 ```
 
@@ -197,7 +222,8 @@ the commands that maintain the simulator, and each of those says what it did
 not change: `setup`, `clean-src`, `nuke`, `fleet add` and `fleet remove`.
 `./px4sim help` holds that list under "The simulator alone", and it names the
 world this machine is. `verify` is not refused: it says for itself which of
-its stages a real machine can answer.
+its stages a real machine can answer. `router` is refused too, because the real
+fleet's router is native: `systemctl status mavlink-router`.
 
 ## The console
 
@@ -210,8 +236,9 @@ enter for what can be done to that row, or press the key beside an action.
 Press `:` to type any px4sim command, and `?` to see every action with the
 command it runs. Press esc to stop a command, and `q` to leave.
 
-Press `=` to fly one more vehicle, and `-` to retire the selected one. Both
-write `UAS_FLEET` in `.env` and bring the stack to the new fleet.
+In the simulator, press `=` to fly one more vehicle and `-` to retire the
+selected one. Both write `UAS_FLEET` in `.env` and bring the stack to the new
+fleet.
 
 The console offers the keys this world accepts, and no others. On a ground
 station and on an aircraft the twenty actions that fly or maintain the
@@ -231,11 +258,11 @@ Each reading comes from the thing itself, never from a log message:
 | Reading | Where it comes from |
 |---|---|
 | A container | The container engine's own state |
-| A video path | The video router API, and the bytes that path carried since the report before |
+| A video path | The video router API in the simulator, with the bytes that path carried since the report before. One probe by name on a real machine, where lcam and rcam serve no API |
 | A vehicle | MAVLink on `tcp://localhost:5761` upwards, or on the native router's 5760 for the real fleet: mode, arming, battery, GPS, height and gimbal |
 | A Foxglove bridge | A connection to the port, opened and closed |
 | A native service | `systemctl is-active`, on a ground station and on an aircraft |
-| The GPU | `nvidia-smi`: what the cameras, the encoders and the detector are using |
+| The GPU | `nvidia-smi`: what the cameras, the encoders and the detector are using. A Jetson has no `nvidia-smi`, and the field is empty |
 
 `./px4sim state` prints the same picture as JSON, and `./px4sim state --watch`
 keeps it coming, one object for each line. The console reads that stream, and
@@ -256,7 +283,9 @@ first entry is uas11, the second uas12, and so on.
 
 Each of these writes `.env`, removes the containers the fleet no longer holds,
 and reloads the world, so every vehicle respawns. With nothing running it
-writes the file and says so.
+writes the file and says so. `fleet` on its own reads the fleet in every world.
+`fleet add` and `fleet remove` belong to the simulator, and a real machine
+refuses both and says to edit `UAS_FLEET` by hand.
 
 A vehicle taken from anywhere but the end moves every vehicle after it down
 one, which gives each of them other frames, ports, ROS domains and stream
@@ -275,9 +304,16 @@ router and no ROS stack until you add an `onboard15` service.
 ./px4sim verify airframes     # one of them
 ```
 
-The first four stages need nothing running. `vehicle`, `ground`, `fleet`,
-`captures` and `foxglove` fly the stack and say so if it is not up. What each one measured
-last is in [docs/development.md](docs/development.md).
+`airframes`, `contract`, `units` and `localize` need nothing running.
+`vehicle`, `flight`, `ground`, `fleet`, `captures` and `foxglove` read the
+running stack and say so if it is not up. `fleet` and `captures` are skipped
+without `VERIFY_FULL=1`. What each one measured last is in
+[docs/development.md](docs/development.md).
+
+A real machine runs `ground` and `foxglove` and says so. The other stages
+expand the simulator's airframes or fly a vehicle, so `verify` refuses them by
+name. The last simulator run passed 71 checks, and the last ground run passed
+9.
 
 Start a subset by naming the profiles:
 
@@ -288,6 +324,51 @@ Start a subset by naming the profiles:
 
 The routers and the companions come from `UAS_FLEET`, so they need no profile
 name here.
+
+## State of the real-vehicle port (2026-09-03)
+
+The aircraft world and the ground world ran on the real hardware for the first
+time on 2026-09-03. Nothing armed and nothing flew. The evidence is component
+tests on uas1 and on t500.
+
+**Verified on the aircraft, uas1.** `onboard.service` starts the container at
+boot, after docker, rcam, the native router and a clock step, and it reaches
+`active (exited)` in 39 seconds. MAVROS connects to PX4 v1.18 and reads
+`capabilities=321791`. The preview publishes at 27.4 Hz from the rcam NVMM
+socket, and `ds_node` reports `pipelines PLAYING` 57 seconds after the
+container starts. The detector runs on the GPU and publishes at 1.03 to 1.06
+Hz, at 99% GR3D and 15.9 W. The SCF4 lens reaches a framing in about one
+second. The gimbal publishes its state and its attitude at 4 Hz. The engines
+deserialize from `perception_models/orin`, with no rebuild. 46 ROS nodes come
+up and none restarts. The front door refuses all seven flight commands.
+
+**Verified on the ground station, t500.** The `ground` profile runs one
+container on the host network, beside the native lcam and mavlink-router. MAVROS
+on domain 60 reads uas1 as connected. The air bridges carry 16 topics on domain
+99 and 2 on domain 69. `./px4sim streams` lists all three lcam mounts.
+`./px4sim layout` renders the Foxglove layout for uas1, and 0 of its 24 topics
+are absent against the live graph. `./px4sim verify` passes 9 checks over the
+`ground` and `foxglove` stages. The cross-wire run was 38 pass, 0 fail, 1
+blocked. The simulator still passes `./px4sim verify`, 71 of 71.
+
+**What a bench cannot prove.** A level camera means no ray meets the ground.
+`tf_loc` needs a box at least 20 degrees below the horizon, and the bench
+measured about 9. So `target_locations`, the mosaic map,
+the fiducial survey and the full detection round trip stay unproved. The gimbal
+rangefinder id 1 needs a target inside 50 metres. A reboot was out of scope, so
+the boot path was proved with `systemctl start` and `systemctl restart`, not
+with a cold start.
+
+**Open items.**
+
+| Item | What it needs |
+|---|---|
+| Docker on uas1 | `sudo usermod -aG docker user`, then a new login. Interactive `./px4sim` needs it. The boot unit does not |
+| The drone password | Rotate it. It is out of the chimera-deploy tree and still in that repository's history on GitHub |
+| The branches | `feature/real-drone-port` in px4-sim-stack, 5g_drone, MAVInsight and chimera-deploy is unpushed. The drones read it from the mirrors in `/srv/git` |
+| The thermal mount | `thermall1` and the vehicle's own `thermal` answered 503 once. rcam was not restarted. A restart or a camera re-plug is the next step |
+| `ROS_DOMAIN_ID` in a shell | The entry points export it into PID 1 alone, so a hand `docker exec` shell joins domain 0. Every front-door command passes the domain itself |
+| Dead bridge files | 5g_drone still carries eight per-vehicle domain bridge files that no launch file reads. Delete them or keep them |
 
 ## Change something
 
@@ -322,13 +403,18 @@ name here.
   Blackwell card needs 570.133 or later, for the TensorRT that can build engines
   for it.
 - Docker 24 or later with Compose v2.
-- About 120 GB of disk and 32 GB of RAM. Every vehicle costs GPU: a fleet of
-  four renders ten cameras, encodes twenty streams and runs four detectors.
+- About 80 GB of free disk for a full build, and 16 GB of RAM. `./px4sim
+  doctor` warns below either. Every vehicle costs GPU: a fleet of four renders
+  ten cameras, encodes twenty streams and runs four detectors.
 - `chimera-deploy` beside this checkout, with its `mavros` and `angles`
   submodules checked out. `ros-base` builds the PX4 v1.18 MAVROS patch from
   them. `MAVROS_PATCH=0` in `.env` removes that need.
-- On the aircraft, `user` in group `docker`, and `UAS_NUM` in
-  `/etc/environment`. `chimera-deploy/remote/deploy_onboard.sh` sets both up.
+- On the aircraft, `UAS_NUM` in `/etc/environment`, which
+  `chimera-deploy/deploy.sh` writes. `user` in group `docker` for interactive
+  use, which `chimera-deploy/remote/deploy_onboard.sh` sets up. The boot unit
+  carries `SupplementaryGroups=docker` and works without it.
+- On a real machine, `gst-discoverer-1.0` from `gstreamer1.0-plugins-base-apps`,
+  which is how `./px4sim streams` probes a mount that serves no API.
 
 `make preflight` checks all of it and says what is missing.
 
@@ -336,6 +422,7 @@ name here.
 
 | File | Contents |
 |---|---|
+| [docs/front-doors.md](docs/front-doors.md) | Every door into this system, with the exact commands and one worked example for each world |
 | [docs/uas-contract.md](docs/uas-contract.md) | What a simulated vehicle must present. The specification |
 | [docs/architecture.md](docs/architecture.md) | Why the containers split where they do |
 | [docs/interfaces.md](docs/interfaces.md) | What the simulator produces, and the frame conventions |
@@ -343,4 +430,5 @@ name here.
 | [docs/px4-simulated-gimbal.md](docs/px4-simulated-gimbal.md) | How the PX4 simulated gimbal behaves, and how to command it |
 | [docs/localization-error.md](docs/localization-error.md) | Where a target position's error comes from, and which parts are floors |
 | [docs/localization-report.md](docs/localization-report.md) | What the 2026-08-21 accuracy pass changed, and what it measured |
+| [docs/altitude-datums.md](docs/altitude-datums.md) | Which altitude the ground is measured from, and the bias that came of it |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | What breaks, and what to do |
