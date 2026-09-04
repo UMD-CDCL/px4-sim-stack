@@ -61,8 +61,9 @@ A vehicle is one machine: the companion container shares its router's network
 namespace, so the router reaches MAVROS on loopback, as it does on the Orin.
 The ground station is one machine too, so `offboard` holds one MAVROS for each
 vehicle and `ground-router` shares its namespace. On the real machines the
-container shares the host's namespace instead, and the native router pushes to
-`127.0.0.1:14402` as it does today.
+container shares the host's namespace instead. The aircraft's native router
+pushes to `127.0.0.1:14402`. The ground station's router pushes each vehicle to
+its own `127.0.0.<N>:14402`.
 
 `UAS_BASE` in `.env` says which world the numbers belong to: 10 numbers a
 simulated fleet from uas11, 0 the real one from uas1. `COMPOSE_PROFILES` says
@@ -157,7 +158,7 @@ The real fleet, `N` 1 to 9, with `UAS_BASE=0`:
 | What | Address |
 |---|---|
 | MAVLink, to the ground station | `udp://10.200.142.60:14550 + N`, so 14551 for uas1, into the native router |
-| MAVLink, to MAVROS | `udp://127.0.0.1:14402`, from the native router, on the aircraft and on the ground alike |
+| MAVLink, to MAVROS | `udp://127.0.0.1:14402` on the aircraft. On the ground the native router gives each vehicle `udp://127.0.0.<N>:14402` |
 | MAVLink, for scripts | `tcp://127.0.0.1:5760`, this machine's native router |
 | Low-rate video, on the ground | `rtsp://127.0.0.1:8554/rgbl1` from lcam, `pilotl1`, `thermall1` |
 | Video, on the aircraft | `rtsp://127.0.0.1:8554/rgb` from rcam, and `rgbl`, `pilot`, `pilotl`, `thermal`, `thermall` |
@@ -241,7 +242,7 @@ selected one. Both write `UAS_FLEET` in `.env` and bring the stack to the new
 fleet.
 
 The console offers the keys this world accepts, and no others. On a ground
-station and on an aircraft the twenty actions that fly or maintain the
+station and on an aircraft the eighteen actions that fly or maintain the
 simulator are not in the menus, not on a key and not in `?`. A ground station
 and an aircraft also get a NATIVE row, which is `systemctl is-active` for the
 services this machine boots beside the containers: `lcam` and

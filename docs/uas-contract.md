@@ -94,11 +94,10 @@ that vehicle's system id.
 
 The real ground station has the same shape. The native router from
 `local/main.conf` and the `ground` container share the host network, and the
-fielded QGroundControl stays native. That file sends every vehicle to one
-`127.0.0.1:14402` today. A second real vehicle needs its own
-`[UdpEndpoint mavros<N>]` at `127.0.0.<N>:14402` with `AllowSrcSysIn = <N>,255`,
-as the simulated `ground-router` already does. That change waits for a second
-vehicle.
+fielded QGroundControl stays native. That file holds one
+`[UdpEndpoint mavros<N>]` for each of uas1 to uas4, at `127.0.0.<N>:14402` with
+`AllowSrcSysIn = <N>,255`, as the simulated `ground-router` does. A fifth
+vehicle needs one more.
 
 ## 3. Video
 
@@ -112,7 +111,7 @@ low-rate stream. The low-rate stream crosses the radio link.
 
 The full stream is 1920x1080 because that is what the detector reads.
 `onboard_common_params.yaml` declares `source.width` 1920 and `source.height`
-1080, and `DS_WIDTH` and `DS_HEIGHT` match. The aircraft captures the pilot
+1080. The aircraft captures the pilot
 camera at 3840x2160, and its `pilotds` socket carries that size into DeepStream
 (measured on uas1, 2026-09-03). `rgbds` is 1920x1080 and `thermalds` 640x512.
 The simulator has no reason to render the larger frame, so it does not.

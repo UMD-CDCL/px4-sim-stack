@@ -183,7 +183,7 @@ opens what can be done to that row. `:` types any px4sim command, `?` lists
 every action with the command it runs, esc stops a command and `q` leaves.
 
 **What each world offers.** The console offers the keys this world accepts, and
-no others. On a ground station and on an aircraft the twenty actions that fly
+no others. On a ground station and on an aircraft the eighteen actions that fly
 or maintain the simulator are not in the menus, not on a key and not in `?`:
 `fleet add`, `fleet remove`, `place`, `scenario` twice, `scene`, `fiducial`,
 `console`, `origin`, `takeoff`, `land`, `fly`, `arm`, `snap` twice, `goto`,
@@ -211,7 +211,7 @@ every service in a container, so its unit list is empty.
 
 **For.** The target names people already type.
 
-**Where.** Beside `./px4sim`, in either repository checkout.
+**Where.** Beside `./px4sim`, on either machine.
 
 Every target forwards to the front door and does no work of its own.
 
@@ -416,7 +416,8 @@ non-empty group. `--tag` and `--repo` name another GitHub release.
 
 **What it reads.** `perception_models/manifest.json`. `machines` maps a board
 model or a GPU name to an engine group. `roles` says whether a role needs
-models at all. The groups today are `shared`, `orin`, `t500` and `blackwell`.
+models at all. The groups today are `checkpoints`, `shared`, `orin`, `t500`
+and `blackwell`.
 
 **What it refuses.** A machine the manifest has no rule for. `resolve` stops
 rather than guessing, and the answer is to add the machine to `machines`.

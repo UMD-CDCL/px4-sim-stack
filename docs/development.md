@@ -892,8 +892,9 @@ truth. That is the test of whether the boundaries are real.
 ### The ground station
 
 `ground` runs the offboard image on the host network. The native
-`mavlink-router.service` from `chimera-deploy/local/main.conf` pushes every
-vehicle to `127.0.0.1:14402`, and MAVROS binds it there. `lcam.service` holds
+`mavlink-router.service` from `chimera-deploy/local/main.conf` pushes each
+vehicle to its own `127.0.0.<N>:14402`, and that vehicle's MAVROS binds it
+there. `lcam.service` holds
 8554 and restreams each vehicle's low rate mounts as `rgbl<N>`, `pilotl<N>` and
 `thermall<N>`, and `ds_node` previews from them. The fielded QGroundControl
 stays native. No `ground-router`, `video-router` or `qgc` container starts.

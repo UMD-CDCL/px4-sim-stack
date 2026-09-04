@@ -902,8 +902,9 @@ change it, and record the mode beside every measurement.
 
 ### Nothing arrives on 14402
 
-The native `mavlink-router.service` pushes every vehicle to `127.0.0.1:14402`,
-and the `ground` container binds it on the host network. Check both ends:
+The native `mavlink-router.service` pushes each vehicle to its own
+`127.0.0.<N>:14402`, and the `ground` container binds every one of those on the
+host network. Check both ends:
 
 ```bash
 systemctl status mavlink-router
