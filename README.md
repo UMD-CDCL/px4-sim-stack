@@ -311,10 +311,14 @@ running stack and say so if it is not up. `fleet` and `captures` are skipped
 without `VERIFY_FULL=1`. What each one measured last is in
 [docs/development.md](docs/development.md).
 
-A real machine runs `ground` and `foxglove` and says so. The other stages
-expand the simulator's airframes or fly a vehicle, so `verify` refuses them by
-name. The last simulator run passed 71 checks, and the last ground run passed
-9.
+A real machine runs the stages its own world can answer, and says which those
+are. A ground station runs `ground` and `foxglove`, because it holds no vehicle
+of its own and reads the picture it rebuilt from the radio. An aircraft runs
+`units`, `vehicle` and `foxglove`, because it is the vehicle: it runs the
+companion and serves its own bridge. The other stages expand the simulator's
+airframes or fly a vehicle, so `verify` refuses them by name. The last
+simulator run passed 71 checks, the last ground run 9, and the last aircraft
+run 12 of 13.
 
 Start a subset by naming the profiles:
 
@@ -326,14 +330,15 @@ Start a subset by naming the profiles:
 The routers and the companions come from `UAS_FLEET`, so they need no profile
 name here.
 
-## State of the real-vehicle port (2026-09-03)
+## State of the real-vehicle port (2026-09-04)
 
 The aircraft world and the ground world ran on the real hardware for the first
-time on 2026-09-03. Nothing armed and nothing flew. The evidence is component
-tests on uas1 and on t500.
+time on 2026-09-03, and uas1 started the stack by itself from a cold boot on
+2026-09-04. Nothing armed and nothing flew. The evidence is component tests on
+uas1 and on t500.
 
-**Verified on the aircraft, uas1.** `onboard.service` starts the container at
-boot, after docker, rcam, the native router and a clock step, and it reaches
+**Verified on the aircraft, uas1.** `onboard.service` starts the container
+after docker, rcam, the native router and a clock step, and it reaches
 `active (exited)` in 39 seconds. MAVROS connects to PX4 v1.18 and reads
 `capabilities=321791`. The preview publishes at 27.4 Hz from the rcam NVMM
 socket, and `ds_node` reports `pipelines PLAYING` 57 seconds after the
@@ -342,6 +347,17 @@ Hz, at 99% GR3D and 15.9 W. The SCF4 lens reaches a framing in about one
 second. The gimbal publishes its state and its attitude at 4 Hz. The engines
 deserialize from `perception_models/orin`, with no rebuild. 46 ROS nodes come
 up and none restarts. The front door refuses all seven flight commands.
+`./px4sim verify` runs the aircraft's own stages and passes 12 of 13: the one
+failure is the gimbal rangefinder, which is not fitted yet.
+
+**The cold boot, uas1, 2026-09-04.** `onboard.service` was enabled but had
+never run at a boot: an ordering cycle through the aircraft's own
+`mavlink-router.service` made systemd delete its start job every time, and the
+unit was only ever proved with `systemctl start`. With the cycle broken, a
+power cycle brings the stack up unattended. systemd reports no ordering cycle,
+the clock steps before the container, and the unit is `active` 38 seconds after
+power on. `user` is now in group `docker`, so `./px4sim` also runs from a
+prompt without sudo.
 
 **Verified on the ground station, t500.** The `ground` profile runs one
 container on the host network, beside the native lcam and mavlink-router. MAVROS
@@ -355,16 +371,15 @@ blocked. The simulator still passes `./px4sim verify`, 71 of 71.
 **What a bench cannot prove.** A level camera means no ray meets the ground.
 `tf_loc` needs a box at least 20 degrees below the horizon, and the bench
 measured about 9. So `target_locations`, the mosaic map,
-the fiducial survey and the full detection round trip stay unproved. The gimbal
-rangefinder id 1 needs a target inside 50 metres. A reboot was out of scope, so
-the boot path was proved with `systemctl start` and `systemctl restart`, not
-with a cold start.
+the fiducial survey and the full detection round trip stay unproved. The
+rangefinders say nothing at all: PX4 sends no `DISTANCE_SENSOR` on any id, so
+`drone_lidar_200m`, `drone_lidar_6m` and `gimbal_lidar_50m` are advertised and
+silent. They are a vehicle fit, not a stack fault.
 
 **Open items.**
 
 | Item | What it needs |
 |---|---|
-| Docker on uas1 | `sudo usermod -aG docker user`, then a new login. Interactive `./px4sim` needs it. The boot unit does not |
 | The drone password | Rotate it. It is out of the chimera-deploy tree and still in that repository's history on GitHub |
 | The branches | `feature/real-drone-port` in px4-sim-stack, 5g_drone, MAVInsight and chimera-deploy is unpushed. The drones read it from the mirrors in `/srv/git` |
 | The thermal mount | `thermall1` and the vehicle's own `thermal` answered 503 once. rcam was not restarted. A restart or a camera re-plug is the next step |

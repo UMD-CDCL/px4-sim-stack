@@ -62,8 +62,10 @@ on the command line.
 4. `router` on a real machine. The real router is native:
    `systemctl status mavlink-router`.
 
-`verify` is not refused. It runs the stages a real machine can answer and says
-which ones those are.
+`verify` is not refused. It runs the stages this machine's world can answer and
+says which ones those are: `ground` and `foxglove` on a ground station, which
+holds no vehicle of its own, and `units`, `vehicle` and `foxglove` on an
+aircraft, which is the vehicle and serves its own bridge.
 
 `./px4sim help` prints the whole list and names the world this machine is.
 `./px4sim check` reads that text back and fails on a command the help does not
@@ -143,6 +145,7 @@ cd /home/user/px4-sim-stack
 ./px4sim logs onboard
 ./px4sim uas 1 status
 ./px4sim zoom 1 wide
+./px4sim verify            # units, vehicle and foxglove: the aircraft's own
 ./px4sim stop
 ```
 
@@ -297,6 +300,13 @@ waits up to three minutes for a clock step with `chronyc waitsync`. Both
 
 `SupplementaryGroups=docker` gives the unit the docker socket whether or not
 the login user is in that group.
+
+`After=` names `multi-user.target` first, and that line is load bearing. The
+aircraft's own `mavlink-router.service` is ordered after `multi-user.target`.
+Without the line, systemd adds the opposite order for this unit, the three make
+a cycle, and systemd breaks a cycle by deleting a start job: this one. The unit
+then reads `enabled` and `inactive` after every boot, with nothing in its
+journal to say why.
 
 **What it costs.** A `systemctl start` always cycles the container, because
 `ExecStartPre` stops it first. Detection is off on a fresh container. Turn it
