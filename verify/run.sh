@@ -52,9 +52,22 @@ fi
 stage_files() { ls verify/stages/*.sh; }
 # Which stages a real machine can answer. The others expand the simulator's
 # airframes, read its compose services, or fly a vehicle to a viewpoint, and
-# on the real fleet that number is an aircraft on the bench. These two read
-# the ground station itself, and each one skips what needs a scene.
-REAL_STAGES="ground foxglove"
+# on the real fleet that number is an aircraft on the bench. Each stage below
+# skips what needs a scene.
+#
+# A real machine is one of two worlds, and they answer different questions. A
+# ground station holds no vehicle of its own: it reads the picture it rebuilt
+# from the radio, so it answers for the ground station and its bridge. An
+# aircraft IS the vehicle: it runs the companion and serves its own bridge, so
+# it answers for the graph it flies. Giving both worlds the ground station's
+# list told the operator of a healthy aircraft that the stack was broken.
+real_stages() {
+	case "$(world_of)" in
+	aircraft) echo "units vehicle foxglove" ;;
+	*)        echo "ground foxglove" ;;
+	esac
+}
+REAL_STAGES=$(real_stages)
 real_stage() { case " $REAL_STAGES " in *" $1 "*) return 0 ;; esac; return 1; }
 stage_name()  { basename "$1" .sh | cut -d- -f2-; }
 stage_file()  {

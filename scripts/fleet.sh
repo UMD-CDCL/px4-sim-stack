@@ -44,6 +44,11 @@ native_units() {
 # ground station is `ground`. px4sim and the verification stages both ask, so
 # the service names are written once.
 companion_service() { if [ "$FLEET_IS_SIMULATED" = true ]; then echo "onboard$1"; else echo onboard; fi; }
+# The profiles that select a companion, for a caller that asks compose about it
+# rather than through the front door. A simulated companion is selected by its
+# vehicle and itself. The aircraft's companion is the whole aircraft world, so
+# the service name is not the profile name there.
+companion_profiles() { if [ "$FLEET_IS_SIMULATED" = true ]; then echo "uas$1,onboard$1"; else echo aircraft; fi; }
 ground_service()    { if [ "$FLEET_IS_SIMULATED" = true ]; then echo offboard; else echo ground; fi; }
 # The directories compose binds a volume to, made before compose reaches them.
 # Compose makes a missing one root-owned, and the uid 1000 container then
