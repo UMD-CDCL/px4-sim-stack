@@ -67,13 +67,23 @@ expect_eq "the live view is calibrated, so the boxes land on it" data "${verdict
 
 # The ground, drawn the right way round. The model's own bytes say which way
 # its axes and its map face; a turned or mirrored one publishes just as
-# convincingly as a correct one.
-if scene=$(./px4sim uas ground scene 2>&1); then
+# convincingly as a correct one. With no scene there is no mesh and no map,
+# which is what a bench outside the survey area runs.
+if [ -z "${SCENE:-}" ]; then
+	skip "no scene, so the ground station draws no terrain"
+elif scene=$(./px4sim uas ground scene 2>&1); then
 	pass "the satellite map is drawn north up over the terrain"
 	note "$(printf '%s' "$scene" | tr '\n' ' ' | cut -c1-160)"
 else
 	fail "the satellite map is drawn north up over the terrain"
 	note "$(printf '%s' "$scene" | tr '\n' ' ' | cut -c1-200)"
+fi
+
+# What is left is the scoring, which measures the detections against the
+# targets a scenario file places. Only the simulator has those.
+if [ "$FLEET_IS_SIMULATED" = false ]; then
+	skip "the scored layers need the simulator's known targets"
+	return 0
 fi
 
 # The rings around the known targets, read back as the Map panel parses them.

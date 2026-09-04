@@ -759,7 +759,7 @@ esac
 
 # The simulator's own commands. None of them may reach a real vehicle.
 case "$cmd" in
-fly | place | scene | scenario | fiducial | reset | px4 | console | snap | verify | genscene) require_sim "$cmd" ;;
+fly | place | scene | scenario | fiducial | reset | px4 | console | snap | genscene) require_sim "$cmd" ;;
 uas)
 	# The verb can stand anywhere. uas.py reads `--` as the end of the
 	# options and dispatches the word after it, so `uas 1 -- arm` arms.
@@ -1307,6 +1307,8 @@ genscene)
 	COMPOSE_PROFILES="scenegen" exec $DC run --rm --service-ports scenegen "$@"
 	;;
 
+# Not require_sim. The suite reads the same fleet definition this file does,
+# and it says for itself which of its stages a real machine can answer.
 verify)   ./verify/run.sh "$@" ;;
 
 capture)

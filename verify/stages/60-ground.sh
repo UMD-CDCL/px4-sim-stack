@@ -28,6 +28,37 @@ for topic in camera/camera_info position status; do
 	verdict=$(./px4sim probe ground "/uas$lead/$topic" 2>/dev/null | cut -f3)
 	expect_eq "the ground receives $topic" data "$verdict"
 done
+
+# Everything an operator sees in the scene hangs off the aircraft's own frame:
+# the model, the camera under it, the outline on the ground and the picture
+# laid into it. A station that is not told which way the aircraft points draws
+# all of them the same wrong way, and each one looks right beside the others.
+#
+# On a real ground station the vehicle's own companion flies on the aircraft,
+# so both sides of this would be read through the one container and say the
+# same thing twice. Ask the ground alone there.
+sides="ground"
+[ "$FLEET_IS_SIMULATED" = true ] && sides="$lead ground"
+for side in $sides; do
+	name=$([ "$side" = ground ] && echo "the ground station" || echo "uas$lead")
+	if facing=$(./px4sim uas "$side" heading 2>&1); then
+		pass "$name points uas$lead the way it is flying"
+		note "$(printf '%s' "$facing" | tr '\n' ' ')"
+	else
+		fail "$name points uas$lead the way it is flying"
+		note "$(printf '%s' "$facing" | tr '\n' ' ')"
+	fi
+done
+
+# The rest needs the simulator. It scores against the scenario's own targets,
+# it sends the vehicle to a viewpoint over them, and it moves the gimbal to
+# read a click back. A real bench holds none of that, and a red row there says
+# nothing about the ground station.
+if [ "$FLEET_IS_SIMULATED" = false ]; then
+	skip "the scoring, the air link comparison and the click test need the simulator"
+	return 0
+fi
+
 expect_eq "the ground holds the scene's casualty locations" data \
 	"$(./px4sim probe ground /known_casualty_locations 2>/dev/null | cut -f3)"
 
@@ -122,18 +153,3 @@ else
 	expect_eq "a station whose clicks are off ignores them" True \
 		"$(python3 -c "print(abs($ignored - $aimed_before) < 3)")"
 fi
-
-# Everything an operator sees in the scene hangs off the aircraft's own frame:
-# the model, the camera under it, the outline on the ground and the picture
-# laid into it. A station that is not told which way the aircraft points draws
-# all of them the same wrong way, and each one looks right beside the others.
-for side in "$lead" ground; do
-	name=$([ "$side" = ground ] && echo "the ground station" || echo "uas$lead")
-	if facing=$(./px4sim uas "$side" heading 2>&1); then
-		pass "$name points uas$lead the way it is flying"
-		note "$(printf '%s' "$facing" | tr '\n' ' ')"
-	else
-		fail "$name points uas$lead the way it is flying"
-		note "$(printf '%s' "$facing" | tr '\n' ' ')"
-	fi
-done
