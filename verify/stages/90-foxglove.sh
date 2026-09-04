@@ -95,9 +95,10 @@ else
 fi
 
 # What is left is the scoring, which measures the detections against the
-# targets a scenario file places. Only the simulator has those.
-if [ "$FLEET_IS_SIMULATED" = false ]; then
-	skip "the scored layers need the simulator's known targets"
+# targets a scenario file places. A scene ships one, and a bench outside a
+# surveyed course names none.
+if [ -z "${SCENARIO:-}" ]; then
+	skip "no scenario, so the scored layers have no targets to score against"
 	return 0
 fi
 

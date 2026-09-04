@@ -50,17 +50,23 @@ for side in $sides; do
 	fi
 done
 
-# The rest needs the simulator. It scores against the scenario's own targets,
-# it sends the vehicle to a viewpoint over them, and it moves the gimbal to
-# read a click back. A real bench holds none of that, and a red row there says
-# nothing about the ground station.
-if [ "$FLEET_IS_SIMULATED" = false ]; then
-	skip "the scoring, the air link comparison and the click test need the simulator"
-	return 0
+# The truth the ground scores against comes from the scenario, which a real
+# course names as readily as a simulated one. A bench outside a surveyed
+# course names none.
+if [ -n "${SCENARIO:-}" ]; then
+	expect_eq "the ground holds the scene's casualty locations" data \
+		"$(./px4sim probe ground /known_casualty_locations 2>/dev/null | cut -f3)"
+else
+	skip "no scenario, so the ground station has no casualty locations"
 fi
 
-expect_eq "the ground holds the scene's casualty locations" data \
-	"$(./px4sim probe ground /known_casualty_locations 2>/dev/null | cut -f3)"
+# The rest needs the simulator. It sends the vehicle to a viewpoint over the
+# targets and moves the gimbal to read a click back. A real bench holds
+# neither, and a red row there says nothing about the ground station.
+if [ "$FLEET_IS_SIMULATED" = false ]; then
+	skip "the air link comparison and the click test need the simulator"
+	return 0
+fi
 
 # Aim at the casualties and turn detection on, rather than reading whatever the
 # stage before happened to leave pointed where.
