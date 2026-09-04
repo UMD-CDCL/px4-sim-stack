@@ -487,13 +487,17 @@ usage() {
 	ground)    world="the ground station"; sample=ground ;;
 	aircraft)  world="the aircraft";      sample=onboard ;;
 	esac
-	if [ "$FLEET_IS_SIMULATED" = true ]; then
+	case "$(world_of)" in
+	simulator)
 		footer="  Current: scene ${SCENE:-?}, scenario ${SCENARIO:-?}, fleet ${UAS_FLEET:-?}
-           origin ${HOME_LAT:-?}, ${HOME_LON:-?}"
-	else
+           origin ${HOME_LAT:-?}, ${HOME_LON:-?}" ;;
+	aircraft)
+		footer="  Current: uas${UAS_NUM:-$FIRST_UAS} at $(uas_address "$FIRST_UAS"), ROS domain $(uas_domain "$FIRST_UAS")
+           the ground station is $(ground_address), on ROS domain $GROUND_DOMAIN" ;;
+	ground)
 		footer="  Current: fleet ${UAS_FLEET:-?}, uas$FIRST_UAS at $(uas_address "$FIRST_UAS")
-           ground station $(ground_address), ROS domain $GROUND_DOMAIN"
-	fi
+           this ground station is $(ground_address), on ROS domain $GROUND_DOMAIN" ;;
+	esac
 	cat <<EOF
 ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
 
