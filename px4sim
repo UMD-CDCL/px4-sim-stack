@@ -707,20 +707,24 @@ fleet_models() {
 # Every scenario this simulator can place, from the scenario files themselves.
 # `scenario` takes a name from this list and the console offers it, so a name
 # with no file behind it is caught here and not in a world with no targets.
-# The scenes built into modules/sim/scenes. A scene is its surface: the world
-# file alone is a Gazebo world with no terrain for the ground station to draw.
+# The scenes in modules/sim/scenes. A generated one carries a surface, which is
+# what the ground station draws and casts at. A hand written world carries only
+# the Gazebo file, which the simulator can still fly, so both count as a scene
+# and the entry point says which of the two this one is.
 scene_names() {
 	local path name
-	for path in modules/sim/scenes/worlds/*_surface.json; do
+	for path in modules/sim/scenes/worlds/*_surface.json modules/sim/scenes/worlds/*.sdf; do
 		[ -f "$path" ] || continue
 		name=${path##*/}
-		echo "${name%_surface.json}"
-	done
+		name=${name%_surface.json}
+		echo "${name%.sdf}"
+	done | sort -u
 }
 
 have_scene() {
-	[ -f "modules/sim/scenes/worlds/$1_surface.json" ] \
-		|| die "No scene named '$1'. Try: $(scene_names | paste -sd' ' -)
+	[ -f "modules/sim/scenes/worlds/$1_surface.json" ] && return 0
+	[ -f "modules/sim/scenes/worlds/$1.sdf" ] && return 0
+	die "No scene named '$1'. Try: $(scene_names | paste -sd' ' -)
     Or build it: ./px4sim genscene --help"
 }
 
