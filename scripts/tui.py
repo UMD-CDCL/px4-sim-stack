@@ -15,6 +15,10 @@ what happens here is what happens at the prompt.
   esc      stop the command that is running
   q        leave
 
+It offers the actions this world accepts and no others. A ground station and
+an aircraft refuse the simulator's own commands, so the console keeps none of
+them on a key, in a menu or in the help.
+
 It draws best in a terminal of 100 columns or more.
 """
 
