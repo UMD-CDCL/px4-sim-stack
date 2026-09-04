@@ -596,7 +596,8 @@ endpoints() {
 		cat <<EOF
 
   ${BOLD}MAVLink${OFF}     udp://$(ground_address):$(uas_gcs_port "$FIRST_UAS") upwards   each vehicle's router pushes here, into the native ground router
-              udp://127.0.0.1:14402     the native router feeds MAVROS here, on the aircraft and on the ground
+              udp://127.0.0.1:14402     the native router feeds the aircraft's MAVROS here
+              udp://127.0.0.<N>:14402   the ground router feeds vehicle N's MAVROS here, one address per vehicle
               tcp://127.0.0.1:5760      this machine's native router, every vehicle it hears. MAVSDK, pymavlink
   ${BOLD}Video${OFF}       $(host_rtsp_base)/$(ground_stream "$FIRST_UAS")   the low rate mounts lcam restreams: rgbl<N>, pilotl<N>, thermall<N>
               rtsp://$(uas_address "$FIRST_UAS"):8554/rgb      the full mounts, on the vehicle: rgb, pilot, thermal
