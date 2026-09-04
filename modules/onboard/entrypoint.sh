@@ -106,6 +106,22 @@ else
 	echo "terrain: no surface for scene '${SCENE}'. Localization uses the flat plane." >&2
 fi
 
+# Who says where the targets stand, on this vehicle's own ROS domain. Read the
+# same way the ground station reads it, from the same scenario, so both sides
+# score one detection against one target. No scenario publishes no truth.
+TRUTH=false
+if [ -n "${SCENARIO:-}" ]; then
+	export GROUND_TRUTH_FILE="/scenes/scenarios/${SCENARIO}.yaml"
+	if [ -f "${GROUND_TRUTH_FILE}" ]; then
+		TRUTH=true
+		echo "truth: ${GROUND_TRUTH_FILE}"
+	else
+		echo "truth: no scenario named '${SCENARIO}'. The scored layers stay empty." >&2
+	fi
+else
+	echo "truth: no scenario. The scored layers wait for the course."
+fi
+
 # The datum the scene is drawn against, which the ground station works out
 # from the same surface. With no scene the geoid height is 0.0.
 SITE_PARAMS=${SITE_PARAMS:-/camera/site.yaml}
@@ -293,6 +309,7 @@ if [ "${1:-launch}" = "launch" ]; then
 		uas:="${UAS_NUM}"
 		${MODEL:+model:="${MODEL}"}
 		sim:="${SIM}"
+		truth:="${TRUTH}"
 		container:=true
 		${params:+params:="${params}"}
 		"$@")

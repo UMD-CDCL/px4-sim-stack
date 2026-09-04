@@ -189,9 +189,10 @@ x-onboard-env: &onboard-env
   CUDA_CACHE_PATH: /models/.nv-compute
   SCENE: ${SCENE:-lorton}
   # What sim_ground_truth scores against, the same pair the ground station
-  # reads. Without them the node takes its own defaults, which name one
+  # reads. The entry point makes the scenario path from this name, so one
+  # place names it. Without it the node takes its own default, which names one
   # scenario, and every other scenario scores against the wrong targets.
-  GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO:-lorton_casualties}.yaml
+  SCENARIO: ${SCENARIO:-lorton_casualties}
   RESOLVED_TRUTH_FILE: /scenes/ground_truth_actual.yaml
   # One more parameter file, loaded after every other. Where this machine names
   # what only it has, the detector artifacts above all. Put it in the model
@@ -252,10 +253,11 @@ x-offboard-env: &offboard-env
   # real ground station.
   GROUND_DOMAIN: ${GROUND_DOMAIN:-70}
   SCENE: ${SCENE:-lorton}
-  # What sim_ground_truth scores against. The scenario says where each
-  # casualty was asked to go. The resolved file says where Gazebo put it,
-  # and wins where it exists.
-  GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO:-lorton_casualties}.yaml
+  # What sim_ground_truth scores against. The scenario says where each target
+  # was asked to stand. The resolved file says where Gazebo put it, and wins
+  # for the scene that wrote it. The entry point makes the path from this
+  # name, so one place names it.
+  SCENARIO: ${SCENARIO:-lorton_casualties}
   RESOLVED_TRUTH_FILE: /scenes/ground_truth_actual.yaml
   CUDA_CACHE_PATH: /logs/.nv-compute
 
@@ -628,6 +630,10 @@ services:
       # empty, the way `ground` reads it: SCENE= on a bench leaves both
       # sides on the flat plane, SCENE=lorton gives both sides the site.
       SCENE: ${SCENE-lorton}
+      # The targets of that scene, read the same way. SCENARIO= on a bench
+      # publishes no ground truth, so nothing scores a real detection against
+      # targets that are not there.
+      SCENARIO: ${SCENARIO-lorton_casualties}
     volumes:
       - *models-volume
       - *logs-volume
@@ -702,6 +708,10 @@ services:
       # The dash form keeps an empty value empty: SCENE= in .env draws no
       # terrain on a bench, SCENE=lorton draws the site at the field.
       SCENE: ${SCENE-lorton}
+      # The targets of that scene, read the same way. SCENARIO= publishes no
+      # ground truth, and the scored layers wait for the course instead of
+      # calling every real detection a false positive.
+      SCENARIO: ${SCENARIO-lorton_casualties}
 
   # -------------------------------------------------------------------------
   # ground-router - the ground station's mavlink-router, from

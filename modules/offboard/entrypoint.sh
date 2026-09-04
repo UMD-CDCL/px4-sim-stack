@@ -15,9 +15,6 @@ SCENE=${SCENE-lorton}
 TERRAIN_DIR=${TERRAIN_DIR:-/terrain}
 
 UAS_BASE=${UAS_BASE:-10}
-# A simulated fleet is numbered from 11. The same number says whether the
-# ground station scores against a scenario or against the real course.
-if [ "${UAS_BASE}" -ge 10 ]; then SIM=true; else SIM=false; fi
 numbers=""
 models=""
 index=0
@@ -75,6 +72,24 @@ else
 	echo "terrain: no surface for scene '${SCENE}'. The footprint uses the flat plane." >&2
 fi
 
+# Who says where the targets stand. A scene ships a scenario, and the poses in
+# it are the same arithmetic whether Gazebo spawned the targets or a survey
+# placed them, so a real course scores the way a simulated one does. No
+# scenario leaves the truth to the course over the UGV bridge, and the scored
+# layers stay empty rather than call every detection a false positive.
+TRUTH=false
+if [ -n "${SCENARIO:-}" ]; then
+	export GROUND_TRUTH_FILE="/scenes/scenarios/${SCENARIO}.yaml"
+	if [ -f "${GROUND_TRUTH_FILE}" ]; then
+		TRUTH=true
+		echo "truth: ${GROUND_TRUTH_FILE}"
+	else
+		echo "truth: no scenario named '${SCENARIO}'. The scored layers stay empty." >&2
+	fi
+else
+	echo "truth: no scenario. The scored layers wait for the course."
+fi
+
 # The same site the vehicles work out. The station draws the scene against the
 # vehicle's home fix and recomputes the camera footprint, so it needs the datum
 # the vehicle has. With no scene the geoid height is 0.0.
@@ -86,7 +101,7 @@ if [ "${1:-launch}" = "launch" ]; then
 	exec ros2 launch umd_uas offboard.launch.py \
 		uas:="${numbers#,}" \
 		models:="${models#,}" \
-		sim:="${SIM}" \
+		truth:="${TRUTH}" \
 		params:="${SITE_PARAMS}" \
 		"$@"
 fi
