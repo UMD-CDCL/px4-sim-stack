@@ -190,9 +190,14 @@ Fly a vehicle and see what its nodes make of it:
 ```
 
 With `UAS_BASE=0` a vehicle number is a real aircraft, so `./px4sim` refuses
-every command that flies the simulator: `fly`, `place`, `scene`, `scenario`,
-`fiducial`, `reset`, `px4`, `console`, `snap`, `verify`, `genscene`, and
-`uas N arm`, `takeoff`, `land` and `goto`. Nothing is sent.
+every command that flies the simulator: `core`, `fly`, `place`, `scene`,
+`scenario`, `fiducial`, `reset`, `px4`, `console`, `snap`, `genscene`, and
+`uas N arm`, `takeoff`, `land` and `goto`. Nothing is sent. It also refuses
+the commands that maintain the simulator, and each of those says what it did
+not change: `setup`, `clean-src`, `nuke`, `fleet add` and `fleet remove`.
+`./px4sim help` holds that list under "The simulator alone", and it names the
+world this machine is. `verify` is not refused: it says for itself which of
+its stages a real machine can answer.
 
 ## The console
 
@@ -208,6 +213,15 @@ command it runs. Press esc to stop a command, and `q` to leave.
 Press `=` to fly one more vehicle, and `-` to retire the selected one. Both
 write `UAS_FLEET` in `.env` and bring the stack to the new fleet.
 
+The console offers the keys this world accepts, and no others. On a ground
+station and on an aircraft the twenty actions that fly or maintain the
+simulator are not in the menus, not on a key and not in `?`. A ground station
+and an aircraft also get a NATIVE row, which is `systemctl is-active` for the
+services this machine boots beside the containers: `lcam` and
+`mavlink-router` on the ground, `rcam`, `mavlink-router` and `onboard` on the
+aircraft. Every bridge of the real fleet holds port 8765, so the FOXGLOVE row
+names each one by its machine.
+
 The console starts nothing of its own. Every action runs `./px4sim ...`, so
 what it does is what the prompt does. It is a way to reach this script, not a
 second one.
@@ -218,8 +232,9 @@ Each reading comes from the thing itself, never from a log message:
 |---|---|
 | A container | The container engine's own state |
 | A video path | The video router API, and the bytes that path carried since the report before |
-| A vehicle | MAVLink on `tcp://localhost:5761` upwards: mode, arming, battery, GPS, height and gimbal |
+| A vehicle | MAVLink on `tcp://localhost:5761` upwards, or on the native router's 5760 for the real fleet: mode, arming, battery, GPS, height and gimbal |
 | A Foxglove bridge | A connection to the port, opened and closed |
+| A native service | `systemctl is-active`, on a ground station and on an aircraft |
 | The GPU | `nvidia-smi`: what the cameras, the encoders and the detector are using |
 
 `./px4sim state` prints the same picture as JSON, and `./px4sim state --watch`
