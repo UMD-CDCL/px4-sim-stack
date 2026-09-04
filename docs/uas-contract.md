@@ -89,7 +89,8 @@ ground station that does not exist, and the fielded one is a single laptop.
 
 The ground station runs one router from `chimera-deploy/local/main.conf`. It
 listens on 14551 to 14554 in server mode and sends to loopback 14401 for
-QGroundControl and 14402 for MAVROS.
+QGroundControl and `127.0.0.N:14402` for the MAVROS of vehicle N, filtered on
+that vehicle's system id.
 
 The real ground station has the same shape. The native router from
 `local/main.conf` and the `ground` container share the host network, and the

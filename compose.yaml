@@ -684,10 +684,9 @@ services:
   # low rate streams on 8554 under the names offboard.launch.py builds.
   # No ground-router, no video-router, no qgc: the native ones do that work.
   #
-  # One vehicle today. Vehicle N's MAVROS binds 127.0.0.<N>:14402, and the
-  # fielded router sends every vehicle to 127.0.0.1:14402. A longer UAS_FLEET
-  # needs one mavros endpoint for each vehicle in
-  # chimera-deploy/local/main.conf, the shape ground-router writes below.
+  # Vehicle N's MAVROS binds 127.0.0.<N>:14402, and the fielded router in
+  # chimera-deploy/local/main.conf sends each vehicle there, the shape
+  # ground-router writes below.
   # -------------------------------------------------------------------------
   ground:
     <<: *offboard
