@@ -20,6 +20,14 @@ real_profiles_selected() { case ",${COMPOSE_PROFILES:-}," in *,ground,* | *,airc
 # Whether this machine is the vehicle itself, which serves its own cameras and
 # runs its own companion. px4sim and scripts/preflight.sh both ask.
 aircraft_selected() { case ",${COMPOSE_PROFILES:-}," in *,aircraft,*) return 0 ;; esac; return 1; }
+# Which of the three worlds .env describes, in one word. The front door prints
+# it, and scripts/state.py hands it to the console, which hides the keys a
+# world refuses. simulator, ground or aircraft, and nothing else.
+world_of() {
+	if [ "$FLEET_IS_SIMULATED" = true ]; then echo simulator
+	elif aircraft_selected; then echo aircraft
+	else echo ground; fi
+}
 
 # Which compose service holds a vehicle's companion, and which holds the ground
 # station. A simulated vehicle has a companion of its own, numbered like it.

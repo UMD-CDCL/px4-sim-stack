@@ -471,74 +471,111 @@ enter_service() {
       docker inspect px4simstack-$svc-1"
 }
 
+# The one truthful list of what this front door accepts. Every command below
+# is a case arm of main(), and every case arm of main() is named below. The
+# world decides which ones act: require_sim and require_sim_edit refuse the
+# simulator's own commands anywhere else, so they stand in a section of their
+# own with that rule over them.
 usage() {
+	local world footer kinds presets sample
+	kinds=${CAPTURE_KINDS// /, }
+	presets=$(zoom_presets_widest_first | paste -sd, -)
+	presets=${presets//,/, }
+	# One service this world really runs, for the `logs` example.
+	case "$(world_of)" in
+	simulator) world="the simulator";     sample=sim ;;
+	ground)    world="the ground station"; sample=ground ;;
+	aircraft)  world="the aircraft";      sample=onboard ;;
+	esac
+	if [ "$FLEET_IS_SIMULATED" = true ]; then
+		footer="  Current: scene ${SCENE:-?}, scenario ${SCENARIO:-?}, fleet ${UAS_FLEET:-?}
+           origin ${HOME_LAT:-?}, ${HOME_LON:-?}"
+	else
+		footer="  Current: fleet ${UAS_FLEET:-?}, uas$FIRST_UAS at $(uas_address "$FIRST_UAS")
+           ground station $(ground_address), ROS domain $GROUND_DOMAIN"
+	fi
 	cat <<EOF
 ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
 
+  This machine is ${BOLD}$world${OFF}: UAS_BASE=$UAS_BASE, profiles ${COMPOSE_PROFILES:-none}.
+
   ${BOLD}Getting started${OFF}
     doctor              Check the host: driver, docker, GPU runtime, X11, disk
-    setup               Clone PX4 and build the scenes (a few minutes)
     build               Build the images (about 20 minutes the first time)
+    x11                 Let the containers draw on this display
 
   ${BOLD}Every day${OFF}
     start [profiles]    Start what .env selects. Now: ${COMPOSE_PROFILES:-none}
-                        sim,offboard here, ground on a base station, aircraft on the vehicle
-    core                Start the vehicles and QGC, with no ground station
+                        sim,offboard is a simulator, ground a base station,
+                        aircraft a vehicle
     stop                Stop and remove the containers. Volumes stay.
     restart [service]   Restart one service, or all of them
     status              What is running, and the addresses to use
+    endpoints           The addresses alone
     ui                  The same in a console, with a key for every command
     fleet               Every vehicle: model, address, ports, domain, streams
-    fleet add [model]   Fly one more vehicle. Default: another of the last one
-    fleet remove [N]    Retire one vehicle. Default: the last of the fleet
-    logs [opts] [svc]   Follow the logs. \`logs --since 5m sim\` reads back.
-    console             uas${FIRST_UAS}'s PX4 pxh> prompt. Detach with Ctrl-P Ctrl-Q
-    px4 [N] <command>   One PX4 command on one vehicle: px4 ${LAST_UAS} commander status
+    logs [opts] [svc]   Follow the logs. \`logs --since 5m $sample\` reads back.
 
   ${BOLD}Get inside a container${OFF}
-    sim                 PX4, Gazebo and the camera encoders
-    qgc                 QGroundControl
-    router [N]          a vehicle's mavlink-router. Default uas${FIRST_UAS}
     onboard [N]         a vehicle's companion computer. Default uas${FIRST_UAS}
     ground              the ground station
     shell <svc> [cmd]   any other service, or one command inside it
+                        ${DIM}the real fleet runs its companion on the aircraft, and
+                        the ground station on a base station${OFF}
 
   ${BOLD}Look at the data${OFF}
     streams             Which video streams are live right now
-    view [N|stream]     Play a stream. Default: uas${FIRST_UAS}'s gimbal camera
+    view [N|stream]     Play a stream. Default: uas${FIRST_UAS}'s $(default_stream "$FIRST_UAS")
     topics [N]          List a vehicle's ROS topics. Default: uas${FIRST_UAS}
+    state [--watch]     Every reading the console draws, as JSON
     layout              Where the Foxglove layout lives, and how to load it
 
-  ${BOLD}Scenes and targets${OFF}
-    scene <name>        Switch the world and restart the simulator
-    scenario <name>     Switch the targets and reload what scores them
-    scenario            Place this scenario's targets again, with no restart
-    origin              The coordinates this scene and scenario fly at
-    fiducial [e] [n]    Stand the survey marker this far off its survey
-    capture <N> [kind]  Ask for a mosaic, vlm or fiducial capture
-    reset               Remove the targets from the running world
-    place               Put the fleet back upright at its start
-    fly <N> [m]         Respawn, then get that vehicle airborne
-    genscene <args>     Build a world from map data. Try: genscene --help
-                        ${DIM}all runs create / detect / edit (browser on :8090) / build${OFF}
+  ${BOLD}One vehicle${OFF}
+    uas <N> <command>   Read one vehicle's nodes: status, heading, detections,
+                        detect on|off, gimbal <pitch>
+    probe <N> [topic]   What that vehicle's ROS graph carries right now
+    foxglove <N>        What Foxglove is offered on that bridge, over the
+                        protocol Foxglove speaks. \`foxglove ground\` too.
+    capture <N> [kind]  Ask for a capture: $kinds
+    zoom <N> <preset>   Set a v3 lens, and read it back: $presets
 
   ${BOLD}Housekeeping${OFF}
     check               Validate the compose file and lint the docs
     verify [stage]      Run the verification stages. \`verify help\` lists them.
-    state [--watch]     Every reading the console draws, as JSON
-    uas <N> <command>   Fly one vehicle and read its nodes: status, arm,
-                        takeoff [m], land, gimbal <pitch>
-    probe <N> [topic]   What that vehicle's ROS graph carries right now
-    foxglove <N>        What Foxglove is offered on that bridge, over the
-                        protocol Foxglove speaks. \`foxglove ground\` too.
-    snap <stream>       Save one frame of a live stream to look at
-    zoom <N> <preset>   Set a v3 lens: narrow, mid or wide, and read it back
     clean               Remove containers, networks and volumes
+    help                This list, and which of the three worlds this is
+
+  ${BOLD}The simulator alone${OFF}
+    ${DIM}These fly or maintain the simulator. A ground station and an aircraft
+    refuse every one of them, and change nothing.${OFF}
+    setup               Clone PX4 and build the scenes (a few minutes)
+    core                Start the vehicles and QGC, with no ground station
+    console             uas${FIRST_UAS}'s PX4 pxh> prompt. Detach with Ctrl-P Ctrl-Q
+    px4 [N] <command>   One PX4 command on one vehicle: px4 ${LAST_UAS} commander status
+    sim | qgc           A shell in the simulator, or in QGroundControl
+    router [N]          a vehicle's mavlink-router. Default uas${FIRST_UAS}
+    scene <name>        Switch the world and restart the simulator
+    scenario [name]     Switch the targets, or place this scenario's again
+    origin              The coordinates this scene and scenario fly at
+    fiducial [e] [n]    Stand the survey marker this far off its survey
+    reset               Remove the targets from the running world
+    place               Put the fleet back upright at its start
+    fly <N> [m]         Respawn, then get that vehicle airborne
+    snap <stream>       Save one frame of a live stream to look at
+    genscene <args>     Build a world from map data. Try: genscene --help
+                        ${DIM}all runs create / detect / edit (browser on :8090) / build${OFF}
+    fleet add [model]   Fly one more vehicle. Default: another of the last one
+    fleet remove [N]    Retire one vehicle. Default: the last of the fleet
     clean-src           Delete the cloned upstream sources in ./src
     nuke                clean and clean-src together
+    uas <N> arm | takeoff [m] | land | goto <east> <north> <up>
 
-  Current: scene ${SCENE:-?}, scenario ${SCENARIO:-?}, fleet ${UAS_FLEET:-?}
-           origin ${HOME_LAT:-?}, ${HOME_LON:-?}
+  ${BOLD}What a real machine does differently${OFF}
+    ${DIM}streams, view       the mounts lcam serves here, or rcam on the aircraft
+    uas, probe, topics  the ground station answers for a vehicle that flies
+    foxglove, capture   each one asks the machine that holds the answer${OFF}
+
+$footer
 EOF
 }
 
@@ -602,6 +639,7 @@ fleet_facts() {
 		fiducial_lon=${FIDUCIAL_SURVEYED_LON:-}
 		fiducial_alt=${FIDUCIAL_SURVEYED_ALT:-}
 		profiles=${COMPOSE_PROFILES:-}
+		world=$(world_of)
 		compose=$DC
 		ground_domain=$GROUND_DOMAIN
 		ground_foxglove=8765
@@ -1531,6 +1569,17 @@ check)
 		warn "px4sim answers to these more than once: $(echo "$duplicates" | tr -d ')' | tr '\n' ' ')"
 		problems=$((problems + 1))
 	fi
+
+	# The usage text is the single list of what this front door accepts, so
+	# every case arm has to stand in it. A command the help never names is a
+	# command nobody finds. The second name of a pair is an alias, and the
+	# help prints the first one alone.
+	printed=$(usage | sed 's/\x1b\[[0-9;]*m//g')
+	for arm in $(grep -o '^[a-z][a-z0-9|-]*)' "$0" | tr -d ')' | cut -d'|' -f1); do
+		printf '%s\n' "$printed" | grep -q "^    ${arm}[ <[|]" \
+			|| { warn "./px4sim $arm runs, and ./px4sim help never names it."
+			     problems=$((problems + 1)); }
+	done
 
 	# Parameter files, as rcl reads them rather than as YAML does. A node whose
 	# ros__parameters block has nothing left in it stops that node dead at
