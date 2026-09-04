@@ -241,10 +241,13 @@ require_sim_edit() {   # <what was asked> [what to do here]
 # simulator, lcam's numbered low rate mounts on the real ground, rcam's own
 # cameras on the aircraft. A number plays the gimbal camera, which a v2 and a
 # v3 both carry and the detector reads: rcam's is the first name it serves.
+# What this machine serves for one vehicle. rcam's mounts carry no number,
+# because the aircraft is one machine and one vehicle.
+vehicle_streams() { if aircraft_selected; then aircraft_streams "$1"; else streams_of "$1"; fi; }
 local_streams() {
 	local n
-	if aircraft_selected; then aircraft_streams "$UAS_NUM"; return 0; fi
-	for n in $(fleet_numbers); do streams_of "$n"; done
+	if aircraft_selected; then vehicle_streams "$UAS_NUM"; return 0; fi
+	for n in $(fleet_numbers); do vehicle_streams "$n"; done
 }
 default_stream() {
 	if [ "$FLEET_IS_SIMULATED" = true ]; then gimbal_stream "$1"
@@ -582,6 +585,10 @@ EOF
 # The stack as one fact for each line, for a tool that reads rather than reads
 # out. scripts/state.py takes this on standard input, so the console draws the
 # numbers this script works out and never works out its own.
+#
+# `rtsp` is empty in the simulator, whose video router answers an API. On a
+# real machine it is the base lcam or rcam serves, and state.py probes the
+# mounts by name because those two answer no query.
 fleet_facts() {
 	local n companion
 	cat <<-EOF
@@ -599,6 +606,7 @@ fleet_facts() {
 		ground_domain=$GROUND_DOMAIN
 		ground_foxglove=8765
 		mediamtx=${MEDIAMTX_API:-http://localhost:9997}
+		rtsp=$([ "$FLEET_IS_SIMULATED" = true ] || host_rtsp_base)
 		zoom_presets=$(zoom_presets_widest_first | paste -sd, -)
 		capture_kinds=$(echo "$CAPTURE_KINDS" | tr ' ' ',')
 		models=$(fleet_models | paste -sd, -)
@@ -613,7 +621,7 @@ fleet_facts() {
 			"$(uas_tcp_port "$n")" "$(uas_gcs_port "$n")" "$(uas_foxglove_port "$n")" \
 			"$(uas_foxglove_url "$n")" \
 			"$(uas_address "$n")" "$n" "$companion" "$(gimbal_stream "$n")" \
-			"$(streams_of "$n" | tr ' ' ',' | sed 's/,$//')" \
+			"$(vehicle_streams "$n" | tr ' ' ',' | sed 's/,$//')" \
 			"$(zoom_preset_of_slot $((n - UAS_BASE - 1)) || true)"
 	done
 }

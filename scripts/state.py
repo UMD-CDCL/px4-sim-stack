@@ -10,7 +10,8 @@ Nothing here works a fleet number out a second time. Every reading comes from
 the thing itself, never from a log message:
 
   services   the container engine's own state for each container
-  streams    the video router's API, and the bytes each path really carried
+  streams    the video router's API, and the bytes each path really carried,
+             or the mounts themselves where the server answers no API
   vehicles   MAVLink from the vehicle, read on the TCP port the routers publish
   bridges    a connection to each Foxglove port, opened and closed
   gpu        nvidia-smi, which counts the encoder sessions the cameras hold
@@ -55,6 +56,10 @@ PORT_PROBE_S = 0.4
 BRIDGE_PERIOD_TICKS = 5
 STREAMS_TIMEOUT_S = 1.5
 STREAMS_RETRY_TICKS = 5
+# A mount is probed by opening it, which costs seconds. Read them on their own
+# long period, and carry the last answer in between.
+STREAMS_PROBE_TIMEOUT_S = 30.0
+STREAMS_PROBE_TICKS = 15
 DOCKER_TIMEOUT_S = 15.0
 GPU_TIMEOUT_S = 5.0
 GPU_READINGS = "utilization.gpu,memory.used,memory.total,encoder.stats.sessionCount"
@@ -239,6 +244,67 @@ class Streams:
             "kbits": kbits,
             "source": (path.get("source") or {}).get("type", ""),
         }
+
+
+class ProbedStreams:
+    """The video paths of a server that answers no API, probed by name.
+
+    lcam on the ground station and rcam on the aircraft serve mounts and
+    nothing else, so the only way to know a mount is live is to open it.
+    scripts/list-streams.py holds that probe, and `./px4sim streams` prints
+    what it finds. This asks the same file for the same answer as JSON, so one
+    probe serves the console and the table.
+
+    A probe reports no reader count and no bit rate. Nothing counts the readers
+    of a mount from outside it.
+    """
+
+    def __init__(self, base: str, owners: dict[str, int], project_dir: Path):
+        self.base = base
+        self.owners = owners
+        self.project_dir = project_dir
+        self.error = ""
+        self.paths: list[dict] = []
+        self.probe_at_tick = 0
+
+    def read(self, tick: int) -> list[dict]:
+        if tick < self.probe_at_tick or not self.owners:
+            return self.paths
+        self.probe_at_tick = tick + STREAMS_PROBE_TICKS
+        try:
+            done = subprocess.run(
+                [sys.executable, "scripts/list-streams.py", "--json", "--rtsp",
+                 self.base, *self.owners],
+                cwd=self.project_dir, capture_output=True, text=True,
+                timeout=STREAMS_PROBE_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            return self.gave_up(f"{self.base} did not answer for every mount"
+                                f" in {STREAMS_PROBE_TIMEOUT_S:.0f}s")
+        except (OSError, subprocess.SubprocessError) as failure:
+            return self.gave_up(f"cannot probe {self.base}: {failure}")
+        if done.returncode != 0:
+            complaint = done.stderr.strip().splitlines()
+            return self.gave_up(complaint[-1] if complaint else
+                                f"cannot probe {self.base}")
+        try:
+            probed = json.loads(done.stdout)
+        except json.JSONDecodeError as failure:
+            return self.gave_up(f"the probe of {self.base} answered something"
+                                f" this cannot read: {failure}")
+
+        self.error = ""
+        self.paths = [{"name": row.get("name", "?"),
+                       "vehicle": self.owners.get(row.get("name", "")),
+                       "ready": bool(row.get("ready")),
+                       "readers": None,
+                       "kbits": None,
+                       "source": row.get("source", "")} for row in probed]
+        return self.paths
+
+    def gave_up(self, why: str) -> list[dict]:
+        self.error = why
+        self.paths = []
+        return self.paths
 
 
 class Link:
@@ -521,8 +587,12 @@ def main() -> int:
 
     context = read_context("" if sys.stdin.isatty() else sys.stdin.read())
     project_dir = Path(__file__).resolve().parents[1]
-    streams = Streams(str(context.get("mediamtx", "http://localhost:9997")),
-                      stream_owners(context["fleet"]))
+    # The front door names an RTSP base where this machine's server has no API
+    # to ask. See the `rtsp` fact in fleet_facts.
+    owners = stream_owners(context["fleet"])
+    base = str(context.get("rtsp", ""))
+    streams = (ProbedStreams(base, owners, project_dir) if base else
+               Streams(str(context.get("mediamtx", "http://localhost:9997")), owners))
     links = Links(context["fleet"])
     bridges = Bridges(context)
 

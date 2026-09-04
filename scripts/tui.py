@@ -368,9 +368,12 @@ def service_words(row: dict) -> tuple[str, str]:
 
 def stream_words(path: dict) -> list[tuple[str, str]]:
     flowing = bool(path.get("ready")) and bool(path.get("kbits"))
+    # A mount that was probed rather than queried reports no reader count and
+    # no rate. Say nothing about them rather than saying zero.
+    readers = path.get("readers")
     return [("online" if path.get("ready") else "offline",
              "good" if flowing else ("watch" if path.get("ready") else "faint")),
-            (f"{path.get('readers', 0)} readers", "faint"),
+            (f"{readers} readers" if readers is not None else "-", "faint"),
             (kbits_words(path.get("kbits")), "good" if flowing else "faint")]
 
 

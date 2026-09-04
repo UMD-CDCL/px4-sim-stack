@@ -4,6 +4,8 @@
 Two sources. With no flag, the MediaMTX API of the simulated video router.
 With `--rtsp BASE NAME...`, a plain RTSP server that has no API (lcam on the
 ground station, rcam on the aircraft): gst-discoverer-1.0 probes each name.
+`--json` prints the probed rows instead of the table, which is how
+scripts/state.py reads the same answer.
 
 `px4sim streams` calls this. It is a file rather than a line inside the shell
 script because the quoting of nested JSON in a heredoc is not worth the trouble.
@@ -18,7 +20,8 @@ import sys
 import urllib.error
 import urllib.request
 
-API = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:9997"
+API = next((word for word in sys.argv[1:] if not word.startswith("-")),
+             "http://localhost:9997")
 PROBE_SECONDS = 5
 # gst-discoverer text when no server or no mount accepts the connection.
 REFUSED_TEXT = "Could not open resource for reading"
@@ -79,37 +82,51 @@ def describe_video(report: str) -> str:
     return " ".join(part for part in (codec.group(1), size, rate and f"{rate} fps") if part)
 
 
-def probe_rtsp(base: str, names: list[str]) -> int:
-    print(f"  {'PATH':<20} {'STATE':<9} SOURCE")
-    live = 0
-    refused = 0
+def probe_rtsp(base: str, names: list[str]) -> list[dict]:
+    """One row for each mount. `source` is empty where no frames arrived."""
+    rows = []
     for name in names:
         try:
             result = subprocess.run(["gst-discoverer-1.0", "-t", str(PROBE_SECONDS), f"{base}/{name}"],
                                     capture_output=True, text=True, timeout=PROBE_SECONDS * 3)
             video = describe_video(result.stdout)
-            refused += REFUSED_TEXT in result.stdout
-        except FileNotFoundError:
-            print("  gst-discoverer-1.0 is not installed. It comes with gstreamer1.0-plugins-base-apps.")
-            return 1
+            refused = REFUSED_TEXT in result.stdout
         except subprocess.TimeoutExpired:
-            video = ""
-        live += bool(video)
-        print(f"  {name:<20} {'online' if video else 'offline':<9} {video or '-'}")
-    if live == 0:
-        print()
-        if refused == len(names):
-            print(f"  Nothing answers at {base}. The ground station serves it with lcam.service,")
-            print("  the aircraft with rcam.service:  systemctl status lcam rcam")
-        else:
-            print(f"  {base} answers, but no stream sends frames.")
-            print("  Check the camera on the vehicle.")
+            video, refused = "", False
+        rows.append({"name": name, "ready": bool(video),
+                     "source": video, "refused": refused})
+    return rows
+
+
+def print_rtsp(base: str, rows: list[dict]) -> int:
+    print(f"  {'PATH':<20} {'STATE':<9} SOURCE")
+    for row in rows:
+        print(f"  {row['name']:<20} {'online' if row['ready'] else 'offline':<9} "
+              f"{row['source'] or '-'}")
+    if any(row["ready"] for row in rows):
+        return 0
+    print()
+    if rows and all(row["refused"] for row in rows):
+        print(f"  Nothing answers at {base}. The ground station serves it with lcam.service,")
+        print("  the aircraft with rcam.service:  systemctl status lcam rcam")
+    else:
+        print(f"  {base} answers, but no stream sends frames.")
+        print("  Check the camera on the vehicle.")
     return 0
 
 
 if __name__ == "__main__":
-    if sys.argv[1:2] == ["--rtsp"]:
-        if len(sys.argv) < 3:
-            sys.exit(f"usage: {sys.argv[0]} --rtsp rtsp://HOST:PORT NAME...")
-        sys.exit(probe_rtsp(sys.argv[2], sys.argv[3:]))
+    words = [word for word in sys.argv[1:] if word != "--json"]
+    if words[:1] == ["--rtsp"]:
+        if len(words) < 2:
+            sys.exit(f"usage: {sys.argv[0]} [--json] --rtsp rtsp://HOST:PORT NAME...")
+        try:
+            probed = probe_rtsp(words[1], words[2:])
+        except FileNotFoundError:
+            sys.exit("gst-discoverer-1.0 is not installed."
+                     " It comes with gstreamer1.0-plugins-base-apps.")
+        if "--json" in sys.argv[1:]:
+            json.dump(probed, sys.stdout)
+            sys.exit(0)
+        sys.exit(print_rtsp(words[1], probed))
     sys.exit(main())
