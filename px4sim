@@ -237,6 +237,18 @@ require_sim_edit() {   # <what was asked> [what to do here]
     profiles '${COMPOSE_PROFILES:-none}'). Nothing was changed.$instead"
 }
 
+# The commands that work on a SCENE. A scene is map data, not a simulator: the
+# ground station draws its terrain and buildings, casts the camera footprint at
+# its surface and scores against its scenario, so a real ground station builds
+# and selects one the way the simulator does. The aircraft only reads the scene
+# it is given, and holds no scenegen image and no Gazebo world to reload.
+require_scene_world() {   # <what was asked>
+	if ! aircraft_selected; then add_fleet_profiles; return 0; fi
+	die "'$1' works on a scene, and this machine is an aircraft. Set SCENE and
+    SCENARIO in .env here, and build the scene on the ground station.
+    Nothing was changed."
+}
+
 # The names this machine's RTSP server serves: the video router's in the
 # simulator, lcam's numbered low rate mounts on the real ground, rcam's own
 # cameras on the aircraft. A number plays the gimbal camera, which a v2 and a
@@ -352,7 +364,10 @@ add_fleet_profiles() {
 reload_world() {
 	local reloading
 	add_fleet_profiles
-	reloading="sim $(picture_consumers)"
+	reloading=$(picture_consumers)
+	# A ground station has no world to respawn. It reads the scene from the
+	# same directory, so recreating its container is the whole reload.
+	has_service sim && reloading="sim $reloading"
 	has_service ground-router && reloading="$reloading ground-router"
 	# shellcheck disable=SC2086
 	$DC up -d --force-recreate $reloading >/dev/null 2>&1
@@ -685,6 +700,23 @@ fleet_models() {
 # Every scenario this simulator can place, from the scenario files themselves.
 # `scenario` takes a name from this list and the console offers it, so a name
 # with no file behind it is caught here and not in a world with no targets.
+# The scenes built into modules/sim/scenes. A scene is its surface: the world
+# file alone is a Gazebo world with no terrain for the ground station to draw.
+scene_names() {
+	local path name
+	for path in modules/sim/scenes/worlds/*_surface.json; do
+		[ -f "$path" ] || continue
+		name=${path##*/}
+		echo "${name%_surface.json}"
+	done
+}
+
+have_scene() {
+	[ -f "modules/sim/scenes/worlds/$1_surface.json" ] \
+		|| die "No scene named '$1'. Try: $(scene_names | paste -sd' ' -)
+    Or build it: ./px4sim genscene --help"
+}
+
 scenario_names() {
 	local path name
 	for path in modules/sim/scenes/scenarios/*.yaml; do
@@ -823,8 +855,10 @@ esac
 
 # The simulator's own commands. None of them may reach a real vehicle.
 case "$cmd" in
-fly | place | scene | scenario | fiducial | reset | px4 | console | snap | genscene | core)
+fly | place | fiducial | reset | px4 | console | snap | core)
 	require_sim "$cmd" ;;
+scene | scenario | genscene)
+	require_scene_world "$cmd" ;;
 setup | clean-src | nuke)
 	require_sim_edit "$cmd" "./src holds the simulator's PX4 and QGroundControl sources.
     To remove this stack's containers and volumes: ./px4sim clean" ;;
@@ -1145,18 +1179,27 @@ layout)
 	;;
 
 scene)
-	# No name restarts the sim with the scene already in .env, which is how
-	# a new UAS_FLEET or AIRFRAME reaches the world.
+	# No name restarts with the scene already in .env, which is how a new
+	# UAS_FLEET or AIRFRAME reaches the world.
+	was=${SCENE:-}
 	name=${1:-${SCENE:-}}
-	[ -n "$name" ] || die "Give a scene name. Try: lorton, uroc, campus, recon_field"
+	[ -n "$name" ] || die "Give a scene name. Try: $(scene_names | paste -sd' ' -)"
+	have_scene "$name"
 	say "Switching to scene '$name'"
-	# The new world brings its own origin, so resolve it again before the
-	# sim starts. Without this the vehicle would fly the old coordinates.
+	# The new scene brings its own origin, so resolve it again before the
+	# containers start. Without this the vehicle would fly the old
+	# coordinates, and the ground station would draw the old site.
 	export SCENE="$name"
 	resolve_origin "$SCENE"
 	reload_world
 	echo "  scene $SCENE   origin ${HOME_LAT:-from the world file}"
-	say "Wait for 'Ready for takeoff' in ./px4sim logs sim"
+	if [ "$was" != "$SCENE" ]; then
+		warn "SCENE in .env still names '${was:-nothing}'. Change it there to"
+		warn "keep this scene, or the next start draws the other one again."
+	fi
+	if [ "$(world_of)" = simulator ]; then
+		say "Wait for 'Ready for takeoff' in ./px4sim logs sim"
+	fi
 	;;
 
 origin)
@@ -1242,6 +1285,12 @@ scenario)
 		[ -n "${SCENARIO:-}" ] \
 			|| die "Give a scenario name, or set SCENARIO in .env. Try: $(scenario_names | paste -sd' ' -)"
 		have_scenario "$SCENARIO"
+		# Placing the targets is Gazebo's work. A real course already holds
+		# them, and the ground station scores against where they were
+		# surveyed to stand.
+		[ "$(world_of)" = simulator ] \
+			|| die "Placing targets needs the simulator. This scenario already names
+    where they stand: ./px4sim scenario $SCENARIO switches the truth to it."
 		$DC exec sim /scenes/spawn_scenario.py \
 			--world "${SCENE:-lorton}" --scenario "/scenes/scenarios/${SCENARIO}.yaml"
 		exit 0
@@ -1257,7 +1306,9 @@ scenario)
 		warn "SCENARIO in .env still names '${was:-nothing}'. Change it there to"
 		warn "keep this scenario, or the next start flies the other one again."
 	fi
-	say "Wait for 'Ready for takeoff' in ./px4sim logs sim"
+	if [ "$(world_of)" = simulator ]; then
+		say "Wait for 'Ready for takeoff' in ./px4sim logs sim"
+	fi
 	;;
 
 fiducial)

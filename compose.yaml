@@ -868,11 +868,12 @@ services:
       - ./modules/scenegen:/app
       - ./modules/scenegen/data:/data
       - ./modules/sim/scenes:/scenes
+    # The editor, published to this host, which is how `genscene edit` reaches
+    # it. No simnet: the generator downloads map data and writes files, and it
+    # runs on a real ground station too, where creating the fleet network
+    # would put a bridge across the range the radio uses.
     ports:
       - "8090:8090"
-    networks:
-      simnet:
-        ipv4_address: ${SIMNET_PREFIX:-10.200.142}.229
 
   # -------------------------------------------------------------------------
   # xrce-agent - the uXRCE-DDS bridge. This puts PX4 uORB topics directly on
