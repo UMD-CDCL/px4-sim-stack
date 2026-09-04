@@ -79,8 +79,7 @@ fi
 # layers stay empty rather than call every detection a false positive.
 TRUTH=false
 if [ -n "${SCENARIO:-}" ]; then
-	export GROUND_TRUTH_FILE="/scenes/scenarios/${SCENARIO}.yaml"
-	if [ -f "${GROUND_TRUTH_FILE}" ]; then
+	if [ -f "${GROUND_TRUTH_FILE:-}" ]; then
 		TRUTH=true
 		echo "truth: ${GROUND_TRUTH_FILE}"
 	else

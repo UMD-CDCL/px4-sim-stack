@@ -111,8 +111,7 @@ fi
 # score one detection against one target. No scenario publishes no truth.
 TRUTH=false
 if [ -n "${SCENARIO:-}" ]; then
-	export GROUND_TRUTH_FILE="/scenes/scenarios/${SCENARIO}.yaml"
-	if [ -f "${GROUND_TRUTH_FILE}" ]; then
+	if [ -f "${GROUND_TRUTH_FILE:-}" ]; then
 		TRUTH=true
 		echo "truth: ${GROUND_TRUTH_FILE}"
 	else

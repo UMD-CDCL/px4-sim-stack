@@ -365,10 +365,16 @@ reload_world() {
 	local reloading
 	add_fleet_profiles
 	reloading=$(picture_consumers)
-	# A ground station has no world to respawn. It reads the scene from the
-	# same directory, so recreating its container is the whole reload.
-	has_service sim && reloading="sim $reloading"
-	has_service ground-router && reloading="$reloading ground-router"
+	# Only the simulator holds a world to respawn, and only it runs the router
+	# that borrows the ground station's namespace. has_service cannot answer
+	# this: it says which services compose.yaml DECLARES, and it declares every
+	# one of them on every machine. Asking it started Gazebo, the simulated
+	# ground station and the simulated router on a fielded base station, where
+	# they fight the native lcam and mavlink-router for their ports.
+	if [ "$(world_of)" = simulator ]; then
+		reloading="sim $reloading"
+		has_service ground-router && reloading="$reloading ground-router"
+	fi
 	# shellcheck disable=SC2086
 	$DC up -d --force-recreate $reloading >/dev/null 2>&1
 }
@@ -384,10 +390,18 @@ PICTURE_SOURCES="sim video-router"
 # station, which reads the low rate streams for its own preview.
 picture_consumers() {
 	local number list=""
-	for number in $(fleet_numbers); do
-		has_service "$(companion_service "$number")" && list="$list $(companion_service "$number")"
-	done
-	has_service "$(ground_service)" && list="$list $(ground_service)"
+	case "$(world_of)" in
+	simulator)
+		for number in $(fleet_numbers); do
+			has_service "$(companion_service "$number")" && list="$list $(companion_service "$number")"
+		done
+		list="$list $(ground_service)"
+		;;
+	# A real machine runs one of the two, and the other belongs to a machine
+	# somewhere else. Naming both recreates a container this host must not run.
+	ground)   list=" $(ground_service)" ;;
+	aircraft) list=" $(companion_service "${UAS_NUM:-}")" ;;
+	esac
 	echo "${list# }"
 }
 
@@ -569,12 +583,13 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     the 3D panel draws, the surface the camera footprint and the live view meet,
     and the targets the scenario says are on it. The simulator and the ground
     station both build and select one. An aircraft reads the scene it is
-    given, and refuses these.${OFF}
+    given, and refuses the three that change it.${OFF}
     scene <name>        Switch the scene, and reload what draws and casts at it
     scenario [name]     Switch the targets, or place this scenario's again
-    origin              The coordinates this scene and scenario fly at
     genscene <args>     Build a scene from map data. Try: genscene --help
                         ${DIM}all runs create / detect / edit (browser on :8090) / build${OFF}
+    origin              The coordinates this scene and scenario fly at
+                        ${DIM}every world answers this one${OFF}
 
   ${BOLD}The simulator alone${OFF}
     ${DIM}These fly or maintain the simulator. A ground station and an aircraft

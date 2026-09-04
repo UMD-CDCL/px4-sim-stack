@@ -563,7 +563,9 @@ ros2 launch umd_uas offboard.launch.py uas:=1 models:=v3 truth:=true params:=/ca
 ```
 
 `sim` selects the camera source, RTSP or the rcam socket, and the sim-only
-nodes: `sim_ground_truth` on both sides. `container` loads
+parameter layer. `truth` selects `sim_ground_truth` on both sides, and follows
+SCENARIO rather than the fleet, so a real course written into a scenario is
+scored the way a simulated one is. `container` loads
 `onboard_container_params.yaml`, the layer that names `/models/local`, the
 `/logs` output directories and `/dev/lens`. The Foxglove bridge on 8765 runs
 in both modes. The onboard layers load in this order: common, vehicle,

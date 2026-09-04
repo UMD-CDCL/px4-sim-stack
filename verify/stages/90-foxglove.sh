@@ -91,7 +91,7 @@ expect_eq "the live view is calibrated, so the boxes land on it" data "${verdict
 # matter: a missing geoid separation, or a scene placed at the wrong site.
 scene_tolerance=()
 if [ "$FLEET_IS_SIMULATED" = false ]; then
-	scene_tolerance=(--height-tolerance 15)
+	scene_tolerance=(--real-fix)
 fi
 if [ -z "${SCENE:-}" ]; then
 	skip "no scene, so no terrain is drawn"

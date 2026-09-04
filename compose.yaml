@@ -189,10 +189,12 @@ x-onboard-env: &onboard-env
   CUDA_CACHE_PATH: /models/.nv-compute
   SCENE: ${SCENE:-lorton}
   # What sim_ground_truth scores against, the same pair the ground station
-  # reads. The entry point makes the scenario path from this name, so one
-  # place names it. Without it the node takes its own default, which names one
+  # reads. Without them the node takes its own default, which names one
   # scenario, and every other scenario scores against the wrong targets.
+  # The name as well as the path: the entry point tells an empty SCENARIO,
+  # which publishes no truth, from one naming a scenario that is not there.
   SCENARIO: ${SCENARIO:-lorton_casualties}
+  GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO:-lorton_casualties}.yaml
   RESOLVED_TRUTH_FILE: /scenes/ground_truth_actual.yaml
   # One more parameter file, loaded after every other. Where this machine names
   # what only it has, the detector artifacts above all. Put it in the model
@@ -255,9 +257,10 @@ x-offboard-env: &offboard-env
   SCENE: ${SCENE:-lorton}
   # What sim_ground_truth scores against. The scenario says where each target
   # was asked to stand. The resolved file says where Gazebo put it, and wins
-  # for the scene that wrote it. The entry point makes the path from this
-  # name, so one place names it.
+  # for the scene that wrote it. The name as well as the path: the entry point
+  # tells an empty SCENARIO from one naming a scenario that is not there.
   SCENARIO: ${SCENARIO:-lorton_casualties}
+  GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO:-lorton_casualties}.yaml
   RESOLVED_TRUTH_FILE: /scenes/ground_truth_actual.yaml
   CUDA_CACHE_PATH: /logs/.nv-compute
 
@@ -634,6 +637,7 @@ services:
       # publishes no ground truth, so nothing scores a real detection against
       # targets that are not there.
       SCENARIO: ${SCENARIO-lorton_casualties}
+      GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO-lorton_casualties}.yaml
     volumes:
       - *models-volume
       - *logs-volume
@@ -712,6 +716,7 @@ services:
       # ground truth, and the scored layers wait for the course instead of
       # calling every real detection a false positive.
       SCENARIO: ${SCENARIO-lorton_casualties}
+      GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO-lorton_casualties}.yaml
 
   # -------------------------------------------------------------------------
   # ground-router - the ground station's mavlink-router, from
