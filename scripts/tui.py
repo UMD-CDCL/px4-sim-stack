@@ -57,6 +57,9 @@ PANES = (SERVICE, VEHICLE, STREAM)
 SIMULATOR, GROUND, AIRCRAFT = "simulator", "ground", "aircraft"
 EVERY_WORLD = (SIMULATOR, GROUND, AIRCRAFT)
 SIM_ONLY = (SIMULATOR,)
+# A scene is map data. The simulator and the ground station both build and
+# select one; an aircraft reads the scene it is given.
+WITH_SCENE = (SIMULATOR, GROUND)
 # Where this machine holds a ground station, and where it holds a companion
 # container. The real ground flies no companion, and the aircraft has no
 # ground station.
@@ -101,11 +104,11 @@ ACTIONS = (
     Action(STACK, "P", "put the fleet back at its start", ("place",),
            confirm="Reload the world and respawn every vehicle?", worlds=SIM_ONLY),
     Action(STACK, "A", "place the targets again", ("scenario",), worlds=SIM_ONLY),
-    Action(STACK, "N", "switch the world", ("scene", "{value}"),
-           ask=Ask("scene name", "{scene}"), refresh=True, worlds=SIM_ONLY),
+    Action(STACK, "N", "switch the scene", ("scene", "{value}"),
+           ask=Ask("scene name", "{scene}"), refresh=True, worlds=WITH_SCENE),
     Action(STACK, "T", "switch the targets", ("scenario", "{value}"),
            ask=Ask("scenario", "{scenario}", choices_from="scenarios"),
-           refresh=True, worlds=SIM_ONLY),
+           refresh=True, worlds=WITH_SCENE),
     Action(STACK, "F", "stand the survey marker off its survey",
            ("fiducial", "{value}"), ask=Ask("east north, in metres", "0 0", split=True),
            worlds=SIM_ONLY),
@@ -123,7 +126,7 @@ ACTIONS = (
     Action(STACK, "", "every vehicle, in full", ("fleet",)),
     Action(STACK, "", "the video paths", ("streams",)),
     Action(STACK, "", "the coordinates this scene flies at", ("origin",),
-           worlds=SIM_ONLY),
+           worlds=WITH_SCENE),
     Action(STACK, "", "remove the containers and the volumes", ("clean",),
            confirm="Remove every container, network and volume?"),
 

@@ -555,11 +555,11 @@ in from `UAS_NUM` and `UAS_FLEET`:
 
 ```bash
 # the simulated companion and the aircraft
-ros2 launch umd_uas onboard.launch.py uas:=11 model:=v3 sim:=true container:=true params:=/camera/site.yaml,/camera/lens.yaml
-ros2 launch umd_uas onboard.launch.py uas:=1 sim:=false container:=true params:=/camera/site.yaml
+ros2 launch umd_uas onboard.launch.py uas:=11 model:=v3 sim:=true truth:=true container:=true params:=/camera/site.yaml,/camera/lens.yaml
+ros2 launch umd_uas onboard.launch.py uas:=1 sim:=false truth:=true container:=true params:=/camera/site.yaml
 # the simulated ground station and the real one
-ros2 launch umd_uas offboard.launch.py uas:=11,12,13,14 models:=v3,v3,v2,v2 sim:=true params:=/camera/site.yaml
-ros2 launch umd_uas offboard.launch.py uas:=1 models:=v3 sim:=false params:=/camera/site.yaml
+ros2 launch umd_uas offboard.launch.py uas:=11,12,13,14 models:=v3,v3,v2,v2 truth:=true params:=/camera/site.yaml
+ros2 launch umd_uas offboard.launch.py uas:=1 models:=v3 truth:=true params:=/camera/site.yaml
 ```
 
 `sim` selects the camera source, RTSP or the rcam socket, and the sim-only
@@ -885,9 +885,11 @@ block of `.env.example` carries all of them:
 `./px4sim doctor` refuses a half flip. It checks the two switches, the domain
 and the lens together.
 
-The onboard and offboard containers change nothing but `sim:=false`, which
-takes the camera from the rcam socket instead of RTSP and drops the ground
-truth. That is the test of whether the boundaries are real.
+The onboard container changes nothing but `sim:=false`, which takes the camera
+from the rcam socket instead of RTSP. The ground station changes nothing at
+all. `truth` is separate from both, and follows SCENARIO: a real course written
+into a scenario is scored the way a simulated one is. That is the test of
+whether the boundaries are real.
 
 ### The ground station
 

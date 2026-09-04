@@ -53,9 +53,12 @@ on the command line.
    Every command stops, except `help`, `doctor`, `check`, `x11`, `setup`,
    `stop`, `clean`, `clean-src` and `nuke`.
 2. On a real machine, the commands that fly the simulator: `core`, `fly`,
-   `place`, `scene`, `scenario`, `fiducial`, `reset`, `px4`, `console`, `snap`,
-   `genscene`, and `uas <N> arm`, `takeoff`, `land` and `goto`. Each one exits 1
-   and prints `Nothing was sent.`
+   `place`, `fiducial`, `reset`, `px4`, `console`, `snap`, and `uas <N> arm`,
+   `takeoff`, `land` and `goto`. Each one exits 1 and prints `Nothing was
+   sent.`
+2b. On an aircraft, the commands that work on a scene: `scene`, `scenario` and
+   `genscene`. A scene is map data, so the ground station builds and selects
+   one the way the simulator does. The aircraft reads the scene it is given.
 3. On a real machine, the commands that maintain the simulator: `setup`,
    `clean-src`, `nuke`, `fleet add` and `fleet remove`. Each one exits 1 and
    prints `Nothing was changed.`
@@ -96,9 +99,13 @@ minutes, once, because the output lands in `./src/PX4-Autopilot` on the host.
 ### The ground world, on t500
 
 `.env` carries `COMPOSE_PROFILES=ground`, `UAS_BASE=0`, `GROUND_DOMAIN=60`,
-`RTSP_BASE=rtsp://127.0.0.1:8554`, an empty `SCENE` and an empty `SCENARIO`.
-The native `lcam.service`, `mavlink-router.service` and `git-daemon.service`
-keep running. No `ground-router`, `video-router` or `qgc` container starts, and
+`RTSP_BASE=rtsp://127.0.0.1:8554`, and the `SCENE` and `SCENARIO` of the site
+it stands on: `SCENE=uroc` and `SCENARIO=uroc_casualties` at the UMD test site.
+Those draw the terrain, the buildings and the satellite map in the Foxglove 3D
+panel, cast the camera footprint and the live view at that surface, and score
+against the targets the scenario names. Both empty is a bench outside any
+surveyed site. The native `lcam.service`, `mavlink-router.service` and
+`git-daemon.service` keep running. No `ground-router`, `video-router` or `qgc` container starts, and
 the fielded QGroundControl stays native.
 
 ```bash
@@ -132,7 +139,8 @@ mv .env.backup .env
 ### The aircraft world, on uas1
 
 `.env` carries `COMPOSE_PROFILES=aircraft`, `UAS_BASE=0`, the whole
-`UAS_FLEET`, an empty `SCENE`, `SIMNET_PREFIX=172.28.0` and
+`UAS_FLEET`, the `SCENE` and `SCENARIO` the ground station carries,
+`SIMNET_PREFIX=172.28.0` and
 `ONBOARD_LENS_DEVICE`. `UAS_NUM` comes from `/etc/environment`. The native
 `rcam.service` and `mavlink-router.service` keep running.
 

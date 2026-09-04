@@ -564,6 +564,18 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     clean               Remove containers, networks and volumes
     help                This list, and which of the three worlds this is
 
+  ${BOLD}The scene${OFF}
+    ${DIM}A scene is map data: the terrain, the buildings and the satellite map
+    the 3D panel draws, the surface the camera footprint and the live view meet,
+    and the targets the scenario says are on it. The simulator and the ground
+    station both build and select one. An aircraft reads the scene it is
+    given, and refuses these.${OFF}
+    scene <name>        Switch the scene, and reload what draws and casts at it
+    scenario [name]     Switch the targets, or place this scenario's again
+    origin              The coordinates this scene and scenario fly at
+    genscene <args>     Build a scene from map data. Try: genscene --help
+                        ${DIM}all runs create / detect / edit (browser on :8090) / build${OFF}
+
   ${BOLD}The simulator alone${OFF}
     ${DIM}These fly or maintain the simulator. A ground station and an aircraft
     refuse every one of them, and change nothing.${OFF}
@@ -573,16 +585,11 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     px4 [N] <command>   One PX4 command on one vehicle: px4 ${LAST_UAS} commander status
     sim | qgc           A shell in the simulator, or in QGroundControl
     router [N]          a vehicle's mavlink-router. Default uas${FIRST_UAS}
-    scene <name>        Switch the world and restart the simulator
-    scenario [name]     Switch the targets, or place this scenario's again
-    origin              The coordinates this scene and scenario fly at
     fiducial [e] [n]    Stand the survey marker this far off its survey
     reset               Remove the targets from the running world
     place               Put the fleet back upright at its start
     fly <N> [m]         Respawn, then get that vehicle airborne
     snap <stream>       Save one frame of a live stream to look at
-    genscene <args>     Build a world from map data. Try: genscene --help
-                        ${DIM}all runs create / detect / edit (browser on :8090) / build${OFF}
     fleet add [model]   Fly one more vehicle. Default: another of the last one
     fleet remove [N]    Retire one vehicle. Default: the last of the fleet
     clean-src           Delete the cloned upstream sources in ./src
