@@ -86,7 +86,7 @@ expect_eq "the live view is calibrated, so the boxes land on it" data "${verdict
 # which is what a bench outside the survey area runs.
 #
 # The scene is anchored on the vehicle's own home fix, so the height this
-# compares carries the receiver's altitude error. A simulated fix is exact; a
+# compares carries the receiver's altitude error. A simulated fix is exact. A
 # real one is metres out, and the wider figure still catches the mistakes that
 # matter: a missing geoid separation, or a scene placed at the wrong site.
 scene_tolerance=()

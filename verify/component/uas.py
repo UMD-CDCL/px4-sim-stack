@@ -72,7 +72,7 @@ TEXTURE_EDGE = 0.05
 # How far the drawn ground may sit from the height the surface file gives it.
 # The scene is anchored on the vehicle's own home fix, so this measures the
 # receiver's altitude error as much as the drawing. A simulated fix is exact
-# and 5 m is a drawing fault; a real receiver is metres out on a good day, and
+# and 5 m is a drawing fault. A real receiver is metres out on a good day, and
 # the figure that still catches the mistakes worth catching is the geoid
 # separation, 33 m in Maryland, and a scene placed at the wrong site.
 SCENE_HEIGHT_TOLERANCE_M = 5.0

@@ -58,7 +58,7 @@ SIMULATOR, GROUND, AIRCRAFT = "simulator", "ground", "aircraft"
 EVERY_WORLD = (SIMULATOR, GROUND, AIRCRAFT)
 SIM_ONLY = (SIMULATOR,)
 # A scene is map data. The simulator and the ground station both build and
-# select one; an aircraft reads the scene it is given.
+# select one. An aircraft reads the scene it is given.
 WITH_SCENE = (SIMULATOR, GROUND)
 # Where this machine holds a ground station, and where it holds a companion
 # container. The real ground flies no companion, and the aircraft has no

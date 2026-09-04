@@ -216,9 +216,12 @@ The simulator adds the commands that fly it and maintain it:
 ```
 
 With `UAS_BASE=0` a vehicle number is a real aircraft, so `./px4sim` refuses
-every command that flies the simulator: `core`, `fly`, `place`, `scene`,
-`scenario`, `fiducial`, `reset`, `px4`, `console`, `snap`, `genscene`, and
-`uas N arm`, `takeoff`, `land` and `goto`. Nothing is sent. It also refuses
+every command that flies the simulator: `core`, `fly`, `place`, `fiducial`,
+`reset`, `px4`, `console`, `snap`, and `uas N arm`, `takeoff`, `land` and
+`goto`. Nothing is sent. `scene`, `scenario` and `genscene` stay: a scene is
+map data, and the ground station builds and selects one the way the simulator
+does. An aircraft refuses those three and reads the scene it is given. It also
+refuses
 the commands that maintain the simulator, and each of those says what it did
 not change: `setup`, `clean-src`, `nuke`, `fleet add` and `fleet remove`.
 `./px4sim help` holds that list under "The simulator alone", and it names the
