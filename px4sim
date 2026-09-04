@@ -225,6 +225,18 @@ require_sim() {   # <what was asked>
     profiles '${COMPOSE_PROFILES:-none}'). Nothing was sent."
 }
 
+# The commands that MAINTAIN the simulator: they fetch or delete the upstream
+# sources it is built from, or they edit the fleet it spawns. None of them
+# sends anything to a vehicle, so each says what it did not change, and what
+# to do on this machine instead.
+require_sim_edit() {   # <what was asked> [what to do here]
+	[ "$FLEET_IS_SIMULATED" = true ] && return 0
+	local instead=${2:+"
+    $2"}
+	die "'$1' changes the simulator, and this stack is not one (UAS_BASE=$UAS_BASE,
+    profiles '${COMPOSE_PROFILES:-none}'). Nothing was changed.$instead"
+}
+
 # The names this machine's RTSP server serves: the video router's in the
 # simulator, lcam's numbered low rate mounts on the real ground, rcam's own
 # cameras on the aircraft. A number plays the gimbal camera, which a v2 and a
@@ -759,7 +771,11 @@ esac
 
 # The simulator's own commands. None of them may reach a real vehicle.
 case "$cmd" in
-fly | place | scene | scenario | fiducial | reset | px4 | console | snap | genscene) require_sim "$cmd" ;;
+fly | place | scene | scenario | fiducial | reset | px4 | console | snap | genscene | core)
+	require_sim "$cmd" ;;
+setup | clean-src | nuke)
+	require_sim_edit "$cmd" "./src holds the simulator's PX4 and QGroundControl sources.
+    To remove this stack's containers and volumes: ./px4sim clean" ;;
 uas)
 	# The verb can stand anywhere. uas.py reads `--` as the end of the
 	# options and dispatches the word after it, so `uas 1 -- arm` arms.
@@ -1114,7 +1130,9 @@ endpoints|urls) endpoints ;;
 
 fleet)
 	case "${1:-}" in
-	add | remove) fleet_edit "$@"; exit 0 ;;
+	add | remove)
+		require_sim_edit "fleet $1" "Edit UAS_FLEET in .env, then: ./px4sim start"
+		fleet_edit "$@"; exit 0 ;;
 	'') ;;
 	*) die "fleet takes 'add [model]' or 'remove [N]', or nothing to print the fleet." ;;
 	esac
