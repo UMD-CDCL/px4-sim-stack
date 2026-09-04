@@ -1062,9 +1062,11 @@ topics)
 	;;
 
 layout)
-	f="${ROS2_WS_DIR:-../ros2_ws}/src/5g_drone/config/foxglove/chimera_sim.json"
-	say "Foxglove layout"
+	f=$(render_layout) || die "No Foxglove layout at $f. Check ROS2_WS_DIR in .env."
+	say "Foxglove layout for uas$FIRST_UAS"
 	echo "  $(readlink -f "$f" 2>/dev/null || echo "$f")"
+	echo "${DIM}  Rendered from $LAYOUT_TEMPLATE at every ./px4sim layout, so edit${OFF}"
+	echo "${DIM}  the template and not this copy.${OFF}"
 	echo
 	echo "  1. Open Foxglove, desktop or https://app.foxglove.dev"
 	echo "  2. Connect to ws://localhost:8765 for the ground station, which holds"
@@ -1510,7 +1512,7 @@ check)
 	# The operator's console. One value Foxglove rejects takes the whole
 	# panel's settings with it and says nothing, and a panel with no place in
 	# the layout is never drawn at all.
-	layout=${FOXGLOVE_LAYOUT:-${ROS2_WS_DIR:-../ros2_ws}/src/5g_drone/config/foxglove/chimera_sim.json}
+	layout=$LAYOUT_TEMPLATE
 	if [ -f "$layout" ]; then
 		if faults=$(python3 verify/component/foxglove_layout.py "$layout"); then
 			echo "layout OK: every panel setting is one Foxglove accepts, and every panel is drawn"

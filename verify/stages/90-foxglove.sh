@@ -7,7 +7,10 @@
 # read over the protocol Foxglove itself speaks, against the ground station,
 # which is the bridge an operator connects to.
 
-layout=${FOXGLOVE_LAYOUT:-${ROS2_WS_DIR:-../ros2_ws}/src/5g_drone/config/foxglove/chimera_sim.json}
+# The copy `./px4sim layout` gives the operator, with this fleet's numbers in
+# it. The shipped template names uas11, so a real fleet would be measured
+# against topics no vehicle here publishes.
+layout=$(render_layout) || true
 lead=$FIRST_UAS
 
 if [ ! -f "$layout" ]; then

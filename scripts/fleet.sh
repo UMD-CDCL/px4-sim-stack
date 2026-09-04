@@ -160,3 +160,19 @@ host_rtsp_base() {
 		echo "${RTSP_BASE:-rtsp://127.0.0.1:8554}"
 	fi
 }
+
+# The operator's Foxglove console. The shipped file is the simulator's: every
+# panel, topic and TF frame in it carries uas11 and d11, so a real fleet
+# imports a window of empty panels and reads no error. Render it for this
+# fleet's first vehicle instead, and give the operator that copy. A simulated
+# fleet renders the bytes it ships, so one path serves both worlds.
+LAYOUT_TEMPLATE=${FOXGLOVE_LAYOUT:-${ROS2_WS_DIR:-../ros2_ws}/src/5g_drone/config/foxglove/chimera_sim.json}
+LAYOUT_RENDERED=${LAYOUT_RENDERED:-logs/foxglove/chimera_uas$FIRST_UAS.json}
+# Prints the file it wrote. Prints the template, and fails, where there is none.
+render_layout() {
+	[ -f "$LAYOUT_TEMPLATE" ] || { printf '%s\n' "$LAYOUT_TEMPLATE"; return 1; }
+	make_bind_dirs "$(dirname "$LAYOUT_RENDERED")" >/dev/null || return 1
+	sed -e "s/uas11/uas$FIRST_UAS/g" -e "s/d11_/d${FIRST_UAS}_/g" \
+		"$LAYOUT_TEMPLATE" > "$LAYOUT_RENDERED" || return 1
+	printf '%s\n' "$LAYOUT_RENDERED"
+}
