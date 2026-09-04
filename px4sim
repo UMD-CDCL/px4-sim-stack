@@ -1358,7 +1358,7 @@ capture)
 	say "asking uas$n for a $kind capture, through $reader"
 	docker exec -e ROS_DOMAIN_ID="$(reader_domain "$reader" "$n")" "$container" bash -lc '
 		. /usr/local/bin/ros-env.sh
-		exec timeout 10 ros2 topic pub --once "$1" std_msgs/msg/Bool "{data: true}"' \
+		exec timeout 10 ros2 topic pub --once -w 1 "$1" std_msgs/msg/Bool "{data: true}"' \
 		_ "/uas$n/${kind}_capture_cmd" >/dev/null \
 		&& echo "  asked for $kind on /uas$n/${kind}_capture_cmd" \
 		|| die "nothing accepted the $kind capture command"
