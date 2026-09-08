@@ -1661,7 +1661,7 @@ check)
 	# help prints the first one alone.
 	printed=$(usage | sed 's/\x1b\[[0-9;]*m//g')
 	for arm in $(grep -o '^[a-z][a-z0-9|-]*)' "$0" | tr -d ')' | cut -d'|' -f1); do
-		printf '%s\n' "$printed" | grep -q "^    ${arm}[ <[|]" \
+		grep -q "^    ${arm}[ <[|]" <<< "$printed" \
 			|| { warn "./px4sim $arm runs, and ./px4sim help never names it."
 			     problems=$((problems + 1)); }
 	done
