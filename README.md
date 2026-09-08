@@ -371,21 +371,21 @@ it for uas1. The simulation world selects `chimera_sim.json` instead.
 `./px4sim verify` checks every topic and service the selected layout uses
 against the live bridge.
 
-**What a bench cannot prove.** A level camera means no ray meets the ground.
-`tf_loc` needs a box at least 20 degrees below the horizon, and the bench
-measured about 9. So `target_locations`, the mosaic map,
-the fiducial survey and the full detection round trip stay unproved. The
-rangefinders say nothing at all: PX4 sends no `DISTANCE_SENSOR` on any id, so
-`drone_lidar_200m`, `drone_lidar_6m` and `gimbal_lidar_50m` are advertised and
-silent. They are a vehicle fit, not a stack fault.
+**What a bench cannot prove.** A forward camera means no ray meets the ground.
+The live VLM capture did return a rangefinder localization, but terrain-based
+target locations, the mosaic map, and a fiducial survey still need a downward
+view or flight. The dedicated PX4 range sensors are silent on this vehicle:
+`drone_lidar_200m`, `drone_lidar_6m` and `gimbal_lidar_50m` are advertised but
+PX4 sends no `DISTANCE_SENSOR` on any id. They are a vehicle fit, not a stack
+fault.
 
 **Open items.**
 
 | Item | What it needs |
 |---|---|
 | The drone password | Rotate it. It is out of the chimera-deploy tree and still in that repository's history on GitHub |
-| The branches | `feature/real-drone-port` in px4-sim-stack, 5g_drone, MAVInsight and chimera-deploy is unpushed. The drones read it from the mirrors in `/srv/git` |
-| The thermal mount | `thermall1` and the vehicle's own `thermal` answered 503 once. rcam was not restarted. A restart or a camera re-plug is the next step |
+| The branches | Current real-drone changes use `feature/real-fixes` in px4-sim-stack, 5g_drone, MAVInsight and chimera-deploy. The drone reads them from the mirrors in `/srv/git` before they reach GitHub |
+| The thermal mount | The Boson disconnected from USB after repeated protocol errors while rcam stayed active. Inspect hub power, cabling and bandwidth, then re-enumerate the camera; restarting rcam alone cannot recover an absent USB device |
 | `ROS_DOMAIN_ID` in a shell | The entry points export it into PID 1 alone, so a hand `docker exec` shell joins domain 0. Every front-door command passes the domain itself |
 | Dead bridge files | 5g_drone still carries eight per-vehicle domain bridge files that no launch file reads. Delete them or keep them |
 

@@ -263,7 +263,8 @@ ENABLE_BOOT_UNIT=1 ./remote/deploy_onboard.sh # and enable it
 
 **What it reads.** `UAS_NUM` from `/etc/environment`, which `deploy.sh` writes.
 `SERVER_IP` (10.200.142.60), `GIT_PORT` (9418), `STACK_BRANCH` and `WS` come
-from the environment and have defaults.
+from the environment and have defaults. `STACK_BRANCH` follows the current
+`chimera-deploy` branch, or `flight_testing` from a detached checkout.
 
 **What it does, in order.** Each step examines the machine first, so a second
 run changes nothing.
@@ -384,16 +385,16 @@ rename.
 
 ### A branch that GitHub has never seen
 
-This is the path the real-vehicle port used. The work is on a feature branch,
-nothing goes to GitHub, and the drone still gets it.
+This is the path for bench-testing a feature branch without pushing it to
+GitHub. The example uses the current real-drone branch.
 
 On the laptop, push the worktree straight into the mirror:
 
 ```bash
 git -C /home/user/px4-sim-stack push /srv/git/px4-sim-stack.git \
-    refs/heads/feature/real-drone-port:refs/heads/feature/real-drone-port
+    refs/heads/feature/real-fixes:refs/heads/feature/real-fixes
 git -C /home/user/ros2_ws/src/5g_drone push /srv/git/5g_drone.git \
-    refs/heads/feature/real-drone-port:refs/heads/feature/real-drone-port
+    refs/heads/feature/real-fixes:refs/heads/feature/real-fixes
 git --git-dir=/srv/git/px4-sim-stack.git branch -v      # read it back
 systemctl is-active git-daemon
 ```
@@ -404,7 +405,7 @@ On the drone, fetch it. `origin` is already the mirror, because
 ```bash
 cd ~/px4-sim-stack
 git fetch origin
-git reset --hard origin/feature/real-drone-port
+git switch --track origin/feature/real-fixes
 git status --porcelain          # empty, and .env is gitignored
 ```
 
