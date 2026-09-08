@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  recon_field - the default scene.
+  recon_field - a light hand-written scene. SCENE=lorton is the default.
 
   A flat field with a few blocks that cast shadows and hide targets from some
   angles. It stays light, so the frame rate leaves room for the encoders and

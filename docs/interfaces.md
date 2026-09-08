@@ -37,6 +37,11 @@ replaces the serial port PX4 does not have here. The ground station endpoint
 exists because QGroundControl autoconnects on 14550, and one QGC then shows the
 whole fleet.
 
+The aircraft carries `[UartEndpoint alpha]` in its native router instead,
+`/dev/ttyTHS1` at 500000 baud, and the same `ros` endpoint to `127.0.0.1:14402`.
+The companion needs no router of its own, and the `aircraft` profile starts
+none.
+
 ### Why the addresses are numbers
 
 mavlink-router parses `Address` as an IP literal. Give it a name and it stops
@@ -55,6 +60,10 @@ to `10.200.142`.
 Two blocks carry meaning. A router for uas`N` is at `.2<N>`, which is where PX4
 pushes, and the ground station is at `.210` where the fielded one is `.60`. The
 companion container has no address of its own: it shares its router's.
+
+The real fleet flies `10.200.142.6<N>`, with the ground station at `.60`. The
+`ground` and `aircraft` profiles run on the host network and use no simnet
+address.
 
 The ADDRESSES deconflict with the fleet. The SUBNET does not. A bridge on this
 range shadows the whole real range on a host that is itself on the radio
@@ -81,9 +90,11 @@ print(link.target_system, link.target_component)
 ```
 
 A ground station outside this stack: run the router from
-`chimera-deploy/local/main.conf` on the host. It listens on 14551 upwards and
-feeds QGroundControl and MAVROS on the loopback. `GCS_ADDRESS` in `.env` decides
-where the fleet sends. The default is the simnet gateway, which is this host.
+`chimera-deploy/local/main.conf` on the host. It listens on 14551 to 14554,
+serves TCP 5760, and sends to QGroundControl on `127.0.0.1:14401` and to each
+vehicle's MAVROS on `127.0.0.<N>:14402`, filtered by `AllowSrcSysIn`.
+`GCS_ADDRESS` in `.env` decides where the fleet sends. The default is the
+simnet gateway, which is this host.
 
 ### The startup handshake
 
@@ -213,6 +224,12 @@ full size.
 | HLS | `http://localhost:8888/rgb11` | Widest compatibility, about 2 s behind. |
 
 Inside the compose network, use `video-router` in place of `localhost`.
+
+On the real ground station lcam serves the low rate names alone:
+`rtsp://127.0.0.1:8554/rgbl1`, `pilotl1` and `thermall1`. On the aircraft rcam
+serves every camera of that airframe at both rates, with no number: `rgb`,
+`rgbl`, `pilot`, `pilotl`, `thermal` and `thermall`. Neither one has an API, so
+`./px4sim streams` asks for each name with `scripts/list-streams.py --rtsp`.
 
 Check a stream from the host:
 

@@ -46,13 +46,17 @@ the same property from being nine aircraft.
 
 The companion container shares its router's network namespace, so both hold one
 address and the router reaches MAVROS at `127.0.0.1:14402`. The Orin does the
-same, and `main.conf.template` then needs no address of ours.
+same, and `main.conf.template` then needs no address of ours. On the aircraft
+the `onboard` container shares the host's namespace, beside the native
+`mavlink-router.service`, and MAVROS binds `127.0.0.1:14402` there too.
 
 The ground station is one laptop, so it is one container. It runs one MAVROS for
 each vehicle, and a UDP port holds one listener for each ADDRESS rather than for
 each host. Each vehicle's MAVROS therefore binds `127.0.0.<N>:14402` and the
 port stays the same. `ground-router` shares that namespace and pushes each
-vehicle to its own loopback address.
+vehicle to its own loopback address. On t500 the `ground` container shares the
+host's namespace beside the native router from `chimera-deploy/local/main.conf`,
+and no `ground-router` runs.
 
 A container for each vehicle on the ground would make every `fcu_url` identical,
 but it would describe a ground station that does not exist.
@@ -76,6 +80,27 @@ onboard and offboard images build that directory with colcon through a named
 build context. `ROS2_WS_DIR` says where it is. A copy in this repository would
 be a second version of the flight code, and the point of the stack is that
 there is only one.
+
+## Profiles
+
+One `compose.yaml` serves three machines. [front-doors.md](front-doors.md)
+works one example for each of them. `COMPOSE_PROFILES` in `.env` says
+what runs, and `UAS_BASE` says which world the numbers belong to. The two must
+agree, and `./px4sim` refuses a file where they do not.
+
+| Profile | Services | Machine |
+|---|---|---|
+| `sim` | `sim`, `video-router`, `qgc` | the simulator laptop, `UAS_BASE=10` |
+| `offboard` | `offboard`, `ground-router`, `video-router` | the simulated ground station, beside `sim` |
+| `ground` | `ground` | the real ground station on t500, `UAS_BASE=0` |
+| `aircraft` | `onboard` | the real vehicle, `UAS_BASE=0`, `UAS_NUM` from `/etc/environment` |
+| `uas11` to `uas19`, `onboard11` to `onboard14` | one router and one companion for each simulated vehicle | added by `./px4sim` from `UAS_FLEET` |
+| `base`, `qgc-dev`, `scenegen`, `xrce` | `ros-base`, the QGC source build, the scene builder, the uXRCE-DDS agent | on demand |
+
+`video-router` carries both `sim` and `offboard`: the simulator publishes into
+it and the simulated ground station previews from it. The simulated and the
+real variants share their definitions through YAML anchors, so nothing is
+written twice.
 
 ## What is inside each container
 
@@ -127,22 +152,25 @@ anyway.
 ### onboard
 
 The companion computer for one vehicle: MAVROS, `ds_node`, `tf_loc`, the mission
-and survey nodes, the MAVInsight frame tree, and the two domain bridges. `sim`
-is the only launch argument that differs from the aircraft.
+and survey nodes, the MAVInsight frame tree, and the two domain bridges. The
+entry point sets two launch arguments. `sim` says where the camera comes from,
+and `container` adds the paths a container sees, in the simulator and on the
+aircraft alike.
 
 `UAS_NUM` is the whole identity. The entry point derives the system id, the
 `/uas<N>` namespace, ROS domain `60 + N` and the frame prefixes from it.
 
-Two nodes run here only in simulation. `sim_ground_truth` stands in for the
-course data that a real exercise sends over the UGV bridge. A second Foxglove
-bridge lets an operator attach to one vehicle, which on the aircraft would
-collide with the fielded read-only bridge.
+One node runs here only in simulation. `sim_ground_truth` stands in for the
+course data that a real exercise sends over the UGV bridge. The Foxglove bridge
+on 8765 runs on both sides, so an operator can attach to one vehicle.
 
 ### offboard
 
-The ground station, one container for the whole fleet. It runs a listening
-MAVROS for each vehicle, its own MAVInsight frame tree, its own `ds_node`
-against the low-rate stream, and the viz nodes. Domain 70 throughout.
+The ground station, one definition and two services. `offboard` runs on simnet
+beside the simulator, and `ground` runs on the host network of the fielded base
+station. Both run a listening MAVROS for each vehicle, their own MAVInsight
+frame tree, their own `ds_node` against the low-rate stream, and the viz nodes.
+Domain 70 in the simulator and 60 fielded.
 
 It rebuilds what the radio link would otherwise have to carry. The contract's
 section on what crosses the radio link says what it does not rebuild, and why.
@@ -161,7 +189,7 @@ tree.
 ```
 gz camera sensor
   → gz-transport image topic, named after the model instance
-  → gz_video_streamer: NVENC H.265, one full stream and one low-rate stream
+  → gz_video_streamer: H.265, one full stream and one low-rate stream
   → RTSP publish to video-router
   → ds_node in onboard<N>: decode, infer, track
   → /uas<N>/target_detections, boxes in image space
@@ -171,7 +199,9 @@ gz camera sensor
   → image_rehydrate on the ground refills the image from its own preview
 ```
 
-Every arrow is a hop that the aircraft also has.
+Every arrow is a hop that the aircraft also has. The encoder is the first that
+works on this machine, hardware where the machine has one and software where it
+has not.
 
 ### From a stick input to a motor
 
@@ -206,8 +236,8 @@ carries the whole argument.
 
 ## What this design costs
 
-- **More containers.** Four, plus two for each vehicle. Start time is longer
-  than one big image.
+- **More containers.** Five in the simulator, plus two for each vehicle. A real
+  machine runs one. Start time is longer than one big image.
 - **H.265 loses detail.** The detector sees a compressed frame, as it would on
   the aircraft. For pixel-exact frames, read the Gazebo topic directly and
   accept that the path is then simulation only.

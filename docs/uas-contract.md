@@ -21,7 +21,7 @@ namespaces and stream names use the simulated number.
 | MAVLink system id | `N` (11 to 19) |
 | ROS namespace | `/uas${N}` |
 | ROS domain, vehicle | `60 + N` (71 to 79) |
-| ROS domain, ground | `70` |
+| ROS domain, ground | `70` in the simulator, `60` fielded |
 | Air domain, telemetry and commands | `99` |
 | Air domain, imagery | `69` |
 | TF body frame prefix | `d${N}_` |
@@ -35,6 +35,12 @@ Write the port and the domain as arithmetic, never by joining strings. `1455${N}
 and `6${N}` read correctly below ten and produce 145511 and 611 above it, and
 both are out of range. `14550 + N` and `60 + N` give the fielded numbers for a
 real vehicle and a clear block for a simulated one.
+
+`UAS_BASE` in `.env` is the one switch, on every machine. 10 numbers a
+simulated fleet from uas11, and 0 numbers the real fleet from uas1.
+`scripts/fleet.sh`, `compose.yaml` and both entry points read that number.
+`./px4sim` refuses a `.env` whose `COMPOSE_PROFILES` describes the other
+world.
 
 ## 2. MAVLink
 
@@ -64,6 +70,11 @@ A vehicle is ONE machine. The router and the ROS stack share a network
 namespace, as they do on the Orin, so the router reaches MAVROS at
 `127.0.0.1:14402` and needs no address of ours.
 
+On the aircraft the router is the native `mavlink-router.service`, rendered
+from `chimera-deploy/remote/main.conf.template`. The `onboard` container runs
+on the host network, so MAVROS binds 14402 beside it and no router container
+runs.
+
 The ground station is ALSO one machine, and it must be modelled as one. It runs
 one MAVROS for each vehicle, and a UDP port holds one listener per ADDRESS
 rather than per host. All of `127.0.0.0/8` is local, so each vehicle's MAVROS
@@ -78,7 +89,15 @@ ground station that does not exist, and the fielded one is a single laptop.
 
 The ground station runs one router from `chimera-deploy/local/main.conf`. It
 listens on 14551 to 14554 in server mode and sends to loopback 14401 for
-QGroundControl and 14402 for MAVROS.
+QGroundControl and `127.0.0.N:14402` for the MAVROS of vehicle N, filtered on
+that vehicle's system id.
+
+The real ground station has the same shape. The native router from
+`local/main.conf` and the `ground` container share the host network, and the
+fielded QGroundControl stays native. That file holds one
+`[UdpEndpoint mavros<N>]` for each of uas1 to uas4, at `127.0.0.<N>:14402` with
+`AllowSrcSysIn = <N>,255`, as the simulated `ground-router` does. A fifth
+vehicle needs one more.
 
 ## 3. Video
 
@@ -92,13 +111,16 @@ low-rate stream. The low-rate stream crosses the radio link.
 
 The full stream is 1920x1080 because that is what the detector reads.
 `onboard_common_params.yaml` declares `source.width` 1920 and `source.height`
-1080, and `DS_WIDTH` and `DS_HEIGHT` match. The aircraft captures the pilot
-camera at 3840x2160 and gives DeepStream a smaller surface. The simulator has no
-reason to render the larger frame, so it does not.
+1080. The aircraft captures the pilot
+camera at 3840x2160, and its `pilotds` socket carries that size into DeepStream
+(measured on uas1, 2026-09-03). `rgbds` is 1920x1080 and `thermalds` 640x512.
+The simulator has no reason to render the larger frame, so it does not.
 
 `ds_node` reads the gimbal RGB camera: `rgb${N}` on v3, `pilot${N}` on v2. On
-the aircraft that source is a shared-memory socket. In the simulator it is the
-full RTSP mount, which is the only permitted difference.
+the aircraft that source is an NVMM socket from rcam:
+`nvunix:///tmp/rgbds_nv.sock` on a v3, `pilotds` on a v2, and `thermalds` for
+the thermal camera. In the simulator it is the full RTSP mount, which is the
+only permitted difference.
 
 ## 4. MAVROS topics
 
@@ -143,13 +165,15 @@ MAVROS goes to the vehicle through `gimbal_control/manager/set_attitude`, the
 `gimbal_control/manager/configure` and `set_roi` services, `cmd/command` and
 `mission/set_current`.
 
-The simulator uses the MAVROS package from apt. Its PX4 keeps the legacy
-`MAV_CMD_REQUEST_AUTOPILOT_CAPABILITIES` shim, so MAVROS still learns the
-autopilot capabilities and the waypoint plugin still selects `MISSION_ITEM_INT`.
+The simulator and the aircraft run one MAVROS. `ros-base` builds the patch in
+`chimera-deploy/remote/mavros_patch/` into `/opt/mavros`, and `ros-env.sh`
+sources that overlay ahead of the apt package. PX4 v1.18 dropped the legacy
+`MAV_CMD_REQUEST_AUTOPILOT_CAPABILITIES` shim. Without the patch MAVROS learns
+no capabilities and the waypoint plugin sends `MISSION_ITEM` floats.
 
-The aircraft is different. PX4 v1.18 dropped that shim, so a real vehicle needs
-the source build and the patch in `chimera-deploy/remote/mavros_patch/`. That
-patch is out of scope here.
+The simulator's PX4 v1.17 keeps the shim, so `MAVROS_PATCH=0` in `.env` builds
+the apt package instead and the simulator still flies. `CHIMERA_DEPLOY_DIR`
+names the checkout, and the build needs its `mavros` and `angles` submodules.
 
 ## 5. Frames
 
@@ -240,13 +264,14 @@ geometry that produced it.
 
 The ground station rebuilds what it can. It runs its own MAVROS off the same
 MAVLink stream, its own MAVInsight frame tree, and its own `ds_node` in preview
-mode against the low-rate RTSP stream, all on domain 70. Camera footprints, the live view
-projection, the drone position and the verdicts are all computed again there.
+mode against the low-rate RTSP stream, all on `GROUND_DOMAIN`: 70 beside the
+simulator, 60 fielded. Camera footprints, the live view projection, the drone
+position and the verdicts are all computed again there.
 
 One rule decides every entry below: a thing crosses only when the ground cannot
 rebuild it, or when rebuilding it would cost more than sending it.
 
-### Vehicle to ground, domain `60 + N` to 99 to 70
+### Vehicle to ground, domain `60 + N` to 99 to the ground domain
 
 | Topic | Type | Why |
 |---|---|---|
@@ -277,13 +302,13 @@ link delay, so it is less exact. The operator interface also reads that
 telemetry out of the message rather than from topics of its own, which is why
 six of its ten inputs need no bridge.
 
-### Ground to vehicle, domain 70 to 99 to `60 + N`
+### Ground to vehicle, the ground domain to 99 to `60 + N`
 
 `gimbal_point_cmd`, `roi_point_cmd`, `raw_roi_point_cmd`, `gimbal_raw_command`,
 `gimbal_angle_cmd`, `reassert_gimbal_cmd`, `release_gimbal_cmd` and
 `hil_detection/detected`. On a v3, `zoom/preset_cmd` as well.
 
-### Ground to vehicle, domain 70 straight to `60 + N`
+### Ground to vehicle, the ground domain straight to `60 + N`
 
 `start_survey_cmd`, `vlm_capture_cmd`, `mosaic_capture_cmd`,
 `fiducial_capture_cmd`, `advance_mission_cmd` and `continuous_detection_cmd`,
@@ -352,6 +377,12 @@ vehicle and the ground can each score without sending anything.
   never a newer DeepStream. See scripts/ds-select.sh.
 - A node specific parameter selector beats a wildcard selector whatever the file
   order. Keep `source.uri` out of the vehicle parameter file.
+- `onboard.launch.py` loads the parameter files in this order: `chimera_common`,
+  the vehicle's `uas<N>_params.yaml`, `onboard_common`, the container layer
+  `onboard_container_params.yaml` with `container:=true`, the simulator layer
+  `sim/onboard_sim_params.yaml` with `sim:=true`, then the deployment files in
+  `params:=`. The container layer names `/models/local`, the `/logs` output
+  directories and `/dev/lens`, in the simulator and on the aircraft alike.
 - Set the imagery flow controller with `FASTRTPS_DEFAULT_PROFILES_FILE` and
   `RMW_FASTRTPS_PUBLICATION_MODE=AUTO` on the image bridge process alone.
 - Run the image bridge as its own process. `domain_bridge` republishes inside

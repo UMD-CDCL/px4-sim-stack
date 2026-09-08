@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Build the X11 cookie file that the GUI containers mount.
+# Build the X11 cookie file that the GUI containers mount. With --needed it
+# only says whether a selected service draws on X: exit 0 for yes, 1 for no.
 #
 # This is the narrow alternative to `xhost +local:`. It grants access to the
 # containers through one cookie file instead of opening the X server to every
@@ -17,9 +18,36 @@ cd "$(dirname "$0")/.."
 XAUTH=${XAUTH_FILE:-./.xauth}
 DISP=${DISPLAY:-}
 
+# Does any selected service draw on X? The compose file says which ones
+# mount the X socket, so the answer is read there and written nowhere else.
+gui_selected() {
+	# A compose file that does not render answers "no". Compose itself reports
+	# the real error to the operator a moment later.
+	local rendered
+	rendered=$(docker compose config --format json 2>/dev/null) || return 1
+	[ -n "$rendered" ] || return 1
+	printf '%s' "$rendered" | python3 -c '
+import json, sys
+services = (json.load(sys.stdin).get("services") or {}).values()
+mounts = (m.get("source") for s in services for m in (s.get("volumes") or []))
+sys.exit(0 if "/tmp/.X11-unix" in mounts else 1)'
+}
+
+case "${1:-}" in
+--needed) if gui_selected; then exit 0; else exit 1; fi ;;
+esac
+
+if ! gui_selected; then
+	exit 0
+fi
+
+# A missing display is not a stop. The cookie file is still made, empty, so
+# docker mounts a file and not a directory, and a headless ground station
+# starts without its windows.
 if [ -z "$DISP" ]; then
-	echo "DISPLAY is empty. Run this from a graphical session." >&2
-	exit 1
+	echo "DISPLAY is empty. The GUI containers start without a display." >&2
+	[ -f "$XAUTH" ] || { rm -rf "$XAUTH"; touch "$XAUTH"; }
+	exit 0
 fi
 
 if ! command -v xauth >/dev/null 2>&1; then

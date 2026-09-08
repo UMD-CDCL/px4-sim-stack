@@ -5,8 +5,12 @@
 # takeoff in the flight stage, so a fault in the graph is found before the
 # vehicle leaves the ground.
 
+# The companion, whichever world holds it: one numbered container per
+# simulated vehicle, and the single `onboard` container on an aircraft.
 lead=$FIRST_UAS
-container=$(COMPOSE_PROFILES="uas$lead,onboard$lead" docker compose ps -q "onboard$lead" 2>/dev/null)
+companion=$(companion_service "$lead")
+container=$(COMPOSE_PROFILES="$(companion_profiles "$lead")" \
+	docker compose ps -q "$companion" 2>/dev/null)
 if [ -z "$container" ]; then
 	fail "uas$lead is not running. Start it: ./px4sim start"
 	return 0

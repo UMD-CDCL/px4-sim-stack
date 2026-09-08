@@ -29,7 +29,8 @@ vehicle_ready "$lead" || return 0
 
 viewpoint=$(python3 verify/component/viewpoint.py \
 	"modules/sim/scenes/scenarios/${SCENARIO:-${SCENE}_casualties}.yaml" \
-	--height "${VERIFY_HEIGHT_M:-20}" --depression "${VERIFY_DEPRESSION_DEG:-45}" 2>/dev/null)
+	--height "${VERIFY_HEIGHT_M:-20}" --depression "${VERIFY_DEPRESSION_DEG:-45}" \
+	--buildings "modules/sim/scenes/worlds/${SCENE}_buildings.json" 2>/dev/null)
 if [ -z "$viewpoint" ]; then
 	fail "the scenario says where its targets are"
 	return 0
@@ -145,9 +146,22 @@ else
 fi
 
 # The one extra move. A held place is only proved by the aircraft leaving it.
+#
+# Twice the standoff, so the same targets are seen at half the elevation, and
+# the bearing worked out again for that range rather than simply dropped 20 m
+# south. A sight line that clears a roof at 20 m out can be under it at 40 m,
+# and this leg used to put uroc's 5.8 m roof in front of two of the three
+# casualties for the rest of the stage.
+farther=$(python3 verify/component/viewpoint.py \
+	"modules/sim/scenes/scenarios/${SCENARIO:-${SCENE}_casualties}.yaml" \
+	--height "${VERIFY_HEIGHT_M:-20}" \
+	--depression "$(python3 -c "
+import math
+print(round(math.degrees(math.atan(${VERIFY_HEIGHT_M:-20} / (2 * ${VERIFY_HEIGHT_M:-20} / math.tan(math.radians(${VERIFY_DEPRESSION_DEG:-45}))))), 2))")" \
+	--buildings "modules/sim/scenes/worlds/${SCENE}_buildings.json" 2>/dev/null)
+read -r far_east far_north far_up far_heading <<< "${farther:-$view_east $(python3 -c "print($view_north - 20)") $view_up $view_heading}"
 first=$(uas status | sed -n 's/^gimbal *\([-0-9.]*\).*/\1/p')
-uas goto "$view_east" "$(python3 -c "print($view_north - 20)")" "$view_up" \
-	--heading "$view_heading" >/dev/null
+uas goto "$far_east" "$far_north" "$far_up" --heading "$far_heading" >/dev/null
 second=$(uas status | sed -n 's/^gimbal *\([-0-9.]*\).*/\1/p')
 if [ -n "$first" ] && [ -n "$second" ]; then
 	expect_eq "the gimbal repoints to hold that place as the aircraft moves" True \

@@ -15,6 +15,10 @@ what happens here is what happens at the prompt.
   esc      stop the command that is running
   q        leave
 
+It offers the actions this world accepts and no others. A ground station and
+an aircraft refuse the simulator's own commands, so the console keeps none of
+them on a key, in a menu or in the help.
+
 It draws best in a terminal of 100 columns or more.
 """
 
@@ -47,6 +51,21 @@ FRONT_DOOR = Path(__file__).resolve().parents[1] / "px4sim"
 STACK, SERVICE, VEHICLE, STREAM = "stack", "service", "vehicle", "stream"
 PANES = (SERVICE, VEHICLE, STREAM)
 
+# The three worlds one .env can describe, as scripts/fleet.sh names them. An
+# action stands in the menus of the worlds it can act on, and nowhere else: a
+# key that runs into a refusal is a key that should not have been offered.
+SIMULATOR, GROUND, AIRCRAFT = "simulator", "ground", "aircraft"
+EVERY_WORLD = (SIMULATOR, GROUND, AIRCRAFT)
+SIM_ONLY = (SIMULATOR,)
+# A scene is map data. The simulator and the ground station both build and
+# select one. An aircraft reads the scene it is given.
+WITH_SCENE = (SIMULATOR, GROUND)
+# Where this machine holds a ground station, and where it holds a companion
+# container. The real ground flies no companion, and the aircraft has no
+# ground station.
+WITH_GROUND = (SIMULATOR, GROUND)
+WITH_COMPANION = (SIMULATOR, AIRCRAFT)
+
 
 class Ask(NamedTuple):
     prompt: str
@@ -65,6 +84,7 @@ class Action(NamedTuple):
     confirm: str = ""
     foreground: bool = False
     refresh: bool = False
+    worlds: tuple[str, ...] = EVERY_WORLD
 
 
 # Every action this console offers, and the px4sim command it runs. This table
@@ -78,33 +98,35 @@ ACTIONS = (
     Action(STACK, "=", "fly one more vehicle", ("fleet", "add", "{value}"),
            ask=Ask("airframe", choices_from="models"),
            confirm="Add a vehicle? The world reloads and every vehicle respawns.",
-           refresh=True),
+           refresh=True, worlds=SIM_ONLY),
     Action(STACK, "B", "build the images", ("build",),
            confirm="Build every image? This takes about twenty minutes."),
     Action(STACK, "P", "put the fleet back at its start", ("place",),
-           confirm="Reload the world and respawn every vehicle?"),
-    Action(STACK, "A", "place the targets again", ("scenario",)),
-    Action(STACK, "N", "switch the world", ("scene", "{value}"),
-           ask=Ask("scene name", "{scene}"), refresh=True),
+           confirm="Reload the world and respawn every vehicle?", worlds=SIM_ONLY),
+    Action(STACK, "A", "place the targets again", ("scenario",), worlds=SIM_ONLY),
+    Action(STACK, "N", "switch the scene", ("scene", "{value}"),
+           ask=Ask("scene name", "{scene}"), refresh=True, worlds=WITH_SCENE),
     Action(STACK, "T", "switch the targets", ("scenario", "{value}"),
            ask=Ask("scenario", "{scenario}", choices_from="scenarios"),
-           refresh=True),
+           refresh=True, worlds=WITH_SCENE),
     Action(STACK, "F", "stand the survey marker off its survey",
-           ("fiducial", "{value}"), ask=Ask("east north, in metres", "0 0", split=True)),
+           ("fiducial", "{value}"), ask=Ask("east north, in metres", "0 0", split=True),
+           worlds=SIM_ONLY),
     Action(STACK, "V", "run the verification", ("verify",)),
     Action(STACK, "C", "check the front door and the docs", ("check",)),
     Action(STACK, "D", "check the host", ("doctor",)),
     Action(STACK, "L", "where the Foxglove layout lives", ("layout",)),
     Action(STACK, "K", "the PX4 console. Detach with Ctrl-P Ctrl-Q", ("console",),
-           foreground=True),
+           foreground=True, worlds=SIM_ONLY),
     Action(STACK, "", "what the ground station's ROS graph carries",
-           ("probe", "ground")),
+           ("probe", "ground"), worlds=WITH_GROUND),
     Action(STACK, "", "what Foxglove is offered on the ground",
-           ("foxglove", "ground")),
+           ("foxglove", "ground"), worlds=WITH_GROUND),
     Action(STACK, "", "the addresses to use", ("endpoints",)),
     Action(STACK, "", "every vehicle, in full", ("fleet",)),
     Action(STACK, "", "the video paths", ("streams",)),
-    Action(STACK, "", "the coordinates this scene flies at", ("origin",)),
+    Action(STACK, "", "the coordinates this scene flies at", ("origin",),
+           worlds=WITH_SCENE),
     Action(STACK, "", "remove the containers and the volumes", ("clean",),
            confirm="Remove every container, network and volume?"),
 
@@ -116,12 +138,12 @@ ACTIONS = (
 
     Action(VEHICLE, "i", "what it says about itself", ("uas", "{n}", "status")),
     Action(VEHICLE, "t", "take off", ("uas", "{n}", "takeoff", "{value}"),
-           ask=Ask("height in metres", "40")),
-    Action(VEHICLE, "l", "land", ("uas", "{n}", "land")),
+           ask=Ask("height in metres", "40"), worlds=SIM_ONLY),
+    Action(VEHICLE, "l", "land", ("uas", "{n}", "land"), worlds=SIM_ONLY),
     Action(VEHICLE, "f", "respawn, then climb", ("fly", "{n}", "{value}"),
            ask=Ask("height in metres", "20"),
-           confirm="Reload the world, then fly uas{n}?"),
-    Action(VEHICLE, "m", "arm", ("uas", "{n}", "arm")),
+           confirm="Reload the world, then fly uas{n}?", worlds=SIM_ONLY),
+    Action(VEHICLE, "m", "arm", ("uas", "{n}", "arm"), worlds=SIM_ONLY),
     Action(VEHICLE, "g", "point the gimbal", ("uas", "{n}", "gimbal", "{value}"),
            ask=Ask("pitch in degrees, below the horizon is negative", "-30")),
     Action(VEHICLE, "z", "set the framing", ("zoom", "{n}", "{value}"),
@@ -132,29 +154,32 @@ ACTIONS = (
            ask=Ask("capture", choices_from="capture_kinds")),
     Action(VEHICLE, "p", "what its ROS graph carries", ("probe", "{n}")),
     Action(VEHICLE, "v", "play its gimbal camera", ("view", "{n}"), foreground=True),
-    Action(VEHICLE, "w", "save one frame", ("snap", "{gimbal}")),
+    Action(VEHICLE, "w", "save one frame", ("snap", "{gimbal}"), worlds=SIM_ONLY),
     Action(VEHICLE, "-", "retire this vehicle",
            ("fleet", "remove", "{n}", "--renumber"),
            confirm="Retire uas{n}? The world reloads. A vehicle before the last"
                    " renumbers every vehicle after it.",
-           refresh=True),
-    Action(VEHICLE, "o", "follow the companion log", ("logs", "{companion}")),
-    Action(VEHICLE, "", "follow the router log", ("logs", "{router}")),
+           refresh=True, worlds=SIM_ONLY),
+    Action(VEHICLE, "o", "follow the companion log", ("logs", "{companion}"),
+           worlds=WITH_COMPANION),
+    Action(VEHICLE, "", "follow the router log", ("logs", "{router}"),
+           worlds=SIM_ONLY),
     Action(VEHICLE, "", "what it found, and where that landed",
            ("uas", "{n}", "detections")),
     Action(VEHICLE, "", "which way it and its camera point", ("uas", "{n}", "heading")),
     Action(VEHICLE, "", "the scene the 3D panel is given", ("uas", "{n}", "scene")),
     Action(VEHICLE, "", "go to a place over home", ("uas", "{n}", "goto", "{value}"),
-           ask=Ask("east north up, in metres", "0 0 20", split=True)),
+           ask=Ask("east north up, in metres", "0 0 20", split=True),
+           worlds=SIM_ONLY),
     Action(VEHICLE, "", "its ROS topics", ("topics", "{n}")),
     Action(VEHICLE, "", "what Foxglove is offered", ("foxglove", "{n}")),
     Action(VEHICLE, "", "one PX4 command", ("px4", "{n}", "{value}"),
-           ask=Ask("PX4 command", "commander status", split=True)),
+           ask=Ask("PX4 command", "commander status", split=True), worlds=SIM_ONLY),
     Action(VEHICLE, "", "open a shell in the companion", ("onboard", "{n}"),
-           foreground=True),
+           foreground=True, worlds=WITH_COMPANION),
 
     Action(STREAM, "v", "play it", ("view", "{stream}"), foreground=True),
-    Action(STREAM, "w", "save one frame", ("snap", "{stream}")),
+    Action(STREAM, "w", "save one frame", ("snap", "{stream}"), worlds=SIM_ONLY),
 )
 
 
@@ -368,9 +393,12 @@ def service_words(row: dict) -> tuple[str, str]:
 
 def stream_words(path: dict) -> list[tuple[str, str]]:
     flowing = bool(path.get("ready")) and bool(path.get("kbits"))
+    # A mount that was probed rather than queried reports no reader count and
+    # no rate. Say nothing about them rather than saying zero.
+    readers = path.get("readers")
     return [("online" if path.get("ready") else "offline",
              "good" if flowing else ("watch" if path.get("ready") else "faint")),
-            (f"{path.get('readers', 0)} readers", "faint"),
+            (f"{readers} readers" if readers is not None else "-", "faint"),
             (kbits_words(path.get("kbits")), "good" if flowing else "faint")]
 
 
@@ -429,6 +457,12 @@ def card_words(card: dict) -> str:
 
 
 def vehicle_place(reported: dict, vehicle: dict) -> str:
+    """Where this vehicle is, and where the console reads it.
+
+    A bridge belongs to a machine: the simulator serves every one of them on
+    this host, and a real vehicle serves its own. So the whole address is
+    drawn, and not the port alone.
+    """
     words = []
     if reported.get("latitude") is not None:
         words.append(f"{reported['latitude']:.7f}, {reported['longitude']:.7f}")
@@ -436,10 +470,27 @@ def vehicle_place(reported: dict, vehicle: dict) -> str:
         words.append(f"{reported['altitude_amsl']:.1f} m amsl")
     if vehicle.get("domain"):
         words.append(f"ros domain {vehicle['domain']}")
-    if vehicle.get("companion"):
-        words.append(f"foxglove {vehicle.get('foxglove', '')}")
-    words.append(f"mavlink tcp {reported.get('port', '')}")
+    if vehicle.get("companion") and vehicle.get("foxglove_url"):
+        words.append(f"foxglove {vehicle['foxglove_url']}")
+    words.append(f"mavlink tcp {reported.get('host', '')}:{reported.get('port', '')}")
     return "   ".join(words)
+
+
+def bridge_words(bridge: dict) -> str:
+    """One Foxglove bridge, named by the machine that serves it.
+
+    Every bridge of the real fleet holds port 8765, so the port alone names
+    two of them the same. A bridge on this host keeps the short form.
+    """
+    host = str(bridge.get("host", ""))
+    where = bridge["port"] if host in ("127.0.0.1", "localhost", "") else \
+        f"{host}:{bridge['port']}"
+    return f"{bridge['name']} {where}"
+
+
+def unit_words(unit: dict) -> tuple[str, str]:
+    state = str(unit.get("state", "unknown"))
+    return f"{unit.get('name', '?')} {state}", "good" if state == "active" else "bad"
 
 
 def gloss(action: Action) -> str:
@@ -466,8 +517,18 @@ class Rows:
         self.vehicles = report.get("vehicles") or []
         self.streams = report.get("streams") or []
         self.bridges = report.get("bridges") or []
+        self.units = report.get("units") or []
         self.gpu = report.get("gpu") or {}
         self.errors = [report.get("services_error", ""), report.get("streams_error", "")]
+
+    @property
+    def world(self) -> str:
+        """Which of the three worlds .env describes, as the report states it.
+
+        Before the first report nothing is known, and the console then offers
+        every action rather than hiding one it cannot judge.
+        """
+        return str(self.config.get("world", ""))
 
     def of(self, pane: str) -> list[dict]:
         return {SERVICE: self.services, VEHICLE: self.vehicles,
@@ -561,7 +622,8 @@ class Console:
         if config.get("home_lat") not in (None, ""):
             origin = f"{config.get('home_lat')}, {config.get('home_lon')}"
         told = "   ".join(word for word in (
-            str(config.get("scene", "")), str(config.get("scenario", "")), origin,
+            self.rows.world, str(config.get("scene", "")),
+            str(config.get("scenario", "")), origin,
             fleet_words(len(self.rows.fleet))) if word)
         self.put(0, 9, told, "bar", width - len(clock) - 12)
         self.put(0, max(9, width - len(clock) - 2), clock, "bar")
@@ -593,7 +655,8 @@ class Console:
                 (VEHICLE, "VEHICLES", self.draw_pane),
                 ("detail", "", self.draw_detail),
                 (STREAM, "STREAMS", self.draw_pane),
-                ("bridges", "FOXGLOVE", self.draw_bridges)):
+                ("bridges", "FOXGLOVE", self.draw_bridges),
+                ("units", "NATIVE", self.draw_units)):
             if name not in given:
                 continue
             below = row + given[name]
@@ -611,9 +674,12 @@ class Console:
         """
         wanted = {VEHICLE: max(2, len(self.rows.vehicles) + 1),
                   STREAM: max(2, len(self.rows.streams) + 1),
-                  "detail": 3, "bridges": 2}
+                  "detail": 3, "bridges": 2,
+                  "units": 2 if self.rows.units else 0}
         given = {}
-        for name in (VEHICLE, STREAM, "detail", "bridges"):
+        for name in (VEHICLE, STREAM, "detail", "bridges", "units"):
+            if not wanted[name]:
+                continue
             take = min(wanted[name], space - 1)
             if take >= 2:
                 given[name] = take
@@ -689,9 +755,20 @@ class Console:
         self.put(top, column, "FOXGLOVE", "faint", room)
         at = column + 2
         for bridge in self.rows.bridges:
-            words = f"{bridge['name']} {bridge['port']}"
+            words = bridge_words(bridge)
             self.put(top + 1, at, words, "good" if bridge["listening"] else "faint",
                      room - (at - column))
+            at += len(words) + 3
+
+    def draw_units(self, top: int, end: int, column: int, room: int) -> None:
+        """The native services this machine boots. The simulator has none."""
+        if top + 1 >= end or not self.rows.units:
+            return
+        self.put(top, column, "NATIVE", "faint", room)
+        at = column + 2
+        for unit in self.rows.units:
+            words, style = unit_words(unit)
+            self.put(top + 1, at, words, style, room - (at - column))
             at += len(words) + 3
 
     def draw_output(self, top: int, end: int, width: int) -> None:
@@ -716,8 +793,8 @@ class Console:
     def draw_footer(self, row: int, width: int) -> None:
         keys = ["tab pane", "enter actions", ". stack", ": command",
                 "pgup output", "? help", "q quit"]
-        keys += [f"{action.key} {gloss(action)}" for action in ACTIONS
-                 if action.key and action.scope == self.pane]
+        keys += [f"{action.key} {gloss(action)}"
+                 for action in self.actions_for(self.pane) if action.key]
         self.put(row, 0, " " + " · ".join(keys), "faint")
 
     # ---------------------------------------------------------------- asking
@@ -801,7 +878,20 @@ class Console:
     # ---------------------------------------------------------------- acting
 
     def actions_for(self, pane: str) -> list[Action]:
-        return [action for action in ACTIONS if action.scope == pane]
+        """The actions of one scope that this world can act on.
+
+        The front door refuses the simulator's own commands anywhere else, so
+        offering them here would offer a key that only prints a refusal.
+        """
+        world = self.rows.world
+        return [action for action in ACTIONS if action.scope == pane
+                and (not world or world in action.worlds)]
+
+    def hidden_here(self) -> int:
+        world = self.rows.world
+        if not world:
+            return 0
+        return len([action for action in ACTIONS if world not in action.worlds])
 
     def selected_row(self, pane: str) -> dict | None:
         rows = self.rows.of(pane)
@@ -919,6 +1009,11 @@ class Console:
             for action in self.actions_for(scope):
                 command = " ".join(action.command)
                 lines.append(f"{action.key or ' ':<2} {action.label:<44} px4sim {command}")
+        hidden = self.hidden_here()
+        if hidden:
+            lines.append("")
+            lines.append(f"{hidden} more fly or maintain the simulator. This is"
+                         f" the {self.rows.world}, which refuses them.")
         self.choose("every action, and what it runs", lines)
 
     def typed(self) -> None:

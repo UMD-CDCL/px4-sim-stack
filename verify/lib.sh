@@ -48,11 +48,25 @@ await() {
 # its engines. A stage that starts before that fails on everything and says
 # nothing useful, so every runtime stage waits here first.
 vehicle_ready() {
-	local n=$1 deadline=${2:-600} waited=0
+	local n=$1 deadline=${2:-600} waited=0 topic ready
 	# altitude, not state: MAVROS publishes state on a timer whether or not it
 	# is hearing an autopilot, so a stack that has just restarted its simulator
 	# looks ready while nothing is flying.
-	while [ "$(./px4sim probe "$n" "/uas$n/altitude" 2>/dev/null | cut -f3)" != data ]; do
+	#
+	# camera_info as well, and it is the slower of the two. A v3 homes its lens
+	# before it publishes any intrinsics: the zoom node searches for each axis's
+	# switch band, repeats the trip points, and only then moves to its boot
+	# preset, which is about 30 s from a cold start. Altitude alone returned in
+	# 10 s, so every camera check that followed raced the homing and the vehicle
+	# stage failed camera/camera_info on a cold stack while passing on a warm
+	# one. Waiting for the lens is what makes those checks mean anything.
+	while true; do
+		ready=true
+		for topic in altitude camera/camera_info; do
+			[ "$(./px4sim probe "$n" "/uas$n/$topic" 2>/dev/null | cut -f3)" = data ] \
+				|| ready=false
+		done
+		[ "$ready" = true ] && break
 		if [ "$waited" -ge "$deadline" ]; then
 			fail "uas$n answers after ${deadline}s"
 			note "is it started? ./px4sim status, ./px4sim logs onboard$n"

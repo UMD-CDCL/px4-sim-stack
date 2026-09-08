@@ -5,8 +5,8 @@ A scene is the terrain. A scenario is what stands on it. They are separate so
 that one scene can carry many test cases, and so that a target layout can
 change without a simulator restart.
 
-    spawn_scenario.py --world recon_field --scenario scenarios/urban_casualties.yaml
-    spawn_scenario.py --world recon_field --clear
+    spawn_scenario.py --world lorton --scenario scenarios/lorton_casualties.yaml
+    spawn_scenario.py --world lorton --clear
     spawn_scenario.py --list
     spawn_scenario.py --world lorton --fiducial 6 -9
 
@@ -373,7 +373,7 @@ def cmd_spawn(world: str, path: Path) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--world", default=os.environ.get("SCENE", "recon_field"))
+    ap.add_argument("--world", default=os.environ.get("SCENE", "lorton"))
     ap.add_argument("--scenario", type=Path)
     ap.add_argument("--clear", action="store_true", help="remove the entities that are placed")
     ap.add_argument("--list", action="store_true", help="show the scenarios on disk")

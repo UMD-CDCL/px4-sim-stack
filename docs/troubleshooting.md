@@ -9,6 +9,120 @@ Start here:
 ./px4sim logs sim  # the service you suspect
 ```
 
+[front-doors.md](front-doors.md) says what each command reads and what it
+refuses, in each of the three worlds.
+
+## The start
+
+### `start` creates some of the stack, or none of it
+
+A published port is a claim on the host, and this stack is not the only thing
+that can hold one. A container that cannot bind its port stops `docker compose
+up` where it stands, and compose abandons everything after it:
+
+```
+Error response from daemon: failed to set up container networking: driver
+failed programming external connectivity on endpoint px4simstack-video-router-1:
+failed to bind host port 0.0.0.0:8554/tcp: address already in use
+```
+
+Every service compose had not reached yet is never created. 8554 costs the
+whole picture, because `video-router` comes early: `sim`, `qgc`, `offboard` and
+`ground-router` never start. The operator meets no video and no ground station,
+never a port.
+
+`./px4sim doctor` names the port, the service that wants it, and what holds it:
+
+```
+  fail  host ports already taken. The start stops at the first of these and
+        leaves every service after it unstarted:
+        8554/tcp, wanted by video-router, held by python3 pid 56131
+            Move the stack instead: set RTSP_HOST_PORT in .env
+```
+
+`ss` names the holder only when it is yours or you are root. For anything
+else, `sudo ss -lnp` says who it is.
+
+An address this stack shares with a real airframe is the usual cause. 8554 is
+RTSP for both, so a relay for the real fleet on this machine and the simulator
+cannot both hold it.
+
+Where the port has a knob, `doctor` prints it under the holder, as above. Take
+it, and nothing has to be stopped:
+
+```bash
+RTSP_HOST_PORT=8654       # in .env
+```
+
+Only the host side moves. Inside `simnet` every consumer still dials
+`video-router:8554`, so QGC and the companions never notice, and `./px4sim
+view` and the addresses `status` prints follow the new value.
+
+Otherwise stop the one you are not flying. If it is a service, stop the unit
+and not the process, or systemd starts it again five seconds later:
+
+```bash
+systemctl status lcam     # what holds it, and whether it comes back
+sudo systemctl stop lcam
+```
+
+### `UAS_BASE=10 numbers a simulated fleet`, or `selects no real profile`
+
+`UAS_BASE` and `COMPOSE_PROFILES` in `.env` must describe one world. `ground`
+or `aircraft` with `UAS_BASE=10` would number a real vehicle 11. `UAS_BASE=0`
+with the simulator's profiles would exec into a container that is not there.
+`./px4sim` refuses every command until the pair agrees, except `help`,
+`doctor`, `check`, `x11`, `setup`, `stop` and the clean commands. `.env.example` lists the three pairs, and
+`./px4sim doctor` checks `GROUND_DOMAIN` and `ONBOARD_LENS_DEVICE` with them.
+
+### A knob exists and .env has never heard of it
+
+`.env` is copied from `.env.example` once, and then it stops moving. A line
+added to the example afterwards is missing from every `.env` made before it,
+and a missing line is not an empty one: the reader takes a default written
+into `compose.yaml` or an entry point. The stack runs, nothing reports
+anything, and the setting that would have fixed the machine is one the
+operator cannot see, because the file they read does not carry it.
+
+`./px4sim doctor` compares the two files by name:
+
+```
+  warn  .env does not mention: RTSP_HOST_PORT
+```
+
+Copy the lines it names across from `.env.example`, with the comment above
+each one, and set the ones this host wants. A name is reported whether the
+example sets it or leaves it commented out, because a knob you can read is the
+point.
+
+### A service is Up, and nothing can reach it
+
+A container that lost a host port keeps its place in the project, and starting
+it again brings it up with no network endpoint at all: no address on
+`px4simstack_simnet`, no name for the other services to resolve, and none of
+the ports it publishes. Nothing about it reads as broken. Compose says running,
+`status` says Up with an empty PORTS column, and the service's own log says it
+is listening, because inside the container it is.
+
+`./px4sim status` reads the endpoint rather than the container, and says so:
+
+```
+    Running, and reachable by nothing:
+      video-router joined no network: no address on px4simstack_simnet, and no name to resolve.
+```
+
+Meanwhile the services that need it wait rather than fail. The simulator
+repeats `[rgb11] cannot start the pipeline`, and the companion repeats `waiting
+for rtsp://video-router:8554/rgb11 to be served`. Neither is an error, so
+neither stands out in a log.
+
+Start the container again and it reuses the endpoint it already has. Free the
+port first, then recreate it, which is what `stop` and `start` do together:
+
+```bash
+./px4sim stop && ./px4sim start
+```
+
 ## The GPU
 
 ### A container exits at once with a driver error
@@ -68,6 +182,33 @@ docker compose exec sim gst-inspect-1.0 nvh264enc
 
 Software encoding works. It costs about one core for each 720p stream.
 
+### The GPU has no video engines at all
+
+The laptop parts (the T500, the MX class) ship with NVENC and NVDEC fused
+off while CUDA works untouched. `./px4sim doctor` says so up front: "GPU
+video engines: NVENC no, NVDEC no". Every pipeline recovers on its own, so
+this is a description of what such a machine does, not a fault to fix:
+
+- The sim's streamer probes its encoders by running them and lands on
+  `x265enc`, the software H.265 encoder. Same codec the aircraft sends.
+- The companion's `ds_node` probes `nvv4l2decoder` with one real decode at
+  startup, finds it dead, and resolves `pipeline.type` to `cpu`: `avdec`
+  decodes, `jpegenc` draws the preview, `x264enc` records.
+- Detection is unaffected. The batch inference pipeline is CUDA compute --
+  `nvvideoconvert`, `nvstreammux`, `nvinfer` -- and never touches the video
+  engines, so the detector runs on the GPU while the video around it is
+  software. The startup log says `pipeline_type=cpu` and still builds the
+  batch pipeline.
+
+Expect the fallback resolution to add about ten seconds to `ds_node`
+startup on such a machine: the decode probes have to time out before the
+resolution can step down. A machine with working engines passes the probe
+in under a second and changes nothing.
+
+Fly a small fleet on these machines. Every stream is a CPU encode in the
+sim container plus a CPU decode in every container that reads it, about a
+core each at 720p, and the physics loop competes for the same cores.
+
 ## The display
 
 ### "rm: cannot remove '/tmp/.docker.xauth': Is a directory"
@@ -92,6 +233,11 @@ docker compose exec sim bash -lc 'xdpyinfo | head -3'
 
 `./px4sim x11` writes the cookie file that the containers mount. Run it again
 after you log out and back in, because the cookie changes.
+
+An empty `DISPLAY` is a warning from `./px4sim doctor`, never a failure. The
+aircraft and a base station over ssh run with no window. Only a service that
+mounts the X socket gets the warning, and `x11-allow.sh` then writes an empty
+cookie file so the bind mount stays a file.
 
 Under Wayland, X11 applications go through XWayland. It works, and GPU
 acceleration is less reliable. An X11 session is the tested path.
@@ -150,8 +296,7 @@ is the point of that mode.
 ```bash
 ./px4sim topics 11 | grep state
 docker compose exec -e ROS_DOMAIN_ID=71 onboard11 bash -lc \
-  '. /opt/ros/humble/setup.bash; . /home/user/ros2_ws/install/setup.bash; \
-   ros2 topic echo /uas11/state --once'
+  '. /usr/local/bin/ros-env.sh; ros2 topic echo /uas11/state --once'
 ```
 
 `connected: false` means the router never reached MAVROS. The two share a
@@ -186,6 +331,16 @@ directly.
 `offline` means nobody is publishing, and a player gets a 404 or a timeout.
 Every path comes from the simulator, so they stay offline until Gazebo is up and
 the vehicle has spawned.
+
+If the router itself cannot be reached, no path is served and none is listed:
+
+```
+  cannot reach http://localhost:9997: <urlopen error [Errno 111] Connection refused>
+  Is the video router running?  ./px4sim status
+```
+
+That is the host side of `video-router`, not the streams. See
+[A service is Up, and nothing can reach it](#a-service-is-up-and-nothing-can-reach-it).
 
 ### Some streams are online and others never appear
 
@@ -318,6 +473,10 @@ picked up a stock base by mistake shows as TensorRT 10.3 on a card past Hopper:
 ```bash
 docker compose exec onboard11 dpkg -l libnvinfer10
 ```
+
+A Jetson is the reverse case. Its engines load only under the host's own
+10.3.0.30 build, so the image carries that one and the tag is `7.1-trt10.3`.
+See "The aircraft" below.
 
 Second, are the artifacts where the container looks? `ONBOARD_MODEL_DIR` is
 mounted at `/models`, and `model.detector` and `model.classifier` name files
@@ -606,6 +765,169 @@ ls /dev/shm | grep -c fastrtps
 
 ```bash
 ./px4sim stop
+```
+
+## The aircraft
+
+Every entry here shows in `./px4sim doctor` on the Orin, or in the first lines
+of `./px4sim logs onboard`.
+
+### `no /tmp/*ds_nv.sock`
+
+rcam forks every camera onto an NVMM socket at start, and the companion reads
+`rgbds`, `pilotds` or `thermalds` there. With no socket the entry point waits
+up to `STREAM_WAIT_S` (300 s), then starts the launch anyway, and the detector
+fails to open its camera.
+
+```bash
+systemctl status rcam
+journalctl -u rcam -n 30
+ls /tmp/*ds_nv.sock
+```
+
+A socket that exists and gives no frames is a producer fault, not a container
+fault. Probe it on the host, which is what the container does:
+
+```bash
+gst-launch-1.0 nvunixfdsrc socket-path=/tmp/rgbds_nv.sock ! fakesink num-buffers=30
+```
+
+On the last bench run all three DeepStream sockets gave frames, and the thermal
+mount alone answered 503. Try `sudo systemctl restart rcam` first. A USB
+re-plug is the second step.
+
+### `lens: /dev/lens is /dev/null`
+
+`.env` names no `ONBOARD_LENS_DEVICE`, so compose mapped `/dev/null` in its
+place. A v3 needs the SCF4:
+
+```bash
+ls /dev/serial/by-id/usb-Kurokesu_*
+```
+
+Put that path in `.env` as `ONBOARD_LENS_DEVICE` and start again. A v2 has no
+lens, so the warning means nothing there.
+
+### `docker needs sudo here`
+
+`user` is not in group `docker`, so every docker command fails with
+`permission denied` on the daemon socket. `./px4sim doctor` prints the fix:
+
+```bash
+sudo usermod -aG docker $USER
+```
+
+Then log out and in. Until then this shape works and keeps `UAS_NUM` and
+`HOME`:
+
+```bash
+sudo -E env HOME=/home/user UAS_NUM=1 ./px4sim start
+```
+
+`./px4sim doctor` and `./px4sim start` both hand `.env` and the log directories
+back to the operator after a run under sudo, so the uid 1000 container can
+still write them. The boot unit needs no group: `onboard.service` carries
+`SupplementaryGroups=docker`.
+
+### `clock says 1970`
+
+The clock reads 1970 until chrony reaches the laptop and steps it, and every
+log and bag written before that carries a 1970 stamp. `onboard.service` waits
+up to three minutes for the step with `chronyc waitsync`, then starts anyway.
+By hand:
+
+```bash
+chronyc tracking
+chronyc waitsync 18 1.0 0 10
+```
+
+### `onboard.service stays active with no container`
+
+The unit is `oneshot` with `RemainAfterExit`. A hand `./px4sim stop` removes
+the container and leaves the unit active, so the stack comes back at the next
+boot and not before. To start it under the unit again now:
+
+```bash
+sudo systemctl restart onboard
+```
+
+### `The engine plan file is not compatible with this version of TensorRT`
+
+An engine loads only under the exact TensorRT build that made it. The Orin's
+engines come from 10.3.0.30, and the generic arm64 DeepStream image carries
+10.3.0.26. The image must carry the host's build:
+
+```bash
+./scripts/ds-select.sh --tag                          # 7.1-trt10.3 on a Jetson
+./px4sim shell onboard dpkg -l libnvinfer10           # 10.3.0.30-1+cuda12.5
+```
+
+Another version means the build had no JetPack apt source.
+`./px4sim doctor` prints what `ds-select` chose. Rebuild `ros-base`, then the
+onboard image.
+
+### The first start builds an engine for a long time
+
+The detector engines come from `perception_models/orin` and load as they are.
+The classifier wants `injury-336.onnx_b8_gpu0_fp16.engine`, which the model
+manifest does not carry, so `nvinfer` builds it from the ONNX at the first
+start. On the bench that took 8 minutes 55 seconds at 15 W.
+`./px4sim logs onboard` shows the build while it runs. Let it finish once.
+
+`nvinfer` writes the engine beside the ONNX it resolved, which is
+`perception_models/shared`. The group directory is what `/models/local` points
+at, so move it there once and link the tree again:
+
+```bash
+cd ~/ros2_ws/src/5g_drone/perception_models
+mv shared/injury-336.onnx_b8_gpu0_fp16.engine orin/
+../scripts/fetch_models.py resolve --link
+```
+
+A later start then deserializes it, and `ds_node` reaches `pipelines PLAYING`
+in about 57 seconds.
+
+### `terrain: no scene`
+
+`SCENE=` in `.env`, which a bench wants. The footprint and every ray use the
+flat plane. At the field, `SCENE=lorton` draws the site.
+
+### The power mode
+
+The Orin NX ran at `nvpmodel` 15 W on the bench, with four cores online.
+`./px4sim doctor` prints the mode. Measure detection at that mode before you
+change it, and record the mode beside every measurement.
+
+## The ground
+
+### Nothing arrives on 14402
+
+The native `mavlink-router.service` pushes each vehicle to its own
+`127.0.0.<N>:14402`, and the `ground` container binds every one of those on the
+host network. Check both ends:
+
+```bash
+systemctl status mavlink-router
+ss -lunp | grep 14402               # mavros, in the ground container
+./px4sim uas ground status
+```
+
+`offboard` in place of `ground` binds 14402 on simnet, in a namespace the
+native router never reaches. `./px4sim doctor` checks that `UAS_BASE` and the
+profile agree.
+
+### `rgbl1` answers 503 or hangs
+
+lcam restreams the vehicle's `rgbl` mount from `rtsp://10.200.142.61:8554`. A
+503, or a hang at DESCRIBE, means the producer on the drone gives no frames.
+Ask the vehicle's own mount the same question: a 503 there as well is the
+producer, not this stack. On the last bench run `rgbl1` and `pilotl1` were live
+and `thermall1` answered 503 on three tries.
+
+```bash
+./px4sim streams                    # every lcam mount, by name
+journalctl -u rcam -n 30            # on the drone
+sudo systemctl restart rcam         # on the drone
 ```
 
 ## Starting over

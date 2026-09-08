@@ -65,16 +65,26 @@ else
 	note "$(./px4sim logs --since 5m "onboard$lead" 2>/dev/null | grep 'SKIP.*summary' | tail -1)"
 fi
 
-for file in overlay.png map.html; do
-	path=/home/user/d${lead}_rgb_mosaic_${file%%.*}.${file##*.}
-	size=$(./px4sim shell "onboard$lead" "stat -c %s '$path' 2>/dev/null || echo 0" 2>/dev/null | tr -d '\r')
-	if [ "${size:-0}" -gt 1000 ]; then
-		pass "the mosaic wrote $(basename "$path") (${size} bytes)"
-	else
-		fail "the mosaic wrote $(basename "$path")"
-		note "${size:-0} bytes"
-	fi
-done
+# The PNG and its bounds are what the running system produces, and what the
+# tileserver serves the live map from.
+path=/home/user/d${lead}_rgb_mosaic_overlay.png
+size=$(./px4sim shell "onboard$lead" "stat -c %s '$path' 2>/dev/null || echo 0" 2>/dev/null | tr -d '\r')
+if [ "${size:-0}" -gt 1000 ]; then
+	pass "the mosaic wrote $(basename "$path") (${size} bytes)"
+else
+	fail "the mosaic wrote $(basename "$path")"
+	note "${size:-0} bytes, and 0 means the file is not there at all"
+fi
+
+# The folium HTML is NOT checked, and asking for it here was a check that could
+# never pass. folium base64 embeds the whole PNG, which dominated export time,
+# so mosaic.py builds the map only at shutdown by default
+# (folium_html_every_n_exports = 0) and forces it from main()'s finally block.
+# This stage runs while the node is still up, so the file does not exist yet.
+# Nothing in the launch files consumes it either. Checking it means stopping the
+# vehicle first, which belongs in a stage of its own rather than in the middle
+# of a flight.
+skip "the mosaic map HTML is written at shutdown, so a flying vehicle has none" 
 
 # Back over the casualties, where there is something to mark and something to
 # hand a vision model.
