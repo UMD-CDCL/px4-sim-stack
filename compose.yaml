@@ -617,10 +617,7 @@ services:
     <<: *onboard
     profiles: [aircraft]
     network_mode: host
-    # A crash comes back five times. Docker also starts this container again
-    # at boot after a power cut, so the boot unit removes it before the clock
-    # wait and makes it again after (chimera-deploy remote/onboard.service).
-    restart: on-failure:5
+    restart: "no"
     environment:
       <<: *onboard-env
       # Empty on a laptop, where this profile is never selected. Compose
