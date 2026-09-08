@@ -366,10 +366,10 @@ prompt without sudo.
 container on the host network, beside the native lcam and mavlink-router. MAVROS
 on domain 60 reads uas1 as connected. The air bridges carry 16 topics on domain
 99 and 2 on domain 69. `./px4sim streams` lists all three lcam mounts.
-`./px4sim layout` renders the Foxglove layout for uas1, and 0 of its 24 topics
-are absent against the live graph. `./px4sim verify` passes 9 checks over the
-`ground` and `foxglove` stages. The cross-wire run was 38 pass, 0 fail, 1
-blocked. The simulator still passes `./px4sim verify`, 71 of 71.
+`./px4sim layout` selects the live `chimera_real.json` front door and renders
+it for uas1. The simulation world selects `chimera_sim.json` instead.
+`./px4sim verify` checks every topic and service the selected layout uses
+against the live bridge.
 
 **What a bench cannot prove.** A level camera means no ray meets the ground.
 `tf_loc` needs a box at least 20 degrees below the horizon, and the bench

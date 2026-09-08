@@ -1638,7 +1638,9 @@ check)
 		while read -r name; do
 			# Only the ones a container really reads. compose interpolates
 			# others on the host, where passing them would mean nothing.
-			grep -rqlw "$name" modules/ 2>/dev/null || continue
+			find modules -type f \( -name '*.sh' -o -name '*.py' -o \
+				-name Dockerfile -o -name '*.yaml' -o -name '*.yml' \) \
+				-exec grep -qlw "$name" {} + 2>/dev/null || continue
 			grep -q "^[[:space:]]*$name: " compose.yaml \
 				|| { warn "compose.yaml never passes $name, which $table defines and a container reads."
 				     problems=$((problems + 1)); }
