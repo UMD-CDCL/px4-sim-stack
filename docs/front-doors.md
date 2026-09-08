@@ -305,10 +305,11 @@ and `ROS_DOMAIN_ID` reach it. `HOME=/home/user` is set in the unit.
 
 **How it runs.** `Type=oneshot` with `RemainAfterExit=yes`. It is ordered after
 `docker.service`, `rcam.service`, `mavlink-router.service` and
-`time-sync.target`. `ExecStartPre` removes any container a power cut left, then
-waits up to three minutes for a clock step with `chronyc waitsync`. Both
-`ExecStartPre` lines carry a leading dash, so neither can hold the boot.
-`ExecStart` is `./px4sim start` and `ExecStop` is `./px4sim stop`.
+`time-sync.target`. The aircraft container has no Docker restart policy, so
+Docker does not restore the power-cut container before this unit runs. Its only
+`ExecStartPre` waits up to three minutes for a clock step with `chronyc
+waitsync`; the leading dash lets startup continue when the laptop is absent.
+`ExecStart` runs `./px4sim start` once and `ExecStop` runs `./px4sim stop`.
 
 `SupplementaryGroups=docker` gives the unit the docker socket whether or not
 the login user is in that group.
@@ -320,9 +321,9 @@ a cycle, and systemd breaks a cycle by deleting a start job: this one. The unit
 then reads `enabled` and `inactive` after every boot, with nothing in its
 journal to say why.
 
-**What it costs.** A `systemctl start` always cycles the container, because
-`ExecStartPre` stops it first. Detection is off on a fresh container. Turn it
-on again with `/ds/mode/toggle_detection` and `continuous_detection_cmd`.
+An explicit `systemctl restart onboard` cycles the container. Detection is off
+on a fresh container. Turn it on again with `/ds/mode/toggle_detection` and
+`continuous_detection_cmd`.
 
 A hand `./px4sim stop` leaves the unit active with no container. `./px4sim`
 says so, and `sudo systemctl restart onboard` brings it back.
