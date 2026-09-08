@@ -275,6 +275,7 @@ services:
     profiles: [base]
     build:
       context: ./modules/ros-base
+      network: host
       additional_contexts:
         # Where 5g_drone, cdcl_umd_msgs and MAVInsight are checked out. colcon
         # builds them into the image, so nothing is mounted at run time.
