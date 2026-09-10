@@ -6,7 +6,7 @@ and works one example.
 
 | Door | Machine | For |
 |---|---|---|
-| [`./px4sim`](#px4sim) | t500 and uas1 | build, start, read and stop the stack |
+| [`./px4sim`](#px4sim) | t500 and uas1 | build through start, read and stop the stack |
 | [`./px4sim ui` and `state`](#the-console-and-the-state-report) | t500 and uas1 | the same readings in a console, or as JSON |
 | [`make`](#the-makefile) | t500 and uas1 | the old target names, forwarded to `./px4sim` |
 | [`deploy_onboard.sh`](#deploy_onboardsh) | uas1 | put this stack on an aircraft |
