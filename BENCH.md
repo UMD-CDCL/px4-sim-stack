@@ -16,6 +16,10 @@ When enabled, the real-aircraft launch:
   Foxglove scene so the vehicle appears near the fiducial;
 - keeps the normal camera, detector, gimbal, and visualization paths running.
 
+The stored bench altitudes are WGS84 ellipsoid heights (the UROC mean-sea-level
+heights plus the site's geoid offset), matching `NavSatFix` and the terrain
+renderer.
+
 Bench mode disables no flight software, but it does replace the missing
 ROS-side home/fiducial reference at the localization input. It does not
 publish fake global GPS, arm, move, or alter PX4 state, and it must never be
