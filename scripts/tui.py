@@ -91,7 +91,7 @@ class Action(NamedTuple):
 # fills the menus, the hot keys, the footer and the help, so an action is
 # written down once.
 ACTIONS = (
-    Action(STACK, "s", "start the stack", ("start",)),
+    Action(STACK, "s", "build and start the stack", ("start",)),
     Action(STACK, "", "enable GPS-free BENCH MODE (select this menu item)",
            ("bench", "enable", "{value}"),
            ask=Ask("type ENABLE BENCH MODE", "ENABLE BENCH MODE"),
@@ -101,14 +101,10 @@ ACTIONS = (
            ("bench", "disable"),
            confirm="Disable bench mode before flight?", worlds=(AIRCRAFT, GROUND)),
     Action(STACK, "x", "stop everything", ("stop",), confirm="Stop every container?"),
-    Action(STACK, "", "recreate every service", ("restart",),
-           confirm="Recreate every container?"),
     Action(STACK, "=", "fly one more vehicle", ("fleet", "add", "{value}"),
            ask=Ask("airframe", choices_from="models"),
            confirm="Add a vehicle? The world reloads and every vehicle respawns.",
            refresh=True, worlds=SIM_ONLY),
-    Action(STACK, "B", "build the images", ("build",),
-           confirm="Build every image? This takes about twenty minutes."),
     Action(STACK, "P", "put the fleet back at its start", ("place",),
            confirm="Reload the world and respawn every vehicle?", worlds=SIM_ONLY),
     Action(STACK, "A", "place the targets again", ("scenario",), worlds=SIM_ONLY),
@@ -141,7 +137,6 @@ ACTIONS = (
     Action(SERVICE, "o", "follow the log", ("logs", "{service}")),
     Action(SERVICE, "h", "read the last fifteen minutes",
            ("logs", "--since", "15m", "{service}")),
-    Action(SERVICE, "r", "restart it", ("restart", "{service}")),
     Action(SERVICE, "e", "open a shell in it", ("shell", "{service}"), foreground=True),
 
     Action(VEHICLE, "i", "what it says about itself", ("uas", "{n}", "status")),

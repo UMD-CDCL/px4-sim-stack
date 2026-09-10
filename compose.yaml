@@ -122,8 +122,8 @@ x-onboard: &onboard
       shared: ./scripts
     args:
       # Which ros-base to derive from. Everything heavy is there, so this image
-      # is its entry point and nothing else. `./px4sim build` builds the base
-      # first. See modules/ros-base/Dockerfile.
+      # is its entry point and nothing else. `./px4sim start` builds the base
+      # before creating containers. See modules/ros-base/Dockerfile.
       <<: *deepstream
   image: px4simstack/onboard:${DS_TAG:-7.1}
   runtime: nvidia

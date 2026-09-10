@@ -637,7 +637,7 @@ The user id inside the container must match yours. `./px4sim doctor` sets
 sim image after a change:
 
 ```bash
-./px4sim build sim
+./px4sim start
 ```
 
 ### "World file X declares world name Y"
@@ -694,7 +694,7 @@ After you change the addresses, recreate the containers. A running container
 keeps the address it was created with:
 
 ```bash
-docker compose up -d --force-recreate
+./px4sim start
 ```
 
 ### The mavlink-router build fails on "Dependency systemd not found"
@@ -722,8 +722,7 @@ after that is named by the launch file and is not installed. Rebuild them, and
 recreate what runs them:
 
 ```bash
-./px4sim build onboard offboard
-./px4sim restart onboard11 offboard
+./px4sim start
 ```
 
 `./px4sim doctor` compares the two dates and reports this before a start does.
@@ -734,8 +733,7 @@ recreate what runs them:
 one at a time when you are debugging:
 
 ```bash
-./px4sim build sim
-./px4sim build onboard
+./px4sim start
 ```
 
 ### The image is enormous

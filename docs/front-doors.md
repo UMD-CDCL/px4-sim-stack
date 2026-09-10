@@ -83,8 +83,7 @@ name, so the list cannot drift.
 cd /home/user/px4-sim-stack
 ./px4sim doctor            # driver, docker, GPU runtime, X11, disk, ports
 ./px4sim setup             # clone PX4 and QGroundControl into ./src
-./px4sim build             # ros-base, then every image
-./px4sim start             # sim, uas11, onboard11, offboard, ground-router,
+./px4sim start             # stop, build, then start sim, uas11, onboard11,
                            # video-router and qgc
 ./px4sim status            # what is up, and the addresses
 ./px4sim fly 11 20         # respawn uas11 and take it to 20 m
@@ -111,8 +110,7 @@ the fielded QGroundControl stays native.
 ```bash
 cd /home/user/px4-sim-stack
 ./px4sim doctor            # also lcam, mavlink-router, 14402/udp and 8765/tcp
-./px4sim build             # ros-base and the ground image
-./px4sim start             # one container, `ground`, on the host network
+./px4sim start             # stop, build, then start `ground` on the host network
 ./px4sim uas 1 status      # the vehicle, through the ground station
 ./px4sim streams           # the lcam mounts, asked for by name
 ./px4sim view 1            # rgbl1
@@ -152,8 +150,7 @@ mv .env.backup .env
 cd /home/user/px4-sim-stack
 ./px4sim doctor            # also rcam, its sockets, the clock, the power mode,
                            # the lens and the perception_models group
-./px4sim build ros-base onboard
-./px4sim start             # one container, `onboard`, on the host network
+./px4sim start             # stop, build, then start `onboard` on the host network
 ./px4sim logs onboard
 ./px4sim uas 1 status
 ./px4sim zoom 1 wide
@@ -234,9 +231,8 @@ Every target forwards to the front door and does no work of its own.
 |---|---|
 | `make preflight` | `./px4sim doctor` |
 | `make bootstrap` | `./px4sim setup` |
-| `make build`, `make build-onboard` | `./px4sim build [service]` |
 | `make up`, `make up-core`, `make down` | `./px4sim start`, `core`, `stop` |
-| `make restart S=sim` | `./px4sim restart sim` |
+| `make restart` | `./px4sim start` (the whole stack is rebuilt) |
 | `make ps`, `make ui`, `make state` | `./px4sim status`, `ui`, `state` |
 | `make logs S=onboard` | `./px4sim logs onboard` |
 | `make onboard N=13`, `make router N=13` | `./px4sim onboard 13`, `router 13` |
@@ -412,7 +408,7 @@ git status --porcelain          # empty, and .env is gitignored
 Then rebuild and restart on the drone:
 
 ```bash
-./px4sim build ros-base onboard
+./px4sim start
 sudo systemctl restart onboard
 ```
 

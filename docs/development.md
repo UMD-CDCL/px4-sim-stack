@@ -277,12 +277,12 @@ ccache keeps the incremental builds fast.
 
 ```bash
 vim src/PX4-Autopilot/src/modules/commander/Commander.cpp
-docker compose restart sim
+./px4sim start
 ./px4sim logs sim
 ```
 
 The entrypoint rebuilds only what changed. A one-file change takes about a
-minute. To build without a restart:
+minute, and the cached image build runs before the containers are recreated.
 
 ```bash
 docker compose exec sim make -C /px4 px4_sitl_default -j16
@@ -345,7 +345,7 @@ Then rebuild the image, because the dependency set comes from that release:
 ```bash
 rm -rf src/PX4-Autopilot
 ./px4sim setup
-./px4sim build sim
+./px4sim start
 ```
 
 ## DeepStream, TensorRT and the GPU
@@ -453,8 +453,7 @@ them. It uses gz-transport and GStreamer, and it is not a Gazebo system plugin,
 so it starts, stops and fails on its own.
 
 ```bash
-./px4sim build sim
-docker compose up -d --force-recreate sim
+./px4sim start
 ```
 
 Test it by hand:
@@ -540,11 +539,11 @@ to, so this floor belongs to the simulator alone.
 
 5g_drone, cdcl_umd_msgs and MAVInsight are not in this repository. `ROS2_WS_DIR`
 in `.env` names the checkout, and the onboard and offboard images build it with
-colcon. So a change there is a rebuild, not a restart:
+colcon. A change there is picked up by the next start, which always stops the
+current containers, builds the selected images, and starts fresh ones:
 
 ```bash
-./px4sim build onboard offboard
-./px4sim restart onboard11 offboard
+./px4sim start
 ```
 
 Both images build the same workspace, so a change in a shared package needs
@@ -589,7 +588,7 @@ beside the simulator and 60 fielded.
 
 ### The MAVROS patch
 
-`./px4sim build ros-base` builds the PX4 v1.18 MAVROS patch from
+Every `./px4sim start` builds the PX4 v1.18 MAVROS patch from
 `chimera-deploy/remote/mavros_patch` into `/opt/mavros`, so the simulator and
 the aircraft run one MAVROS. `CHIMERA_DEPLOY_DIR` in `.env` names the checkout
 (default `../chimera-deploy`). Check out its `submodules/mavros` and
@@ -622,7 +621,7 @@ QGC_REF=v5.1.0
 ```
 
 ```bash
-./px4sim build qgc && docker compose up -d --force-recreate qgc
+./px4sim start
 ```
 
 The container seeds `QGroundControl.ini` on first start, so the vehicle

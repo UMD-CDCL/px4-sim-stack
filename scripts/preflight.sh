@@ -641,7 +641,7 @@ for image in "onboard:${ds_tag}" "offboard:${ds_tag}"; do
 done
 if [ -n "$stale" ]; then
 	note "The flight code in $ws/src is newer than the build inside:$stale
-        Those containers run it as it was. Rebuild:  ./px4sim build$stale"
+        ./px4sim start will rebuild it before starting the containers."
 fi
 
 echo ""
@@ -652,8 +652,8 @@ fi
 # `setup` clones the PX4 and QGroundControl sources, which only the simulator
 # builds. A real machine is one build and one start away from flying.
 if [ "$FLEET_IS_SIMULATED" = true ]; then
-	next="./px4sim setup, then ./px4sim build, then ./px4sim start"
+	next="./px4sim setup, then ./px4sim start"
 else
-	next="./px4sim build, then ./px4sim start"
+	next="./px4sim start"
 fi
 echo "${GRN}Ready.${OFF} $warn warning(s). Next: $next."

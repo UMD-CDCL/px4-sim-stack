@@ -9,7 +9,7 @@ SHELL := /bin/bash
 PX4SIM := ./px4sim
 
 .DEFAULT_GOAL := help
-.PHONY: help preflight bootstrap x11 build build-% up up-core down restart ps logs \
+.PHONY: help preflight bootstrap x11 up up-core down restart ps logs \
         sim qgc router onboard ground topics px4-console scenario scene origin reset \
         ui state \
         genscene clean clean-src lint-docs check endpoints fleet streams layout
@@ -28,17 +28,9 @@ bootstrap: ## Clone and pin PX4 and QGroundControl into ./src, and build the sce
 x11: ## Write the X11 cookie the containers need
 	@$(PX4SIM) x11
 
-## ----------------------------------------------------------------- build
-
-build: ## Build every image
-	@$(PX4SIM) build
-
-build-%: ## Build one image, for example `make build-sim`
-	@$(PX4SIM) build $*
-
 ## ----------------------------------------------------------------- run
 
-up: ## Start the stack, following COMPOSE_PROFILES in .env
+up: ## Stop, build, and start the stack, following COMPOSE_PROFILES in .env
 	@$(PX4SIM) start
 
 up-core: ## Start the vehicles and QGC, with no ground station
@@ -47,8 +39,8 @@ up-core: ## Start the vehicles and QGC, with no ground station
 down: ## Stop the stack and remove the containers
 	@$(PX4SIM) stop
 
-restart: ## Restart one service, for example `make restart S=sim`
-	@$(PX4SIM) restart $(S)
+restart: ## Stop, build, and start the whole stack
+	@$(PX4SIM) start
 
 ps: ## Show the running services
 	@$(PX4SIM) status
