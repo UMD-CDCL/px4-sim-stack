@@ -277,7 +277,7 @@ ccache keeps the incremental builds fast.
 
 ```bash
 vim src/PX4-Autopilot/src/modules/commander/Commander.cpp
-./px4sim start
+./px4sim restart
 ./px4sim logs sim
 ```
 
@@ -345,7 +345,7 @@ Then rebuild the image, because the dependency set comes from that release:
 ```bash
 rm -rf src/PX4-Autopilot
 ./px4sim setup
-./px4sim start
+./px4sim restart
 ```
 
 ## DeepStream, TensorRT and the GPU
@@ -453,7 +453,7 @@ them. It uses gz-transport and GStreamer, and it is not a Gazebo system plugin,
 so it starts, stops and fails on its own.
 
 ```bash
-./px4sim start
+./px4sim restart
 ```
 
 Test it by hand:
@@ -543,7 +543,7 @@ colcon. A change there is picked up by the next start, which always stops the
 current containers, builds the selected images, and starts fresh ones:
 
 ```bash
-./px4sim start
+./px4sim restart
 ```
 
 Both images build the same workspace, so a change in a shared package needs
@@ -588,7 +588,7 @@ beside the simulator and 60 fielded.
 
 ### The MAVROS patch
 
-Every `./px4sim start` builds the PX4 v1.18 MAVROS patch from
+Every `./px4sim restart` builds the PX4 v1.18 MAVROS patch from
 `chimera-deploy/remote/mavros_patch` into `/opt/mavros`, so the simulator and
 the aircraft run one MAVROS. `CHIMERA_DEPLOY_DIR` in `.env` names the checkout
 (default `../chimera-deploy`). Check out its `submodules/mavros` and
@@ -621,7 +621,7 @@ QGC_REF=v5.1.0
 ```
 
 ```bash
-./px4sim start
+./px4sim restart
 ```
 
 The container seeds `QGroundControl.ini` on first start, so the vehicle

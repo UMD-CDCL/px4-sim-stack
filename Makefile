@@ -31,7 +31,7 @@ x11: ## Write the X11 cookie the containers need
 ## ----------------------------------------------------------------- run
 
 up: ## Stop, build, and start the stack, following COMPOSE_PROFILES in .env
-	@$(PX4SIM) start
+	@$(PX4SIM) restart
 
 up-core: ## Start the vehicles and QGC, with no ground station
 	@$(PX4SIM) core
@@ -40,7 +40,7 @@ down: ## Stop the stack and remove the containers
 	@$(PX4SIM) stop
 
 restart: ## Stop, build, and start the whole stack
-	@$(PX4SIM) start
+	@$(PX4SIM) restart
 
 ps: ## Show the running services
 	@$(PX4SIM) status

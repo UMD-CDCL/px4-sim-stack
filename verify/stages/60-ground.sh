@@ -8,7 +8,7 @@
 lead=$FIRST_UAS
 ground=$(ground_service)
 if [ -z "$(COMPOSE_PROFILES="$ground" docker compose ps -q "$ground" 2>/dev/null)" ]; then
-	fail "the ground station is not running. Start it: ./px4sim start $ground"
+	fail "the ground station is not running. Start it: ./px4sim restart $ground"
 	return 0
 fi
 

@@ -120,7 +120,7 @@ Start the container again and it reuses the endpoint it already has. Free the
 port first, then recreate it, which is what `stop` and `start` do together:
 
 ```bash
-./px4sim stop && ./px4sim start
+./px4sim stop && ./px4sim restart
 ```
 
 ## The GPU
@@ -357,7 +357,7 @@ serves, and `gimbal` is the one the detector reads. Turn one vehicle up without
 touching the others:
 
 ```bash
-UAS_STREAMS="all gimbal gimbal gimbal" ./px4sim start
+UAS_STREAMS="all gimbal gimbal gimbal" ./px4sim restart
 ```
 
 Encode the scaled streams in software, which is the default. They are 640x360
@@ -637,7 +637,7 @@ The user id inside the container must match yours. `./px4sim doctor` sets
 sim image after a change:
 
 ```bash
-./px4sim start
+./px4sim restart
 ```
 
 ### "World file X declares world name Y"
@@ -694,7 +694,7 @@ After you change the addresses, recreate the containers. A running container
 keeps the address it was created with:
 
 ```bash
-./px4sim start
+./px4sim restart
 ```
 
 ### The mavlink-router build fails on "Dependency systemd not found"
@@ -722,7 +722,7 @@ after that is named by the launch file and is not installed. Rebuild them, and
 recreate what runs them:
 
 ```bash
-./px4sim start
+./px4sim restart
 ```
 
 `./px4sim doctor` compares the two dates and reports this before a start does.
@@ -733,7 +733,7 @@ recreate what runs them:
 one at a time when you are debugging:
 
 ```bash
-./px4sim start
+./px4sim restart
 ```
 
 ### The image is enormous
@@ -819,10 +819,10 @@ Then log out and in. Until then this shape works and keeps `UAS_NUM` and
 `HOME`:
 
 ```bash
-sudo -E env HOME=/home/user UAS_NUM=1 ./px4sim start
+sudo -E env HOME=/home/user UAS_NUM=1 ./px4sim restart
 ```
 
-`./px4sim doctor` and `./px4sim start` both hand `.env` and the log directories
+`./px4sim doctor` and `./px4sim restart` both hand `.env` and the log directories
 back to the operator after a run under sudo, so the uid 1000 container can
 still write them. The boot unit needs no group: `onboard.service` carries
 `SupplementaryGroups=docker`.

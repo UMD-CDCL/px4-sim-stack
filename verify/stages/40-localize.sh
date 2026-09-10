@@ -8,7 +8,7 @@
 onboard_image=px4simstack/onboard:${DS_TAG:-${DS_VERSION:-7.1}}
 
 if ! docker image inspect "$onboard_image" >/dev/null 2>&1; then
-	fail "$onboard_image is not built. Run ./px4sim start"
+	fail "$onboard_image is not built. Run ./px4sim restart"
 	return 0
 fi
 
@@ -22,7 +22,7 @@ fi
 # The terrain cache reads every file in its directory, so the scene under test
 # gets one of its own.
 # The image supplies the environment and the working tree supplies the code, so
-# a source change is checked without a rebuild. `./px4sim start` is what proves
+# a source change is checked without a rebuild. `./px4sim restart` is what proves
 # the cached build agrees before the containers launch.
 # The interpreter is the base image's, and the base image is the DeepStream
 # release this machine chose: 3.10 under 7.1 and 3.12 under 8.0 and 9.0. A

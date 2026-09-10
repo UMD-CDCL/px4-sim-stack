@@ -83,7 +83,7 @@ name, so the list cannot drift.
 cd /home/user/px4-sim-stack
 ./px4sim doctor            # driver, docker, GPU runtime, X11, disk, ports
 ./px4sim setup             # clone PX4 and QGroundControl into ./src
-./px4sim start             # stop, build, then start sim, uas11, onboard11,
+./px4sim restart             # stop, build, then start sim, uas11, onboard11,
                            # video-router and qgc
 ./px4sim status            # what is up, and the addresses
 ./px4sim fly 11 20         # respawn uas11 and take it to 20 m
@@ -110,7 +110,7 @@ the fielded QGroundControl stays native.
 ```bash
 cd /home/user/px4-sim-stack
 ./px4sim doctor            # also lcam, mavlink-router, 14402/udp and 8765/tcp
-./px4sim start             # stop, build, then start `ground` on the host network
+./px4sim restart             # stop, build, then start `ground` on the host network
 ./px4sim uas 1 status      # the vehicle, through the ground station
 ./px4sim streams           # the lcam mounts, asked for by name
 ./px4sim view 1            # rgbl1
@@ -134,7 +134,7 @@ keys, and put the file back at the end:
 cp .env .env.backup
 # COMPOSE_PROFILES=ground UAS_BASE=0 GROUND_DOMAIN=60
 # RTSP_BASE=rtsp://127.0.0.1:8554 SCENE= SCENARIO=
-./px4sim start && ./px4sim state && ./px4sim stop
+./px4sim restart && ./px4sim state && ./px4sim stop
 mv .env.backup .env
 ```
 
@@ -150,7 +150,7 @@ mv .env.backup .env
 cd /home/user/px4-sim-stack
 ./px4sim doctor            # also rcam, its sockets, the clock, the power mode,
                            # the lens and the perception_models group
-./px4sim start             # stop, build, then start `onboard` on the host network
+./px4sim restart             # stop, build, then start `onboard` on the host network
 ./px4sim logs onboard
 ./px4sim uas 1 status
 ./px4sim zoom 1 wide
@@ -163,7 +163,7 @@ user` and logs in again.** Until then every call takes this shape, which keeps
 `HOME` and `UAS_NUM`:
 
 ```bash
-echo <the drone password> | sudo -S -p x env HOME=/home/user UAS_NUM=1 ./px4sim start
+echo <the drone password> | sudo -S -p x env HOME=/home/user UAS_NUM=1 ./px4sim restart
 ```
 
 `./px4sim doctor` and `scripts/fleet.sh` hand `.env` and the log directories
@@ -231,8 +231,8 @@ Every target forwards to the front door and does no work of its own.
 |---|---|
 | `make preflight` | `./px4sim doctor` |
 | `make bootstrap` | `./px4sim setup` |
-| `make up`, `make up-core`, `make down` | `./px4sim start`, `core`, `stop` |
-| `make restart` | `./px4sim start` (the whole stack is rebuilt) |
+| `make up`, `make up-core`, `make down` | `./px4sim restart`, `core`, `stop` |
+| `make restart` | `./px4sim restart` (the whole stack is rebuilt) |
 | `make ps`, `make ui`, `make state` | `./px4sim status`, `ui`, `state` |
 | `make logs S=onboard` | `./px4sim logs onboard` |
 | `make onboard N=13`, `make router N=13` | `./px4sim onboard 13`, `router 13` |
@@ -306,7 +306,7 @@ and `ROS_DOMAIN_ID` reach it. `HOME=/home/user` is set in the unit.
 Docker does not restore the power-cut container before this unit runs. Its only
 `ExecStartPre` waits up to three minutes for a clock step with `chronyc
 waitsync`; the leading dash lets startup continue when the laptop is absent.
-`ExecStart` runs `./px4sim start` once and `ExecStop` runs `./px4sim stop`.
+`ExecStart` runs `./px4sim restart` once and `ExecStop` runs `./px4sim stop`.
 
 `SupplementaryGroups=docker` gives the unit the docker socket whether or not
 the login user is in that group.
@@ -336,7 +336,7 @@ on the Orin.
 
 | Alias | Runs |
 |---|---|
-| `onboard` | `(cd ~/px4-sim-stack && ./px4sim start)` |
+| `onboard` | `(cd ~/px4-sim-stack && ./px4sim restart)` |
 | `onboard-logs` | `(cd ~/px4-sim-stack && ./px4sim logs onboard)` |
 | `onboard-native` | `ccb && ros2 launch umd_uas onboard.launch.py uas:=${UAS_NUM:?}` |
 | `rs`, `ws`, `cdr`, `ccb` | source ROS, source the workspace, go to it, build it |
@@ -408,7 +408,7 @@ git status --porcelain          # empty, and .env is gitignored
 Then start on the drone (which rebuilds before launch):
 
 ```bash
-./px4sim start
+./px4sim restart
 sudo systemctl restart onboard
 ```
 

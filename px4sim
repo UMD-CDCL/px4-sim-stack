@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # px4sim - one command for the whole stack.
 #
-#   ./px4sim start        bring everything up
+#   ./px4sim restart      rebuild and bring everything up
 #   ./px4sim stop         shut everything down
 #   ./px4sim status       what is running
 #
@@ -50,7 +50,7 @@ ALL_PROFILES=$(sed -n 's/^[[:space:]]*profiles:[[:space:]]*\[\(.*\)\][[:space:]]
 [ -f .env ] || { warn "No .env yet. Creating it from .env.example."; cp .env.example .env; }
 
 # .env is the configuration. The environment overrides the few names that
-# select one run, so `SCENE=forest ./px4sim start` flies another world once
+# select one run, so `SCENE=forest ./px4sim restart` flies another world once
 # and changes no file. The list is short on purpose: a shell that already
 # exports SCENE must not quietly change what everything else does.
 OVERRIDABLE="SCENE SCENARIO UAS_FLEET UAS_STREAMS AIRFRAME COMPOSE_PROFILES
@@ -231,7 +231,7 @@ bench_mode() {
 		done
 		say "GPS-free BENCH MODE enabled. It is not safe for flight."
 		say "Bench reference: UROC home and fiducial; terrain: SCENE=uroc."
-		say "Start through ./px4sim ui or ./px4sim start, then disable before flight."
+		say "Restart through ./px4sim ui or ./px4sim restart, then disable before flight."
 	else
 		if grep -q '^BENCH_MODE=' .env; then
 			sed -i 's/^BENCH_MODE=.*/BENCH_MODE=false/' .env
@@ -257,7 +257,7 @@ vehicle_reader() {   # <uas number>, sets reader, container and domain
 	if [ -z "$container" ]; then
 		reader=$(ground_service)
 		container=$($DC ps -q "$reader" 2>/dev/null)
-		[ -n "$container" ] || die "$(companion_service "$1") is not running. Start it: ./px4sim start"
+		[ -n "$container" ] || die "$(companion_service "$1") is not running. Restart it: ./px4sim restart"
 	fi
 	domain=$(reader_domain "$reader" "$1")
 }
@@ -575,7 +575,7 @@ enter_service() {
 	svc=$(service_name "$1")
 	has_service "$svc" || die "compose.yaml has no service named '$svc'. ./px4sim status lists them."
 	COMPOSE_PROFILES="$ALL_PROFILES" $DC ps --status running --services 2>/dev/null | grep -qx "$svc" \
-		|| die "$svc is not running. Run: ./px4sim start"
+		|| die "$svc is not running. Run: ./px4sim restart"
 	shift
 	for candidate in bash sh; do
 		if COMPOSE_PROFILES="$ALL_PROFILES" $DC exec -T "$svc" "$candidate" -c 'exit 0' >/dev/null 2>&1; then
@@ -629,11 +629,11 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     x11                 Let the containers draw on this display
 
   ${BOLD}Every day${OFF}
-    start [profiles]    Stop, build, and start what .env selects. Now: ${COMPOSE_PROFILES:-none}
+    restart [profiles]  Stop, build, and start what .env selects. Now: ${COMPOSE_PROFILES:-none}
                         sim,offboard is a simulator, ground a base station,
                         aircraft a vehicle
     stop                Stop and remove the containers. Volumes stay.
-    restart             Alias for start (stop, build, and start everything)
+    start [profiles]    Start only when the stack is stopped; otherwise no-op
     status              What is running, and the addresses to use
     endpoints           The addresses alone
     ui                  The same in a console, with a key for every command
@@ -931,7 +931,7 @@ fleet_edit() {
 
 	if [ -z "$(COMPOSE_PROFILES="$ALL_PROFILES" $DC ps --status running -q 2>/dev/null)" ]; then
 		echo "  Nothing is running, so the new fleet flies at the next start:"
-		echo "    ./px4sim start"
+		echo "    ./px4sim restart"
 		return 0
 	fi
 
@@ -1006,8 +1006,9 @@ setup)    ./scripts/bootstrap.sh "$@" ;;
 
 x11)      add_fleet_profiles; ./scripts/x11-allow.sh ;;
 
-start|up|core)
-	# A profile list can be given: ./px4sim start ground
+restart|start|up|core)
+	# A profile list can be given: ./px4sim restart ground. `start` is the
+	# non-disruptive counterpart: it does nothing while any stack service runs.
 	# `core` drops every named profile. The fleet is added below either way,
 	# so it is the simulator, the vehicles and QGC, with no ground station.
 	[ "$cmd" = core ] && export COMPOSE_PROFILES=""
@@ -1015,6 +1016,11 @@ start|up|core)
 	check_mode
 	add_fleet_profiles
 	[ "$FLEET_IS_SIMULATED" = true ] && need_sources
+	if [ "$cmd" = start ] && [ -n "$(COMPOSE_PROFILES="$ALL_PROFILES" $DC ps --status running -q 2>/dev/null)" ]; then
+		say "Already running; start does nothing"
+		echo "  Use ./px4sim restart to stop, rebuild, and recreate the stack."
+		return 0
+	fi
 	stop_stack
 	say "Building: $COMPOSE_PROFILES"
 	build_stack
@@ -1022,9 +1028,9 @@ start|up|core)
 	# The log volumes bind here. scripts/fleet.sh says why, and who owns them.
 	make_bind_dirs logs logs/onboard logs/offboard logs/px4 logs/qgc
 	if [ "$FLEET_IS_SIMULATED" = false ] && unit_owns_stack; then
-		warn "onboard.service already runs this stack. This start reuses its container."
+		warn "onboard.service already runs this stack. This restart reuses its container."
 	fi
-	say "Starting: $COMPOSE_PROFILES"
+	say "Restarting: $COMPOSE_PROFILES"
 	echo "  fleet ${UAS_FLEET:-?}"
 	if [ "$FLEET_IS_SIMULATED" = true ]; then
 		if [ -n "${HOME_LAT:-}" ]; then
@@ -1044,11 +1050,6 @@ stop|down)
 	stop_stack
 	;;
 
-restart)
-	[ $# -eq 0 ] || die "restart no longer takes a service; ./px4sim start rebuilds and restarts the whole stack"
-	exec "$0" start
-	;;
-
 status|ps)
 	COMPOSE_PROFILES="$ALL_PROFILES" $DC ps \
 		--format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
@@ -1060,7 +1061,7 @@ status|ps)
 		printf '%s\n' "$wedged" | while read -r line; do warn "  $line"; done
 		warn "Starting these again reuses the endpoint they have. Free whatever"
 		warn "holds the port (./px4sim doctor names it), then recreate them:"
-		warn "  ./px4sim stop && ./px4sim start"
+		warn "  ./px4sim stop && ./px4sim restart"
 	fi
 	endpoints
 	;;
@@ -1112,7 +1113,7 @@ console)
 	# foreground, which makes it the container's own terminal, and starts
 	# every other vehicle with -d. `px4` below reaches those.
 	id=$($DC ps -q sim) || true
-	[ -n "${id:-}" ] || die "The sim container is not running. Run: ./px4sim start"
+	[ -n "${id:-}" ] || die "The sim container is not running. Run: ./px4sim restart"
 	say "Attaching to uas$FIRST_UAS's pxh>. Detach with Ctrl-P Ctrl-Q, not Ctrl-C."
 	echo "  Every other vehicle runs headless. Send one a command with:"
 	echo "    ./px4sim px4 $LAST_UAS commander status"
@@ -1270,7 +1271,7 @@ endpoints|urls) endpoints ;;
 fleet)
 	case "${1:-}" in
 	add | remove)
-		require_sim_edit "fleet $1" "Edit UAS_FLEET in .env, then: ./px4sim start"
+		require_sim_edit "fleet $1" "Edit UAS_FLEET in .env, then: ./px4sim restart"
 		fleet_edit "$@"; exit 0 ;;
 	'') ;;
 	*) die "fleet takes 'add [model]' or 'remove [N]', or nothing to print the fleet." ;;
@@ -1493,7 +1494,7 @@ capture)
 	# door, and reader_domain says which domain that reader answers on.
 	if aircraft_selected; then reader=$(companion_service "$n"); else reader=$(ground_service); fi
 	container=$($DC ps -q "$reader" 2>/dev/null)
-	[ -n "$container" ] || die "$reader is not running. Start it: ./px4sim start"
+	[ -n "$container" ] || die "$reader is not running. Restart it: ./px4sim restart"
 	say "asking uas$n for a $kind capture, through $reader"
 	docker exec -e ROS_DOMAIN_ID="$(reader_domain "$reader" "$n")" "$container" bash -lc '
 		. /usr/local/bin/ros-env.sh
@@ -1569,7 +1570,7 @@ uas|probe|foxglove)
 		shift
 		reader=$(ground_service)
 		container=$($DC ps -q "$reader" 2>/dev/null)
-		[ -n "$container" ] || die "the ground station is not running. Start it: ./px4sim start"
+		[ -n "$container" ] || die "the ground station is not running. Restart it: ./px4sim restart"
 		domain=$GROUND_DOMAIN
 		n=$FIRST_UAS
 		asked=ground

@@ -82,7 +82,7 @@ The simulator, on one laptop, with `COMPOSE_PROFILES=sim,offboard` and
 ```bash
 ./px4sim doctor    # check the driver, docker, GPU runtime and X11
 ./px4sim setup     # clone PX4 into ./src and build the scenes
-./px4sim start     # stop, build the cached images, and start the stack
+./px4sim restart     # stop, build the cached images, and start the stack
 ```
 
 The real ground station on t500, with `COMPOSE_PROFILES=ground`, `UAS_BASE=0`
@@ -90,7 +90,7 @@ and `GROUND_DOMAIN=60`:
 
 ```bash
 ./px4sim doctor    # also lcam, mavlink-router, and the host ports 14402 and 8765
-./px4sim start     # stop, build ros-base and ground, then start it
+./px4sim restart     # stop, build ros-base and ground, then start it
 ```
 
 The aircraft, with `COMPOSE_PROFILES=aircraft` and `UAS_BASE=0`, after
@@ -98,13 +98,13 @@ The aircraft, with `COMPOSE_PROFILES=aircraft` and `UAS_BASE=0`, after
 
 ```bash
 ./px4sim doctor    # also rcam, its sockets, the clock, the power mode and the lens
-./px4sim start     # stop, build the arm64 images, then start onboard
+./px4sim restart     # stop, build the arm64 images, then start onboard
 ```
 
 The first build on the Orin compiles the whole ROS workspace at 15 W and takes
 tens of minutes. Cached builds after a flight-code change are short enough to
 run on every start. Until `user` is in group `docker` there, every call needs sudo:
-`sudo -E env HOME=/home/user UAS_NUM=1 ./px4sim start`. The boot unit does not
+`sudo -E env HOME=/home/user UAS_NUM=1 ./px4sim restart`. The boot unit does not
 need that group.
 
 Each machine builds its own architecture from its own checkout. No machine
@@ -116,13 +116,13 @@ To stop it:
 ./px4sim stop
 ```
 
-The first `./px4sim start` builds PX4 inside the sim container. That takes 10 to
+The first `./px4sim restart` builds PX4 inside the sim container. That takes 10 to
 20 minutes and happens once, because the build output lands in
 `./src/PX4-Autopilot` on the host. Watch it with `./px4sim logs sim`.
 
 The onboard and offboard images build 5g_drone, cdcl_umd_msgs and MAVInsight
 with colcon. `ROS2_WS_DIR` in `.env` says where those sources are checked out,
-and every `./px4sim start` rebuilds the selected images before creating containers.
+and every `./px4sim restart` rebuilds the selected images before creating containers.
 
 `./px4sim` with no arguments prints every command, and names which of the three
 worlds this machine is. It is the front door: it reads `.env`, resolves the
@@ -170,7 +170,7 @@ is. These work in all three worlds:
 
 ```bash
 ./px4sim ui                   # the console: what is running, and a key for every command
-./px4sim start                # stop, build, and start what .env selects
+./px4sim restart                # stop, build, and start what .env selects
 ./px4sim stop                 # stop everything
 ./px4sim status               # what is running, and the addresses
 ./px4sim logs onboard11       # follow one service. `logs --since 5m ground` reads back
@@ -323,8 +323,8 @@ run 12 of 13.
 Start a subset by naming the profiles:
 
 ```bash
-./px4sim start ""             # the vehicles and QGC, with no ground station
-./px4sim start offboard       # the default. ./px4sim adds sim itself in the simulator
+./px4sim restart ""             # the vehicles and QGC, with no ground station
+./px4sim restart offboard       # the default. ./px4sim adds sim itself in the simulator
 ```
 
 The routers and the companions come from `UAS_FLEET`, so they need no profile

@@ -8,7 +8,7 @@ onboard_image=px4simstack/onboard:${DS_TAG:-${DS_VERSION:-7.1}}
 workspace=$(readlink -f "${ROS2_WS_DIR:-../ros2_ws}")
 
 if ! docker image inspect "$onboard_image" >/dev/null 2>&1; then
-	fail "$onboard_image is not built. Run ./px4sim start"
+	fail "$onboard_image is not built. Run ./px4sim restart"
 	return 0
 fi
 

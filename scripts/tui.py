@@ -91,7 +91,8 @@ class Action(NamedTuple):
 # fills the menus, the hot keys, the footer and the help, so an action is
 # written down once.
 ACTIONS = (
-    Action(STACK, "s", "build and start the stack", ("start",)),
+    Action(STACK, "r", "rebuild and restart the stack", ("restart",)),
+    Action(STACK, "s", "start the stack if it is stopped", ("start",)),
     Action(STACK, "", "enable GPS-free BENCH MODE (select this menu item)",
            ("bench", "enable", "{value}"),
            ask=Ask("type ENABLE BENCH MODE", "ENABLE BENCH MODE"),

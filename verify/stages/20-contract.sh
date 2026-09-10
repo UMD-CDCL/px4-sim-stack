@@ -52,7 +52,7 @@ if docker image inspect "$router_image" >/dev/null 2>&1; then
 			14402 "$(printf '%s' "$conf" | endpoint_port ros)"
 	done
 else
-	fail "$router_image is not built. Run ./px4sim start"
+	fail "$router_image is not built. Run ./px4sim restart"
 fi
 
 rm -f "$cfg"

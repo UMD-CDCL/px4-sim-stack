@@ -26,12 +26,12 @@ if [ "$(world_of)" = aircraft ]; then
 	reader=$lead
 	holder=$(companion_service "$lead")
 	profiles=$(companion_profiles "$lead")
-	absent="uas$lead is not running. Start it: ./px4sim start"
+	absent="uas$lead is not running. Start it: ./px4sim restart"
 else
 	reader=ground
 	holder=$(ground_service)
 	profiles=$holder
-	absent="the ground station is not running. Start it: ./px4sim start $holder"
+	absent="the ground station is not running. Start it: ./px4sim restart $holder"
 fi
 if [ -z "$(COMPOSE_PROFILES="$profiles" docker compose ps -q "$holder" 2>/dev/null)" ]; then
 	fail "$absent"

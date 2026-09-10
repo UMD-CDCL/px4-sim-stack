@@ -12,7 +12,7 @@ companion=$(companion_service "$lead")
 container=$(COMPOSE_PROFILES="$(companion_profiles "$lead")" \
 	docker compose ps -q "$companion" 2>/dev/null)
 if [ -z "$container" ]; then
-	fail "uas$lead is not running. Start it: ./px4sim start"
+	fail "uas$lead is not running. Start it: ./px4sim restart"
 	return 0
 fi
 

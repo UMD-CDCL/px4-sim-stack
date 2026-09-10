@@ -84,7 +84,7 @@ ${BOLD}px4sim verify${OFF} [stage ...]   default: every stage, in this order
 $(for f in $(stage_files); do printf '    %-12s %s\n' "$(stage_name "$f")" "$(sed -n '2s/^# //p' "$f")"; done)
 
   A stage that needs the stack running says so and stops. Start it with
-  ./px4sim start.
+  ./px4sim restart.
 
   A real machine answers these stages: $REAL_STAGES. The rest fly the
   simulator, and this file refuses them by name.

@@ -52,7 +52,7 @@ companion_profiles() { if [ "$FLEET_IS_SIMULATED" = true ]; then echo "uas$1,onb
 ground_service()    { if [ "$FLEET_IS_SIMULATED" = true ]; then echo offboard; else echo ground; fi; }
 # The directories compose binds a volume to, made before compose reaches them.
 # Compose makes a missing one root-owned, and the uid 1000 container then
-# writes nothing into it. Under `sudo ./px4sim start` the mkdir here runs as
+# writes nothing into it. Under `sudo ./px4sim restart` the mkdir here runs as
 # root as well, so hand each directory back to the operator, the way
 # scripts/preflight.sh hands back .env.
 make_bind_dirs() { # dir...
