@@ -153,6 +153,11 @@ x-onboard: &onboard
       required: false
 
 x-onboard-env: &onboard-env
+  # GPS-free reference injection is opt-in through the px4sim bench front door.
+  BENCH_MODE: ${BENCH_MODE:-false}
+  BENCH_HOME_LAT: ${BENCH_HOME_LAT:-}
+  BENCH_HOME_LON: ${BENCH_HOME_LON:-}
+  BENCH_HOME_ALT: ${BENCH_HOME_ALT:-0.0}
   # ros2 launch reads its nodes through pipes, and a pipe makes Python
   # block-buffer: everything ds_node says -- the backend it resolved, the
   # engine it is building, the reason it stopped -- sits invisible in a

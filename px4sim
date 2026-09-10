@@ -195,6 +195,33 @@ check_mode() {
 	fi
 }
 
+bench_mode() {
+	[ "$FLEET_IS_SIMULATED" = false ] || die "bench mode is only for a real aircraft"
+	[ "${1:-}" = enable ] || [ "${1:-}" = disable ] || \
+		die "Use: ./px4sim bench enable 'ENABLE BENCH MODE' or ./px4sim bench disable"
+	if [ -n "$(COMPOSE_PROFILES="$ALL_PROFILES" $DC ps --status running -q 2>/dev/null)" ]; then
+		die "Stop the stack before changing bench mode: ./px4sim stop"
+	fi
+	if [ "$1" = enable ]; then
+		[ "${2:-}" = "ENABLE BENCH MODE" ] || \
+			die "Enabling GPS-free bench mode requires the exact phrase: ENABLE BENCH MODE"
+		if grep -q '^BENCH_MODE=' .env; then
+			sed -i 's/^BENCH_MODE=.*/BENCH_MODE=true/' .env
+		else
+			printf '\nBENCH_MODE=true\n' >> .env
+		fi
+		say "GPS-free BENCH MODE enabled. It is not safe for flight."
+		say "Start through ./px4sim ui or ./px4sim start, then disable before flight."
+	else
+		if grep -q '^BENCH_MODE=' .env; then
+			sed -i 's/^BENCH_MODE=.*/BENCH_MODE=false/' .env
+		else
+			printf '\nBENCH_MODE=false\n' >> .env
+		fi
+		say "GPS-free BENCH MODE disabled."
+	fi
+}
+
 # The ROS domain a reader answers on. The ground station joins every vehicle's
 # domain with its domain bridge and carries all of them on $GROUND_DOMAIN. A
 # companion holds its own vehicle's domain alone.
@@ -546,6 +573,8 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     status              What is running, and the addresses to use
     endpoints           The addresses alone
     ui                  The same in a console, with a key for every command
+    bench enable PHRASE Enable GPS-free bench reference (requires exact phrase)
+    bench disable       Disable bench reference before flight
     fleet               Every vehicle: model, address, ports, domain, streams
     logs [opts] [svc]   Follow the logs. \`logs --since 5m $sample\` reads back.
 
@@ -875,6 +904,8 @@ cmd=${1:-help}
 # except the ones that explain or undo: doctor says what is wrong, and stop
 # takes every profile down whatever .env says.
 case "$cmd" in
+
+bench)  bench_mode "$@" ;;
 help | -h | --help | doctor | check | x11 | setup | stop | down | clean | clean-src | nuke) ;;
 *) check_mode ;;
 esac
@@ -898,6 +929,10 @@ uas)
 esac
 
 case "$cmd" in
+
+# Configuration changes still go through this front door; bench_mode refuses
+# to alter a running stack and requires an explicit confirmation phrase.
+bench)  bench_mode "$@" ;;
 
 # The fleet profiles carry a router and a companion for each vehicle, and
 # so the ports those publish. Without them preflight checks the ports of a
