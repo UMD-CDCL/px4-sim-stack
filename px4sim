@@ -196,7 +196,7 @@ check_mode() {
 }
 
 bench_mode() {
-	[ "$FLEET_IS_SIMULATED" = false ] || die "bench mode is only for a real aircraft"
+	[ "$FLEET_IS_SIMULATED" = false ] || die "bench mode is only for a real aircraft or ground station"
 	[ "${1:-}" = enable ] || [ "${1:-}" = disable ] || \
 		die "Use: ./px4sim bench enable 'ENABLE BENCH MODE' or ./px4sim bench disable"
 	if [ -n "$(COMPOSE_PROFILES="$ALL_PROFILES" $DC ps --status running -q 2>/dev/null)" ]; then
@@ -717,6 +717,7 @@ fleet_facts() {
 		fiducial_alt=${FIDUCIAL_SURVEYED_ALT:-}
 		profiles=${COMPOSE_PROFILES:-}
 		world=$(world_of)
+		bench_mode=${BENCH_MODE:-false}
 		units=$(native_units | tr ' ' ',' | sed 's/,$//')
 		compose=$DC
 		ground_domain=$GROUND_DOMAIN

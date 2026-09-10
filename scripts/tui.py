@@ -96,10 +96,10 @@ ACTIONS = (
            ("bench", "enable", "{value}"),
            ask=Ask("type ENABLE BENCH MODE", "ENABLE BENCH MODE"),
            confirm="Enable GPS-free BENCH MODE? This is unsafe for flight.",
-           worlds=(AIRCRAFT,)),
+           worlds=(AIRCRAFT, GROUND)),
     Action(STACK, "", "disable GPS-free BENCH MODE (select this menu item)",
            ("bench", "disable"),
-           confirm="Disable bench mode before flight?", worlds=(AIRCRAFT,)),
+           confirm="Disable bench mode before flight?", worlds=(AIRCRAFT, GROUND)),
     Action(STACK, "x", "stop everything", ("stop",), confirm="Stop every container?"),
     Action(STACK, "", "recreate every service", ("restart",),
            confirm="Recreate every container?"),
@@ -614,7 +614,7 @@ class Console:
         height, width = self.screen.getmaxyx()
         self.draw_header(width)
         output_rows = max(4, int(height * OUTPUT_ROWS_SHARE))
-        body_top, body_end = 3, max(5, height - output_rows - 2)
+        body_top, body_end = 4, max(6, height - output_rows - 2)
         self.draw_body(body_top, body_end, width)
         self.rule(body_end)
         self.draw_output(body_end + 1, height - 1, width)
@@ -644,11 +644,20 @@ class Console:
         line = self.message or (faults[0] if faults
                                 else f"profiles {config.get('profiles', '-')}")
         card = card_words(self.rows.gpu)
+        if str(config.get("bench_mode", "false")).lower() == "true":
+            warning = "!!! BENCH MODE ENABLED — GPS-FREE — NOT FOR FLIGHT !!!"
+            self.put(1, 0, warning, "bad", width - 1)
+            self.put(2, 1, f"{state}    {line}", "watch" if self.message else style,
+                     width - len(card) - 4)
+            if card:
+                self.put(2, max(1, width - len(card) - 2), card, "faint")
+            self.rule(3)
+            return
         self.put(1, 1, f"{state}    {line}", "watch" if self.message else style,
                  width - len(card) - 4)
         if card:
             self.put(1, max(1, width - len(card) - 2), card, "faint")
-        self.rule(2)
+        self.rule(3)
 
     def draw_body(self, top: int, end: int, width: int) -> None:
         left = max(24, min(38, width // 3))

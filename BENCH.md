@@ -1,7 +1,7 @@
 # Bench mode
 
 Bench mode is an explicitly guarded, GPS-free test configuration for a real
-aircraft on the bench. Enable it only while the stack is stopped, through
+aircraft or ground station on the bench. Enable it only while the stack is stopped, through
 `./px4sim ui`'s stack menu or:
 
 ```text
@@ -15,6 +15,9 @@ When enabled, the real-aircraft launch:
 - supplies the configured home/fiducial reference to localization and the
   Foxglove scene so the vehicle appears near the fiducial;
 - keeps the normal camera, detector, gimbal, and visualization paths running.
+
+`./px4sim ui` shows a persistent red `BENCH MODE ENABLED — NOT FOR FLIGHT`
+banner on both the aircraft and ground station while the setting is enabled.
 
 The stored bench altitudes are WGS84 ellipsoid heights (the UROC mean-sea-level
 heights plus the site's geoid offset), matching `NavSatFix` and the terrain
