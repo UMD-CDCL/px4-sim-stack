@@ -92,13 +92,6 @@ class Action(NamedTuple):
 # written down once.
 ACTIONS = (
     Action(STACK, "s", "start the stack", ("start",)),
-    Action(STACK, "b", "enable GPS-free BENCH MODE (type the phrase)",
-           ("bench", "enable", "{value}"),
-           ask=Ask("type ENABLE BENCH MODE", "ENABLE BENCH MODE"),
-           confirm="Enable GPS-free BENCH MODE? This is unsafe for flight.",
-           worlds=(AIRCRAFT,)),
-    Action(STACK, "B", "disable GPS-free BENCH MODE", ("bench", "disable"),
-           confirm="Disable bench mode before flight?", worlds=(AIRCRAFT,)),
     Action(STACK, "x", "stop everything", ("stop",), confirm="Stop every container?"),
     Action(STACK, "", "recreate every service", ("restart",),
            confirm="Recreate every container?"),
