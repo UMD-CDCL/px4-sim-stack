@@ -16,9 +16,10 @@ When enabled, the real-aircraft launch:
   Foxglove scene so the vehicle appears near the fiducial;
 - keeps the normal camera, detector, gimbal, and visualization paths running.
 
-Bench mode does not arm, move, or alter PX4 state, and it must never be used
-for flight. It substitutes ROS-side reference data for the missing GPS/home
-reference; it is not a navigation or flight-safety aid. Disable it before
+Bench mode disables no flight software, but it does replace the missing
+ROS-side home/fiducial reference at the localization input. It does not
+publish fake global GPS, arm, move, or alter PX4 state, and it must never be
+used for flight. It is not a navigation or flight-safety aid. Disable it before
 flight:
 
 ```text
