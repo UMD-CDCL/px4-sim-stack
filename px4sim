@@ -215,6 +215,20 @@ bench_mode() {
 		else
 			printf 'SCENE=uroc\n' >> .env
 		fi
+		for setting in \
+			'BENCH_HOME_LAT=38.313294' \
+			'BENCH_HOME_LON=-76.55221' \
+			'BENCH_HOME_ALT=8.1432' \
+			'BENCH_FIDUCIAL_LAT=38.3133004' \
+			'BENCH_FIDUCIAL_LON=-76.5522071' \
+			'BENCH_FIDUCIAL_ALT=8.1232'; do
+			key=${setting%%=*}
+			if grep -q "^${key}=" .env; then
+				sed -i "s/^${key}=.*/${setting}/" .env
+			else
+				printf '%s\n' "${setting}" >> .env
+			fi
+		done
 		say "GPS-free BENCH MODE enabled. It is not safe for flight."
 		say "Bench reference: UROC home and fiducial; terrain: SCENE=uroc."
 		say "Start through ./px4sim ui or ./px4sim start, then disable before flight."

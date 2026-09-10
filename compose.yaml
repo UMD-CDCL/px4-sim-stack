@@ -196,6 +196,13 @@ x-onboard-env: &onboard-env
   FCU_URL: ${FCU_URL:-udp://:14402@:14550}
   CUDA_CACHE_PATH: /models/.nv-compute
   SCENE: ${SCENE:-lorton}
+  BENCH_MODE: ${BENCH_MODE:-false}
+  BENCH_HOME_LAT: ${BENCH_HOME_LAT:-}
+  BENCH_HOME_LON: ${BENCH_HOME_LON:-}
+  BENCH_HOME_ALT: ${BENCH_HOME_ALT:-0.0}
+  BENCH_FIDUCIAL_LAT: ${BENCH_FIDUCIAL_LAT:-}
+  BENCH_FIDUCIAL_LON: ${BENCH_FIDUCIAL_LON:-}
+  BENCH_FIDUCIAL_ALT: ${BENCH_FIDUCIAL_ALT:-0.0}
   # What sim_ground_truth scores against, the same pair the ground station
   # reads. Without them the node takes its own default, which names one
   # scenario, and every other scenario scores against the wrong targets.
