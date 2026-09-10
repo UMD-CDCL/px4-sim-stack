@@ -210,7 +210,13 @@ bench_mode() {
 		else
 			printf '\nBENCH_MODE=true\n' >> .env
 		fi
+		if grep -q '^SCENE=' .env; then
+			sed -i 's/^SCENE=.*/SCENE=uroc/' .env
+		else
+			printf 'SCENE=uroc\n' >> .env
+		fi
 		say "GPS-free BENCH MODE enabled. It is not safe for flight."
+		say "Bench reference: UROC home and fiducial; terrain: SCENE=uroc."
 		say "Start through ./px4sim ui or ./px4sim start, then disable before flight."
 	else
 		if grep -q '^BENCH_MODE=' .env; then

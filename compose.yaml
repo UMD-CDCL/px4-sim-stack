@@ -158,6 +158,9 @@ x-onboard-env: &onboard-env
   BENCH_HOME_LAT: ${BENCH_HOME_LAT:-}
   BENCH_HOME_LON: ${BENCH_HOME_LON:-}
   BENCH_HOME_ALT: ${BENCH_HOME_ALT:-0.0}
+  BENCH_FIDUCIAL_LAT: ${BENCH_FIDUCIAL_LAT:-}
+  BENCH_FIDUCIAL_LON: ${BENCH_FIDUCIAL_LON:-}
+  BENCH_FIDUCIAL_ALT: ${BENCH_FIDUCIAL_ALT:-}
   # ros2 launch reads its nodes through pipes, and a pipe makes Python
   # block-buffer: everything ds_node says -- the backend it resolved, the
   # engine it is building, the reason it stopped -- sits invisible in a
