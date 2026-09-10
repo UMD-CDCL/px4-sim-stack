@@ -550,6 +550,10 @@ stop_stack() {
 		rm -f "$segment" && leaked=$((leaked + 1))
 	done
 	[ "$leaked" -gt 0 ] && echo "  released $leaked shared memory segments"
+	# A normal stop commonly has no stale segments. The conditional above then
+	# returns false; make that benign case successful so `set -e` callers such
+	# as `start` proceed to build and bring the stack back up.
+	return 0
 }
 
 # The same names for a command that takes a list: `logs ground` and `shell onboard`.
