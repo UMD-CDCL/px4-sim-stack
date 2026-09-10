@@ -405,7 +405,7 @@ git switch --track origin/feature/real-fixes
 git status --porcelain          # empty, and .env is gitignored
 ```
 
-Then rebuild and restart on the drone:
+Then start on the drone (which rebuilds before launch):
 
 ```bash
 ./px4sim start
