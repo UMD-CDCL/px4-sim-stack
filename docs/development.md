@@ -277,12 +277,12 @@ ccache keeps the incremental builds fast.
 
 ```bash
 vim src/PX4-Autopilot/src/modules/commander/Commander.cpp
-docker compose restart sim
+./px4sim restart
 ./px4sim logs sim
 ```
 
 The entrypoint rebuilds only what changed. A one-file change takes about a
-minute. To build without a restart:
+minute, and the cached image build runs before the containers are recreated.
 
 ```bash
 docker compose exec sim make -C /px4 px4_sitl_default -j16
@@ -345,7 +345,7 @@ Then rebuild the image, because the dependency set comes from that release:
 ```bash
 rm -rf src/PX4-Autopilot
 ./px4sim setup
-./px4sim build sim
+./px4sim restart
 ```
 
 ## DeepStream, TensorRT and the GPU
@@ -358,13 +358,13 @@ It is not a choice this stack makes. The aircraft is a Jetson Orin on Ubuntu
 22.04 with DeepStream 7.1, which is ROS 2 Humble, and everything here is built
 to match it:
 
-| | Orin (sm_87) | a Blackwell workstation (sm_120) |
-|---|---|---|
-| DeepStream | 7.1 | 7.1 |
-| Ubuntu | 22.04 jammy | 22.04 jammy |
-| ROS 2 | Humble | Humble |
-| TensorRT | 10.3, as shipped | 10.9, installed over it |
-| image tag | `7.1` | `7.1-trt10.9` |
+| | an x86 GPU up to Hopper (the T500) | the Orin (sm_87) | a Blackwell workstation (sm_120) |
+|---|---|---|---|
+| DeepStream | 7.1 | 7.1 | 7.1 |
+| Ubuntu | 22.04 jammy | 22.04 jammy | 22.04 jammy |
+| ROS 2 | Humble | Humble | Humble |
+| TensorRT | 10.3, as shipped | 10.3.0.30, the host's own build, from the JetPack repository | 10.9, installed over it |
+| image tag | `7.1` | `7.1-trt10.3` | `7.1-trt10.9` |
 
 The reason it cannot be a choice is `cdcl_umd_msgs`. Jazzy adds a field to
 `sensor_msgs/Range`, which sits inside `TargetBoxArray` ahead of the box array.
@@ -403,11 +403,27 @@ the first release that knows Blackwell and 10.9 is the one DeepStream 8.0
 itself ships, so 10.9 is the shortest distance from 10.3. That reasoning is in
 the header of `ds-select.sh`; read it before raising the version.
 
+A Jetson is the other case. An engine loads only under the exact TensorRT build
+that made it. The generic arm64 image carries 10.3.0.26 and the Orin runs
+10.3.0.30. The 10.3.0.26 builder refuses the host's engines, and it cannot build
+one of its own on the Orin (a 5 MB tactic limit, measured 2026-09-03). So on a
+Jetson `ds-select.sh` reads the host's `libnvinfer10` version, and the image
+installs that version from the JetPack repository the host lists:
+`deb https://repo.download.nvidia.com/jetson/common r36.4 main`, signed by
+`jetson-ota-public.asc`. The tag is `7.1-trt10.3`. No engine rebuild happens,
+because the image carries the build that made them. One rule serves every
+machine: the image carries the TensorRT the host needs.
+
 ### Moving to another machine
 
 Each combination builds to its own image tag, so a machine that moves between
 them does not build one over the other and leave a container that will not
 start. The derived images follow `DS_TAG`, not the release number.
+
+Each machine builds its own architecture. The laptop builds x86_64 and the Orin
+builds arm64, each from its own checkout of this repository and its own
+`ros2_ws`, and neither copies an image from the other. Expect 60 to 120
+minutes for the first Orin build, of which the MAVROS patch layer is 25 to 40.
 
 The TensorRT engine beside each ONNX belongs to one GPU, one driver and one
 TensorRT. Delete the `*.engine` files when any of those change and let the
@@ -415,6 +431,8 @@ first run rebuild them -- a stale engine that fails to deserialize is rebuilt
 anyway, but one that loads and is wrong is worse. The bbox parser is stamped:
 `.parser-deepstream` in the model directory records which release built the
 `.so` beside it, and the companion's entry point replaces it when they differ.
+On the Orin the engines in `perception_models/orin` come from the host's own
+TensorRT, and the image carries that same build, so they load as they are.
 
 ### Pinning 8.0 or 9.0
 
@@ -435,8 +453,7 @@ them. It uses gz-transport and GStreamer, and it is not a Gazebo system plugin,
 so it starts, stops and fails on its own.
 
 ```bash
-./px4sim build sim
-docker compose up -d --force-recreate sim
+./px4sim restart
 ```
 
 Test it by hand:
@@ -520,14 +537,13 @@ to, so this floor belongs to the simulator alone.
 
 ## The flight code
 
-5g_drone, cdcl_umd_msgs, tracking_test_5g and MAVInsight are not in this
-repository. `ROS2_WS_DIR` in `.env` names the checkout, and the onboard and
-offboard images build it with colcon. So a change there is a rebuild, not a
-restart:
+5g_drone, cdcl_umd_msgs and MAVInsight are not in this repository. `ROS2_WS_DIR`
+in `.env` names the checkout, and the onboard and offboard images build it with
+colcon. A change there is picked up by the next start, which always stops the
+current containers, builds the selected images, and starts fresh ones:
 
 ```bash
-./px4sim build onboard offboard
-docker compose up -d --force-recreate onboard11 offboard
+./px4sim restart
 ```
 
 Both images build the same workspace, so a change in a shared package needs
@@ -537,20 +553,60 @@ The launch files take the identity as arguments, and the entry points fill them
 in from `UAS_NUM` and `UAS_FLEET`:
 
 ```bash
-ros2 launch umd_uas onboard.launch.py uas:=11 model:=v3 sim:=true
-ros2 launch umd_uas offboard.launch.py uas:=11,12,13,14 models:=v3,v3,v2,v2
+# the simulated companion and the aircraft
+ros2 launch umd_uas onboard.launch.py uas:=11 model:=v3 sim:=true truth:=true container:=true params:=/camera/site.yaml,/camera/lens.yaml
+ros2 launch umd_uas onboard.launch.py uas:=1 sim:=false truth:=true container:=true params:=/camera/site.yaml
+# the simulated ground station and the real one
+ros2 launch umd_uas offboard.launch.py uas:=11,12,13,14 models:=v3,v3,v2,v2 truth:=true params:=/camera/site.yaml
+ros2 launch umd_uas offboard.launch.py uas:=1 models:=v3 truth:=true params:=/camera/site.yaml
 ```
 
+`sim` selects the camera source, RTSP or the rcam socket, and the sim-only
+parameter layer. `truth` selects `sim_ground_truth` on both sides, and follows
+SCENARIO rather than the fleet, so a real course written into a scenario is
+scored the way a simulated one is. `container` loads
+`onboard_container_params.yaml`, the layer that names `/models/local`, the
+`/logs` output directories and `/dev/lens`. The Foxglove bridge on 8765 runs
+in both modes. The onboard layers load in this order: common, vehicle,
+`onboard_common`, container, sim, then the deployment files in `params:=`. On
+the aircraft the launch takes the model from the number, so the entry point
+leaves `model:=` out. It leaves an empty `params:=` out too, because
+`ros2 launch` refuses an empty value.
+
 To look at a running graph, remember that `docker compose exec` does not run the
-entry point, so the domain and the overlay are not set:
+entry point, so the domain and the overlays are not set. One file sources every
+overlay the image carries, the patched MAVROS included:
 
 ```bash
 ./px4sim topics 11        # does both for you
 docker compose exec -e ROS_DOMAIN_ID=71 onboard11 bash -lc \
-  '. /opt/ros/humble/setup.bash; . /home/user/ros2_ws/install/setup.bash; ros2 node list'
+  '. /usr/local/bin/ros-env.sh; ros2 node list'
 ```
 
-A vehicle holds domain `60 + N`. The ground station holds 70.
+A vehicle holds domain `60 + N`. The ground station holds `GROUND_DOMAIN`, 70
+beside the simulator and 60 fielded.
+
+### The MAVROS patch
+
+Every `./px4sim restart` builds the PX4 v1.18 MAVROS patch from
+`chimera-deploy/remote/mavros_patch` into `/opt/mavros`, so the simulator and
+the aircraft run one MAVROS. `CHIMERA_DEPLOY_DIR` in `.env` names the checkout
+(default `../chimera-deploy`). Check out its `submodules/mavros` and
+`submodules/angles` first:
+
+```bash
+git -C ../chimera-deploy submodule update --init submodules/mavros submodules/angles
+```
+
+The layer costs 10 to 15 minutes on the laptop and 25 to 40 on the Orin, and a
+flight code edit never rebuilds it. `MAVROS_PATCH=0` in `.env` builds the apt
+package instead. To make sure the overlay is in the path:
+
+```bash
+docker run --rm px4simstack/ros-base:$(./scripts/ds-select.sh --tag) \
+  bash -c '. /usr/local/bin/ros-env.sh; ros2 pkg prefix mavros'
+# /opt/mavros/install/mavros
+```
 
 ## QGroundControl
 
@@ -565,7 +621,7 @@ QGC_REF=v5.1.0
 ```
 
 ```bash
-./px4sim build qgc && docker compose up -d --force-recreate qgc
+./px4sim restart
 ```
 
 The container seeds `QGroundControl.ini` on first start, so the vehicle
@@ -596,8 +652,9 @@ version must match the one that release of QGroundControl expects. Look at
 
 ## Verification
 
-`./px4sim verify` runs every stage. Four need nothing running, four fly the
-stack.
+`./px4sim verify` runs every stage. The first four need nothing running. The
+other six read the running stack, and `fleet` and `captures` wait for
+`VERIFY_FULL=1`.
 
 | Stage | What it establishes |
 |---|---|
@@ -606,9 +663,15 @@ stack.
 | `units` | The terrain rays, the roofs and the ground the fleet shares |
 | `localize` | A hardcoded box lands where the geometry says, on the plane and on a roof |
 | `vehicle` | Telemetry, the gimbal, the outline, the drape, and a localized target |
+| `flight` | One takeoff, the gimbal, the lens, a localization, the mosaic and the survey |
 | `ground` | The ground station shows what the vehicle worked out, not its own version |
 | `fleet` | Every vehicle over one target reports one position for it |
 | `captures` | The mosaic is drawn, the fiducial surveys, the VLM frame crosses the link |
+| `foxglove` | The layout, the bridge and the live view the operator gets |
+
+A real machine answers `ground` and `foxglove`. The other stages expand the
+simulator's airframes or fly a vehicle, and `verify` refuses each one by name
+and says which two it runs.
 
 The stages that fly are written against `./px4sim uas`, which flies a vehicle
 through the interfaces the aircraft uses: MAVROS for flight, the 5g_drone
@@ -780,6 +843,15 @@ otherwise put every one of them 33 m over the ground it lies on.
 points source it: the ground station draws the same scene against the same
 fixes as the vehicle, and a station without it draws its own version.
 
+### The docs lint
+
+`./px4sim check` runs `scripts/lint-docs.sh` over every `*.md` file in git.
+`STE_LINT` names the linter, default
+`~/.claude/skills/asd-ste100/scripts/ste-lint.py`, and `STE_MAX` the score a
+file may reach, default 2.5 violations per 100 words. A machine without the
+linter prints two lines and passes, unless `STE_LINT` names a path that is
+missing.
+
 ## Speed and determinism
 
 ```bash
@@ -799,18 +871,73 @@ the result before the flight with `./px4sim origin`.
 
 ## Running against real hardware
 
-The point of the layout. Three changes:
+The point of the layout. The changes are `.env` lines, and the "which machine"
+block of `.env.example` carries all of them:
 
-1. Stop the `sim` service.
-2. Point the router for that vehicle at the aircraft. The aircraft carries its
-   own router, so the usual answer is to stop the `uas<N>` service as well and
-   let the companion computer's router do the work. To keep a router here,
-   change its vehicle endpoint to a serial device in
-   `modules/mavlink-router/main.conf.template`, which is where the aircraft
-   template has its `[UartEndpoint alpha]`.
-3. Point `video-router` at the real camera. Add a path with an `rtsp://` or
-   `udp+rtp://` source in `modules/video-router/mediamtx.yml`.
+| Key | Simulator | Real ground (t500) | Aircraft (the Orin) |
+|---|---|---|---|
+| `COMPOSE_PROFILES` | `sim,offboard` | `ground` | `aircraft` |
+| `UAS_BASE` | `10` | `0` | `0` |
+| `GROUND_DOMAIN` | unset (70) | `60` | not read |
+| `RTSP_BASE` | unset | `rtsp://127.0.0.1:8554`, lcam | not read |
+| `SCENE` | `lorton` | empty on a bench, `lorton` at the field | empty |
+| `ONBOARD_LENS_DEVICE` | not read | not read | the SCF4 under `/dev/serial/by-id/` |
 
-The onboard and offboard containers need no change beyond `sim:=false`, which
-takes the camera from the shared memory socket instead of from RTSP. That is the
-test of whether the boundaries are real.
+`./px4sim doctor` refuses a half flip. It checks the two switches, the domain
+and the lens together.
+
+The onboard container changes nothing but `sim:=false`, which takes the camera
+from the rcam socket instead of RTSP. The ground station changes nothing at
+all. `truth` is separate from both, and follows SCENARIO: a real course written
+into a scenario is scored the way a simulated one is. That is the test of
+whether the boundaries are real.
+
+### The ground station
+
+`ground` runs the offboard image on the host network. The native
+`mavlink-router.service` from `chimera-deploy/local/main.conf` pushes each
+vehicle to its own `127.0.0.<N>:14402`, and that vehicle's MAVROS binds it
+there. `lcam.service` holds
+8554 and restreams each vehicle's low rate mounts as `rgbl<N>`, `pilotl<N>` and
+`thermall<N>`, and `ds_node` previews from them. The fielded QGroundControl
+stays native. No `ground-router`, `video-router` or `qgc` container starts.
+
+[front-doors.md](front-doors.md) carries the command line for this world.
+
+### The aircraft
+
+`onboard` runs the companion image on the host network of the Orin. The native
+`mavlink-router.service`, from `chimera-deploy/remote/main.conf.template`,
+reads the autopilot on `/dev/ttyTHS1` and pushes to `127.0.0.1:14402`.
+`rcam.service` forks every camera onto an NVMM socket, `/tmp/<name>ds_nv.sock`,
+and `ds_node` reads `rgbds` on a v3 and `pilotds` on a v2 through
+`nvunixfdsrc`. The entry point waits up to `STREAM_WAIT_S` (300 s) for those
+sockets. `UAS_NUM` comes from `/etc/environment`, which
+`chimera-deploy/deploy.sh` writes, never from `.env`. compose maps the SCF4
+lens that `ONBOARD_LENS_DEVICE` names to `/dev/lens` inside, and
+`onboard_container_params.yaml` pins `zoom.serial.port` to that name.
+
+`chimera-deploy/remote/deploy_onboard.sh` puts it all in place, and
+`remote/onboard.service` starts it at boot. [front-doors.md](front-doors.md)
+carries both, with the command line for this world. Never run the native launch
+and the container at once: one MAVROS can bind 14402, and one node can hold the
+SCF4.
+
+### What the front door refuses
+
+With `UAS_BASE=0` a vehicle number is a real aircraft, so `./px4sim` refuses
+every command that flies the simulator: `core`, `fly`, `place`, `scene`,
+`scenario`, `fiducial`, `reset`, `px4`, `console`, `snap`, `genscene`, and
+`uas N arm`, `takeoff`, `land` and `goto`. Nothing is sent. It refuses the
+commands that maintain the simulator too, and each of those says what it did
+not change: `setup`, `clean-src`, `nuke`, `fleet add` and `fleet remove`. It
+refuses `router`, because the real fleet's router is native:
+`systemctl status mavlink-router`. `view` needs `ffplay`, which the Orin does
+not have, and says so.
+
+`verify` is not refused. It runs the `ground` and `foxglove` stages and names
+the ones it left out.
+
+What stays native on each machine this round: on t500 `lcam`,
+`mavlink-router`, QGroundControl and `git-daemon`. On the Orin `rcam` and
+`mavlink-router`.

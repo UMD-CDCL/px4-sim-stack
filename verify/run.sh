@@ -50,6 +50,25 @@ fi
 
 # The number in each file name is the order, and nothing else reads it.
 stage_files() { ls verify/stages/*.sh; }
+# Which stages a real machine can answer. The others expand the simulator's
+# airframes, read its compose services, or fly a vehicle to a viewpoint, and
+# on the real fleet that number is an aircraft on the bench. Each stage below
+# skips what needs a scene.
+#
+# A real machine is one of two worlds, and they answer different questions. A
+# ground station holds no vehicle of its own: it reads the picture it rebuilt
+# from the radio, so it answers for the ground station and its bridge. An
+# aircraft IS the vehicle: it runs the companion and serves its own bridge, so
+# it answers for the graph it flies. Giving both worlds the ground station's
+# list told the operator of a healthy aircraft that the stack was broken.
+real_stages() {
+	case "$(world_of)" in
+	aircraft) echo "units vehicle foxglove" ;;
+	*)        echo "ground foxglove" ;;
+	esac
+}
+REAL_STAGES=$(real_stages)
+real_stage() { case " $REAL_STAGES " in *" $1 "*) return 0 ;; esac; return 1; }
 stage_name()  { basename "$1" .sh | cut -d- -f2-; }
 stage_file()  {
 	local match
@@ -65,7 +84,10 @@ ${BOLD}px4sim verify${OFF} [stage ...]   default: every stage, in this order
 $(for f in $(stage_files); do printf '    %-12s %s\n' "$(stage_name "$f")" "$(sed -n '2s/^# //p' "$f")"; done)
 
   A stage that needs the stack running says so and stops. Start it with
-  ./px4sim start.
+  ./px4sim restart.
+
+  A real machine answers these stages: $REAL_STAGES. The rest fly the
+  simulator, and this file refuses them by name.
 EOF
 }
 
@@ -78,10 +100,24 @@ if [ $# -gt 0 ]; then
 	for name in "$@"; do
 		found=$(stage_file "$name") ||
 			{ printf 'No verify stage named %s.\n\n' "$name" >&2; usage >&2; exit 2; }
+		if [ "$FLEET_IS_SIMULATED" = false ] && ! real_stage "$name"; then
+			printf "'%s' verifies the simulator, and this stack is not one (UAS_BASE=%s,\n" \
+				"$name" "$UAS_BASE" >&2
+			printf "    profiles '%s'). This machine answers: %s\n" \
+				"${COMPOSE_PROFILES:-none}" "$REAL_STAGES" >&2
+			exit 2
+		fi
 		files="$files $found"
 	done
 else
 	files=$(stage_files)
+	if [ "$FLEET_IS_SIMULATED" = false ]; then
+		kept=""
+		for f in $files; do real_stage "$(stage_name "$f")" && kept="$kept $f"; done
+		files=$kept
+		printf '%bThis stack is not a simulator, so it runs: %s%b\n' \
+			"$BOLD" "$REAL_STAGES" "$OFF"
+	fi
 fi
 
 for f in $files; do

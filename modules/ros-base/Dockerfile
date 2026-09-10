@@ -99,11 +99,12 @@ RUN set -eux; \
 # have used, so it is read from there rather than written down again.
 #
 # The CUDA compiler comes from apt only where the base has none for the version
-# the flight code names. A Jetson gets CUDA from JetPack rather than from the
-# x86 CUDA repository, so that install can fail there; the fallback takes the
-# newest nvcc the base already carries and builds against that instead of
-# stopping. An x86 DeepStream 7.1 ships nvcc for 12.1 and the parser wants
-# 12.6, which is why the install is tried at all.
+# the flight code names. A Jetson gets its compiler and headers from the
+# JetPack repository that TRT_APT_SOURCE names. Without that source the
+# install fails there, and the fallback takes the newest nvcc the base already
+# carries and builds against that instead of stopping. An x86 DeepStream 7.1
+# ships nvcc for 12.1 and the parser wants 12.6, which is why the install is
+# tried at all.
 #
 # Compiling against NvInfer.h needs TensorRT headers at the version of the
 # libraries beside them, so this stage installs them where an upgrade is in
@@ -121,23 +122,39 @@ FROM ${DS_IMAGE} AS dsyolo
 ARG DS_VERSION
 ENV DEBIAN_FRONTEND=noninteractive
 
-# The TensorRT this GPU needs, when the release does not ship one.
+# The TensorRT this machine needs, when the one in the base is not it.
 #
-# DeepStream 7.1 carries TensorRT 10.3, which emits kernels up to Hopper. On a
-# newer card it parses the ONNX, reports `Unsupported SM`, builds no engine and
-# takes the process down with it -- while the streams keep decoding, so the
-# only visible symptom is a detector that never fires. NVIDIA packages newer
-# TensorRT for jammy, the soname does not change, and DeepStream's own nvinfer
-# builds and loads engines against it.
+# Two cases. A GPU newer than Hopper: DeepStream 7.1 ships TensorRT 10.3,
+# which stops at Hopper. On a newer card it parses the ONNX, reports
+# `Unsupported SM`, builds no engine and takes the process down, while the
+# streams keep decoding. A newer TensorRT for jammy from the CUDA repository,
+# which the x86 base already lists, fixes it. A Jetson: the generic arm64 base
+# carries 10.3.0.26 and the host runs 10.3.0.30. An engine loads only under
+# the build that made it, and 10.3.0.26 cannot build one on the Orin at all
+# (a 5 MB tactic limit). The host's own packages fix it. They come from the
+# JetPack repository, which TRT_APT_SOURCE names and this block adds.
+# TRT_APT_PUBLIC_KEY is the URL of the key that signs that repository.
+#
+# TRT_CUDA names the CUDA runtime the x86 upgrade links. A Jetson leaves it
+# empty, because its base already carries CUDA 12.6.
 #
 # Empty means the base's own TensorRT is right for this machine, which is the
-# case for every GPU up to Hopper -- the Orin included, so the aircraft image
-# is byte for byte what it always was. scripts/ds-select.sh decides.
+# case for every x86 GPU up to Hopper. scripts/ds-select.sh decides all four.
 ARG TRT_VERSION=
 ARG TRT_CUDA=
+ARG TRT_APT_SOURCE=
+ARG TRT_APT_PUBLIC_KEY=
 RUN if [ -n "${TRT_VERSION}" ]; then \
         set -eux; \
         apt-get update; \
+        apt-get install -y --no-install-recommends ca-certificates curl; \
+        if [ -n "${TRT_APT_SOURCE}" ]; then \
+            curl -fsSL "${TRT_APT_PUBLIC_KEY}" -o /etc/apt/trusted.gpg.d/tensorrt-host.asc; \
+            echo "${TRT_APT_SOURCE}" > /etc/apt/sources.list.d/tensorrt-host.list; \
+            apt-get update; \
+        fi; \
+        cuda=""; \
+        if [ -n "${TRT_CUDA}" ]; then cuda="cuda-cudart-${TRT_CUDA} libcublas-${TRT_CUDA}"; fi; \
         apt-get install -y --no-install-recommends --allow-downgrades \
             "libnvinfer10=${TRT_VERSION}" \
             "libnvinfer-plugin10=${TRT_VERSION}" \
@@ -146,8 +163,7 @@ RUN if [ -n "${TRT_VERSION}" ]; then \
             "libnvinfer-lean10=${TRT_VERSION}" \
             "libnvinfer-vc-plugin10=${TRT_VERSION}" \
             "libnvinfer-bin=${TRT_VERSION}" \
-            "cuda-cudart-${TRT_CUDA}" \
-            "libcublas-${TRT_CUDA}"; \
+            ${cuda}; \
         rm -rf /var/lib/apt/lists/*; \
         echo "TensorRT is now $(dpkg -l libnvinfer10 | awk '/^ii/ {print $3}')"; \
     fi
@@ -370,23 +386,39 @@ RUN set -eu; \
     done
 
 
-# The TensorRT this GPU needs, when the release does not ship one.
+# The TensorRT this machine needs, when the one in the base is not it.
 #
-# DeepStream 7.1 carries TensorRT 10.3, which emits kernels up to Hopper. On a
-# newer card it parses the ONNX, reports `Unsupported SM`, builds no engine and
-# takes the process down with it -- while the streams keep decoding, so the
-# only visible symptom is a detector that never fires. NVIDIA packages newer
-# TensorRT for jammy, the soname does not change, and DeepStream's own nvinfer
-# builds and loads engines against it.
+# Two cases. A GPU newer than Hopper: DeepStream 7.1 ships TensorRT 10.3,
+# which stops at Hopper. On a newer card it parses the ONNX, reports
+# `Unsupported SM`, builds no engine and takes the process down, while the
+# streams keep decoding. A newer TensorRT for jammy from the CUDA repository,
+# which the x86 base already lists, fixes it. A Jetson: the generic arm64 base
+# carries 10.3.0.26 and the host runs 10.3.0.30. An engine loads only under
+# the build that made it, and 10.3.0.26 cannot build one on the Orin at all
+# (a 5 MB tactic limit). The host's own packages fix it. They come from the
+# JetPack repository, which TRT_APT_SOURCE names and this block adds.
+# TRT_APT_PUBLIC_KEY is the URL of the key that signs that repository.
+#
+# TRT_CUDA names the CUDA runtime the x86 upgrade links. A Jetson leaves it
+# empty, because its base already carries CUDA 12.6.
 #
 # Empty means the base's own TensorRT is right for this machine, which is the
-# case for every GPU up to Hopper -- the Orin included, so the aircraft image
-# is byte for byte what it always was. scripts/ds-select.sh decides.
+# case for every x86 GPU up to Hopper. scripts/ds-select.sh decides all four.
 ARG TRT_VERSION=
 ARG TRT_CUDA=
+ARG TRT_APT_SOURCE=
+ARG TRT_APT_PUBLIC_KEY=
 RUN if [ -n "${TRT_VERSION}" ]; then \
         set -eux; \
         apt-get update; \
+        apt-get install -y --no-install-recommends ca-certificates curl; \
+        if [ -n "${TRT_APT_SOURCE}" ]; then \
+            curl -fsSL "${TRT_APT_PUBLIC_KEY}" -o /etc/apt/trusted.gpg.d/tensorrt-host.asc; \
+            echo "${TRT_APT_SOURCE}" > /etc/apt/sources.list.d/tensorrt-host.list; \
+            apt-get update; \
+        fi; \
+        cuda=""; \
+        if [ -n "${TRT_CUDA}" ]; then cuda="cuda-cudart-${TRT_CUDA} libcublas-${TRT_CUDA}"; fi; \
         apt-get install -y --no-install-recommends --allow-downgrades \
             "libnvinfer10=${TRT_VERSION}" \
             "libnvinfer-plugin10=${TRT_VERSION}" \
@@ -395,8 +427,7 @@ RUN if [ -n "${TRT_VERSION}" ]; then \
             "libnvinfer-lean10=${TRT_VERSION}" \
             "libnvinfer-vc-plugin10=${TRT_VERSION}" \
             "libnvinfer-bin=${TRT_VERSION}" \
-            "cuda-cudart-${TRT_CUDA}" \
-            "libcublas-${TRT_CUDA}"; \
+            ${cuda}; \
         rm -rf /var/lib/apt/lists/*; \
         echo "TensorRT is now $(dpkg -l libnvinfer10 | awk '/^ii/ {print $3}')"; \
     fi
@@ -413,6 +444,40 @@ RUN if python3 -m pip install --help 2>/dev/null | grep -q -- --break-system-pac
 
 # MAVROS refuses to convert between AMSL and ellipsoid height without these.
 RUN /opt/ros/${ROS_DISTRO}/lib/mavros/install_geographiclib_datasets.sh
+
+# ---------------------------------------------------------------------------
+# MAVROS, patched for PX4 v1.18.
+#
+# The apt package asks for the autopilot capabilities with a command that PX4
+# v1.18 removed. It learns nothing, and the waypoint plugin drops to
+# MISSION_ITEM floats. chimera-deploy/remote/mavros_patch is the one source of
+# the fix: its apply.sh checks the release, applies the patch and builds an
+# overlay. This block runs that script unchanged, against the mavros and
+# angles submodules beside it, so the aircraft and the simulator load one
+# MAVROS. chimera_deploy is a named build context, CHIMERA_DEPLOY_DIR in .env.
+#
+# The three source directories arrive as build mounts, not as copies, so no
+# source lands in a layer that the derived images then carry.
+#
+# The overlay lands in /opt/mavros, and ros-env.sh sources it between /opt/ros
+# and the workspace. The build dependencies arrive with the apt mavros above,
+# so this block installs patch and the colcon extension that supplies
+# --allow-overriding, which the image does not have. MAVROS_PATCH=0 skips the
+# build. apply.sh pins MAVROS 2.14.0 on /opt/ros/humble, so a Jazzy base skips
+# it too.
+# ---------------------------------------------------------------------------
+ARG MAVROS_PATCH=1
+RUN --mount=type=bind,from=chimera_deploy,source=remote/mavros_patch,target=/tmp/chimera-deploy/remote/mavros_patch \
+    --mount=type=bind,from=chimera_deploy,source=submodules/mavros,target=/tmp/chimera-deploy/submodules/mavros \
+    --mount=type=bind,from=chimera_deploy,source=submodules/angles,target=/tmp/chimera-deploy/submodules/angles \
+    set -eux; \
+    if [ "${MAVROS_PATCH}" = 1 ] && [ "${ROS_DISTRO}" = humble ]; then \
+        apt-get update; \
+        apt-get install -y --no-install-recommends patch python3-colcon-override-check; \
+        MAVROS_PATCH_WS=/opt/mavros bash /tmp/chimera-deploy/remote/mavros_patch/apply.sh; \
+        rm -rf /opt/mavros/src /opt/mavros/build /opt/mavros/log; \
+        rm -rf /var/lib/apt/lists/*; \
+    fi
 
 # pymap3d is what tf_loc and MAVInsight convert LLA with. folium is the mosaic
 # map export. tracking_test imports utm in its nodes and uses ONNX Runtime for
@@ -533,8 +598,9 @@ USER ${USERNAME}
 RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
     && colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
 
-# What both entry points work the site out with. Last, because it is the
-# cheapest thing here to edit and nothing above it depends on it.
+# What both entry points work the site out with, and the one file that
+# sources every ROS overlay. Last, because they are the cheapest things here
+# to edit and nothing above them depends on them.
 USER root
-COPY site-params.sh /usr/local/bin/site-params.sh
+COPY site-params.sh ros-env.sh /usr/local/bin/
 USER ${USERNAME}

@@ -6,8 +6,9 @@
 # on the two sides have to be the same numbers.
 
 lead=$FIRST_UAS
-if [ -z "$(COMPOSE_PROFILES=offboard docker compose ps -q offboard 2>/dev/null)" ]; then
-	fail "the ground station is not running. Start it: ./px4sim start offboard"
+ground=$(ground_service)
+if [ -z "$(COMPOSE_PROFILES="$ground" docker compose ps -q "$ground" 2>/dev/null)" ]; then
+	fail "the ground station is not running. Start it: ./px4sim restart $ground"
 	return 0
 fi
 
@@ -27,8 +28,45 @@ for topic in camera/camera_info position status; do
 	verdict=$(./px4sim probe ground "/uas$lead/$topic" 2>/dev/null | cut -f3)
 	expect_eq "the ground receives $topic" data "$verdict"
 done
-expect_eq "the ground holds the scene's casualty locations" data \
-	"$(./px4sim probe ground /known_casualty_locations 2>/dev/null | cut -f3)"
+
+# Everything an operator sees in the scene hangs off the aircraft's own frame:
+# the model, the camera under it, the outline on the ground and the picture
+# laid into it. A station that is not told which way the aircraft points draws
+# all of them the same wrong way, and each one looks right beside the others.
+#
+# On a real ground station the vehicle's own companion flies on the aircraft,
+# so both sides of this would be read through the one container and say the
+# same thing twice. Ask the ground alone there.
+sides="ground"
+[ "$FLEET_IS_SIMULATED" = true ] && sides="$lead ground"
+for side in $sides; do
+	name=$([ "$side" = ground ] && echo "the ground station" || echo "uas$lead")
+	if facing=$(./px4sim uas "$side" heading 2>&1); then
+		pass "$name points uas$lead the way it is flying"
+		note "$(printf '%s' "$facing" | tr '\n' ' ')"
+	else
+		fail "$name points uas$lead the way it is flying"
+		note "$(printf '%s' "$facing" | tr '\n' ' ')"
+	fi
+done
+
+# The truth the ground scores against comes from the scenario, which a real
+# course names as readily as a simulated one. A bench outside a surveyed
+# course names none.
+if [ -n "${SCENARIO:-}" ]; then
+	expect_eq "the ground holds the scene's casualty locations" data \
+		"$(./px4sim probe ground /known_casualty_locations 2>/dev/null | cut -f3)"
+else
+	skip "no scenario, so the ground station has no casualty locations"
+fi
+
+# The rest needs the simulator. It sends the vehicle to a viewpoint over the
+# targets and moves the gimbal to read a click back. A real bench holds
+# neither, and a red row there says nothing about the ground station.
+if [ "$FLEET_IS_SIMULATED" = false ]; then
+	skip "the air link comparison and the click test need the simulator"
+	return 0
+fi
 
 # Aim at the casualties and turn detection on, rather than reading whatever the
 # stage before happened to leave pointed where.
@@ -121,18 +159,3 @@ else
 	expect_eq "a station whose clicks are off ignores them" True \
 		"$(python3 -c "print(abs($ignored - $aimed_before) < 3)")"
 fi
-
-# Everything an operator sees in the scene hangs off the aircraft's own frame:
-# the model, the camera under it, the outline on the ground and the picture
-# laid into it. A station that is not told which way the aircraft points draws
-# all of them the same wrong way, and each one looks right beside the others.
-for side in "$lead" ground; do
-	name=$([ "$side" = ground ] && echo "the ground station" || echo "uas$lead")
-	if facing=$(./px4sim uas "$side" heading 2>&1); then
-		pass "$name points uas$lead the way it is flying"
-		note "$(printf '%s' "$facing" | tr '\n' ' ')"
-	else
-		fail "$name points uas$lead the way it is flying"
-		note "$(printf '%s' "$facing" | tr '\n' ' ')"
-	fi
-done

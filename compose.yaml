@@ -1,6 +1,22 @@
 name: px4simstack
 
 # ---------------------------------------------------------------------------
+# Which machine this is. Three worlds, four profiles, one file:
+#   sim       the simulator on one laptop: sim, video-router and qgc, plus a
+#             router uas<N> and a companion onboard<N> for each vehicle in
+#             UAS_FLEET, which ./px4sim adds from that list
+#   offboard  the simulated ground station beside it, on simnet, with the
+#             video router it previews from
+#   ground    the real ground station on t500, on the host network, beside
+#             the native mavlink-router and lcam
+#   aircraft  the real vehicle: one onboard service on the host network,
+#             beside the native mavlink-router and rcam
+# UAS_BASE in .env says which world the numbers belong to: 10 is simulated,
+# 0 is real. scripts/fleet.sh reads the same line, and ./px4sim refuses a
+# .env where the two disagree. See .env.example.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
 # Reusable fragments.
 # ---------------------------------------------------------------------------
 x-gpu-env: &gpu-env
@@ -18,8 +34,9 @@ x-x11-env: &x11-env
 # with ROS 2 Humble, everywhere, because that is what the aircraft is and
 # because cdcl_umd_msgs does not decode across a distribution change.
 #
-# Only TensorRT varies, and only where the GPU is newer than the one the
-# release shipped for. scripts/ds-select.sh reads the card and answers with all
+# Only TensorRT varies, where the GPU is newer than the one the release
+# shipped for or where the host runs its own build, as a Jetson does.
+# scripts/ds-select.sh reads the card and answers with all
 # of these, and ./px4sim exports them before it reaches compose. The defaults
 # here are the stock release with no accommodation, which is what `docker
 # compose` on its own -- with no front door to resolve anything -- gets. Run
@@ -32,10 +49,15 @@ x-deepstream: &deepstream
   # The built tag. onboard and offboard derive from ros-base by this name, so
   # it has to carry the accommodation as well as the release.
   DS_TAG: ${DS_TAG:-7.1}
-  # Empty on every GPU up to Hopper, which is what the aircraft is. Set only
-  # where the release's own TensorRT cannot emit kernels for the card.
+  # Empty where the release's own TensorRT is the one this host runs: every
+  # x86 GPU up to Hopper. A Jetson names its own build, a Blackwell card a
+  # newer release. See scripts/ds-select.sh.
   TRT_VERSION: ${DS_TRT_VERSION:-}
   TRT_CUDA: ${DS_TRT_CUDA:-}
+  # Where that TensorRT comes from, when the base's own apt sources do not
+  # carry it. A Jetson takes the host's JetPack repository. Empty on x86.
+  TRT_APT_SOURCE: ${DS_TRT_APT_SOURCE:-}
+  TRT_APT_PUBLIC_KEY: ${DS_TRT_APT_KEY:-}
 
 x-ids: &ids
   # Named HOST_UID, not UID. A build argument reaches every RUN as an
@@ -68,13 +90,21 @@ x-mavlink-router-env: &mavlink-router-env
   QGC_ADDRESS: ${QGC_ADDRESS:-${SIMNET_PREFIX:-10.200.142}.224}
   KEEPALIVE: ${KEEPALIVE:-1}
 
-# The onboard computer for each simulated vehicle. One container for each,
-# because each binds MAVLink port 14402 and runs its own ROS domain. UAS_NUM is
-# the whole identity: the entrypoint derives the MAVLink system id, the /uas<N>
-# namespace, domain 6<N> and the d<N> and uas<N> frame prefixes from it.
+# Mounted by the simulated companions and the aircraft alike. A merge key
+# replaces a list, so the aircraft names these again by alias.
+x-onboard-volumes:
+  models: &models-volume ${ONBOARD_MODEL_DIR:-./modules/onboard/models}:/models
+  logs: &logs-volume ./logs/onboard:/logs
+
+# The onboard computer, for each simulated vehicle and for the aircraft. One
+# container for each, because each binds MAVLink port 14402 and runs its own
+# ROS domain. UAS_NUM is the whole identity: the entrypoint derives the MAVLink
+# system id, the /uas<N> namespace, domain 6<N> and the d<N> and uas<N> frame
+# prefixes from it.
 #
-# Each one shares its vehicle router's network namespace, so a vehicle is one
-# machine with one address and the router reaches MAVROS on loopback.
+# Each simulated one shares its vehicle router's network namespace, so a
+# vehicle is one machine with one address and the router reaches MAVROS on
+# loopback. The aircraft shares the host's, beside the native router.
 #
 # UAS_FLEET has to agree with the model for each UAS number: uas11 and uas12
 # are v3, uas13 and uas14 are v2. Set UAS1<N>_MODEL to override one
@@ -92,8 +122,8 @@ x-onboard: &onboard
       shared: ./scripts
     args:
       # Which ros-base to derive from. Everything heavy is there, so this image
-      # is its entry point and nothing else. `./px4sim build` builds the base
-      # first. See modules/ros-base/Dockerfile.
+      # is its entry point and nothing else. `./px4sim restart` builds the base
+      # before creating containers. See modules/ros-base/Dockerfile.
       <<: *deepstream
   image: px4simstack/onboard:${DS_TAG:-7.1}
   runtime: nvidia
@@ -106,14 +136,13 @@ x-onboard: &onboard
   cap_add: [SYS_NICE]
   stop_grace_period: 20s
   volumes:
-    # Detector and classifier artifacts from scripts/convert_to_engine.py.
-    # config/param_files/sim/onboard_sim_params.yaml names them. nvinfer builds
-    # the TensorRT engine next to the ONNX on the first run, which takes 1 to 3
-    # minutes and stays on this volume afterwards.
-    - ${ONBOARD_MODEL_DIR:-./modules/onboard/models}:/models
-    - ./logs/onboard:/logs
+    # Detector and classifier artifacts. config/param_files/
+    # onboard_container_params.yaml in 5g_drone names /models/local, the
+    # symlink fetch_models.py points at this machine's engine group.
+    - *models-volume
+    - *logs-volume
     # Terrain surfaces from `px4sim genscene`. The entry point links the one
-    # for SCENE into /terrain, which is where tf_loc reads its cache from.
+    # for SCENE into /terrain. The aircraft names this again by alias.
     - ./modules/sim/scenes:/scenes:ro
   # The world origin, so sim_ground_truth can put the scenario's targets on the
   # Earth. It reads PX4_HOME_LAT, _LON and _ALT and refuses to guess without
@@ -122,9 +151,16 @@ x-onboard: &onboard
   env_file:
     - path: ./.origin.env
       required: false
-  depends_on: [video-router]
 
 x-onboard-env: &onboard-env
+  # GPS-free reference injection is opt-in through the px4sim bench front door.
+  BENCH_MODE: ${BENCH_MODE:-false}
+  BENCH_HOME_LAT: ${BENCH_HOME_LAT:-}
+  BENCH_HOME_LON: ${BENCH_HOME_LON:-}
+  BENCH_HOME_ALT: ${BENCH_HOME_ALT:-0.0}
+  BENCH_FIDUCIAL_LAT: ${BENCH_FIDUCIAL_LAT:-}
+  BENCH_FIDUCIAL_LON: ${BENCH_FIDUCIAL_LON:-}
+  BENCH_FIDUCIAL_ALT: ${BENCH_FIDUCIAL_ALT:-}
   # ros2 launch reads its nodes through pipes, and a pipe makes Python
   # block-buffer: everything ds_node says -- the backend it resolved, the
   # engine it is building, the reason it stopped -- sits invisible in a
@@ -161,14 +197,87 @@ x-onboard-env: &onboard-env
   CUDA_CACHE_PATH: /models/.nv-compute
   SCENE: ${SCENE:-lorton}
   # What sim_ground_truth scores against, the same pair the ground station
-  # reads. Without them the node takes its own defaults, which name one
+  # reads. Without them the node takes its own default, which names one
   # scenario, and every other scenario scores against the wrong targets.
+  # The name as well as the path: the entry point tells an empty SCENARIO,
+  # which publishes no truth, from one naming a scenario that is not there.
+  SCENARIO: ${SCENARIO:-lorton_casualties}
   GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO:-lorton_casualties}.yaml
   RESOLVED_TRUTH_FILE: /scenes/ground_truth_actual.yaml
   # One more parameter file, loaded after every other. Where this machine names
   # what only it has, the detector artifacts above all. Put it in the model
   # directory, which is already mounted. See modules/onboard/models/README.md.
   ONBOARD_PARAMS_FILE: ${ONBOARD_PARAMS_FILE:-}
+
+# The ground station, one container for the whole fleet, in two places: on
+# simnet beside the simulator, and on the host network of a real base station
+# beside the native mavlink-router and lcam. Everything they share lives here.
+# It is the mirror of the onboard containers: the same image shape, the same
+# workspace, the same MAVROS.
+#
+# UAS_FLEET is the whole identity, the way UAS_NUM is for a vehicle. The
+# entry point turns it into the vehicle numbers and the airframe models, so
+# the fleet is written once, in .env, and the ground station follows it.
+#
+# It runs a listening MAVROS, a MAVInsight frame tree, a preview ds_node and
+# the viz nodes for each vehicle, plus one Foxglove bridge and one HIL
+# dispatcher for all of them, and the ground truth publisher in the
+# simulator. Domain GROUND_DOMAIN throughout.
+x-offboard: &offboard
+  build:
+    context: ./modules/offboard
+    args:
+      # See the onboard note above: everything heavy is in ros-base.
+      <<: *deepstream
+  image: px4simstack/offboard:${DS_TAG:-7.1}
+  runtime: nvidia
+  ipc: host
+  # See the onboard note: the ground station records and previews with the
+  # software encoders wherever the GPU has no video engines.
+  cap_add: [SYS_NICE]
+  stop_grace_period: 20s
+  # The world origin, so the ground truth lands where the scene put it. Same
+  # file the sim reads. See scripts/origin-env.sh.
+  env_file:
+    - path: ./.origin.env
+      required: false
+  volumes:
+    # Read only, and only the ground truth node and the terrain link read it.
+    - ./modules/sim/scenes:/scenes:ro
+    - ./logs/offboard:/logs
+    - /tmp/.X11-unix:/tmp/.X11-unix
+    - ${XAUTH_FILE:-./.xauth}:/tmp/.docker.xauth
+
+x-offboard-env: &offboard-env
+  <<: [*gpu-env, *x11-env]
+  # See the onboard-env note: without this, everything the preview
+  # ds_node says sits in a pipe buffer until the process exits.
+  PYTHONUNBUFFERED: "1"
+  UAS_FLEET: ${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2}
+  # The first vehicle is UAS_BASE + 1. Every entry point derives its
+  # identifiers from it, so the host and the container have to read the
+  # same number: scripts/fleet.sh holds the same default.
+  UAS_BASE: ${UAS_BASE:-10}
+  # The ground station's own ROS domain: 70 beside a simulated fleet, 60
+  # beside the real one. offboard.launch.py reads it, and .env pins it on a
+  # real ground station.
+  GROUND_DOMAIN: ${GROUND_DOMAIN:-70}
+  SCENE: ${SCENE:-lorton}
+  BENCH_MODE: ${BENCH_MODE:-false}
+  BENCH_HOME_LAT: ${BENCH_HOME_LAT:-}
+  BENCH_HOME_LON: ${BENCH_HOME_LON:-}
+  BENCH_HOME_ALT: ${BENCH_HOME_ALT:-0.0}
+  BENCH_FIDUCIAL_LAT: ${BENCH_FIDUCIAL_LAT:-}
+  BENCH_FIDUCIAL_LON: ${BENCH_FIDUCIAL_LON:-}
+  BENCH_FIDUCIAL_ALT: ${BENCH_FIDUCIAL_ALT:-0.0}
+  # What sim_ground_truth scores against. The scenario says where each target
+  # was asked to stand. The resolved file says where Gazebo put it, and wins
+  # for the scene that wrote it. The name as well as the path: the entry point
+  # tells an empty SCENARIO from one naming a scenario that is not there.
+  SCENARIO: ${SCENARIO:-lorton_casualties}
+  GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO:-lorton_casualties}.yaml
+  RESOLVED_TRUTH_FILE: /scenes/ground_truth_actual.yaml
+  CUDA_CACHE_PATH: /logs/.nv-compute
 
 services:
 
@@ -181,13 +290,20 @@ services:
     profiles: [base]
     build:
       context: ./modules/ros-base
+      network: host
       additional_contexts:
         # Where 5g_drone, cdcl_umd_msgs, tracking_test_5g and MAVInsight are
         # checked out. colcon builds them into the image, so nothing is mounted
         # at run time.
         ros2_ws: ${ROS2_WS_DIR:-../ros2_ws}
+        # remote/mavros_patch and the mavros and angles submodules, for the
+        # MAVROS that talks to PX4 v1.18. See modules/ros-base/Dockerfile.
+        # Every ros-base build needs this path, MAVROS_PATCH=0 included:
+        # docker resolves a named context before it reads the Dockerfile.
+        chimera_deploy: ${CHIMERA_DEPLOY_DIR:-../chimera-deploy}
       args:
         <<: [*ids, *deepstream]
+        MAVROS_PATCH: ${MAVROS_PATCH:-1}
     image: px4simstack/ros-base:${DS_TAG:-7.1}
     command: ["true"]
 
@@ -197,6 +313,7 @@ services:
   # port and one video stream for each camera. Nothing else.
   # -------------------------------------------------------------------------
   sim:
+    profiles: [sim]
     build:
       context: ./modules/sim
       additional_contexts:
@@ -507,17 +624,57 @@ services:
     depends_on: [uas14]
 
   # -------------------------------------------------------------------------
-  # offboard - the ground station, one container for the whole fleet. Profile
-  # offboard. It is the mirror of the onboard containers: the same image
-  # shape, the same workspace, and MAVROS from apt.
-  #
-  # UAS_FLEET is the whole identity, the way UAS_NUM is for a vehicle. The
-  # entry point turns it into the vehicle numbers and the airframe models, so
-  # the fleet is written once, in .env, and the ground station follows it.
-  #
-  # It runs a listening MAVROS, a MAVInsight frame tree, a preview ds_node and
-  # the viz nodes for each vehicle, plus one Foxglove bridge, one ground truth
-  # publisher and one HIL dispatcher for all of them. Domain 60 throughout.
+  # onboard - the aircraft. Profile aircraft. The same image as onboard<N>,
+  # on the host network beside the native mavlink-router, which pushes to
+  # 127.0.0.1:14402, and rcam, which serves the cameras as /tmp/*ds_nv.sock.
+  # UAS_NUM is this machine's number, from /etc/environment. Nothing here
+  # carries a number of its own, so one block serves every vehicle.
+  # -------------------------------------------------------------------------
+  onboard:
+    <<: *onboard
+    profiles: [aircraft]
+    network_mode: host
+    restart: "no"
+    environment:
+      <<: *onboard-env
+      # Empty on a laptop, where this profile is never selected. Compose
+      # interpolates the whole file before it filters profiles, so a required
+      # variable here would stop the simulator. The entry point refuses an
+      # empty value instead.
+      UAS_NUM: ${UAS_NUM:-}
+      # The scene the ground station draws, so the vehicle casts at the
+      # surface the ground casts at. The dash form keeps an empty value
+      # empty, the way `ground` reads it: SCENE= on a bench leaves both
+      # sides on the flat plane, SCENE=lorton gives both sides the site.
+      SCENE: ${SCENE-lorton}
+      # The targets of that scene, read the same way. SCENARIO= on a bench
+      # publishes no ground truth, so nothing scores a real detection against
+      # targets that are not there.
+      SCENARIO: ${SCENARIO-lorton_casualties}
+      GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO-lorton_casualties}.yaml
+    volumes:
+      - *models-volume
+      - *logs-volume
+      # The surface for SCENE, the same directory the ground station mounts.
+      # The entry point links the one scene in play into /terrain.
+      - ./modules/sim/scenes:/scenes:ro
+      # rcam makes its sockets again at every start, so the directory is
+      # mounted and not the files. The nvidia runtime mounts
+      # /etc/nv_tegra_release by itself.
+      - /tmp:/tmp
+    devices:
+      # The SCF4 zoom lens by its USB identity, seen inside as /dev/lens.
+      # onboard_container_params.yaml pins zoom.serial.port to that name. A
+      # v2 has no lens and leaves the variable unset, which maps /dev/null.
+      - ${ONBOARD_LENS_DEVICE:-/dev/null}:/dev/lens
+    # The Jetson's GPU nodes are root:video and its render node root:render,
+    # and the image runs as uid 1000. preflight writes RENDER_GID into .env
+    # the way it writes INPUT_GID. render has no name inside the image.
+    group_add: [dialout, video, "${RENDER_GID:-104}"]
+
+  # -------------------------------------------------------------------------
+  # offboard - the simulated ground station. Profile offboard. One container
+  # for the whole fleet on simnet, with ground-router in its namespace.
   #
   # The published 1456x ports are where the vehicle routers push. A simulated
   # vehicle sends to 14550 + N with N from 11, so the range is 14561 to 14569
@@ -527,55 +684,15 @@ services:
   # direct path on simnet instead and leave the host out of it.
   # -------------------------------------------------------------------------
   offboard:
+    <<: *offboard
     profiles: [offboard]
-    build:
-      context: ./modules/offboard
-      args:
-        # See the onboard note above: everything heavy is in ros-base.
-        <<: *deepstream
-    image: px4simstack/offboard:${DS_TAG:-7.1}
     hostname: offboard
-    runtime: nvidia
-    ipc: host
-    # See the onboard note: the ground station records and previews with the
-    # software encoders wherever the GPU has no video engines.
-    cap_add: [SYS_NICE]
-    stop_grace_period: 20s
     environment:
-      <<: [*gpu-env, *x11-env]
-      # See the onboard-env note: without this, everything the preview
-      # ds_node says sits in a pipe buffer until the process exits.
-      PYTHONUNBUFFERED: "1"
-      UAS_FLEET: ${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2}
-      # The first simulated vehicle is UAS_BASE + 1. Every entry point derives
-      # its identifiers from it, so the host and the container have to read the
-      # same number: scripts/fleet.sh holds the same default.
-      UAS_BASE: ${UAS_BASE:-10}
-      # The ground station's own ROS domain. offboard.launch.py reads it and
-      # falls back to 70, so leaving it out means .env cannot move the fleet.
-      GROUND_DOMAIN: ${GROUND_DOMAIN:-70}
+      <<: *offboard-env
       # ds_node reads the LOW RATE mount of each gimbal camera, which is what
       # crosses the radio link on the aircraft: rgbl<N> on a v3, pilotl<N> on
       # a v2.
       RTSP_BASE: rtsp://video-router:8554
-      SCENE: ${SCENE:-lorton}
-      # What sim_ground_truth scores against. The scenario says where each
-      # casualty was asked to go; the resolved file says where Gazebo put it,
-      # and wins where it exists.
-      GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO:-lorton_casualties}.yaml
-      RESOLVED_TRUTH_FILE: /scenes/ground_truth_actual.yaml
-      CUDA_CACHE_PATH: /logs/.nv-compute
-    # The world origin, so the ground truth lands where the scene put it. Same
-    # file the sim reads. See scripts/origin-env.sh.
-    env_file:
-      - path: ./.origin.env
-        required: false
-    volumes:
-      # Read only, and only the ground truth node and the terrain link read it.
-      - ./modules/sim/scenes:/scenes:ro
-      - ./logs/offboard:/logs
-      - /tmp/.X11-unix:/tmp/.X11-unix
-      - ${XAUTH_FILE:-./.xauth}:/tmp/.docker.xauth
     ports:
       - "8765:8765"                      # Foxglove bridge
       - "14561-14569:14561-14569/udp"    # the simulated fleet, into ground-router
@@ -585,10 +702,41 @@ services:
     depends_on: [video-router]
 
   # -------------------------------------------------------------------------
+  # ground - the real ground station. Profile ground. The same image on the
+  # host network, so the native mavlink-router reaches its MAVROS at
+  # 127.0.0.1:14402 and DDS reaches the aircraft on the wire. lcam serves the
+  # low rate streams on 8554 under the names offboard.launch.py builds.
+  # No ground-router, no video-router, no qgc: the native ones do that work.
+  #
+  # Vehicle N's MAVROS binds 127.0.0.<N>:14402, and the fielded router in
+  # chimera-deploy/local/main.conf sends each vehicle there, the shape
+  # ground-router writes below.
+  # -------------------------------------------------------------------------
+  ground:
+    <<: *offboard
+    profiles: [ground]
+    network_mode: host
+    environment:
+      <<: *offboard-env
+      RTSP_BASE: ${RTSP_BASE:-rtsp://127.0.0.1:8554}
+      # 60 beside the real fleet, which flies 61 to 69. The anchor's 70
+      # belongs to a simulated fleet. scripts/fleet.sh derives the same pair
+      # for the host, so a .env with no GROUND_DOMAIN line still agrees.
+      GROUND_DOMAIN: ${GROUND_DOMAIN:-60}
+      # The dash form keeps an empty value empty: SCENE= in .env draws no
+      # terrain on a bench, SCENE=lorton draws the site at the field.
+      SCENE: ${SCENE-lorton}
+      # The targets of that scene, read the same way. SCENARIO= publishes no
+      # ground truth, and the scored layers wait for the course instead of
+      # calling every real detection a false positive.
+      SCENARIO: ${SCENARIO-lorton_casualties}
+      GROUND_TRUTH_FILE: /scenes/scenarios/${SCENARIO-lorton_casualties}.yaml
+
+  # -------------------------------------------------------------------------
   # ground-router - the ground station's mavlink-router, from
   # chimera-deploy/local/main.conf. Every vehicle arrives on 14550 + N and
-  # leaves to loopback: 14401 for QGroundControl and 1440<N+1> for that
-  # vehicle's MAVROS.
+  # leaves to loopback: 14401 for QGroundControl and 127.0.0.<N>:14402 for
+  # that vehicle's MAVROS, the same port MAVROS binds on the aircraft.
   #
   # It shares the offboard container's network namespace, because those
   # endpoints are loopback ones and MAVROS binds them there. That is also why
@@ -600,15 +748,25 @@ services:
     entrypoint: ["/bin/sh", "/opt/ground-router/entrypoint.sh"]
     environment:
       UAS_FLEET: ${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2}
+      # The entry point numbers its endpoints from this. Unset, it took the
+      # built-in default and a fleet at another base met nothing.
+      UAS_BASE: ${UAS_BASE:-10}
     volumes:
       - ./modules/offboard/mavlink-router:/opt/ground-router:ro
     network_mode: "service:offboard"
     depends_on: [offboard]
+
   # -------------------------------------------------------------------------
   # video-router - the video contract. Every camera enters here and leaves as
   # RTSP. Downstream modules know stream names, not encoders or transports.
+  #
+  # In both profiles: the simulator publishes into it, and the simulated
+  # ground station previews from it, so either alone still starts it. compose
+  # refuses a project whose selected service depends on one whose profile is
+  # not selected.
   # -------------------------------------------------------------------------
   video-router:
+    profiles: [sim, offboard]
     image: bluenviron/mediamtx:${MEDIAMTX_TAG:-1}
     hostname: video-router
     volumes:
@@ -634,6 +792,7 @@ services:
   # your own from source.
   # -------------------------------------------------------------------------
   qgc:
+    profiles: [sim]
     build:
       context: ./modules/qgc
       dockerfile: Dockerfile
@@ -728,11 +887,12 @@ services:
       - ./modules/scenegen:/app
       - ./modules/scenegen/data:/data
       - ./modules/sim/scenes:/scenes
+    # The editor, published to this host, which is how `genscene edit` reaches
+    # it. No simnet: the generator downloads map data and writes files, and it
+    # runs on a real ground station too, where creating the fleet network
+    # would put a bridge across the range the radio uses.
     ports:
       - "8090:8090"
-    networks:
-      simnet:
-        ipv4_address: ${SIMNET_PREFIX:-10.200.142}.229
 
   # -------------------------------------------------------------------------
   # xrce-agent - the uXRCE-DDS bridge. This puts PX4 uORB topics directly on

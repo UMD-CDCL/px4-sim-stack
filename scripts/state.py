@@ -10,9 +10,11 @@ Nothing here works a fleet number out a second time. Every reading comes from
 the thing itself, never from a log message:
 
   services   the container engine's own state for each container
-  streams    the video router's API, and the bytes each path really carried
+  streams    the video router's API, and the bytes each path really carried,
+             or the mounts themselves where the server answers no API
   vehicles   MAVLink from the vehicle, read on the TCP port the routers publish
   bridges    a connection to each Foxglove port, opened and closed
+  units      systemd, for the native services a real machine boots
   gpu        nvidia-smi, which counts the encoder sessions the cameras hold
 
 A warning from the front door can come before the first object, because the
@@ -35,6 +37,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -54,7 +57,13 @@ PORT_PROBE_S = 0.4
 BRIDGE_PERIOD_TICKS = 5
 STREAMS_TIMEOUT_S = 1.5
 STREAMS_RETRY_TICKS = 5
+# A mount is probed by opening it, which costs seconds. Read them on their own
+# long period, and carry the last answer in between.
+STREAMS_PROBE_TIMEOUT_S = 30.0
+STREAMS_PROBE_TICKS = 15
 DOCKER_TIMEOUT_S = 15.0
+UNITS_TIMEOUT_S = 5.0
+UNITS_PERIOD_TICKS = 5
 GPU_TIMEOUT_S = 5.0
 GPU_READINGS = "utilization.gpu,memory.used,memory.total,encoder.stats.sessionCount"
 LOOPBACK = "127.0.0.1"
@@ -240,15 +249,117 @@ class Streams:
         }
 
 
+class ProbedStreams:
+    """The video paths of a server that answers no API, probed by name.
+
+    lcam on the ground station and rcam on the aircraft serve mounts and
+    nothing else, so the only way to know a mount is live is to open it.
+    scripts/list-streams.py holds that probe, and `./px4sim streams` prints
+    what it finds. This asks the same file for the same answer as JSON, so one
+    probe serves the console and the table.
+
+    A probe reports no reader count and no bit rate. Nothing counts the readers
+    of a mount from outside it.
+    """
+
+    def __init__(self, base: str, owners: dict[str, int], project_dir: Path):
+        self.base = base
+        self.owners = owners
+        self.project_dir = project_dir
+        self.error = ""
+        self.paths: list[dict] = []
+        self.probe_at_tick = 0
+
+    def read(self, tick: int) -> list[dict]:
+        if tick < self.probe_at_tick or not self.owners:
+            return self.paths
+        self.probe_at_tick = tick + STREAMS_PROBE_TICKS
+        try:
+            done = subprocess.run(
+                [sys.executable, "scripts/list-streams.py", "--json", "--rtsp",
+                 self.base, *self.owners],
+                cwd=self.project_dir, capture_output=True, text=True,
+                timeout=STREAMS_PROBE_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            return self.gave_up(f"{self.base} did not answer for every mount"
+                                f" in {STREAMS_PROBE_TIMEOUT_S:.0f}s")
+        except (OSError, subprocess.SubprocessError) as failure:
+            return self.gave_up(f"cannot probe {self.base}: {failure}")
+        if done.returncode != 0:
+            complaint = done.stderr.strip().splitlines()
+            return self.gave_up(complaint[-1] if complaint else
+                                f"cannot probe {self.base}")
+        try:
+            probed = json.loads(done.stdout)
+        except json.JSONDecodeError as failure:
+            return self.gave_up(f"the probe of {self.base} answered something"
+                                f" this cannot read: {failure}")
+
+        self.error = ""
+        self.paths = [{"name": row.get("name", "?"),
+                       "vehicle": self.owners.get(row.get("name", "")),
+                       "ready": bool(row.get("ready")),
+                       "readers": None,
+                       "kbits": None,
+                       "source": row.get("source", "")} for row in probed]
+        return self.paths
+
+    def gave_up(self, why: str) -> list[dict]:
+        self.error = why
+        self.paths = []
+        return self.paths
+
+
+class Units:
+    """The native services a real machine boots beside the containers.
+
+    lcam and mavlink-router carry the video and the telemetry on the ground.
+    rcam, mavlink-router and onboard.service do the same on the aircraft, and
+    onboard.service is the unit that holds the stack there. A stopped one of
+    these explains an empty stream or a silent link, and no container knows it.
+    The simulator holds every one of them in a container, and names none.
+    """
+
+    def __init__(self, names: list[str]):
+        self.names = names
+        self.rows = [{"name": name, "state": "unknown"} for name in names]
+        self.read_at_tick = 0
+
+    def read(self, tick: int) -> list[dict]:
+        if not self.names or tick < self.read_at_tick:
+            return self.rows
+        self.read_at_tick = tick + UNITS_PERIOD_TICKS
+        try:
+            done = subprocess.run(["systemctl", "is-active", *self.names],
+                                  capture_output=True, text=True,
+                                  timeout=UNITS_TIMEOUT_S)
+        except (OSError, subprocess.SubprocessError):
+            return self.rows
+        # is-active answers one word for each unit, in the order it was asked,
+        # and exits non-zero when any of them is not active. A missing unit
+        # answers "inactive" like a stopped one.
+        said = done.stdout.split()
+        self.rows = [{"name": name, "state": said[index] if index < len(said)
+                      else "unknown"}
+                     for index, name in enumerate(self.names)]
+        return self.rows
+
+
 class Link:
-    """A passive MAVLink client on one vehicle's published TCP port.
+    """A passive MAVLink client on one vehicle's TCP port, on this machine.
 
     It sends nothing. The vehicle number is the MAVLink system id, so a frame
     from another system counts as a system that is present and nothing more.
+
+    A simulated vehicle publishes a port of its own, 5750 + N. A real fleet
+    has one router for each machine: the native mavlink-router serves TCP 5760
+    here and carries every vehicle it hears, so the system id picks the
+    vehicle out and every link reads the same port.
     """
 
     def __init__(self, number: int, port: int, system: int):
         self.number = number
+        self.host = LOOPBACK
         self.port = port
         self.system = system
         self.socket: socket.socket | None = None
@@ -274,7 +385,7 @@ class Link:
             return
         opening = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         opening.setblocking(False)
-        result = opening.connect_ex((LOOPBACK, self.port))
+        result = opening.connect_ex((self.host, self.port))
         if result not in (0, errno.EINPROGRESS, errno.EALREADY, errno.EWOULDBLOCK):
             opening.close()
             self.error = errno.errorcode.get(result, str(result))
@@ -348,7 +459,8 @@ class Link:
             link = "silent"
         else:
             link = "up"
-        told = {"number": self.number, "port": self.port, "link": link,
+        told = {"number": self.number, "host": self.host, "port": self.port,
+                "link": link,
                 "silent_for": silent_for, "messages_per_s": rate,
                 "systems": sorted(self.systems), "error": self.error}
         told.update(self.fields)
@@ -418,29 +530,30 @@ class Links:
         self.watcher.close()
 
 
-def listening(ports: list[int], timeout: float = PORT_PROBE_S) -> dict[int, bool]:
-    """Which ports accept a connection right now. Every port is tried at once."""
-    answers = {port: False for port in ports}
+def listening(targets: list[tuple[str, int]],
+              timeout: float = PORT_PROBE_S) -> dict[tuple[str, int], bool]:
+    """Which host and port pairs accept a connection right now, all at once."""
+    answers = {target: False for target in targets}
     trying = {}
-    for port in ports:
+    for target in answers:
         opening = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         opening.setblocking(False)
-        result = opening.connect_ex((LOOPBACK, port))
+        result = opening.connect_ex(target)
         if result in (0, errno.EINPROGRESS, errno.EALREADY, errno.EWOULDBLOCK):
-            trying[port] = opening
+            trying[target] = opening
         else:
             opening.close()
     deadline = time.monotonic() + timeout
     with selectors.DefaultSelector() as watcher:
-        for port, opening in trying.items():
-            watcher.register(opening, selectors.EVENT_WRITE, port)
+        for target, opening in trying.items():
+            watcher.register(opening, selectors.EVENT_WRITE, target)
         while watcher.get_map():
             left = deadline - time.monotonic()
             if left <= 0:
                 break
             for key, _events in watcher.select(timeout=left):
-                port = key.data
-                answers[port] = trying[port].getsockopt(
+                target = key.data
+                answers[target] = trying[target].getsockopt(
                     socket.SOL_SOCKET, socket.SO_ERROR) == 0
                 watcher.unregister(key.fileobj)
     for opening in trying.values():
@@ -458,18 +571,30 @@ class Bridges:
     """
 
     def __init__(self, context: dict):
-        self.named = [{"name": "ground",
-                       "port": int(context.get("ground_foxglove", 8765))}]
+        # The ground bridge is this machine's own, where this machine holds a
+        # ground station. The aircraft holds one bridge and it is the
+        # vehicle's, so a ground row there would name the same port twice. A
+        # vehicle's bridge is wherever px4sim says it is, which is the vehicle
+        # itself on the real fleet.
+        self.named = []
+        if context.get("world") != "aircraft":
+            self.named.append({"name": "ground", "host": LOOPBACK,
+                               "port": int(context.get("ground_foxglove", 8765))})
         for vehicle in context["fleet"]:
             if vehicle.get("companion"):
+                where = urllib.parse.urlsplit(vehicle.get("foxglove_url", ""))
                 self.named.append({"name": f"uas{vehicle['n']}",
-                                   "port": int(vehicle["foxglove"])})
-        self.open_ports: dict[int, bool] = {}
+                                   "host": where.hostname or LOOPBACK,
+                                   "port": where.port or int(vehicle["foxglove"])})
+        self.open_ports: dict[tuple[str, int], bool] = {}
 
     def read(self, tick: int) -> list[dict]:
         if tick % BRIDGE_PERIOD_TICKS == 0 or not self.open_ports:
-            self.open_ports = listening([bridge["port"] for bridge in self.named])
-        return [dict(bridge, listening=self.open_ports.get(bridge["port"], False))
+            self.open_ports = listening(
+                [(bridge["host"], bridge["port"]) for bridge in self.named])
+        return [dict(bridge,
+                     listening=self.open_ports.get(
+                         (bridge["host"], bridge["port"]), False))
                 for bridge in self.named]
 
 
@@ -479,7 +604,7 @@ def stream_owners(fleet: list[dict]) -> dict[str, int]:
 
 
 def snapshot(context: dict, project_dir: Path, streams: Streams, links: Links,
-             bridges: Bridges, tick: int) -> dict:
+             bridges: Bridges, units: Units, tick: int) -> dict:
     # The vehicles answer first. Reading the containers and the card takes
     # seconds on a busy host, and nothing reads a socket while it happens, so a
     # vehicle asked afterwards looks silent while its telemetry is arriving.
@@ -496,6 +621,7 @@ def snapshot(context: dict, project_dir: Path, streams: Streams, links: Links,
         "streams_error": streams.error,
         "vehicles": vehicles,
         "bridges": bridges.read(tick),
+        "units": units.read(tick),
         "gpu": graphics_card(),
     }
 
@@ -512,14 +638,19 @@ def main() -> int:
 
     context = read_context("" if sys.stdin.isatty() else sys.stdin.read())
     project_dir = Path(__file__).resolve().parents[1]
-    streams = Streams(str(context.get("mediamtx", "http://localhost:9997")),
-                      stream_owners(context["fleet"]))
+    # The front door names an RTSP base where this machine's server has no API
+    # to ask. See the `rtsp` fact in fleet_facts.
+    owners = stream_owners(context["fleet"])
+    base = str(context.get("rtsp", ""))
+    streams = (ProbedStreams(base, owners, project_dir) if base else
+               Streams(str(context.get("mediamtx", "http://localhost:9997")), owners))
     links = Links(context["fleet"])
     bridges = Bridges(context)
+    units = Units(as_list(context.get("units", "")))
 
     def tell(tick: int) -> None:
-        json.dump(snapshot(context, project_dir, streams, links, bridges, tick),
-                  sys.stdout)
+        json.dump(snapshot(context, project_dir, streams, links, bridges, units,
+                           tick), sys.stdout)
         sys.stdout.write("\n")
         sys.stdout.flush()
 

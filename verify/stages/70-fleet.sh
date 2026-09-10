@@ -23,12 +23,12 @@ fi
 
 if [ "$UAS_COUNT" -lt 2 ]; then
 	skip "this fleet has one vehicle, and this asks what two make of one target"
-	note "fly more: UAS_FLEET='chimera_v3 chimera_v3 chimera_v2 chimera_v2' ./px4sim start"
+	note "fly more: UAS_FLEET='chimera_v3 chimera_v3 chimera_v2 chimera_v2' ./px4sim restart"
 	return 0
 fi
 for n in $(fleet_numbers); do
 	if [ -z "$(COMPOSE_PROFILES="uas$n,onboard$n" docker compose ps -q "onboard$n" 2>/dev/null)" ]; then
-		fail "uas$n is not running. Start it: ./px4sim start"
+		fail "uas$n is not running. Start it: ./px4sim restart"
 		return 0
 	fi
 done

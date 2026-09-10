@@ -1,4 +1,7 @@
 .env
+# docs/front-doors.md tells the operator to keep one here while a laptop
+# borrows another world.
+.env.backup
 /src/
 /logs/
 *.pyc
@@ -44,3 +47,7 @@ modules/onboard/models/*
 # Written by ./px4sim: the origin of the current scene and scenario,
 # carried to the containers. The scene and the scenario are the source.
 .origin.env
+
+# Session scoped agent workspace. It holds paths that live as long as one
+# session, so a checkout elsewhere would read files that are not there.
+.claude/

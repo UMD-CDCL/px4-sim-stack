@@ -1,7 +1,7 @@
 # Detector models
 
 The onboard containers mount a model directory at `/models`, and
-`onboard_sim_params.yaml` in 5g_drone names what is inside it. The offboard
+`onboard_container_params.yaml` in 5g_drone names what is inside it. The offboard
 ground station does not: its ds_node runs with `preview.only` and
 `detect.enabled` false, so it loads no engine and has no model volume.
 
@@ -15,6 +15,11 @@ group -- resolve inside the container.
 Mount the WHOLE tree. Each group directory reaches the shared ONNX and labels
 through relative symlinks, and mounting one group alone leaves them dangling.
 
+On the drone, `perception_models/orin` holds the Orin's engines, verified
+against the manifest, and `local` points at `orin`.
+`scripts/fetch_models.py resolve --link` makes that link. The arm64 image
+carries the TensorRT build that made the engines, so they load as they are.
+
 This directory is the fallback when `ONBOARD_MODEL_DIR` is unset, and the place
 to put artifacts when you are not using 5g_drone's tree. Nothing per-machine
 lives here any more: `laptop_params.yaml` and the batch 2 classifier template
@@ -22,7 +27,8 @@ moved to `perception_models/t500/` in 5g_drone, beside the engines they belong
 to, reached at `/models/local/params.yaml` on every machine.
 
 nvinfer builds the TensorRT engine next to the ONNX file on the first run,
-which takes 1 to 3 minutes, and keeps it afterwards. An engine belongs to one
+which takes 1 to 3 minutes, and keeps it afterwards. On the Orin at 15 W a
+classifier engine takes tens of minutes. An engine belongs to one
 GPU, one driver and one TensorRT version, so it is not shared between machines
 and git does not carry it.
 

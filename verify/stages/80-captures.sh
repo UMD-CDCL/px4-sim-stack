@@ -17,7 +17,7 @@ fi
 
 lead=$FIRST_UAS
 if [ -z "$(COMPOSE_PROFILES="uas$lead,onboard$lead" docker compose ps -q "onboard$lead" 2>/dev/null)" ]; then
-	fail "uas$lead is not running. Start it: ./px4sim start"
+	fail "uas$lead is not running. Start it: ./px4sim restart"
 	return 0
 fi
 uas() { ./px4sim uas "$lead" "$@" 2>&1 || true; }

@@ -19,10 +19,14 @@
 #
 # The fix is not a newer DeepStream -- 8.0 and 9.0 are Ubuntu 24.04, which is
 # Jazzy, which breaks the fleet. It is a newer TensorRT inside the same 22.04
-# DeepStream 7.1 image. NVIDIA packages TensorRT 10.16 for jammy, the soname
+# DeepStream 7.1 image. NVIDIA packages TensorRT 10.9 for jammy, the soname
 # is unchanged, and DeepStream's own nvinfer builds and loads engines against
 # it. So a machine too new for the stock TensorRT gets a newer one, and
 # nothing else about it moves.
+#
+# A Jetson is the other case. Its engines load only under the exact TensorRT
+# build the host runs, so its image takes that build from the JetPack
+# repository. See the Jetson block below.
 #
 # Precedence, highest first:
 #   DS_IMAGE     an explicit image. Honoured as given.
@@ -34,9 +38,11 @@
 #
 #   DS_VERSION=7.1
 #   DS_IMAGE=nvcr.io/nvidia/deepstream:7.1-samples-multiarch
-#   DS_TAG=7.1-trt10.16
+#   DS_TAG=7.1-trt10.9
 #   ROS_DISTRO=humble
-#   DS_TRT_VERSION=10.16.1.11-1+cuda12.9
+#   DS_TRT_VERSION=10.9.0.34-1+cuda12.8
+#   DS_TRT_APT_SOURCE=
+#   DS_TRT_APT_KEY=
 #
 set -uo pipefail
 
@@ -56,8 +62,9 @@ DEFAULT_RELEASE=7.1
 # The TensorRT a GPU needs, newest architecture first. Compute capabilities are
 # times ten, so 90 is Hopper and 120 is Blackwell.
 #
-#   up to  90  the TensorRT 10.3 DeepStream 7.1 already ships. Nothing to do,
-#              and the Orin (87) lands here, so the aircraft image is untouched.
+#   up to  90  the TensorRT 10.3 DeepStream 7.1 already ships. Nothing to do.
+#              The Orin (87) lands here, but a Jetson takes the build its
+#              host runs. See the Jetson block below.
 #   above  90  TensorRT 10.9 for CUDA 12.8, from the jammy CUDA repository.
 #
 # 10.9 and not the newest, deliberately. 10.8 is the first release that knows
@@ -77,6 +84,19 @@ TRT_UPGRADE_CUDA=12-8
 # The newest architecture the upgrade knows. Past this, say so rather than
 # build an image that cannot infer.
 TRT_UPGRADE_MAX_CAP=120
+
+# A Jetson. An engine loads only under the exact TensorRT build that made it,
+# and the generic arm64 DeepStream image carries another build of the same
+# release: 10.3.0.26 against the host's 10.3.0.30. That build also cannot make
+# an engine on the Orin. So the image takes the host's own packages from the
+# JetPack repository the host lists, signed by the key the host trusts.
+JETSON_APT_KEY=https://repo.download.nvidia.com/jetson/jetson-ota-public.asc
+is_jetson() { [ -f /etc/nv_tegra_release ]; }
+jetson_apt_source() {
+	grep -rhoE '^deb .*repo\.download\.nvidia\.com/jetson/common [^ ]+ main' \
+		/etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null | head -1
+}
+jetson_tensorrt() { dpkg-query -W -f='${Version}' libnvinfer10 2>/dev/null; }
 
 die() { echo "ds-select: $*" >&2; exit 1; }
 
@@ -117,7 +137,8 @@ row_for() {
 RELEASES=$(for row in "${SUPPORTED[@]}"; do row_field "$row" 1; done | paste -sd' ' -)
 
 version=""; image=""; distro=""; codename=""; minimum=""
-trt=""; trt_short=""; reason=""; cap=""; drv=""
+trt=""; trt_short=""; trt_cuda=""; trt_apt_source=""; trt_apt_key=""
+reason=""; cap=""; drv=""
 
 drv=$(driver_version) || true
 cap=$(gpu_capability) || true
@@ -147,11 +168,21 @@ codename=$(row_field "$row" 3)
 minimum=$(row_field "$row" 4)
 
 # ------------------------------------------------------------ which TensorRT
-# Only 7.1 is ever short of a TensorRT the GPU can use. 8.0 and 9.0 ship 10.9
-# and 10.14, which already know Blackwell.
-if [ "$version" = 7.1 ] && [ -n "${cap:-}" ] && [ "$cap" -gt "$TRT_STOCK_MAX_CAP" ]; then
+# Only 7.1 ever takes another TensorRT: the host's own build on a Jetson, or a
+# newer release for a GPU past 10.3. 8.0 and 9.0 ship 10.9 and 10.14, which
+# already know Blackwell.
+if [ "$version" = 7.1 ] && is_jetson && [ -n "$(jetson_tensorrt)" ]; then
+	trt=$(jetson_tensorrt)
+	trt_short=$(echo "${trt%%-*}" | cut -d. -f1,2)
+	trt_apt_source=$(jetson_apt_source)
+	trt_apt_key=$JETSON_APT_KEY
+	[ -n "$trt_apt_source" ] ||
+		die "this is a Jetson and no apt source names repo.download.nvidia.com/jetson/common. JetPack installs one."
+	reason="$reason; TensorRT ${trt%%-*} because a Jetson's engines load only under the build the host runs"
+elif [ "$version" = 7.1 ] && [ -n "${cap:-}" ] && [ "$cap" -gt "$TRT_STOCK_MAX_CAP" ]; then
 	trt=$TRT_UPGRADE_VERSION
 	trt_short=$(echo "${trt%%-*}" | cut -d. -f1,2)
+	trt_cuda=$TRT_UPGRADE_CUDA
 	reason="$reason; TensorRT ${trt_short} because compute capability ${cap%?}.${cap#${cap%?}} is past the 10.3 it ships"
 fi
 
@@ -196,7 +227,9 @@ case "${1:-}" in
 	echo "ROS_DISTRO=$distro"
 	echo "DS_CODENAME=$codename"
 	echo "DS_TRT_VERSION=$trt"
-	echo "DS_TRT_CUDA=$([ -n "$trt" ] && echo "$TRT_UPGRADE_CUDA")"
+	echo "DS_TRT_CUDA=$trt_cuda"
+	printf 'DS_TRT_APT_SOURCE=%q\n' "$trt_apt_source"
+	printf 'DS_TRT_APT_KEY=%q\n' "$trt_apt_key"
 	printf 'DS_REASON=%q\n' "$reason"
 	;;
 *) die "unknown option $1" ;;

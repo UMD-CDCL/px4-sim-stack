@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # px4sim - one command for the whole stack.
 #
-#   ./px4sim start        bring everything up
+#   ./px4sim restart      rebuild and bring everything up
 #   ./px4sim stop         shut everything down
 #   ./px4sim status       what is running
 #
@@ -50,7 +50,7 @@ ALL_PROFILES=$(sed -n 's/^[[:space:]]*profiles:[[:space:]]*\[\(.*\)\][[:space:]]
 [ -f .env ] || { warn "No .env yet. Creating it from .env.example."; cp .env.example .env; }
 
 # .env is the configuration. The environment overrides the few names that
-# select one run, so `SCENE=forest ./px4sim start` flies another world once
+# select one run, so `SCENE=forest ./px4sim restart` flies another world once
 # and changes no file. The list is short on purpose: a shell that already
 # exports SCENE must not quietly change what everything else does.
 OVERRIDABLE="SCENE SCENARIO UAS_FLEET UAS_STREAMS AIRFRAME COMPOSE_PROFILES
@@ -68,14 +68,6 @@ for name in $OVERRIDABLE; do
 		export "$name=${!holder}"
 	fi
 done
-
-# The ground station's ROS domain. compose.yaml and the offboard entry point
-# both default it to 70, and the commands below hand it to `docker exec` as
-# ROS_DOMAIN_ID. Unset, that exec gets an empty string, which rmw reads as
-# domain 0 -- so `capture` published where nothing listens and reported
-# success, because `ros2 topic pub` does not need a subscriber. Defaulted here
-# so a .env written before this variable existed still reaches the station.
-export GROUND_DOMAIN=${GROUND_DOMAIN:-70}
 
 # Whether the fleet that is flying is the one the file holds. This script
 # exports what it reads, so a px4sim that this one runs -- the console, or
@@ -126,7 +118,7 @@ fi
 ds_resolved=$(./scripts/ds-select.sh) ||
 	die "ds-select.sh could not choose a DeepStream release. See the message above."
 eval "$ds_resolved"
-export DS_VERSION DS_IMAGE DS_TAG ROS_DISTRO DS_CODENAME DS_TRT_VERSION DS_TRT_CUDA DS_REASON
+export DS_VERSION DS_IMAGE DS_TAG ROS_DISTRO DS_CODENAME DS_TRT_VERSION DS_TRT_CUDA DS_TRT_APT_SOURCE DS_TRT_APT_KEY DS_REASON
 
 # The world origin and the survey marker come from the scene and the
 # scenario, never from .env. SCENE and SCENARIO carry them. Every command
@@ -174,14 +166,161 @@ resolve_origin
 # nothing else. UAS_FLEET is the single place the fleet size is written.
 # shellcheck disable=SC1091
 . ./scripts/fleet.sh
+# The ground station's ROS domain, derived by fleet.sh from UAS_BASE. The
+# commands below hand it to `docker exec` as ROS_DOMAIN_ID. Unset, that exec
+# gets an empty string, which rmw reads as domain 0.
+export GROUND_DOMAIN
 # shellcheck disable=SC1091
 . ./scripts/zoom.sh
 
-# A vehicle is named by its UAS number, 11 upwards. A single digit is its place
-# in UAS_FLEET, which is how that line reads, so `1` and `11` both reach the
-# first vehicle. Every command that takes one vehicle resolves it here.
+# Whether the boot unit holds this stack. systemd sets INVOCATION_ID inside a
+# unit, so this is true only for a person who runs px4sim by hand.
+unit_owns_stack() { [ -z "${INVOCATION_ID:-}" ] && systemctl is-active --quiet onboard.service 2>/dev/null; }
+
+# UAS_BASE and COMPOSE_PROFILES have to describe one world. A simulated fleet
+# through the real profiles would exec a real container that is not there,
+# and the real fleet through the sim profiles would number a vehicle 11.
+# `start` runs this again after a profile list on the command line.
+check_mode() {
+	if real_profiles_selected && [ "$FLEET_IS_SIMULATED" = true ]; then
+		die "COMPOSE_PROFILES ('${COMPOSE_PROFILES:-}') selects the real ground or the aircraft,
+    and UAS_BASE=$UAS_BASE numbers a simulated fleet. Set UAS_BASE=0 in .env. See .env.example."
+	fi
+	if ! real_profiles_selected && [ "$FLEET_IS_SIMULATED" = false ]; then
+		die "UAS_BASE=$UAS_BASE numbers the real fleet, and COMPOSE_PROFILES ('${COMPOSE_PROFILES:-}')
+    selects no real profile. Set COMPOSE_PROFILES=ground or aircraft in .env. See .env.example."
+	fi
+	if aircraft_selected && [ -z "${UAS_NUM:-}" ]; then
+		die "UAS_NUM is not in the environment. /etc/environment sets it on the aircraft. Log in again."
+	fi
+}
+
+bench_mode() {
+	[ "$FLEET_IS_SIMULATED" = false ] || die "bench mode is only for a real aircraft or ground station"
+	[ "${1:-}" = enable ] || [ "${1:-}" = disable ] || \
+		die "Use: ./px4sim bench enable 'ENABLE BENCH MODE' or ./px4sim bench disable"
+	if [ -n "$(COMPOSE_PROFILES="$ALL_PROFILES" $DC ps --status running -q 2>/dev/null)" ]; then
+		die "Stop the stack before changing bench mode: ./px4sim stop"
+	fi
+	if [ "$1" = enable ]; then
+		[ "${2:-}" = "ENABLE BENCH MODE" ] || \
+			die "Enabling GPS-free bench mode requires the exact phrase: ENABLE BENCH MODE"
+		if grep -q '^BENCH_MODE=' .env; then
+			sed -i 's/^BENCH_MODE=.*/BENCH_MODE=true/' .env
+		else
+			printf '\nBENCH_MODE=true\n' >> .env
+		fi
+		if grep -q '^SCENE=' .env; then
+			sed -i 's/^SCENE=.*/SCENE=uroc/' .env
+		else
+			printf 'SCENE=uroc\n' >> .env
+		fi
+		for setting in \
+			'BENCH_HOME_LAT=38.313294' \
+			'BENCH_HOME_LON=-76.55221' \
+			'BENCH_HOME_ALT=8.1432' \
+			'BENCH_FIDUCIAL_LAT=38.3133004' \
+			'BENCH_FIDUCIAL_LON=-76.5522071' \
+			'BENCH_FIDUCIAL_ALT=8.1232'; do
+			key=${setting%%=*}
+			if grep -q "^${key}=" .env; then
+				sed -i "s/^${key}=.*/${setting}/" .env
+			else
+				printf '%s\n' "${setting}" >> .env
+			fi
+		done
+		say "GPS-free BENCH MODE enabled. It is not safe for flight."
+		say "Bench reference: UROC home and fiducial; terrain: SCENE=uroc."
+		say "Restart through ./px4sim ui or ./px4sim restart, then disable before flight."
+	else
+		if grep -q '^BENCH_MODE=' .env; then
+			sed -i 's/^BENCH_MODE=.*/BENCH_MODE=false/' .env
+		else
+			printf '\nBENCH_MODE=false\n' >> .env
+		fi
+		say "GPS-free BENCH MODE disabled."
+	fi
+}
+
+# The ROS domain a reader answers on. The ground station joins every vehicle's
+# domain with its domain bridge and carries all of them on $GROUND_DOMAIN. A
+# companion holds its own vehicle's domain alone.
+reader_domain() {   # <compose service> <uas number>
+	if [ "$1" = "$(ground_service)" ]; then echo "$GROUND_DOMAIN"; else uas_domain "$2"; fi
+}
+# Which running container answers for a vehicle from this machine: its own
+# companion, or the ground station where the companion is not here, which is
+# how the real ground reaches a vehicle whose companion flies on the aircraft.
+vehicle_reader() {   # <uas number>, sets reader, container and domain
+	reader=$(companion_service "$1")
+	container=$($DC ps -q "$reader" 2>/dev/null)
+	if [ -z "$container" ]; then
+		reader=$(ground_service)
+		container=$($DC ps -q "$reader" 2>/dev/null)
+		[ -n "$container" ] || die "$(companion_service "$1") is not running. Restart it: ./px4sim restart"
+	fi
+	domain=$(reader_domain "$reader" "$1")
+}
+
+# The commands that fly the simulator. Every one of them execs into `sim`,
+# respawns the world or arms a vehicle by number, and with UAS_BASE=0 that
+# number is a real aircraft on the bench. The simulator's profiles are added
+# here, because each of these reaches the sim service.
+require_sim() {   # <what was asked>
+	if [ "$FLEET_IS_SIMULATED" = true ]; then add_fleet_profiles; return 0; fi
+	die "'$1' flies the simulator, and this stack is not one (UAS_BASE=$UAS_BASE,
+    profiles '${COMPOSE_PROFILES:-none}'). Nothing was sent."
+}
+
+# The commands that MAINTAIN the simulator: they fetch or delete the upstream
+# sources it is built from, or they edit the fleet it spawns. None of them
+# sends anything to a vehicle, so each says what it did not change, and what
+# to do on this machine instead.
+require_sim_edit() {   # <what was asked> [what to do here]
+	[ "$FLEET_IS_SIMULATED" = true ] && return 0
+	local instead=${2:+"
+    $2"}
+	die "'$1' changes the simulator, and this stack is not one (UAS_BASE=$UAS_BASE,
+    profiles '${COMPOSE_PROFILES:-none}'). Nothing was changed.$instead"
+}
+
+# The commands that work on a SCENE. A scene is map data, not a simulator: the
+# ground station draws its terrain and buildings, casts the camera footprint at
+# its surface and scores against its scenario, so a real ground station builds
+# and selects one the way the simulator does. The aircraft only reads the scene
+# it is given, and holds no scenegen image and no Gazebo world to reload.
+require_scene_world() {   # <what was asked>
+	if ! aircraft_selected; then add_fleet_profiles; return 0; fi
+	die "'$1' works on a scene, and this machine is an aircraft. Set SCENE and
+    SCENARIO in .env here, and build the scene on the ground station.
+    Nothing was changed."
+}
+
+# The names this machine's RTSP server serves: the video router's in the
+# simulator, lcam's numbered low rate mounts on the real ground, rcam's own
+# cameras on the aircraft. A number plays the gimbal camera, which a v2 and a
+# v3 both carry and the detector reads: rcam's is the first name it serves.
+# What this machine serves for one vehicle. rcam's mounts carry no number,
+# because the aircraft is one machine and one vehicle.
+vehicle_streams() { if aircraft_selected; then aircraft_streams "$1"; else streams_of "$1"; fi; }
+local_streams() {
+	local n
+	if aircraft_selected; then vehicle_streams "$UAS_NUM"; return 0; fi
+	for n in $(fleet_numbers); do vehicle_streams "$n"; done
+}
+default_stream() {
+	if [ "$FLEET_IS_SIMULATED" = true ]; then gimbal_stream "$1"
+	elif aircraft_selected; then local_streams | cut -d' ' -f1
+	else ground_stream "$1"; fi
+}
+
+# A vehicle is named by its UAS number: 11 upwards in the simulator, 1 upwards
+# in the real fleet. A single digit is its place in UAS_FLEET, which is how
+# that line reads, so `1` and `11` both reach the first simulated vehicle. On
+# the aircraft the default is its own number. Every command that takes one
+# vehicle resolves it here.
 vehicle_arg() {
-	local given=${1:-$FIRST_UAS} n
+	local given=${1:-${UAS_NUM:-$FIRST_UAS}} n
 	case "$given" in
 	'' | *[!0-9]*) die "'$given' is not a vehicle number. This fleet is uas$FIRST_UAS to uas$LAST_UAS." ;;
 	esac
@@ -200,9 +339,11 @@ for n in $(fleet_numbers); do
 	if [ -z "$(mark_of "$n")" ]; then
 		warn "UAS_FLEET names '$(model_of "$n")' for uas$n, which is neither a v2 nor a v3."
 		warn "The simulator, the companion and the ground station all refuse it."
-	elif [ ! -d "modules/sim/scenes/models/$(model_of "$n")" ]; then
+	elif [ "$FLEET_IS_SIMULATED" = true ] && [ ! -d "modules/sim/scenes/models/$(model_of "$n")" ]; then
 		warn "uas$n names model '$(model_of "$n")', which is not in modules/sim/scenes/models."
 	fi
+	# The real fleet has no uas<N> service and no numbered companion by design.
+	[ "$FLEET_IS_SIMULATED" = true ] || continue
 	if ! has_service "uas$n"; then
 		warn "compose.yaml defines no uas$n. This stack numbers its vehicles"
 		warn "uas$FIRST_UAS to uas19, so UAS_FLEET holds nine entries at the most."
@@ -216,30 +357,34 @@ done
 # airframe. compose defaults it to uas11's v3 name, so derive it here instead
 # and leave a value from .env or the environment alone.
 QGC_VIDEO_URL_FOLLOWS_FLEET=false
-if [ -z "${QGC_VIDEO_URL:-}" ] && [ -n "$(gimbal_stream "$FIRST_UAS")" ]; then
+if [ "$FLEET_IS_SIMULATED" = true ] && [ -z "${QGC_VIDEO_URL:-}" ] && [ -n "$(gimbal_stream "$FIRST_UAS")" ]; then
 	export QGC_VIDEO_URL="rtsp://video-router:8554/$(gimbal_stream "$FIRST_UAS")"
 	QGC_VIDEO_URL_FOLLOWS_FLEET=true
 fi
 
-# Every vehicle needs its router AND its companion. Without the onboard
-# profile the routers start, PX4 pushes into them, and no ROS stack ever
-# listens, which reads as a healthy stack with no topics.
+# Every vehicle needs its router AND its companion, and a simulated fleet
+# needs the simulator. Without the onboard profile the routers start, PX4
+# pushes into them, and no ROS stack ever listens, which reads as a healthy
+# stack with no topics. The real fleet adds nothing: its profile is in .env.
 fleet_profiles() {
-	local list="" n
+	[ "$FLEET_IS_SIMULATED" = true ] || return 0
+	local list="sim" n
 	for n in $(fleet_numbers); do
 		if has_service "uas$n";     then list="$list,uas$n"; fi
 		if has_service "onboard$n"; then list="$list,onboard$n"; fi
 	done
-	echo "${list#,}"
+	echo "$list"
 }
+# A name already in the list is not added again, so a px4sim that this one
+# runs, and a command that adds them twice, hand compose each profile once.
 add_fleet_profiles() {
 	local extra
-	extra=$(fleet_profiles)
-	if [ -n "${COMPOSE_PROFILES:-}" ]; then
-		export COMPOSE_PROFILES="$COMPOSE_PROFILES,$extra"
-	else
-		export COMPOSE_PROFILES="$extra"
-	fi
+	for extra in $(fleet_profiles | tr ',' ' '); do
+		case ",${COMPOSE_PROFILES:-}," in
+		*,"$extra",*) ;;
+		*) export COMPOSE_PROFILES="${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}$extra" ;;
+		esac
+	done
 }
 
 # Reload the world, and everything that reads it. Both `scene` and `place`
@@ -266,8 +411,17 @@ add_fleet_profiles() {
 reload_world() {
 	local reloading
 	add_fleet_profiles
-	reloading="sim $(picture_consumers)"
-	has_service ground-router && reloading="$reloading ground-router"
+	reloading=$(picture_consumers)
+	# Only the simulator holds a world to respawn, and only it runs the router
+	# that borrows the ground station's namespace. has_service cannot answer
+	# this: it says which services compose.yaml DECLARES, and it declares every
+	# one of them on every machine. Asking it started Gazebo, the simulated
+	# ground station and the simulated router on a fielded base station, where
+	# they fight the native lcam and mavlink-router for their ports.
+	if [ "$(world_of)" = simulator ]; then
+		reloading="sim $reloading"
+		has_service ground-router && reloading="$reloading ground-router"
+	fi
 	# shellcheck disable=SC2086
 	$DC up -d --force-recreate $reloading >/dev/null 2>&1
 }
@@ -283,10 +437,18 @@ PICTURE_SOURCES="sim video-router"
 # station, which reads the low rate streams for its own preview.
 picture_consumers() {
 	local number list=""
-	for number in $(fleet_numbers); do
-		has_service "onboard$number" && list="$list onboard$number"
-	done
-	has_service offboard && list="$list offboard"
+	case "$(world_of)" in
+	simulator)
+		for number in $(fleet_numbers); do
+			has_service "$(companion_service "$number")" && list="$list $(companion_service "$number")"
+		done
+		list="$list $(ground_service)"
+		;;
+	# A real machine runs one of the two, and the other belongs to a machine
+	# somewhere else. Naming both recreates a container this host must not run.
+	ground)   list=" $(ground_service)" ;;
+	aircraft) list=" $(companion_service "${UAS_NUM:-}")" ;;
+	esac
 	echo "${list# }"
 }
 
@@ -342,14 +504,59 @@ need_sources() {
 service_name() {
 	case "$1" in
 	router)  echo "uas$FIRST_UAS" ;;
-	onboard) echo "onboard$FIRST_UAS" ;;
-	ground)  echo offboard ;;
+	onboard) companion_service "$FIRST_UAS" ;;
+	ground)  ground_service ;;
 	video)   echo video-router ;;
 	*) echo "$1" ;;
 	esac
 }
 
-# The same names for a command that takes a list: `logs ground`, `build onboard`.
+build_stack() {
+	add_fleet_profiles
+	resolve_services "$@"
+
+	local needs_base=false
+	[ ${#SERVICES[@]} -eq 0 ] && needs_base=true
+	for svc in "${SERVICES[@]}"; do
+		case "$svc" in onboard* | offboard | ground | ros-base) needs_base=true ;; esac
+	done
+	if [ "$needs_base" = true ]; then
+		COMPOSE_PROFILES=base $DC build ros-base
+	fi
+
+	local remaining=()
+	for svc in "${SERVICES[@]}"; do
+		[ "$svc" = ros-base ] || remaining+=("$svc")
+	done
+	if [ ${#SERVICES[@]} -eq 0 ]; then
+		$DC build
+	elif [ ${#remaining[@]} -gt 0 ]; then
+		$DC build "${remaining[@]}"
+	fi
+}
+
+stop_stack() {
+	if unit_owns_stack; then
+		warn "onboard.service stays active with no container. It starts the stack again"
+		warn "at the next boot, or now with: sudo systemctl restart onboard"
+	fi
+	say "Stopping everything"
+	COMPOSE_PROFILES="$ALL_PROFILES" $DC down --remove-orphans
+
+	local leaked=0 segment
+	for segment in /dev/shm/fastrtps_*; do
+		[ -e "$segment" ] || continue
+		fuser -s "$segment" 2>/dev/null && continue
+		rm -f "$segment" && leaked=$((leaked + 1))
+	done
+	[ "$leaked" -gt 0 ] && echo "  released $leaked shared memory segments"
+	# A normal stop commonly has no stale segments. The conditional above then
+	# returns false; make that benign case successful so `set -e` callers such
+	# as `start` proceed to build and bring the stack back up.
+	return 0
+}
+
+# The same names for a command that takes a list: `logs ground` and `shell onboard`.
 # The answer lands in SERVICES, because a function cannot return an array.
 resolve_services() {
 	local name
@@ -368,7 +575,7 @@ enter_service() {
 	svc=$(service_name "$1")
 	has_service "$svc" || die "compose.yaml has no service named '$svc'. ./px4sim status lists them."
 	COMPOSE_PROFILES="$ALL_PROFILES" $DC ps --status running --services 2>/dev/null | grep -qx "$svc" \
-		|| die "$svc is not running. Run: ./px4sim start"
+		|| die "$svc is not running. Run: ./px4sim restart"
 	shift
 	for candidate in bash sh; do
 		if COMPOSE_PROFILES="$ALL_PROFILES" $DC exec -T "$svc" "$candidate" -c 'exit 0' >/dev/null 2>&1; then
@@ -385,85 +592,151 @@ enter_service() {
       docker inspect px4simstack-$svc-1"
 }
 
+# The one truthful list of what this front door accepts. Every command below
+# is a case arm of main(), and every case arm of main() is named below. The
+# world decides which ones act: require_sim and require_sim_edit refuse the
+# simulator's own commands anywhere else, so they stand in a section of their
+# own with that rule over them.
 usage() {
+	local world footer kinds presets sample
+	kinds=${CAPTURE_KINDS// /, }
+	presets=$(zoom_presets_widest_first | paste -sd, -)
+	presets=${presets//,/, }
+	# One service this world really runs, for the `logs` example.
+	case "$(world_of)" in
+	simulator) world="the simulator";     sample=sim ;;
+	ground)    world="the ground station"; sample=ground ;;
+	aircraft)  world="the aircraft";      sample=onboard ;;
+	esac
+	case "$(world_of)" in
+	simulator)
+		footer="  Current: scene ${SCENE:-?}, scenario ${SCENARIO:-?}, fleet ${UAS_FLEET:-?}
+           origin ${HOME_LAT:-?}, ${HOME_LON:-?}" ;;
+	aircraft)
+		footer="  Current: uas${UAS_NUM:-$FIRST_UAS} at $(uas_address "$FIRST_UAS"), ROS domain $(uas_domain "$FIRST_UAS")
+           the ground station is $(ground_address), on ROS domain $GROUND_DOMAIN" ;;
+	ground)
+		footer="  Current: fleet ${UAS_FLEET:-?}, uas$FIRST_UAS at $(uas_address "$FIRST_UAS")
+           this ground station is $(ground_address), on ROS domain $GROUND_DOMAIN" ;;
+	esac
 	cat <<EOF
 ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
 
+  This machine is ${BOLD}$world${OFF}: UAS_BASE=$UAS_BASE, profiles ${COMPOSE_PROFILES:-none}.
+
   ${BOLD}Getting started${OFF}
     doctor              Check the host: driver, docker, GPU runtime, X11, disk
-    setup               Clone PX4 and build the scenes (a few minutes)
-    build               Build the images (about 20 minutes the first time)
+    x11                 Let the containers draw on this display
 
   ${BOLD}Every day${OFF}
-    start [profiles]    Start everything. Default profiles: ${COMPOSE_PROFILES:-none}
-    core                Start the vehicles and QGC, with no ground station
+    restart [profiles]  Stop, build, and start what .env selects. Now: ${COMPOSE_PROFILES:-none}
+                        sim,offboard is a simulator, ground a base station,
+                        aircraft a vehicle
     stop                Stop and remove the containers. Volumes stay.
-    restart [service]   Restart one service, or all of them
+    start [profiles]    Start only when the stack is stopped; otherwise no-op
     status              What is running, and the addresses to use
+    endpoints           The addresses alone
     ui                  The same in a console, with a key for every command
+    bench enable PHRASE Enable GPS-free bench reference (requires exact phrase)
+    bench disable       Disable bench reference before flight
     fleet               Every vehicle: model, address, ports, domain, streams
-    fleet add [model]   Fly one more vehicle. Default: another of the last one
-    fleet remove [N]    Retire one vehicle. Default: the last of the fleet
-    logs [opts] [svc]   Follow the logs. \`logs --since 5m sim\` reads back.
-    console             uas${FIRST_UAS}'s PX4 pxh> prompt. Detach with Ctrl-P Ctrl-Q
-    px4 [N] <command>   One PX4 command on one vehicle: px4 ${LAST_UAS} commander status
+    logs [opts] [svc]   Follow the logs. \`logs --since 5m $sample\` reads back.
 
   ${BOLD}Get inside a container${OFF}
-    sim                 PX4, Gazebo and the camera encoders
-    qgc                 QGroundControl
-    router [N]          a vehicle's mavlink-router. Default uas${FIRST_UAS}
     onboard [N]         a vehicle's companion computer. Default uas${FIRST_UAS}
     ground              the ground station
     shell <svc> [cmd]   any other service, or one command inside it
+                        ${DIM}the real fleet runs its companion on the aircraft, and
+                        the ground station on a base station${OFF}
 
   ${BOLD}Look at the data${OFF}
     streams             Which video streams are live right now
-    view [N|stream]     Play a stream. Default: uas${FIRST_UAS}'s gimbal camera
+    view [N|stream]     Play a stream. Default: uas${FIRST_UAS}'s $(default_stream "$FIRST_UAS")
     topics [N]          List a vehicle's ROS topics. Default: uas${FIRST_UAS}
+    state [--watch]     Every reading the console draws, as JSON
     layout              Where the Foxglove layout lives, and how to load it
 
-  ${BOLD}Scenes and targets${OFF}
-    scene <name>        Switch the world and restart the simulator
-    scenario <name>     Switch the targets and reload what scores them
-    scenario            Place this scenario's targets again, with no restart
-    origin              The coordinates this scene and scenario fly at
-    fiducial [e] [n]    Stand the survey marker this far off its survey
-    capture <N> [kind]  Ask for a mosaic, vlm or fiducial capture
-    reset               Remove the targets from the running world
-    place               Put the fleet back upright at its start
-    fly <N> [m]         Respawn, then get that vehicle airborne
-    genscene <args>     Build a world from map data. Try: genscene --help
-                        ${DIM}all runs create / detect / edit (browser on :8090) / build${OFF}
+  ${BOLD}One vehicle${OFF}
+    uas <N> <command>   Read one vehicle's nodes: status, heading, detections,
+                        detect on|off, gimbal <pitch>
+    probe <N> [topic]   What that vehicle's ROS graph carries right now
+    foxglove <N>        What Foxglove is offered on that bridge, over the
+                        protocol Foxglove speaks. \`foxglove ground\` too.
+    capture <N> [kind]  Ask for a capture: $kinds
+    zoom <N> <preset>   Set a v3 lens, and read it back: $presets
 
   ${BOLD}Housekeeping${OFF}
     check               Validate the compose file and lint the docs
     verify [stage]      Run the verification stages. \`verify help\` lists them.
-    state [--watch]     Every reading the console draws, as JSON
-    uas <N> <command>   Fly one vehicle and read its nodes: status, arm,
-                        takeoff [m], land, gimbal <pitch>
-    probe <N> [topic]   What that vehicle's ROS graph carries right now
-    foxglove <N>        What Foxglove is offered on that bridge, over the
-                        protocol Foxglove speaks. \`foxglove ground\` too.
-    snap <stream>       Save one frame of a live stream to look at
-    zoom <N> <preset>   Set a v3 lens: narrow, mid or wide, and read it back
     clean               Remove containers, networks and volumes
+    help                This list, and which of the three worlds this is
+
+  ${BOLD}The scene${OFF}
+    ${DIM}A scene is map data: the terrain, the buildings and the satellite map
+    the 3D panel draws, the surface the camera footprint and the live view meet,
+    and the targets the scenario says are on it. The simulator and the ground
+    station both build and select one. An aircraft reads the scene it is
+    given, and refuses the three that change it.${OFF}
+    scene <name>        Switch the scene, and reload what draws and casts at it
+    scenario [name]     Switch the targets, or place this scenario's again
+    genscene <args>     Build a scene from map data. Try: genscene --help
+                        ${DIM}all runs create / detect / edit (browser on :8090) / build${OFF}
+    origin              The coordinates this scene and scenario fly at
+                        ${DIM}every world answers this one${OFF}
+
+  ${BOLD}The simulator alone${OFF}
+    ${DIM}These fly or maintain the simulator. A ground station and an aircraft
+    refuse every one of them, and change nothing.${OFF}
+    setup               Clone PX4 and build the scenes (a few minutes)
+    core                Start the vehicles and QGC, with no ground station
+    console             uas${FIRST_UAS}'s PX4 pxh> prompt. Detach with Ctrl-P Ctrl-Q
+    px4 [N] <command>   One PX4 command on one vehicle: px4 ${LAST_UAS} commander status
+    sim | qgc           A shell in the simulator, or in QGroundControl
+    router [N]          a vehicle's mavlink-router. Default uas${FIRST_UAS}
+    fiducial [e] [n]    Stand the survey marker this far off its survey
+    reset               Remove the targets from the running world
+    place               Put the fleet back upright at its start
+    fly <N> [m]         Respawn, then get that vehicle airborne
+    snap <stream>       Save one frame of a live stream to look at
+    fleet add [model]   Fly one more vehicle. Default: another of the last one
+    fleet remove [N]    Retire one vehicle. Default: the last of the fleet
     clean-src           Delete the cloned upstream sources in ./src
     nuke                clean and clean-src together
+    uas <N> arm | takeoff [m] | land | goto <east> <north> <up>
 
-  Current: scene ${SCENE:-?}, scenario ${SCENARIO:-?}, fleet ${UAS_FLEET:-?}
-           origin ${HOME_LAT:-?}, ${HOME_LON:-?}
+  ${BOLD}What a real machine does differently${OFF}
+    ${DIM}streams, view       the mounts lcam serves here, or rcam on the aircraft
+    uas, probe, topics  the ground station answers for a vehicle that flies
+    foxglove, capture   each one asks the machine that holds the answer${OFF}
+
+$footer
 EOF
 }
 
 endpoints() {
 	echo
 	printf '  %sFleet%s   %s\n' "$BOLD" "$OFF" "${DIM}./px4sim fleet prints the stream names too${OFF}"
-	local n prefix=${SIMNET_PREFIX:-10.200.142}
+	local n
 	for n in $(fleet_numbers); do
-		printf '    uas%-3s %-12s %s.2%s   sysid %s   domain %s   tcp %s   udp %s\n' \
-			"$n" "$(model_of "$n")" "$prefix" "$n" "$n" "$(uas_domain "$n")" \
+		printf '    uas%-3s %-12s %s   sysid %s   domain %s   tcp %s   udp %s\n' \
+			"$n" "$(model_of "$n")" "$(uas_address "$n")" "$n" "$(uas_domain "$n")" \
 			"$(uas_tcp_port "$n")" "$(uas_gcs_port "$n")"
 	done
+	if [ "$FLEET_IS_SIMULATED" = false ]; then
+		cat <<EOF
+
+  ${BOLD}MAVLink${OFF}     udp://$(ground_address):$(uas_gcs_port "$FIRST_UAS") upwards   each vehicle's router pushes here, into the native ground router
+              udp://127.0.0.1:14402     the native router feeds the aircraft's MAVROS here
+              udp://127.0.0.<N>:14402   the ground router feeds vehicle N's MAVROS here, one address per vehicle
+              tcp://127.0.0.1:5760      this machine's native router, every vehicle it hears. MAVSDK, pymavlink
+  ${BOLD}Video${OFF}       $(host_rtsp_base)/$(ground_stream "$FIRST_UAS")   the low rate mounts lcam restreams: rgbl<N>, pilotl<N>, thermall<N>
+              rtsp://$(uas_address "$FIRST_UAS"):8554/rgb      the full mounts, on the vehicle: rgb, pilot, thermal
+  ${BOLD}Foxglove${OFF}    ws://localhost:$(uas_foxglove_port "$FIRST_UAS")       the ground station here, or the aircraft when run there
+              $(uas_foxglove_url "$FIRST_UAS")       uas$FIRST_UAS's own bridge
+
+EOF
+		return 0
+	fi
 	cat <<EOF
 
   ${BOLD}MAVLink${OFF}     udp://<gcs>:$(uas_gcs_port "$FIRST_UAS") upwards   the ground station endpoint, from GCS_ADDRESS
@@ -484,6 +757,10 @@ EOF
 # The stack as one fact for each line, for a tool that reads rather than reads
 # out. scripts/state.py takes this on standard input, so the console draws the
 # numbers this script works out and never works out its own.
+#
+# `rtsp` is empty in the simulator, whose video router answers an API. On a
+# real machine it is the base lcam or rcam serves, and state.py probes the
+# mounts by name because those two answer no query.
 fleet_facts() {
 	local n companion
 	cat <<-EOF
@@ -497,10 +774,14 @@ fleet_facts() {
 		fiducial_lon=${FIDUCIAL_SURVEYED_LON:-}
 		fiducial_alt=${FIDUCIAL_SURVEYED_ALT:-}
 		profiles=${COMPOSE_PROFILES:-}
+		world=$(world_of)
+		bench_mode=${BENCH_MODE:-false}
+		units=$(native_units | tr ' ' ',' | sed 's/,$//')
 		compose=$DC
 		ground_domain=$GROUND_DOMAIN
 		ground_foxglove=8765
 		mediamtx=${MEDIAMTX_API:-http://localhost:9997}
+		rtsp=$([ "$FLEET_IS_SIMULATED" = true ] || host_rtsp_base)
 		zoom_presets=$(zoom_presets_widest_first | paste -sd, -)
 		capture_kinds=$(echo "$CAPTURE_KINDS" | tr ' ' ',')
 		models=$(fleet_models | paste -sd, -)
@@ -509,12 +790,13 @@ fleet_facts() {
 		expected=$($DC config --services 2>/dev/null | paste -sd, -)
 	EOF
 	for n in $(fleet_numbers); do
-		companion=$(has_service "onboard$n" && echo "onboard$n" || true)
-		printf 'vehicle n=%s sysid=%s model=%s mark=%s domain=%s tcp=%s gcs=%s foxglove=%s address=%s router=uas%s companion=%s gimbal=%s streams=%s zoom=%s\n' \
+		companion=$(has_service "$(companion_service "$n")" && companion_service "$n" || true)
+		printf 'vehicle n=%s sysid=%s model=%s mark=%s domain=%s tcp=%s gcs=%s foxglove=%s foxglove_url=%s address=%s router=uas%s companion=%s gimbal=%s streams=%s zoom=%s\n' \
 			"$n" "$n" "$(model_of "$n")" "$(mark_of "$n")" "$(uas_domain "$n")" \
 			"$(uas_tcp_port "$n")" "$(uas_gcs_port "$n")" "$(uas_foxglove_port "$n")" \
+			"$(uas_foxglove_url "$n")" \
 			"$(uas_address "$n")" "$n" "$companion" "$(gimbal_stream "$n")" \
-			"$(streams_of "$n" | tr ' ' ',' | sed 's/,$//')" \
+			"$(vehicle_streams "$n" | tr ' ' ',' | sed 's/,$//')" \
 			"$(zoom_preset_of_slot $((n - UAS_BASE - 1)) || true)"
 	done
 }
@@ -534,6 +816,27 @@ fleet_models() {
 # Every scenario this simulator can place, from the scenario files themselves.
 # `scenario` takes a name from this list and the console offers it, so a name
 # with no file behind it is caught here and not in a world with no targets.
+# The scenes in modules/sim/scenes. A generated one carries a surface, which is
+# what the ground station draws and casts at. A hand written world carries only
+# the Gazebo file, which the simulator can still fly, so both count as a scene
+# and the entry point says which of the two this one is.
+scene_names() {
+	local path name
+	for path in modules/sim/scenes/worlds/*_surface.json modules/sim/scenes/worlds/*.sdf; do
+		[ -f "$path" ] || continue
+		name=${path##*/}
+		name=${name%_surface.json}
+		echo "${name%.sdf}"
+	done | sort -u
+}
+
+have_scene() {
+	[ -f "modules/sim/scenes/worlds/$1_surface.json" ] && return 0
+	[ -f "modules/sim/scenes/worlds/$1.sdf" ] && return 0
+	die "No scene named '$1'. Try: $(scene_names | paste -sd' ' -)
+    Or build it: ./px4sim genscene --help"
+}
+
 scenario_names() {
 	local path name
 	for path in modules/sim/scenes/scenarios/*.yaml; do
@@ -628,7 +931,7 @@ fleet_edit() {
 
 	if [ -z "$(COMPOSE_PROFILES="$ALL_PROFILES" $DC ps --status running -q 2>/dev/null)" ]; then
 		echo "  Nothing is running, so the new fleet flies at the next start:"
-		echo "    ./px4sim start"
+		echo "    ./px4sim restart"
 		return 0
 	fi
 
@@ -662,7 +965,38 @@ main() {
 cmd=${1:-help}
 [ $# -gt 0 ] && shift || true
 
+# A .env whose two switches disagree is refused before any command reads it,
+# except the ones that explain or undo: doctor says what is wrong, and stop
+# takes every profile down whatever .env says.
 case "$cmd" in
+
+help | -h | --help | doctor | check | x11 | setup | stop | down | clean | clean-src | nuke) ;;
+*) check_mode ;;
+esac
+
+# The simulator's own commands. None of them may reach a real vehicle.
+case "$cmd" in
+fly | place | fiducial | reset | px4 | console | snap | core)
+	require_sim "$cmd" ;;
+scene | scenario | genscene)
+	require_scene_world "$cmd" ;;
+setup | clean-src | nuke)
+	require_sim_edit "$cmd" "./src holds the simulator's PX4 and QGroundControl sources.
+    To remove this stack's containers and volumes: ./px4sim clean" ;;
+uas)
+	# The verb can stand anywhere. uas.py reads `--` as the end of the
+	# options and dispatches the word after it, so `uas 1 -- arm` arms.
+	for word in "$@"; do
+		case "$word" in arm | takeoff | land | goto) require_sim "uas $word" ;; esac
+	done
+	;;
+esac
+
+case "$cmd" in
+
+# Configuration changes still go through this front door; bench_mode refuses
+# to alter a running stack and requires an explicit confirmation phrase.
+bench)  bench_mode "$@" ;;
 
 # The fleet profiles carry a router and a companion for each vehicle, and
 # so the ports those publish. Without them preflight checks the ports of a
@@ -670,119 +1004,50 @@ case "$cmd" in
 doctor)   add_fleet_profiles; ./scripts/preflight.sh ;;
 setup)    ./scripts/bootstrap.sh "$@" ;;
 
-build)
-	# The fleet profiles, or compose builds only what the named profiles hold
-	# and the companion image is never built. `build onboard` and `build
-	# router` build the image every vehicle shares.
-	add_fleet_profiles
-	./scripts/x11-allow.sh
-	resolve_services "$@"
+x11)      add_fleet_profiles; ./scripts/x11-allow.sh ;;
 
-	# ros-base is what onboard and offboard are made of, and compose has no way
-	# to order one build before another, so it is built here when either of
-	# them is. Named on its own it is built on its own, which is how to warm
-	# the cache before a day's work.
-	needs_base=false
-	[ ${#SERVICES[@]} -eq 0 ] && needs_base=true
-	for svc in "${SERVICES[@]}"; do
-		case "$svc" in onboard* | offboard | ros-base) needs_base=true ;; esac
-	done
-	if [ "$needs_base" = true ]; then
-		COMPOSE_PROFILES=base $DC build ros-base
-	fi
-
-	# Everything but the base. Asking compose to build it again here would be
-	# a second no-op pass over the largest image in the stack.
-	REMAINING=()
-	for svc in "${SERVICES[@]}"; do
-		[ "$svc" = ros-base ] || REMAINING+=("$svc")
-	done
-	if [ ${#SERVICES[@]} -eq 0 ]; then
-		$DC build
-	elif [ ${#REMAINING[@]} -gt 0 ]; then
-		$DC build "${REMAINING[@]}"
-	fi
-	;;
-
-x11)      ./scripts/x11-allow.sh ;;
-
-start|up|core)
-	# A profile list can be given: ./px4sim start offboard,xrce
+restart|start|up|core)
+	# A profile list can be given: ./px4sim restart ground. `start` is the
+	# non-disruptive counterpart: it does nothing while any stack service runs.
 	# `core` drops every named profile. The fleet is added below either way,
-	# so it is the vehicles, the transport and QGC, with no ground station.
+	# so it is the simulator, the vehicles and QGC, with no ground station.
 	[ "$cmd" = core ] && export COMPOSE_PROFILES=""
 	[ $# -gt 0 ] && export COMPOSE_PROFILES="$1"
+	check_mode
 	add_fleet_profiles
-	need_sources
+	[ "$FLEET_IS_SIMULATED" = true ] && need_sources
+	if [ "$cmd" = start ] && [ -n "$(COMPOSE_PROFILES="$ALL_PROFILES" $DC ps --status running -q 2>/dev/null)" ]; then
+		say "Already running; start does nothing"
+		echo "  Use ./px4sim restart to stop, rebuild, and recreate the stack."
+		return 0
+	fi
+	stop_stack
+	say "Building: $COMPOSE_PROFILES"
+	build_stack
 	./scripts/x11-allow.sh
-	say "Starting: $COMPOSE_PROFILES"
+	# The log volumes bind here. scripts/fleet.sh says why, and who owns them.
+	make_bind_dirs logs logs/onboard logs/offboard logs/px4 logs/qgc
+	if [ "$FLEET_IS_SIMULATED" = false ] && unit_owns_stack; then
+		warn "onboard.service already runs this stack. This restart reuses its container."
+	fi
+	say "Restarting: $COMPOSE_PROFILES"
 	echo "  fleet ${UAS_FLEET:-?}"
-	if [ -n "${HOME_LAT:-}" ]; then
-		echo "  scene ${SCENE:-?}, scenario ${SCENARIO:-?}, origin $HOME_LAT, $HOME_LON"
-	else
-		warn "No origin for scene '${SCENE:-unset}', scenario '${SCENARIO:-unset}'."
-		warn "PX4 will fly the coordinates inside the world file. ./px4sim origin"
+	if [ "$FLEET_IS_SIMULATED" = true ]; then
+		if [ -n "${HOME_LAT:-}" ]; then
+			echo "  scene ${SCENE:-?}, scenario ${SCENARIO:-?}, origin $HOME_LAT, $HOME_LON"
+		else
+			warn "No origin for scene '${SCENE:-unset}', scenario '${SCENARIO:-unset}'."
+			warn "PX4 will fly the coordinates inside the world file. ./px4sim origin"
+		fi
 	fi
 	$DC up -d
 	echo
 	$DC ps --format 'table {{.Service}}\t{{.Status}}'
 	endpoints
-	if [ ! -x src/PX4-Autopilot/build/px4_sitl_default/bin/px4 ]; then
-		warn "PX4 has not been built yet. The first start compiles it, which"
-		warn "takes 10 to 20 minutes. Watch it with: ./px4sim logs sim"
-	fi
 	;;
 
 stop|down)
-	say "Stopping everything"
-	COMPOSE_PROFILES="$ALL_PROFILES" $DC down --remove-orphans
-
-	# Fast DDS keeps its shared memory in /dev/shm, and these containers share
-	# the host's, so a segment outlives the container that made it. They pile
-	# up a few hundred at a time until a new participant cannot lock a port and
-	# the ground station quietly stops hearing anything. Only the ones nobody
-	# has open are removed, so another stack on this machine is left alone.
-	leaked=0
-	for segment in /dev/shm/fastrtps_*; do
-		[ -e "$segment" ] || continue
-		fuser -s "$segment" 2>/dev/null && continue
-		rm -f "$segment" && leaked=$((leaked + 1))
-	done
-	[ "$leaked" -gt 0 ] && echo "  released $leaked shared memory segments"
-	;;
-
-restart)
-	# Recreate, not restart. `docker compose restart` starts the same container
-	# again, so a service restarted after `./px4sim build` keeps running the
-	# image it was created from and the change looks like it did nothing.
-	#
-	# A service that lends its network namespace takes its borrowers with it: a
-	# recreated container gets a new namespace and the old one is left holding
-	# nothing but loopback, which reads as a running container that hears
-	# nobody. See network_mode in compose.yaml.
-	#
-	# A service that carries the picture takes every camera reader with it, for
-	# the same reason and with the same silence. See PICTURE_SOURCES.
-	resolve_services "$@"
-	add_fleet_profiles
-	for source in "${SERVICES[@]}"; do
-		case " $PICTURE_SOURCES " in *" $source "*) ;; *) continue ;; esac
-		for reader in $(picture_consumers); do
-			case " ${SERVICES[*]} " in
-			*" $reader "*) ;;
-			*) SERVICES+=("$reader") ;;
-			esac
-		done
-	done
-	for owner in "${SERVICES[@]}"; do
-		for borrower in $(namespace_borrowers "$owner"); do
-			case " ${SERVICES[*]} " in
-			*" $borrower "*) ;;
-			*) SERVICES+=("$borrower") ;;
-			esac
-		done
-	done
-	$DC up -d --force-recreate "${SERVICES[@]}"
+	stop_stack
 	;;
 
 status|ps)
@@ -796,7 +1061,7 @@ status|ps)
 		printf '%s\n' "$wedged" | while read -r line; do warn "  $line"; done
 		warn "Starting these again reuses the endpoint they have. Free whatever"
 		warn "holds the port (./px4sim doctor names it), then recreate them:"
-		warn "  ./px4sim stop && ./px4sim start"
+		warn "  ./px4sim stop && ./px4sim restart"
 	fi
 	endpoints
 	;;
@@ -848,7 +1113,7 @@ console)
 	# foreground, which makes it the container's own terminal, and starts
 	# every other vehicle with -d. `px4` below reaches those.
 	id=$($DC ps -q sim) || true
-	[ -n "${id:-}" ] || die "The sim container is not running. Run: ./px4sim start"
+	[ -n "${id:-}" ] || die "The sim container is not running. Run: ./px4sim restart"
 	say "Attaching to uas$FIRST_UAS's pxh>. Detach with Ctrl-P Ctrl-Q, not Ctrl-C."
 	echo "  Every other vehicle runs headless. Send one a command with:"
 	echo "    ./px4sim px4 $LAST_UAS commander status"
@@ -870,14 +1135,21 @@ px4)
 
 shell|sh)          enter_service "${1:-sim}" "${@:2}" ;;
 sim|qgc|ground)    enter_service "$cmd" "$@" ;;
-router)            n=$(vehicle_arg "${1:-}"); shift || true; enter_service "uas$n" "$@" ;;
-onboard)           n=$(vehicle_arg "${1:-}"); shift || true; enter_service "onboard$n" "$@" ;;
+router)            [ "$FLEET_IS_SIMULATED" = true ] || die "the real fleet's router is native:  systemctl status mavlink-router"
+                   n=$(vehicle_arg "${1:-}"); shift || true; enter_service "uas$n" "$@" ;;
+onboard)           n=$(vehicle_arg "${1:-}"); shift || true; enter_service "$(companion_service "$n")" "$@" ;;
 
 streams)
 	say "Video paths"
-	./scripts/list-streams.py "${MEDIAMTX_API:-http://localhost:9997}"
+	if [ "$FLEET_IS_SIMULATED" = true ]; then
+		./scripts/list-streams.py "${MEDIAMTX_API:-http://localhost:9997}"
+	else
+		# lcam and rcam have no API, so each mount is asked for by name.
+		# shellcheck disable=SC2046
+		./scripts/list-streams.py --rtsp "$(host_rtsp_base)" $(local_streams)
+	fi
 	echo
-	echo "  Play one with:  ./px4sim view $(gimbal_stream "$FIRST_UAS")"
+	echo "  Play one with:  ./px4sim view $(default_stream "$FIRST_UAS")"
 	;;
 
 view)
@@ -886,19 +1158,19 @@ view)
 	case "${1:-}" in
 	'' | [0-9] | [0-9][0-9])
 		n=$(vehicle_arg "${1:-}")
-		stream=$(gimbal_stream "$n")
+		stream=$(default_stream "$n")
 		[ -n "$stream" ] || die "uas$n names no airframe this stack knows, so no stream name follows from it."
 		;;
 	*) stream=$1 ;;
 	esac
 	# Warn rather than stop: mediamtx serves whatever publishes to it, and a
 	# name of one's own is a fair thing to try.
-	served=$(for n in $(fleet_numbers); do streams_of "$n"; done | tr '\n' ' ')
+	served=$(local_streams | tr '\n' ' ')
 	case " $served " in
 	*" $stream "*) ;;
 	*) warn "No vehicle in this fleet serves '$stream'. ./px4sim fleet lists what each one does." ;;
 	esac
-	url="rtsp://127.0.0.1:${RTSP_HOST_PORT:-8554}/$stream"
+	url="$(host_rtsp_base)/$stream"
 	command -v ffplay >/dev/null || die "ffplay is not installed. Run: sudo apt install ffmpeg"
 	say "Playing $url   (close the window or press q)"
 	# Force TCP and drop every buffer we can. Without -rtsp_transport tcp a
@@ -912,25 +1184,36 @@ view)
 topics)
 	# A vehicle holds ROS domain 60 + N and its companion sources the
 	# workspace in its entry point, which `exec` does not run. So both are
-	# given here. The ground station is domain $GROUND_DOMAIN in the offboard container.
+	# given here, and reader_domain says which domain the reader answers on.
+	#
+	# On the real ground the vehicle's companion runs on the aircraft. The
+	# ground container joins every vehicle's domain with its domain bridge,
+	# so it answers for the vehicle from here.
 	n=$(vehicle_arg "${1:-}")
-	has_service "onboard$n" || die "compose.yaml defines no onboard$n, so uas$n has no ROS stack."
-	COMPOSE_PROFILES="$ALL_PROFILES" $DC exec -e ROS_DOMAIN_ID=$((60 + n)) "onboard$n" bash -lc \
-		'. /opt/ros/$ROS_DISTRO/setup.bash; . /home/user/ros2_ws/install/setup.bash; ros2 topic list' \
-		|| die "onboard$n did not answer. Is it running?  ./px4sim status"
+	if [ "$FLEET_IS_SIMULATED" = false ] && ! aircraft_selected; then
+		reader=$(ground_service)
+	else
+		reader=$(companion_service "$n")
+	fi
+	has_service "$reader" || die "compose.yaml defines no $reader, so uas$n has no ROS stack."
+	COMPOSE_PROFILES="$ALL_PROFILES" $DC exec -e ROS_DOMAIN_ID="$(reader_domain "$reader" "$n")" "$reader" bash -lc \
+		'. /usr/local/bin/ros-env.sh; ros2 topic list' \
+		|| die "$reader did not answer. Is it running?  ./px4sim status"
 	;;
 
 layout)
-	f="${ROS2_WS_DIR:-../ros2_ws}/src/5g_drone/config/foxglove/chimera_sim.json"
-	say "Foxglove layout"
+	f=$(render_layout) || die "No Foxglove layout at $f. Check ROS2_WS_DIR in .env."
+	say "Foxglove layout for uas$FIRST_UAS"
 	echo "  $(readlink -f "$f" 2>/dev/null || echo "$f")"
+	echo "${DIM}  Rendered from $LAYOUT_TEMPLATE at every ./px4sim layout, so edit${OFF}"
+	echo "${DIM}  the template and not this copy.${OFF}"
 	echo
 	echo "  1. Open Foxglove, desktop or https://app.foxglove.dev"
 	echo "  2. Connect to ws://localhost:8765 for the ground station, which holds"
 	echo "     every vehicle, or to one vehicle's own bridge:"
 	for n in $(fleet_numbers); do
-		if has_service "onboard$n"; then
-			echo "       uas$n  ws://localhost:$((8760 + n))"
+		if has_service "$(companion_service "$n")"; then
+			echo "       uas$n  $(uas_foxglove_url "$n")"
 		fi
 	done
 	echo "  3. Layout, then Import from file, and pick the file above"
@@ -941,18 +1224,27 @@ layout)
 	;;
 
 scene)
-	# No name restarts the sim with the scene already in .env, which is how
-	# a new UAS_FLEET or AIRFRAME reaches the world.
+	# No name restarts with the scene already in .env, which is how a new
+	# UAS_FLEET or AIRFRAME reaches the world.
+	was=${SCENE:-}
 	name=${1:-${SCENE:-}}
-	[ -n "$name" ] || die "Give a scene name. Try: lorton, uroc, campus, recon_field"
+	[ -n "$name" ] || die "Give a scene name. Try: $(scene_names | paste -sd' ' -)"
+	have_scene "$name"
 	say "Switching to scene '$name'"
-	# The new world brings its own origin, so resolve it again before the
-	# sim starts. Without this the vehicle would fly the old coordinates.
+	# The new scene brings its own origin, so resolve it again before the
+	# containers start. Without this the vehicle would fly the old
+	# coordinates, and the ground station would draw the old site.
 	export SCENE="$name"
 	resolve_origin "$SCENE"
 	reload_world
 	echo "  scene $SCENE   origin ${HOME_LAT:-from the world file}"
-	say "Wait for 'Ready for takeoff' in ./px4sim logs sim"
+	if [ "$was" != "$SCENE" ]; then
+		warn "SCENE in .env still names '${was:-nothing}'. Change it there to"
+		warn "keep this scene, or the next start draws the other one again."
+	fi
+	if [ "$(world_of)" = simulator ]; then
+		say "Wait for 'Ready for takeoff' in ./px4sim logs sim"
+	fi
 	;;
 
 origin)
@@ -978,37 +1270,47 @@ endpoints|urls) endpoints ;;
 
 fleet)
 	case "${1:-}" in
-	add | remove) fleet_edit "$@"; exit 0 ;;
+	add | remove)
+		require_sim_edit "fleet $1" "Edit UAS_FLEET in .env, then: ./px4sim restart"
+		fleet_edit "$@"; exit 0 ;;
 	'') ;;
 	*) die "fleet takes 'add [model]' or 'remove [N]', or nothing to print the fleet." ;;
 	esac
 	# The whole map for one vehicle at a time. Everything here follows from
 	# the UAS number by arithmetic, and the stream names follow from the
 	# airframe. docs/uas-contract.md is the specification.
-	prefix=${SIMNET_PREFIX:-10.200.142}
 	say "Fleet: $UAS_COUNT vehicles, from UAS_FLEET"
 	for n in $(fleet_numbers); do
 		echo
-		printf '  %suas%s%s  %s   %s.2%s\n' \
-			"$BOLD" "$n" "$OFF" "$(model_of "$n")" "$prefix" "$n"
+		printf '  %suas%s%s  %s   %s\n' \
+			"$BOLD" "$n" "$OFF" "$(model_of "$n")" "$(uas_address "$n")"
 		printf '    mavlink   system id %s   udp %s to the ground station   tcp://localhost:%s\n' \
 			"$n" "$(uas_gcs_port "$n")" "$(uas_tcp_port "$n")"
 		printf '    ros       domain %s   namespace /uas%s   frames d%s_ and uas%s_\n' \
 			"$(uas_domain "$n")" "$n" "$n" "$n"
-		if has_service "onboard$n"; then
-			printf '    foxglove  ws://localhost:%s\n' "$(uas_foxglove_port "$n")"
+		if ! has_service "$(companion_service "$n")"; then
+			printf '    foxglove  none. compose.yaml defines no %s\n' "$(companion_service "$n")"
+			printf '    compose   uas%s alone, with no companion\n' "$n"
+		elif [ "$FLEET_IS_SIMULATED" = true ]; then
+			printf '    foxglove  %s\n' "$(uas_foxglove_url "$n")"
 			printf '    compose   uas%s and onboard%s\n' "$n" "$n"
 		else
-			printf '    foxglove  none. compose.yaml defines no onboard%s\n' "$n"
-			printf '    compose   uas%s alone, with no companion\n' "$n"
+			printf '    foxglove  %s\n' "$(uas_foxglove_url "$n")"
+			printf '    compose   onboard, on the vehicle, beside its native mavlink-router\n'
 		fi
 		printf '    video     %s\n' "$(streams_of "$n")"
 	done
+	if [ "$FLEET_IS_SIMULATED" = true ]; then
+		video="$(host_rtsp_base)/<name>, or http://localhost:8889/<name> in a
+  browser. The full stream is 1920x1080 and the l stream is 640x360, thermal
+  excepted: it is 640x512 both ways."
+	else
+		video="$(host_rtsp_base)/<name>, the low rate mounts lcam pulls from each
+  vehicle, 640x360. The full mounts are on the vehicle: rtsp://<address>:8554/rgb."
+	fi
 	cat <<EOF
 
-${DIM}  Video is rtsp://localhost:${RTSP_HOST_PORT:-8554}/<name>, or http://localhost:8889/<name> in a
-  browser. The full stream is 1920x1080 and the l stream is 640x360, thermal
-  excepted: it is 640x512 both ways.
+${DIM}  Video is $video
 
   The ground station holds every vehicle at once: ws://localhost:8765, ROS
   domain $GROUND_DOMAIN, MAVLink in on $(uas_gcs_port "$FIRST_UAS") upwards.${OFF}
@@ -1028,6 +1330,12 @@ scenario)
 		[ -n "${SCENARIO:-}" ] \
 			|| die "Give a scenario name, or set SCENARIO in .env. Try: $(scenario_names | paste -sd' ' -)"
 		have_scenario "$SCENARIO"
+		# Placing the targets is Gazebo's work. A real course already holds
+		# them, and the ground station scores against where they were
+		# surveyed to stand.
+		[ "$(world_of)" = simulator ] \
+			|| die "Placing targets needs the simulator. This scenario already names
+    where they stand: ./px4sim scenario $SCENARIO switches the truth to it."
 		$DC exec sim /scenes/spawn_scenario.py \
 			--world "${SCENE:-lorton}" --scenario "/scenes/scenarios/${SCENARIO}.yaml"
 		exit 0
@@ -1043,7 +1351,9 @@ scenario)
 		warn "SCENARIO in .env still names '${was:-nothing}'. Change it there to"
 		warn "keep this scenario, or the next start flies the other one again."
 	fi
-	say "Wait for 'Ready for takeoff' in ./px4sim logs sim"
+	if [ "$(world_of)" = simulator ]; then
+		say "Wait for 'Ready for takeoff' in ./px4sim logs sim"
+	fi
 	;;
 
 fiducial)
@@ -1096,7 +1406,7 @@ fly)
 	picture=false
 	while true; do
 		sim_id=$($DC ps -q sim 2>/dev/null)
-		companion=$($DC ps -q "onboard$n" 2>/dev/null)
+		companion=$($DC ps -q "$(companion_service "$n")" 2>/dev/null)
 		# grep -c, never grep -q, and the reason is this script's own
 		# `set -o pipefail`. `grep -q` stops at the first match and closes the
 		# pipe, so `docker logs` dies of SIGPIPE with status 141 while it still
@@ -1116,7 +1426,7 @@ fly)
 		if [ "$SECONDS" -ge "$ready_by" ]; then
 			warn "uas$n was not ready in ${FLY_READY_S:-150}s:"
 			[ "$world" = true ] || warn "  the world never said 'Ready for takeoff'. ./px4sim logs sim"
-			[ "$picture" = true ] || warn "  the camera never opened. ./px4sim logs onboard$n"
+			[ "$picture" = true ] || warn "  the camera never opened. ./px4sim logs $(companion_service "$n")"
 			die "nothing was flown"
 		fi
 		sleep 2
@@ -1126,9 +1436,8 @@ fly)
 	# The autopilot forgets who holds the gimbal across the reboot the respawn
 	# causes, while the manager status still names the old owner. Without this
 	# the gimbal silently ignores every command and the state looks healthy.
-	timeout 60 $DC exec -T "onboard$n" bash -lc '
-		. /opt/ros/$ROS_DISTRO/setup.bash
-		. /home/user/ros2_ws/install/setup.bash
+	timeout 60 $DC exec -T "$(companion_service "$n")" bash -lc '
+		. /usr/local/bin/ros-env.sh
 		exec ros2 topic pub --once -w 1 "$1" std_msgs/msg/Float32 "{data: -361.0}"
 		' _ "/uas$n/reassert_gimbal_cmd" >/dev/null 2>&1 || true
 
@@ -1136,7 +1445,7 @@ fly)
 		say "uas$n is flying at $height m, from a fresh world"
 		exit 0
 	fi
-	die "uas$n will not climb even from a fresh world. ./px4sim logs sim, ./px4sim logs onboard$n"
+	die "uas$n will not climb even from a fresh world. ./px4sim logs sim, ./px4sim logs $(companion_service "$n")"
 	;;
 
 place)
@@ -1164,6 +1473,8 @@ genscene)
 	COMPOSE_PROFILES="scenegen" exec $DC run --rm --service-ports scenegen "$@"
 	;;
 
+# Not require_sim. The suite reads the same fleet definition this file does,
+# and it says for itself which of its stages a real machine can answer.
 verify)   ./verify/run.sh "$@" ;;
 
 capture)
@@ -1178,11 +1489,16 @@ capture)
 	*" $kind "*) ;;
 	*) die "capture takes $(echo "$CAPTURE_KINDS" | sed 's/ /, /g'), not '$kind'" ;;
 	esac
-	say "asking uas$n for a $kind capture, from the ground"
-	$DC exec -e ROS_DOMAIN_ID="$GROUND_DOMAIN" offboard bash -lc '
-		. /opt/ros/$ROS_DISTRO/setup.bash
-		. /home/user/ros2_ws/install/setup.bash
-		exec timeout 10 ros2 topic pub --once "$1" std_msgs/msg/Bool "{data: true}"' \
+	# The aircraft holds no ground station, so there it asks its own companion
+	# on the vehicle's own domain. Everywhere else the ground station is the
+	# door, and reader_domain says which domain that reader answers on.
+	if aircraft_selected; then reader=$(companion_service "$n"); else reader=$(ground_service); fi
+	container=$($DC ps -q "$reader" 2>/dev/null)
+	[ -n "$container" ] || die "$reader is not running. Restart it: ./px4sim restart"
+	say "asking uas$n for a $kind capture, through $reader"
+	docker exec -e ROS_DOMAIN_ID="$(reader_domain "$reader" "$n")" "$container" bash -lc '
+		. /usr/local/bin/ros-env.sh
+		exec timeout 10 ros2 topic pub --once -w 1 "$1" std_msgs/msg/Bool "{data: true}"' \
 		_ "/uas$n/${kind}_capture_cmd" >/dev/null \
 		&& echo "  asked for $kind on /uas$n/${kind}_capture_cmd" \
 		|| die "nothing accepted the $kind capture command"
@@ -1207,16 +1523,23 @@ zoom)
 		|| die "No framing '$preset'. This lens has: $UAS_ZOOM_PRESETS"
 	[ "$(mark_of "$n")" = v3 ] || die "uas$n is a $(mark_of "$n"), and only a v3 lens zooms."
 	add_fleet_profiles
-	container=$($DC ps -q "onboard$n" 2>/dev/null)
-	[ -n "$container" ] || die "onboard$n is not running. Start it: ./px4sim start"
+	vehicle_reader "$n"
 	docker cp verify/component/zoom.py "$container:/tmp/zoom.py" >/dev/null
 	docker cp verify/component/udp-only.xml "$container:/tmp/udp-only.xml" >/dev/null
-	say "asking uas$n for the $preset framing, $hfov degrees"
-	docker exec -e ROS_DOMAIN_ID="$(uas_domain "$n")" \
+	# scripts/zoom.sh holds the SIMULATED lens. A real lens takes its framings
+	# from its own calibration files, so on the aircraft the framing name is the
+	# whole answer, and zoom.py prints the degrees the vehicle reports. 0.0 is
+	# that tool's documented "do not check" value.
+	if [ "$FLEET_IS_SIMULATED" = true ]; then
+		say "asking uas$n for the $preset framing, $hfov degrees"
+	else
+		say "asking uas$n for the $preset framing"
+		hfov=0.0
+	fi
+	docker exec -e ROS_DOMAIN_ID="$domain" \
 		-e FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/udp-only.xml "$container" bash -lc '
 		set -e
-		. /opt/ros/$ROS_DISTRO/setup.bash
-		. /home/user/ros2_ws/install/setup.bash
+		. /usr/local/bin/ros-env.sh
 		exec python3 /tmp/zoom.py "$@"' _ "$n" "$preset" --hfov "$hfov" \
 		|| die "uas$n is not at the $preset framing."
 	;;
@@ -1242,23 +1565,32 @@ uas|probe|foxglove)
 	# started with no extra volume.
 	add_fleet_profiles
 	# `ground` reaches the ground station, which holds every vehicle at once.
+	asked=vehicle
 	if [ "${1:-}" = ground ]; then
 		shift
-		container=$($DC ps -q offboard 2>/dev/null)
-		[ -n "$container" ] || die "the ground station is not running. Start it: ./px4sim start offboard"
+		reader=$(ground_service)
+		container=$($DC ps -q "$reader" 2>/dev/null)
+		[ -n "$container" ] || die "the ground station is not running. Restart it: ./px4sim restart"
 		domain=$GROUND_DOMAIN
 		n=$FIRST_UAS
+		asked=ground
 	else
 		n=$(vehicle_arg "${1:-}"); shift || true
-		container=$($DC ps -q "onboard$n" 2>/dev/null)
-		[ -n "$container" ] || die "onboard$n is not running. Start it: ./px4sim start"
-		domain=$(uas_domain "$n")
+		vehicle_reader "$n"
 	fi
 	case "$cmd" in
 	probe)    tool=graph_probe.py ;;
 	foxglove) tool=foxglove_probe.py ;;
 	*)        tool=uas.py ;;
 	esac
+	# A Foxglove bridge belongs to a machine and not to a ROS domain: each
+	# vehicle serves its own, on the aircraft. Where the ground station answers
+	# for a vehicle, the probe reaches that vehicle's bridge rather than the
+	# ground's own on localhost. A --url from the caller comes later on the
+	# line, and argparse keeps the last one.
+	if [ "$cmd" = foxglove ] && [ "$asked" = vehicle ] && [ "$reader" = "$(ground_service)" ]; then
+		set -- --url "$(uas_foxglove_url "$n")" "$@"
+	fi
 	# The default list stands in when no topic is named. An option is not a
 	# topic, so `probe 11 --deadline 5` still gets the list.
 	named_a_topic=false
@@ -1286,8 +1618,7 @@ uas|probe|foxglove)
 	docker exec -e ROS_DOMAIN_ID="$domain" \
 		-e FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/udp-only.xml "$container" bash -lc '
 		set -e
-		. /opt/ros/$ROS_DISTRO/setup.bash
-		. /home/user/ros2_ws/install/setup.bash
+		. /usr/local/bin/ros-env.sh
 		exec python3 /tmp/'"$tool"' "$@"' _ "$@" | probe_answer
 	;;
 
@@ -1302,18 +1633,20 @@ check)
 		[ -x "scripts/$script$ext" ] \
 			|| { warn "scripts/$script$ext is missing or not executable."; problems=$((problems + 1)); }
 	done
-	for service in sim video-router qgc offboard scenegen; do
+	for service in sim video-router qgc offboard ground onboard scenegen; do
 		has_service "$service" \
 			|| { warn "compose.yaml has no $service service, which ./px4sim names."; problems=$((problems + 1)); }
 	done
-	for n in $(fleet_numbers); do
-		for service in "uas$n" "onboard$n"; do
-			has_service "$service" \
-				|| { warn "compose.yaml has no $service for a fleet of $UAS_COUNT."; problems=$((problems + 1)); }
+	if [ "$FLEET_IS_SIMULATED" = true ]; then
+		for n in $(fleet_numbers); do
+			for service in "uas$n" "onboard$n"; do
+				has_service "$service" \
+					|| { warn "compose.yaml has no $service for a fleet of $UAS_COUNT."; problems=$((problems + 1)); }
+			done
+			[ -d "modules/sim/scenes/models/$(model_of "$n")" ] \
+				|| { warn "no model directory for uas$n's '$(model_of "$n")'."; problems=$((problems + 1)); }
 		done
-		[ -d "modules/sim/scenes/models/$(model_of "$n")" ] \
-			|| { warn "no model directory for uas$n's '$(model_of "$n")'."; problems=$((problems + 1)); }
-	done
+	fi
 	# A shared table is read on the host AND inside the containers, and the two
 	# read the same file only if compose passes the variables. It did not pass
 	# the framing table, so .env's table never reached a container and both
@@ -1324,7 +1657,9 @@ check)
 		while read -r name; do
 			# Only the ones a container really reads. compose interpolates
 			# others on the host, where passing them would mean nothing.
-			grep -rqlw "$name" modules/ 2>/dev/null || continue
+			find modules -type f \( -name '*.sh' -o -name '*.py' -o \
+				-name Dockerfile -o -name '*.yaml' -o -name '*.yml' \) \
+				-exec grep -qlw "$name" {} + 2>/dev/null || continue
 			grep -q "^[[:space:]]*$name: " compose.yaml \
 				|| { warn "compose.yaml never passes $name, which $table defines and a container reads."
 				     problems=$((problems + 1)); }
@@ -1338,6 +1673,17 @@ check)
 		warn "px4sim answers to these more than once: $(echo "$duplicates" | tr -d ')' | tr '\n' ' ')"
 		problems=$((problems + 1))
 	fi
+
+	# The usage text is the single list of what this front door accepts, so
+	# every case arm has to stand in it. A command the help never names is a
+	# command nobody finds. The second name of a pair is an alias, and the
+	# help prints the first one alone.
+	printed=$(usage | sed 's/\x1b\[[0-9;]*m//g')
+	for arm in $(grep -o '^[a-z][a-z0-9|-]*)' "$0" | tr -d ')' | cut -d'|' -f1); do
+		grep -q "^    ${arm}[ <[|]" <<< "$printed" \
+			|| { warn "./px4sim $arm runs, and ./px4sim help never names it."
+			     problems=$((problems + 1)); }
+	done
 
 	# Parameter files, as rcl reads them rather than as YAML does. A node whose
 	# ros__parameters block has nothing left in it stops that node dead at
@@ -1357,7 +1703,7 @@ check)
 	# The operator's console. One value Foxglove rejects takes the whole
 	# panel's settings with it and says nothing, and a panel with no place in
 	# the layout is never drawn at all.
-	layout=${FOXGLOVE_LAYOUT:-${ROS2_WS_DIR:-../ros2_ws}/src/5g_drone/config/foxglove/chimera_sim.json}
+	layout=$LAYOUT_TEMPLATE
 	if [ -f "$layout" ]; then
 		if faults=$(python3 verify/component/foxglove_layout.py "$layout"); then
 			echo "layout OK: every panel setting is one Foxglove accepts, and every panel is drawn"
