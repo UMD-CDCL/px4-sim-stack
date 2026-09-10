@@ -6,7 +6,7 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.." || exit 1
 
-LINT=${STE_LINT:-$HOME/.claude/skills/asd-ste100/scripts/ste-lint.py}
+LINT=${STE_LINT:-$(dirname "$0")/../tools/asd-ste100/ste-lint.py}
 
 if [ ! -f "$LINT" ]; then
 	echo "Linter not found at $LINT. The docs are not linted."
