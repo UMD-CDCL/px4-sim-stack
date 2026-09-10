@@ -122,8 +122,8 @@ x-onboard: &onboard
       shared: ./scripts
     args:
       # Which ros-base to derive from. Everything heavy is there, so this image
-      # is its entry point and nothing else. `./px4sim build` builds the base
-      # first. See modules/ros-base/Dockerfile.
+      # is its entry point and nothing else. `./px4sim start` builds the base
+      # before creating containers. See modules/ros-base/Dockerfile.
       <<: *deepstream
   image: px4simstack/onboard:${DS_TAG:-7.1}
   runtime: nvidia
@@ -153,6 +153,14 @@ x-onboard: &onboard
       required: false
 
 x-onboard-env: &onboard-env
+  # GPS-free reference injection is opt-in through the px4sim bench front door.
+  BENCH_MODE: ${BENCH_MODE:-false}
+  BENCH_HOME_LAT: ${BENCH_HOME_LAT:-}
+  BENCH_HOME_LON: ${BENCH_HOME_LON:-}
+  BENCH_HOME_ALT: ${BENCH_HOME_ALT:-0.0}
+  BENCH_FIDUCIAL_LAT: ${BENCH_FIDUCIAL_LAT:-}
+  BENCH_FIDUCIAL_LON: ${BENCH_FIDUCIAL_LON:-}
+  BENCH_FIDUCIAL_ALT: ${BENCH_FIDUCIAL_ALT:-}
   # ros2 launch reads its nodes through pipes, and a pipe makes Python
   # block-buffer: everything ds_node says -- the backend it resolved, the
   # engine it is building, the reason it stopped -- sits invisible in a
@@ -255,6 +263,13 @@ x-offboard-env: &offboard-env
   # real ground station.
   GROUND_DOMAIN: ${GROUND_DOMAIN:-70}
   SCENE: ${SCENE:-lorton}
+  BENCH_MODE: ${BENCH_MODE:-false}
+  BENCH_HOME_LAT: ${BENCH_HOME_LAT:-}
+  BENCH_HOME_LON: ${BENCH_HOME_LON:-}
+  BENCH_HOME_ALT: ${BENCH_HOME_ALT:-0.0}
+  BENCH_FIDUCIAL_LAT: ${BENCH_FIDUCIAL_LAT:-}
+  BENCH_FIDUCIAL_LON: ${BENCH_FIDUCIAL_LON:-}
+  BENCH_FIDUCIAL_ALT: ${BENCH_FIDUCIAL_ALT:-0.0}
   # What sim_ground_truth scores against. The scenario says where each target
   # was asked to stand. The resolved file says where Gazebo put it, and wins
   # for the scene that wrote it. The name as well as the path: the entry point
@@ -275,6 +290,7 @@ services:
     profiles: [base]
     build:
       context: ./modules/ros-base
+      network: host
       additional_contexts:
         # Where 5g_drone, cdcl_umd_msgs and MAVInsight are checked out. colcon
         # builds them into the image, so nothing is mounted at run time.
@@ -617,10 +633,7 @@ services:
     <<: *onboard
     profiles: [aircraft]
     network_mode: host
-    # A crash comes back five times. Docker also starts this container again
-    # at boot after a power cut, so the boot unit removes it before the clock
-    # wait and makes it again after (chimera-deploy remote/onboard.service).
-    restart: on-failure:5
+    restart: "no"
     environment:
       <<: *onboard-env
       # Empty on a laptop, where this profile is never selected. Compose

@@ -101,6 +101,7 @@ if [ "${1:-launch}" = "launch" ]; then
 		uas:="${numbers#,}" \
 		models:="${models#,}" \
 		truth:="${TRUTH}" \
+		bench:="${BENCH_MODE:-false}" \
 		params:="${SITE_PARAMS}" \
 		"$@"
 fi

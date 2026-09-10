@@ -89,19 +89,29 @@ def placement_problems(layout):
     rejected value produces.
     """
     placed = set()
+    configured = layout.get("configById", {})
 
     def walk(node):
         if isinstance(node, str):
+            if node in placed:
+                return
             placed.add(node)
+            config = configured.get(node, {})
+            if node.startswith("Tab!"):
+                for tab in config.get("tabs", []):
+                    walk(tab.get("layout"))
+            elif node.startswith("Stack!"):
+                for panel in config.get("panels", []):
+                    walk(panel.get("panelId"))
         elif isinstance(node, dict):
             walk(node.get("first"))
             walk(node.get("second"))
 
     walk(layout.get("layout"))
-    configured = set(layout.get("configById", {}))
-    for name in sorted(configured - placed):
+    configured_names = set(configured)
+    for name in sorted(configured_names - placed):
         yield f"{name}: has settings but no place in the layout, so it is not drawn"
-    for name in sorted(placed - configured):
+    for name in sorted(placed - configured_names):
         yield f"{name}: is in the layout with no settings, so it draws its defaults"
 
 

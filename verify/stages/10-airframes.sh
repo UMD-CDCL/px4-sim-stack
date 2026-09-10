@@ -11,7 +11,7 @@ sdf_errors=$(mktemp)
 expansion=$(mktemp)
 
 if ! docker image inspect "$sim_image" >/dev/null 2>&1; then
-	fail "$sim_image is not built. Run ./px4sim build sim"
+	fail "$sim_image is not built. Run ./px4sim start"
 	return 0
 fi
 

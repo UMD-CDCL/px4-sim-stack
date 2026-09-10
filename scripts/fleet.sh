@@ -191,12 +191,12 @@ host_rtsp_base() {
 	fi
 }
 
-# The operator's Foxglove console. The shipped file is the simulator's: every
-# panel, topic and TF frame in it carries uas11 and d11, so a real fleet
-# imports a window of empty panels and reads no error. Render it for this
-# fleet's first vehicle instead, and give the operator that copy. A simulated
-# fleet renders the bytes it ships, so one path serves both worlds.
-LAYOUT_TEMPLATE=${FOXGLOVE_LAYOUT:-${ROS2_WS_DIR:-../ros2_ws}/src/5g_drone/config/foxglove/chimera_sim.json}
+if [ "$FLEET_IS_SIMULATED" = true ]; then
+	DEFAULT_LAYOUT=chimera_sim.json
+else
+	DEFAULT_LAYOUT=chimera_real.json
+fi
+LAYOUT_TEMPLATE=${FOXGLOVE_LAYOUT:-${ROS2_WS_DIR:-../ros2_ws}/src/5g_drone/config/foxglove/$DEFAULT_LAYOUT}
 LAYOUT_RENDERED=${LAYOUT_RENDERED:-logs/foxglove/chimera_uas$FIRST_UAS.json}
 # Prints the file it wrote. Prints the template, and fails, where there is none.
 render_layout() {

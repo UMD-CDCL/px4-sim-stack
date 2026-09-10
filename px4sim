@@ -195,6 +195,53 @@ check_mode() {
 	fi
 }
 
+bench_mode() {
+	[ "$FLEET_IS_SIMULATED" = false ] || die "bench mode is only for a real aircraft or ground station"
+	[ "${1:-}" = enable ] || [ "${1:-}" = disable ] || \
+		die "Use: ./px4sim bench enable 'ENABLE BENCH MODE' or ./px4sim bench disable"
+	if [ -n "$(COMPOSE_PROFILES="$ALL_PROFILES" $DC ps --status running -q 2>/dev/null)" ]; then
+		die "Stop the stack before changing bench mode: ./px4sim stop"
+	fi
+	if [ "$1" = enable ]; then
+		[ "${2:-}" = "ENABLE BENCH MODE" ] || \
+			die "Enabling GPS-free bench mode requires the exact phrase: ENABLE BENCH MODE"
+		if grep -q '^BENCH_MODE=' .env; then
+			sed -i 's/^BENCH_MODE=.*/BENCH_MODE=true/' .env
+		else
+			printf '\nBENCH_MODE=true\n' >> .env
+		fi
+		if grep -q '^SCENE=' .env; then
+			sed -i 's/^SCENE=.*/SCENE=uroc/' .env
+		else
+			printf 'SCENE=uroc\n' >> .env
+		fi
+		for setting in \
+			'BENCH_HOME_LAT=38.313294' \
+			'BENCH_HOME_LON=-76.55221' \
+			'BENCH_HOME_ALT=8.1432' \
+			'BENCH_FIDUCIAL_LAT=38.3133004' \
+			'BENCH_FIDUCIAL_LON=-76.5522071' \
+			'BENCH_FIDUCIAL_ALT=8.1232'; do
+			key=${setting%%=*}
+			if grep -q "^${key}=" .env; then
+				sed -i "s/^${key}=.*/${setting}/" .env
+			else
+				printf '%s\n' "${setting}" >> .env
+			fi
+		done
+		say "GPS-free BENCH MODE enabled. It is not safe for flight."
+		say "Bench reference: UROC home and fiducial; terrain: SCENE=uroc."
+		say "Start through ./px4sim ui or ./px4sim start, then disable before flight."
+	else
+		if grep -q '^BENCH_MODE=' .env; then
+			sed -i 's/^BENCH_MODE=.*/BENCH_MODE=false/' .env
+		else
+			printf '\nBENCH_MODE=false\n' >> .env
+		fi
+		say "GPS-free BENCH MODE disabled."
+	fi
+}
+
 # The ROS domain a reader answers on. The ground station joins every vehicle's
 # domain with its domain bridge and carries all of them on $GROUND_DOMAIN. A
 # companion holds its own vehicle's domain alone.
@@ -464,7 +511,48 @@ service_name() {
 	esac
 }
 
-# The same names for a command that takes a list: `logs ground`, `build onboard`.
+build_stack() {
+	add_fleet_profiles
+	resolve_services "$@"
+
+	local needs_base=false
+	[ ${#SERVICES[@]} -eq 0 ] && needs_base=true
+	for svc in "${SERVICES[@]}"; do
+		case "$svc" in onboard* | offboard | ground | ros-base) needs_base=true ;; esac
+	done
+	if [ "$needs_base" = true ]; then
+		COMPOSE_PROFILES=base $DC build ros-base
+	fi
+
+	local remaining=()
+	for svc in "${SERVICES[@]}"; do
+		[ "$svc" = ros-base ] || remaining+=("$svc")
+	done
+	if [ ${#SERVICES[@]} -eq 0 ]; then
+		$DC build
+	elif [ ${#remaining[@]} -gt 0 ]; then
+		$DC build "${remaining[@]}"
+	fi
+}
+
+stop_stack() {
+	if unit_owns_stack; then
+		warn "onboard.service stays active with no container. It starts the stack again"
+		warn "at the next boot, or now with: sudo systemctl restart onboard"
+	fi
+	say "Stopping everything"
+	COMPOSE_PROFILES="$ALL_PROFILES" $DC down --remove-orphans
+
+	local leaked=0 segment
+	for segment in /dev/shm/fastrtps_*; do
+		[ -e "$segment" ] || continue
+		fuser -s "$segment" 2>/dev/null && continue
+		rm -f "$segment" && leaked=$((leaked + 1))
+	done
+	[ "$leaked" -gt 0 ] && echo "  released $leaked shared memory segments"
+}
+
+# The same names for a command that takes a list: `logs ground` and `shell onboard`.
 # The answer lands in SERVICES, because a function cannot return an array.
 resolve_services() {
 	local name
@@ -534,18 +622,19 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
 
   ${BOLD}Getting started${OFF}
     doctor              Check the host: driver, docker, GPU runtime, X11, disk
-    build               Build the images (about 20 minutes the first time)
     x11                 Let the containers draw on this display
 
   ${BOLD}Every day${OFF}
-    start [profiles]    Start what .env selects. Now: ${COMPOSE_PROFILES:-none}
+    start [profiles]    Stop, build, and start what .env selects. Now: ${COMPOSE_PROFILES:-none}
                         sim,offboard is a simulator, ground a base station,
                         aircraft a vehicle
     stop                Stop and remove the containers. Volumes stay.
-    restart [service]   Restart one service, or all of them
+    restart             Alias for start (stop, build, and start everything)
     status              What is running, and the addresses to use
     endpoints           The addresses alone
     ui                  The same in a console, with a key for every command
+    bench enable PHRASE Enable GPS-free bench reference (requires exact phrase)
+    bench disable       Disable bench reference before flight
     fleet               Every vehicle: model, address, ports, domain, streams
     logs [opts] [svc]   Follow the logs. \`logs --since 5m $sample\` reads back.
 
@@ -682,6 +771,7 @@ fleet_facts() {
 		fiducial_alt=${FIDUCIAL_SURVEYED_ALT:-}
 		profiles=${COMPOSE_PROFILES:-}
 		world=$(world_of)
+		bench_mode=${BENCH_MODE:-false}
 		units=$(native_units | tr ' ' ',' | sed 's/,$//')
 		compose=$DC
 		ground_domain=$GROUND_DOMAIN
@@ -875,6 +965,7 @@ cmd=${1:-help}
 # except the ones that explain or undo: doctor says what is wrong, and stop
 # takes every profile down whatever .env says.
 case "$cmd" in
+
 help | -h | --help | doctor | check | x11 | setup | stop | down | clean | clean-src | nuke) ;;
 *) check_mode ;;
 esac
@@ -899,44 +990,15 @@ esac
 
 case "$cmd" in
 
+# Configuration changes still go through this front door; bench_mode refuses
+# to alter a running stack and requires an explicit confirmation phrase.
+bench)  bench_mode "$@" ;;
+
 # The fleet profiles carry a router and a companion for each vehicle, and
 # so the ports those publish. Without them preflight checks the ports of a
 # stack smaller than the one `start` would raise.
 doctor)   add_fleet_profiles; ./scripts/preflight.sh ;;
 setup)    ./scripts/bootstrap.sh "$@" ;;
-
-build)
-	# The fleet profiles, or compose builds only what the named profiles hold
-	# and the companion image is never built. `build onboard` and `build
-	# router` build the image every vehicle shares.
-	add_fleet_profiles
-	resolve_services "$@"
-
-	# ros-base is what onboard and offboard are made of, and compose has no way
-	# to order one build before another, so it is built here when either of
-	# them is. Named on its own it is built on its own, which is how to warm
-	# the cache before a day's work.
-	needs_base=false
-	[ ${#SERVICES[@]} -eq 0 ] && needs_base=true
-	for svc in "${SERVICES[@]}"; do
-		case "$svc" in onboard* | offboard | ground | ros-base) needs_base=true ;; esac
-	done
-	if [ "$needs_base" = true ]; then
-		COMPOSE_PROFILES=base $DC build ros-base
-	fi
-
-	# Everything but the base. Asking compose to build it again here would be
-	# a second no-op pass over the largest image in the stack.
-	REMAINING=()
-	for svc in "${SERVICES[@]}"; do
-		[ "$svc" = ros-base ] || REMAINING+=("$svc")
-	done
-	if [ ${#SERVICES[@]} -eq 0 ]; then
-		$DC build
-	elif [ ${#REMAINING[@]} -gt 0 ]; then
-		$DC build "${REMAINING[@]}"
-	fi
-	;;
 
 x11)      add_fleet_profiles; ./scripts/x11-allow.sh ;;
 
@@ -949,6 +1011,9 @@ start|up|core)
 	check_mode
 	add_fleet_profiles
 	[ "$FLEET_IS_SIMULATED" = true ] && need_sources
+	stop_stack
+	say "Building: $COMPOSE_PROFILES"
+	build_stack
 	./scripts/x11-allow.sh
 	# The log volumes bind here. scripts/fleet.sh says why, and who owns them.
 	make_bind_dirs logs logs/onboard logs/offboard logs/px4 logs/qgc
@@ -969,66 +1034,15 @@ start|up|core)
 	echo
 	$DC ps --format 'table {{.Service}}\t{{.Status}}'
 	endpoints
-	if [ "$FLEET_IS_SIMULATED" = true ] && [ ! -x src/PX4-Autopilot/build/px4_sitl_default/bin/px4 ]; then
-		warn "PX4 has not been built yet. The first start compiles it, which"
-		warn "takes 10 to 20 minutes. Watch it with: ./px4sim logs sim"
-	fi
 	;;
 
 stop|down)
-	if unit_owns_stack; then
-		warn "onboard.service stays active with no container. It starts the stack again"
-		warn "at the next boot, or now with:  sudo systemctl restart onboard"
-	fi
-	say "Stopping everything"
-	COMPOSE_PROFILES="$ALL_PROFILES" $DC down --remove-orphans
-
-	# Fast DDS keeps its shared memory in /dev/shm, and these containers share
-	# the host's, so a segment outlives the container that made it. They pile
-	# up a few hundred at a time until a new participant cannot lock a port and
-	# the ground station quietly stops hearing anything. Only the ones nobody
-	# has open are removed, so another stack on this machine is left alone.
-	leaked=0
-	for segment in /dev/shm/fastrtps_*; do
-		[ -e "$segment" ] || continue
-		fuser -s "$segment" 2>/dev/null && continue
-		rm -f "$segment" && leaked=$((leaked + 1))
-	done
-	if [ "$leaked" -gt 0 ]; then echo "  released $leaked shared memory segments"; fi
+	stop_stack
 	;;
 
 restart)
-	# Recreate, not restart. `docker compose restart` starts the same container
-	# again, so a service restarted after `./px4sim build` keeps running the
-	# image it was created from and the change looks like it did nothing.
-	#
-	# A service that lends its network namespace takes its borrowers with it: a
-	# recreated container gets a new namespace and the old one is left holding
-	# nothing but loopback, which reads as a running container that hears
-	# nobody. See network_mode in compose.yaml.
-	#
-	# A service that carries the picture takes every camera reader with it, for
-	# the same reason and with the same silence. See PICTURE_SOURCES.
-	resolve_services "$@"
-	add_fleet_profiles
-	for source in "${SERVICES[@]}"; do
-		case " $PICTURE_SOURCES " in *" $source "*) ;; *) continue ;; esac
-		for reader in $(picture_consumers); do
-			case " ${SERVICES[*]} " in
-			*" $reader "*) ;;
-			*) SERVICES+=("$reader") ;;
-			esac
-		done
-	done
-	for owner in "${SERVICES[@]}"; do
-		for borrower in $(namespace_borrowers "$owner"); do
-			case " ${SERVICES[*]} " in
-			*" $borrower "*) ;;
-			*) SERVICES+=("$borrower") ;;
-			esac
-		done
-	done
-	$DC up -d --force-recreate "${SERVICES[@]}"
+	[ $# -eq 0 ] || die "restart no longer takes a service; ./px4sim start rebuilds and restarts the whole stack"
+	exec "$0" start
 	;;
 
 status|ps)
@@ -1638,7 +1652,9 @@ check)
 		while read -r name; do
 			# Only the ones a container really reads. compose interpolates
 			# others on the host, where passing them would mean nothing.
-			grep -rqlw "$name" modules/ 2>/dev/null || continue
+			find modules -type f \( -name '*.sh' -o -name '*.py' -o \
+				-name Dockerfile -o -name '*.yaml' -o -name '*.yml' \) \
+				-exec grep -qlw "$name" {} + 2>/dev/null || continue
 			grep -q "^[[:space:]]*$name: " compose.yaml \
 				|| { warn "compose.yaml never passes $name, which $table defines and a container reads."
 				     problems=$((problems + 1)); }
@@ -1659,7 +1675,7 @@ check)
 	# help prints the first one alone.
 	printed=$(usage | sed 's/\x1b\[[0-9;]*m//g')
 	for arm in $(grep -o '^[a-z][a-z0-9|-]*)' "$0" | tr -d ')' | cut -d'|' -f1); do
-		printf '%s\n' "$printed" | grep -q "^    ${arm}[ <[|]" \
+		grep -q "^    ${arm}[ <[|]" <<< "$printed" \
 			|| { warn "./px4sim $arm runs, and ./px4sim help never names it."
 			     problems=$((problems + 1)); }
 	done

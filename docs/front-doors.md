@@ -6,7 +6,7 @@ and works one example.
 
 | Door | Machine | For |
 |---|---|---|
-| [`./px4sim`](#px4sim) | t500 and uas1 | build, start, read and stop the stack |
+| [`./px4sim`](#px4sim) | t500 and uas1 | build through start, read and stop the stack |
 | [`./px4sim ui` and `state`](#the-console-and-the-state-report) | t500 and uas1 | the same readings in a console, or as JSON |
 | [`make`](#the-makefile) | t500 and uas1 | the old target names, forwarded to `./px4sim` |
 | [`deploy_onboard.sh`](#deploy_onboardsh) | uas1 | put this stack on an aircraft |
@@ -83,8 +83,7 @@ name, so the list cannot drift.
 cd /home/user/px4-sim-stack
 ./px4sim doctor            # driver, docker, GPU runtime, X11, disk, ports
 ./px4sim setup             # clone PX4 and QGroundControl into ./src
-./px4sim build             # ros-base, then every image
-./px4sim start             # sim, uas11, onboard11, offboard, ground-router,
+./px4sim start             # stop, build, then start sim, uas11, onboard11,
                            # video-router and qgc
 ./px4sim status            # what is up, and the addresses
 ./px4sim fly 11 20         # respawn uas11 and take it to 20 m
@@ -111,8 +110,7 @@ the fielded QGroundControl stays native.
 ```bash
 cd /home/user/px4-sim-stack
 ./px4sim doctor            # also lcam, mavlink-router, 14402/udp and 8765/tcp
-./px4sim build             # ros-base and the ground image
-./px4sim start             # one container, `ground`, on the host network
+./px4sim start             # stop, build, then start `ground` on the host network
 ./px4sim uas 1 status      # the vehicle, through the ground station
 ./px4sim streams           # the lcam mounts, asked for by name
 ./px4sim view 1            # rgbl1
@@ -124,6 +122,10 @@ cd /home/user/px4-sim-stack
 `./px4sim uas`, `probe` and `topics` run inside the `ground` container, on
 domain 60. `./px4sim foxglove 1` reaches the vehicle's own bridge at
 `ws://10.200.142.61:8765`, because a bridge belongs to a machine.
+
+`./px4sim layout` selects `chimera_real.json` in the ground and aircraft
+worlds. The live layout owns operator interaction; the simulator keeps the
+separate `chimera_sim.json` layout and its simulation-only controls.
 
 **To try this world on a simulator laptop**, copy `.env` first, flip the six
 keys, and put the file back at the end:
@@ -148,8 +150,7 @@ mv .env.backup .env
 cd /home/user/px4-sim-stack
 ./px4sim doctor            # also rcam, its sockets, the clock, the power mode,
                            # the lens and the perception_models group
-./px4sim build ros-base onboard
-./px4sim start             # one container, `onboard`, on the host network
+./px4sim start             # stop, build, then start `onboard` on the host network
 ./px4sim logs onboard
 ./px4sim uas 1 status
 ./px4sim zoom 1 wide
@@ -230,9 +231,8 @@ Every target forwards to the front door and does no work of its own.
 |---|---|
 | `make preflight` | `./px4sim doctor` |
 | `make bootstrap` | `./px4sim setup` |
-| `make build`, `make build-onboard` | `./px4sim build [service]` |
 | `make up`, `make up-core`, `make down` | `./px4sim start`, `core`, `stop` |
-| `make restart S=sim` | `./px4sim restart sim` |
+| `make restart` | `./px4sim start` (the whole stack is rebuilt) |
 | `make ps`, `make ui`, `make state` | `./px4sim status`, `ui`, `state` |
 | `make logs S=onboard` | `./px4sim logs onboard` |
 | `make onboard N=13`, `make router N=13` | `./px4sim onboard 13`, `router 13` |
@@ -259,7 +259,8 @@ ENABLE_BOOT_UNIT=1 ./remote/deploy_onboard.sh # and enable it
 
 **What it reads.** `UAS_NUM` from `/etc/environment`, which `deploy.sh` writes.
 `SERVER_IP` (10.200.142.60), `GIT_PORT` (9418), `STACK_BRANCH` and `WS` come
-from the environment and have defaults.
+from the environment and have defaults. `STACK_BRANCH` follows the current
+`chimera-deploy` branch, or `flight_testing` from a detached checkout.
 
 **What it does, in order.** Each step examines the machine first, so a second
 run changes nothing.
@@ -301,10 +302,11 @@ and `ROS_DOMAIN_ID` reach it. `HOME=/home/user` is set in the unit.
 
 **How it runs.** `Type=oneshot` with `RemainAfterExit=yes`. It is ordered after
 `docker.service`, `rcam.service`, `mavlink-router.service` and
-`time-sync.target`. `ExecStartPre` removes any container a power cut left, then
-waits up to three minutes for a clock step with `chronyc waitsync`. Both
-`ExecStartPre` lines carry a leading dash, so neither can hold the boot.
-`ExecStart` is `./px4sim start` and `ExecStop` is `./px4sim stop`.
+`time-sync.target`. The aircraft container has no Docker restart policy, so
+Docker does not restore the power-cut container before this unit runs. Its only
+`ExecStartPre` waits up to three minutes for a clock step with `chronyc
+waitsync`; the leading dash lets startup continue when the laptop is absent.
+`ExecStart` runs `./px4sim start` once and `ExecStop` runs `./px4sim stop`.
 
 `SupplementaryGroups=docker` gives the unit the docker socket whether or not
 the login user is in that group.
@@ -316,9 +318,9 @@ a cycle, and systemd breaks a cycle by deleting a start job: this one. The unit
 then reads `enabled` and `inactive` after every boot, with nothing in its
 journal to say why.
 
-**What it costs.** A `systemctl start` always cycles the container, because
-`ExecStartPre` stops it first. Detection is off on a fresh container. Turn it
-on again with `/ds/mode/toggle_detection` and `continuous_detection_cmd`.
+An explicit `systemctl restart onboard` cycles the container. Detection is off
+on a fresh container. Turn it on again with `/ds/mode/toggle_detection` and
+`continuous_detection_cmd`.
 
 A hand `./px4sim stop` leaves the unit active with no container. `./px4sim`
 says so, and `sudo systemctl restart onboard` brings it back.
@@ -379,16 +381,16 @@ rename.
 
 ### A branch that GitHub has never seen
 
-This is the path the real-vehicle port used. The work is on a feature branch,
-nothing goes to GitHub, and the drone still gets it.
+This is the path for bench-testing a feature branch without pushing it to
+GitHub. The example uses the current real-drone branch.
 
 On the laptop, push the worktree straight into the mirror:
 
 ```bash
 git -C /home/user/px4-sim-stack push /srv/git/px4-sim-stack.git \
-    refs/heads/feature/real-drone-port:refs/heads/feature/real-drone-port
+    refs/heads/feature/real-fixes:refs/heads/feature/real-fixes
 git -C /home/user/ros2_ws/src/5g_drone push /srv/git/5g_drone.git \
-    refs/heads/feature/real-drone-port:refs/heads/feature/real-drone-port
+    refs/heads/feature/real-fixes:refs/heads/feature/real-fixes
 git --git-dir=/srv/git/px4-sim-stack.git branch -v      # read it back
 systemctl is-active git-daemon
 ```
@@ -399,14 +401,14 @@ On the drone, fetch it. `origin` is already the mirror, because
 ```bash
 cd ~/px4-sim-stack
 git fetch origin
-git reset --hard origin/feature/real-drone-port
+git switch --track origin/feature/real-fixes
 git status --porcelain          # empty, and .env is gitignored
 ```
 
-Then rebuild and restart on the drone:
+Then start on the drone (which rebuilds before launch):
 
 ```bash
-./px4sim build ros-base onboard
+./px4sim start
 sudo systemctl restart onboard
 ```
 

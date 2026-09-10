@@ -309,6 +309,7 @@ if [ "${1:-launch}" = "launch" ]; then
 		${MODEL:+model:="${MODEL}"}
 		sim:="${SIM}"
 		truth:="${TRUTH}"
+		bench:="${BENCH_MODE:-false}"
 		container:=true
 		${params:+params:="${params}"}
 		"$@")
