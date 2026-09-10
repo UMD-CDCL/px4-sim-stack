@@ -22,6 +22,7 @@ on `feature/real-fixes`, branched from `flight_testing` in `px4-sim-stack`,
 | Corrected Orin plan needs a one-time build | Completed on the bench; aircraft retest open | The compatible TensorRT plan was built from the portable 1280 ONNX with the required `input -> output [1,19320,6]` contract. Repeat the capture on the aircraft after the next image restart. |
 | Aircraft image is older than its checked-out flight code | Rebuilt and restarted; repeat after future changes | The aircraft pulled `feature/real-fixes` for all four repositories, rebuilt `px4simstack/onboard:7.1-trt10.3`, and restarted `onboard.service`. The image loaded the merged MAVInsight package and compatible TensorRT engines. |
 | Jetson is in 25 W power mode | Observe. | Do not change aircraft power policy implicitly. Account for it when scheduling the TensorRT build. |
+| Docker ROS workspace build context is oversized | TODO: verify reduction | A workspace-level `.dockerignore` now excludes models, bags, generated outputs, and caches on the local, ground, and aircraft workspaces. Run the next `./px4sim build ground` and confirm the transferred context is source-sized before relying on the improvement. |
 
 ## Acceptance boundary
 
