@@ -520,9 +520,10 @@ to, so this floor belongs to the simulator alone.
 
 ## The flight code
 
-5g_drone, cdcl_umd_msgs and MAVInsight are not in this repository. `ROS2_WS_DIR`
-in `.env` names the checkout, and the onboard and offboard images build it with
-colcon. So a change there is a rebuild, not a restart:
+5g_drone, cdcl_umd_msgs, tracking_test_5g and MAVInsight are not in this
+repository. `ROS2_WS_DIR` in `.env` names the checkout, and the onboard and
+offboard images build it with colcon. So a change there is a rebuild, not a
+restart:
 
 ```bash
 ./px4sim build onboard offboard

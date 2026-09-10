@@ -71,11 +71,11 @@ attach to the world that already exists.
 
 ### The flight code is not vendored
 
-5g_drone, cdcl_umd_msgs and MAVInsight stay in their own checkout, and the
-onboard and offboard images build that directory with colcon through a named
-build context. `ROS2_WS_DIR` says where it is. A copy in this repository would
-be a second version of the flight code, and the point of the stack is that
-there is only one.
+5g_drone, cdcl_umd_msgs, tracking_test_5g and MAVInsight stay in their own
+checkout, and the onboard and offboard images build that directory with colcon
+through a named build context. `ROS2_WS_DIR` says where it is. A copy in this
+repository would be a second version of the flight code, and the point of the
+stack is that there is only one.
 
 ## What is inside each container
 

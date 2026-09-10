@@ -415,7 +415,10 @@ RUN if python3 -m pip install --help 2>/dev/null | grep -q -- --break-system-pac
 RUN /opt/ros/${ROS_DISTRO}/lib/mavros/install_geographiclib_datasets.sh
 
 # pymap3d is what tf_loc and MAVInsight convert LLA with. folium is the mosaic
-# map export.
+# map export. tracking_test imports utm in its nodes and uses ONNX Runtime for
+# appearance ReID. Keep the latter on the CPU build, matching the ROS workspace
+# environment; the nodes request CUDA first and fall back to CPU when it is not
+# available.
 #
 # numpy stays below 2 on every base. pyds does not support numpy 2 at all, and
 # each distribution's cv_bridge and apt scipy are built against the numpy that
@@ -424,7 +427,9 @@ RUN /opt/ros/${ROS_DISTRO}/lib/mavros/install_geographiclib_datasets.sh
 RUN python3 -m pip install --no-cache-dir \
       "$([ "${ROS_DISTRO}" = humble ] && echo 'numpy==1.24.4' || echo 'numpy<2')" \
       "pymap3d" \
-      "folium"
+      "folium" \
+      "utm==0.9.0" \
+      "onnxruntime==1.23.2"
 
 # The bindings from the first stage. Installing the wheel, rather than copying
 # pyds*.so into site-packages, makes a wrong artifact fail here instead of at
@@ -518,6 +523,9 @@ USER root
 COPY --exclude=perception_models --exclude=.git --exclude=.vscode \
      --from=ros2_ws --chown=${HOST_UID}:${HOST_GID} \
      src/5g_drone ${WORKSPACE_DIR}/src/5g_drone
+COPY --exclude=.git --exclude=.vscode \
+     --from=ros2_ws --chown=${HOST_UID}:${HOST_GID} \
+     src/tracking_test_5g ${WORKSPACE_DIR}/src/tracking_test_5g
 COPY --exclude=.git --exclude=.vscode \
      --from=ros2_ws --chown=${HOST_UID}:${HOST_GID} \
      src/MAVInsight ${WORKSPACE_DIR}/src/MAVInsight

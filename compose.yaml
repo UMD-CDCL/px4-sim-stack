@@ -182,8 +182,9 @@ services:
     build:
       context: ./modules/ros-base
       additional_contexts:
-        # Where 5g_drone, cdcl_umd_msgs and MAVInsight are checked out. colcon
-        # builds them into the image, so nothing is mounted at run time.
+        # Where 5g_drone, cdcl_umd_msgs, tracking_test_5g and MAVInsight are
+        # checked out. colcon builds them into the image, so nothing is mounted
+        # at run time.
         ros2_ws: ${ROS2_WS_DIR:-../ros2_ws}
       args:
         <<: [*ids, *deepstream]

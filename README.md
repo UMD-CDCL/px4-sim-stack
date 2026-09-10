@@ -73,9 +73,10 @@ The first `./px4sim start` builds PX4 inside the sim container. That takes 10 to
 20 minutes and happens once, because the build output lands in
 `./src/PX4-Autopilot` on the host. Watch it with `./px4sim logs sim`.
 
-The onboard and offboard images build 5g_drone, cdcl_umd_msgs and MAVInsight
-with colcon. `ROS2_WS_DIR` in `.env` says where those sources are checked out,
-and a change there needs `./px4sim build onboard offboard`.
+The onboard and offboard images build 5g_drone, cdcl_umd_msgs,
+tracking_test_5g and MAVInsight with colcon. `ROS2_WS_DIR` in `.env` says where
+those sources are checked out, and a change there needs
+`./px4sim build onboard offboard`.
 
 `./px4sim` with no arguments prints every command. It is the front door: it
 reads `.env` and resolves the world origin from the scene and the scenario. The
