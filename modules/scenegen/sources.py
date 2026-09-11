@@ -40,16 +40,20 @@ IMAGERY_URL_TEMPLATES = {
              "World_Imagery/MapServer/tile/{z}/{y}/{x}"),
 }
 ELEVATION_URL_TEMPLATE = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
-# Two Overpass mirrors. The second answers when the first is saturated.
+# Keep these independent public instances in order.  Scene queries cover at
+# most a few hundred metres, so a healthy instance answers in seconds; moving
+# on promptly is better than spending a minute waiting for one busy mirror.
 OVERPASS_URLS = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
 ]
 USER_AGENT = "px4-sim-stack-scenegen/1.0"
 DOWNLOAD_WORKERS = 8
 DOWNLOAD_RETRIES = 3
 REQUEST_TIMEOUT_S = 30
-OVERPASS_TIMEOUT_S = 90
+OVERPASS_QUERY_TIMEOUT_S = 15
+OVERPASS_REQUEST_TIMEOUT_S = 20
 # 2048 tiles is about 500 MB of imagery. Above that the zoom is wrong for
 # the requested side, so stop and say so instead of hammering the server.
 MAX_TILES_PER_LAYER = 2048
@@ -307,7 +311,7 @@ def _overpass_elements(frame: geo.GeoFrame, half_m: float, body: str) -> list:
     to south,west,north,east."""
     south, west, _ = frame.enu_to_latlon(-half_m, -half_m)
     north, east, _ = frame.enu_to_latlon(half_m, half_m)
-    query = (f"[out:json][timeout:{OVERPASS_TIMEOUT_S}];"
+    query = (f"[out:json][timeout:{OVERPASS_QUERY_TIMEOUT_S}];"
              + body.format(bbox=f"{south},{west},{north},{east}")
              + "out tags geom;")
     session = _session()
@@ -315,7 +319,7 @@ def _overpass_elements(frame: geo.GeoFrame, half_m: float, body: str) -> list:
     for url in OVERPASS_URLS:
         try:
             reply = session.post(url, data={"data": query},
-                                 timeout=OVERPASS_TIMEOUT_S + 15)
+                                 timeout=OVERPASS_REQUEST_TIMEOUT_S)
             reply.raise_for_status()
             return reply.json().get("elements", [])
         except Exception as error:  # noqa: BLE001 - try the next mirror

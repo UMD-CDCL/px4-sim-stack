@@ -1,0 +1,74 @@
+{
+ "name": "raley",
+ "center_lat": 38.263458,
+ "center_lon": -76.779413,
+ "side_m": 200,
+ "origin_alt_m": 4.69,
+ "imagery": {
+  "source": "google",
+  "zoom": 19,
+  "file": "satellite.jpg",
+  "width_px": 853,
+  "height_px": 857,
+  "m_per_px": 0.2344,
+  "origin_px": 38482998,
+  "origin_py": 51646323
+ },
+ "elevation": {
+  "grid_n": 128,
+  "side_m": 200,
+  "zoom": 15,
+  "row0": "south",
+  "origin_alt_m": 4.69,
+  "min_m": 0.76,
+  "max_m": 5.83
+ },
+ "fiducial": {
+  "east_m": -28.01,
+  "north_m": -8.69,
+  "diameter_m": 0.5,
+  "placed_east_m": 0,
+  "placed_north_m": 0
+ },
+ "buildings": [
+  {
+   "length_m": 19.46,
+   "width_m": 10.83,
+   "yaw_deg": -36.2,
+   "height_m": 6,
+   "height_source": "manual",
+   "name": "",
+   "map_height_m": null,
+   "map_height_source": "",
+   "outline_m": [],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "manual",
+   "model_uri": null,
+   "enabled": true,
+   "id": "b_manual_1",
+   "east_m": -21.78,
+   "north_m": 12.66
+  }
+ ],
+ "vehicles": [],
+ "targets": [
+  {
+   "name": "casualty_m1",
+   "agl_m": 3,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual",
+   "id": "t_manual_1",
+   "east_m": -34.78,
+   "north_m": 11.98
+  }
+ ],
+ "trees": [],
+ "tree_areas": [],
+ "flatten_zones": [],
+ "format": "scenegen-scene/1"
+}
