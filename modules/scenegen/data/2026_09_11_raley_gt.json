@@ -1,0 +1,308 @@
+{
+    "geo_fence": [
+        {
+            "lat": 38.2634653,
+            "lon": -76.77986811333334,
+            "alt": 0.0
+        },
+        {
+            "lat": 38.26359742,
+            "lon": -76.77985308,
+            "alt": 0.0
+        },
+        {
+            "lat": 38.26353775333333,
+            "lon": -76.77976288666666,
+            "alt": 0.0
+        },
+        {
+            "lat": 38.26345057,
+            "lon": -76.77962103166666,
+            "alt": 0.0
+        },
+        {
+            "lat": 38.26350413666667,
+            "lon": -76.77949386833333,
+            "alt": 0.0
+        },
+        {
+            "lat": 38.263447076666665,
+            "lon": -76.77942458333334,
+            "alt": 0.0
+        },
+        {
+            "lat": 38.263311986666665,
+            "lon": -76.77960165166667,
+            "alt": 0.0
+        },
+        {
+            "lat": 38.26333012333333,
+            "lon": -76.77989986333333,
+            "alt": 0.0
+        }
+    ],
+    "search_domain": [],
+    "launch_zone": [
+        {
+            "lat": 38.26330124333333,
+            "lon": -76.77981120333334,
+            "alt": 0.0
+        },
+        {
+            "lat": 38.26329754333333,
+            "lon": -76.77977669166667,
+            "alt": 0.0
+        },
+        {
+            "lat": 38.26339578,
+            "lon": -76.77973041833333,
+            "alt": 0.0
+        },
+        {
+            "lat": 38.2634152,
+            "lon": -76.77979742,
+            "alt": 0.0
+        }
+    ],
+    "known_casualties": [],
+    "exclusion_zones": [
+        [
+            {
+                "lat": 38.263335721666664,
+                "lon": -76.77966067666667,
+                "alt": 0.0
+            },
+            {
+                "lat": 38.26332625333333,
+                "lon": -76.77967300666667,
+                "alt": 0.0
+            },
+            {
+                "lat": 38.26331373833333,
+                "lon": -76.77965755,
+                "alt": 0.0
+            },
+            {
+                "lat": 38.263320248333336,
+                "lon": -76.77964610666666,
+                "alt": 0.0
+            }
+        ]
+    ],
+    "vantage_point": {
+        "ugv_pixels": 100,
+        "uav_pixels": 100,
+        "ugv_radial_perspectives": 4,
+        "uav_radial_perspectives": 4,
+        "num_yaw": 8,
+        "uav_num_pitch": 3,
+        "uav_min_pitch": 0.0,
+        "uav_max_pitch": 90.0,
+        "uav_num_alt": 3,
+        "uav_min_alt": 10.0,
+        "uav_max_alt": 50.0,
+        "max_comp_time": 3.0
+    },
+    "robot_routing_problem": {
+        "max_comp_time": 3.0,
+        "transit_speed": 0.5,
+        "assessment_duration": 0.75
+    },
+    "launch_zone_fiducial": {
+        "lat": 38.263370415,
+        "lon": -76.77975497,
+        "alt": -29.247400000000003
+    },
+    "gate": 1,
+    "time_of_day": 0,
+    "run_duration_min": 10.0,
+    "darpa_server_ip": "localhost",
+    "active_mobile_assets": {
+        "0": true,
+        "1": false,
+        "2": true,
+        "3": true,
+        "4": true,
+        "5": false,
+        "6": false,
+        "7": false,
+        "8": false,
+        "9": false
+    },
+    "ground_truth_csv_path": "/home/cdcl/cdcl_ws/src/dtc_interface/settings/2026_09_11_Raley/gt",
+    "gt_actor_moulage": [
+        {
+            "darpa_id": 1,
+            "injuries": {
+                "severe_hemorrhage": "absent",
+                "tripod_position": "absent",
+                "audible_respiratory_distress": "absent",
+                "trauma_head": "normal",
+                "trauma_torso_front": "normal",
+                "trauma_torso_back": "normal",
+                "trauma_arm_right": "normal",
+                "trauma_arm_left": "normal",
+                "trauma_leg_right": "normal",
+                "trauma_leg_left": "normal",
+                "deceased": "absent",
+                "alertness_motor": "normal",
+                "alertness_ocular": "open",
+                "alertness_verbal": "normal",
+                "is_manikin": "human",
+                "posture": "standing"
+            }
+        },
+        {
+            "darpa_id": 2,
+            "injuries": {
+                "severe_hemorrhage": "absent",
+                "tripod_position": "absent",
+                "audible_respiratory_distress": "absent",
+                "trauma_head": "normal",
+                "trauma_torso_front": "normal",
+                "trauma_torso_back": "normal",
+                "trauma_arm_right": "normal",
+                "trauma_arm_left": "normal",
+                "trauma_leg_right": "normal",
+                "trauma_leg_left": "normal",
+                "deceased": "absent",
+                "alertness_motor": "normal",
+                "alertness_ocular": "open",
+                "alertness_verbal": "normal",
+                "is_manikin": "human",
+                "posture": "standing"
+            }
+        },
+        {
+            "darpa_id": 3,
+            "injuries": {
+                "severe_hemorrhage": "absent",
+                "tripod_position": "absent",
+                "audible_respiratory_distress": "absent",
+                "trauma_head": "normal",
+                "trauma_torso_front": "normal",
+                "trauma_torso_back": "normal",
+                "trauma_arm_right": "normal",
+                "trauma_arm_left": "normal",
+                "trauma_leg_right": "normal",
+                "trauma_leg_left": "normal",
+                "deceased": "absent",
+                "alertness_motor": "normal",
+                "alertness_ocular": "open",
+                "alertness_verbal": "normal",
+                "is_manikin": "human",
+                "posture": "standing"
+            }
+        },
+        {
+            "darpa_id": 4,
+            "injuries": {
+                "severe_hemorrhage": "absent",
+                "tripod_position": "absent",
+                "audible_respiratory_distress": "absent",
+                "trauma_head": "normal",
+                "trauma_torso_front": "normal",
+                "trauma_torso_back": "normal",
+                "trauma_arm_right": "normal",
+                "trauma_arm_left": "normal",
+                "trauma_leg_right": "normal",
+                "trauma_leg_left": "normal",
+                "deceased": "absent",
+                "alertness_motor": "normal",
+                "alertness_ocular": "open",
+                "alertness_verbal": "normal",
+                "is_manikin": "human",
+                "posture": "standing"
+            }
+        },
+        {
+            "darpa_id": 5,
+            "injuries": {
+                "severe_hemorrhage": "absent",
+                "tripod_position": "absent",
+                "audible_respiratory_distress": "absent",
+                "trauma_head": "normal",
+                "trauma_torso_front": "normal",
+                "trauma_torso_back": "normal",
+                "trauma_arm_right": "normal",
+                "trauma_arm_left": "normal",
+                "trauma_leg_right": "normal",
+                "trauma_leg_left": "normal",
+                "deceased": "absent",
+                "alertness_motor": "normal",
+                "alertness_ocular": "open",
+                "alertness_verbal": "normal",
+                "is_manikin": "human",
+                "posture": "standing"
+            }
+        }
+    ],
+    "gt_casualty_locations": [
+        {
+            "casualty_id": 1,
+            "position": {
+                "lat": 38.26339596,
+                "lon": -76.77967216,
+                "alt": 0.0
+            },
+            "level": 1
+        },
+        {
+            "casualty_id": 2,
+            "position": {
+                "lat": 38.26340284,
+                "lon": -76.77960427,
+                "alt": 0.0
+            },
+            "level": 1
+        },
+        {
+            "casualty_id": 3,
+            "position": {
+                "lat": 38.26334566,
+                "lon": -76.77959632,
+                "alt": 0.0
+            },
+            "level": 1
+        },
+        {
+            "casualty_id": 4,
+            "position": {
+                "lat": 38.26343683,
+                "lon": -76.77947887,
+                "alt": 0.0
+            },
+            "level": 1
+        },
+        {
+            "casualty_id": 5,
+            "position": {
+                "lat": 38.2635488,
+                "lon": -76.77981527,
+                "alt": 0.0
+            },
+            "level": 2
+        }
+    ],
+    "gt_gate1_mapping": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5
+    },
+    "gt_gate2_mapping": {},
+    "gt_gate3_mapping": {},
+    "gt_gate4_mapping": {},
+    "gt_hmt_mapping": {},
+    "inference_engine_path": "/home/cdcl/cdcl_ws/roboscout-assessment/inference_engine/output/pgm/stage2/model_definitional.json",
+    "num_evacuation_seats": 0,
+    "show_mosaic": false,
+    "show_sensor_footprint": false,
+    "show_gt": true,
+    "show_dr": true,
+    "show_covariance": true,
+    "show_overview_observations": true,
+    "show_overview_derived_reports": true,
+    "use_gt_for_known_casualties": false
+}
