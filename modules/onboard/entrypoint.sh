@@ -41,7 +41,15 @@ if [ "${SIM}" = true ]; then
 	esac
 fi
 
-export ROS_DOMAIN_ID=$((60 + UAS_NUM))
+expected_ros_domain=$((60 + UAS_NUM))
+# Compose receives the declared value from the aircraft's .env so `docker
+# inspect` and PID 1 agree.  Do not silently correct a stale deployment: ROS
+# discovery on the wrong domain fails without a useful symptom.
+if [ -n "${ROS_DOMAIN_ID:-}" ] && [ "${ROS_DOMAIN_ID}" != "${expected_ros_domain}" ]; then
+	echo "uas${UAS_NUM} must use ROS_DOMAIN_ID=${expected_ros_domain}, not ${ROS_DOMAIN_ID}." >&2
+	exit 1
+fi
+export ROS_DOMAIN_ID=${expected_ros_domain}
 export ROS_LOCALHOST_ONLY=0
 # The air imagery profiles are Fast DDS XML, so the bridge needs this
 # implementation. The profiles themselves are set on the image bridge process
