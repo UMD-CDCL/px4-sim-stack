@@ -59,7 +59,7 @@ ALL_PROFILES=$(sed -n 's/^[[:space:]]*profiles:[[:space:]]*\[\(.*\)\][[:space:]]
 # select one run, so `SCENE=forest ./px4sim restart` flies another world once
 # and changes no file. The list is short on purpose: a shell that already
 # exports SCENE must not quietly change what everything else does.
-OVERRIDABLE="SCENE SCENARIO UAS_FLEET UAS_STREAMS AIRFRAME COMPOSE_PROFILES
+OVERRIDABLE="SCENE SCENARIO UAS_FLEET UAS_ACTIVE UAS_STREAMS AIRFRAME COMPOSE_PROFILES
              GZ_GUI SIM_SPEED_FACTOR VIDEO_SCALED_ENCODER"
 for name in $OVERRIDABLE; do
 	if [ -n "${!name+set}" ]; then
@@ -584,7 +584,11 @@ stop_stack() {
 	COMPOSE_PROFILES="$ALL_PROFILES" $DC down --remove-orphans
 
 	local leaked=0 segment
-	for segment in /dev/shm/fastrtps_*; do
+	# Host IPC intentionally lets the container talk to native ROS processes,
+	# but it also lets Fast DDS port files and POSIX semaphore locks survive a
+	# container.  Remove only objects no process still has open.  The semaphore
+	# form starts with `sem.` rather than `fastrtps_`, so it needs its own glob.
+	for segment in /dev/shm/fastrtps_* /dev/shm/sem.fastrtps_*; do
 		[ -e "$segment" ] || continue
 		fuser -s "$segment" 2>/dev/null && continue
 		rm -f "$segment" && leaked=$((leaked + 1))

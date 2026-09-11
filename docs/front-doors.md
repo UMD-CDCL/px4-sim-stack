@@ -39,7 +39,7 @@ on uas1. The same script, the same commands, three worlds.
 | Source | What it takes |
 |---|---|
 | `./.env` | every key. `COMPOSE_PROFILES` and `UAS_BASE` name the world |
-| the environment | `SCENE`, `SCENARIO`, `UAS_FLEET`, `UAS_STREAMS`, `AIRFRAME`, `COMPOSE_PROFILES`, `GZ_GUI`, `SIM_SPEED_FACTOR` and `VIDEO_SCALED_ENCODER` beat `.env` for one run |
+| the environment | `SCENE`, `SCENARIO`, `UAS_FLEET`, `UAS_ACTIVE`, `UAS_STREAMS`, `AIRFRAME`, `COMPOSE_PROFILES`, `GZ_GUI`, `SIM_SPEED_FACTOR` and `VIDEO_SCALED_ENCODER` beat `.env` for one run |
 | `/etc/environment` | `UAS_NUM` on the aircraft, through compose. `.env` never carries it |
 | `scripts/ds-select.sh` | the DeepStream release, the image, the tag and the TensorRT, resolved on every run |
 | `.origin.env` | the coordinates of the scene and the scenario, in the simulator |

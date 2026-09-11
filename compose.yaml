@@ -257,6 +257,9 @@ x-offboard-env: &offboard-env
   # ds_node says sits in a pipe buffer until the process exits.
   PYTHONUNBUFFERED: "1"
   UAS_FLEET: ${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2}
+  # A ground station can represent one active member of a configured fleet
+  # without changing that fleet's model mapping. Empty means every member.
+  UAS_ACTIVE: ${UAS_ACTIVE:-}
   # The first vehicle is UAS_BASE + 1. Every entry point derives its
   # identifiers from it, so the host and the container have to read the
   # same number: scripts/fleet.sh holds the same default.

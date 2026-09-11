@@ -10,6 +10,10 @@
 set -euo pipefail
 
 UAS_FLEET=${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2}
+# Keep the fleet identity intact even when only part of it is airborne.  The
+# number here is the real ROS/MAVLink number (for example "3"), not its
+# position in UAS_FLEET.  An empty value deliberately means the whole fleet.
+UAS_ACTIVE=${UAS_ACTIVE:-}
 # The dash form keeps an empty value empty: SCENE= draws no terrain.
 SCENE=${SCENE-lorton}
 TERRAIN_DIR=${TERRAIN_DIR:-/terrain}
@@ -18,6 +22,18 @@ UAS_BASE=${UAS_BASE:-10}
 numbers=""
 models=""
 index=0
+declare -A requested=()
+for number in ${UAS_ACTIVE//,/ }; do
+	if [[ ! "$number" =~ ^[0-9]+$ ]]; then
+		echo "UAS_ACTIVE entry '$number' is not a UAS number. Use a space-separated list such as: UAS_ACTIVE=3" >&2
+		exit 1
+	fi
+	if [[ -n "${requested[$number]:-}" ]]; then
+		echo "UAS_ACTIVE names uas$number more than once." >&2
+		exit 1
+	fi
+	requested[$number]=pending
+done
 for airframe in ${UAS_FLEET}; do
 	index=$((index + 1))
 	case "${airframe}" in
@@ -32,14 +48,25 @@ for airframe in ${UAS_FLEET}; do
 	# station namespaces match the vehicles. Without the offset this launched
 	# /uas1 to /uas4 while the fleet published /uas11 to /uas14, and the two
 	# sides simply never met.
-	numbers="${numbers},$((UAS_BASE + index))"
-	models="${models},${model}"
+	number=$((UAS_BASE + index))
+	if [ ${#requested[@]} -eq 0 ] || [[ -n "${requested[$number]:-}" ]]; then
+		numbers="${numbers},${number}"
+		models="${models},${model}"
+		requested[$number]=found
+	fi
 done
 
 if [ "${index}" -lt 1 ] || [ "${index}" -gt 9 ]; then
 	echo "UAS_FLEET has ${index} vehicles. A fleet is 1 to 9 of them." >&2
 	exit 1
 fi
+
+for number in "${!requested[@]}"; do
+	if [ "${requested[$number]}" != found ]; then
+		echo "UAS_ACTIVE names uas$number, but UAS_FLEET covers uas$((UAS_BASE + 1)) through uas$((UAS_BASE + index))." >&2
+		exit 1
+	fi
+done
 
 # 60 + UAS_BASE: 70 beside a simulated fleet, 60 beside the real one, so a
 # simulator and the fleet can share one network without discovering each

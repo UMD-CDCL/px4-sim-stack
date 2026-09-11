@@ -751,15 +751,16 @@ open_and_lock_file failed
 ```
 
 Fast DDS keeps its shared memory in `/dev/shm`, and these containers share the
-host's, so a segment outlives the container that made it. A few hundred pile up
-over a day of restarts until a new participant cannot lock a port, and the
-ground station stops hearing anything while every container still looks healthy.
+host's, so a port segment or its `sem.fastrtps_*` mutex can outlive the
+container that made it. A few hundred pile up over a day of restarts until a
+new participant cannot lock a port, and the ground station stops hearing
+anything while every container still looks healthy.
 
 ```bash
 ls /dev/shm | grep -c fastrtps
 ```
 
-`./px4sim stop` releases the ones nobody has open. To clear them by hand:
+`./px4sim stop` releases both forms when nobody has them open. To clear them by hand:
 
 ```bash
 ./px4sim stop
