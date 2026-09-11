@@ -641,6 +641,9 @@ services:
       # variable here would stop the simulator. The entry point refuses an
       # empty value instead.
       UAS_NUM: ${UAS_NUM:-}
+      # A real deployment has one airframe. Pass its declared model through
+      # to onboard.launch.py instead of inferring it from a fleet slot.
+      MODEL: ${UAS_MODEL:-}
       # The scene the ground station draws, so the vehicle casts at the
       # surface the ground casts at. The dash form keeps an empty value
       # empty, the way `ground` reads it: SCENE= on a bench leaves both

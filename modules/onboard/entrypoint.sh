@@ -278,9 +278,10 @@ else
 		echo "camera: rcam sockets ready after ${waited}s: $(basename -a -s _nv.sock /tmp/*ds_nv.sock | paste -sd' ' -)"
 	fi
 
-	# The lens, as compose mapped it. /dev/null (1:3) means .env names no
-	# ONBOARD_LENS_DEVICE, which a v3 needs and a v2 does not.
-	if [ "$(stat -c '%t:%T' /dev/lens 2>/dev/null)" = "1:3" ]; then
+	# The lens, as compose mapped it. /dev/null (1:3) is expected on a v2;
+	# only a v3 needs an SCF4. MODEL comes from UAS_MODEL on an aircraft and
+	# from UAS_FLEET for a simulated vehicle.
+	if [ "${MODEL:-}" = v3 ] && [ "$(stat -c '%t:%T' /dev/lens 2>/dev/null)" = "1:3" ]; then
 		echo "lens: /dev/lens is /dev/null. A v3 needs ONBOARD_LENS_DEVICE in .env." >&2
 	fi
 fi

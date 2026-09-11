@@ -279,7 +279,9 @@ case "$selected" in
 	else
 		bad "UAS_NUM is not set. chimera-deploy/deploy.sh writes it into /etc/environment. Log in again."
 	fi
-	if [ -z "${ONBOARD_LENS_DEVICE:-}" ]; then
+	if [ "${UAS_MODEL:-}" = v2 ]; then
+		ok "UAS_MODEL=v2: no SCF4 lens is required"
+	elif [ -z "${ONBOARD_LENS_DEVICE:-}" ]; then
 		note "ONBOARD_LENS_DEVICE is unset, so the container gets /dev/null as its lens. A v3 needs it: see .env.example."
 	elif [ -e "${ONBOARD_LENS_DEVICE}" ]; then
 		ok "SCF4 zoom lens at ${ONBOARD_LENS_DEVICE} -> $(readlink -f "${ONBOARD_LENS_DEVICE}")"
