@@ -15,6 +15,12 @@ cd "$(dirname "$(readlink -f "$0")")"
 
 DC="docker compose"
 
+# Set by build_stack when nvcr.io cannot be resolved but the images from a
+# previous successful build are still here.  `up` must then be told not to
+# build (or pull) anything: a normal `up` is allowed to build a missing image,
+# which would put us straight back into the DNS timeout we avoided.
+DEEPSTREAM_OFFLINE_CACHE=false
+
 # What a vehicle can be asked to capture. The console offers these, and the
 # `capture` arm below takes these, so one list answers both.
 CAPTURE_KINDS="mosaic vlm fiducial"
@@ -520,6 +526,34 @@ service_name() {
 build_stack() {
 	add_fleet_profiles
 	resolve_services "$@"
+
+	# The DeepStream base is both large and hosted on NVIDIA's registry.  An
+	# aircraft can lose DNS for a while, but it should still be able to restart
+	# using images which are already on disk.  Do not probe the registry over
+	# HTTPS here: the whole point is to avoid BuildKit's long resolver timeout.
+	# getent is bounded so a broken systemd-resolved socket cannot hold startup.
+	local ds_base_cached=false
+	docker image inspect "$DS_IMAGE" >/dev/null 2>&1 && ds_base_cached=true
+	if [ "$ds_base_cached" = false ] && [[ "$DS_IMAGE" == nvcr.io/* ]] && ! timeout 3 getent ahostsv4 nvcr.io >/dev/null 2>&1; then
+		local cached=true
+		for image in "px4simstack/ros-base:$DS_TAG"; do
+			docker image inspect "$image" >/dev/null 2>&1 || cached=false
+		done
+		if [[ ",${COMPOSE_PROFILES:-}," == *,ground,* || ",${COMPOSE_PROFILES:-}," == *,offboard,* ]]; then
+			docker image inspect "px4simstack/offboard:$DS_TAG" >/dev/null 2>&1 || cached=false
+		fi
+		# Simulated companions and the aircraft share this image.
+		if [[ ",${COMPOSE_PROFILES:-}," == *,sim,* || ",${COMPOSE_PROFILES:-}," == *,aircraft,* ]]; then
+			docker image inspect "px4simstack/onboard:$DS_TAG" >/dev/null 2>&1 || cached=false
+		fi
+		if [ "$cached" = true ]; then
+			warn "nvcr.io cannot be resolved; using cached DeepStream stack images."
+			warn "No source changes will be built until DNS returns."
+			DEEPSTREAM_OFFLINE_CACHE=true
+			return 0
+		fi
+		die "nvcr.io cannot be resolved and DeepStream $DS_IMAGE is not local. Connect DNS/network once to build the missing images."
+	fi
 
 	local needs_base=false
 	[ ${#SERVICES[@]} -eq 0 ] && needs_base=true
@@ -1047,7 +1081,11 @@ restart|start|up|core)
 			warn "PX4 will fly the coordinates inside the world file. ./px4sim origin"
 		fi
 	fi
-	$DC up -d
+	if [ "$DEEPSTREAM_OFFLINE_CACHE" = true ]; then
+		$DC up -d --no-build --pull never
+	else
+		$DC up -d
+	fi
 	echo
 	$DC ps --format 'table {{.Service}}\t{{.Status}}'
 	endpoints
