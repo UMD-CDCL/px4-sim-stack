@@ -43,6 +43,7 @@ fi
 		fiducial_alt=$(python3 -c "print(float('${FIDUCIAL_SURVEYED_ALT}') + float('${GEOID_HEIGHT_M}'))")
 		printf '    fiducial_lla: [%s, %s, %s]\n' \
 			"${FIDUCIAL_SURVEYED_LAT}" "${FIDUCIAL_SURVEYED_LON}" "${fiducial_alt}"
-		echo "site: fiducial ${FIDUCIAL_SURVEYED_LAT}, ${FIDUCIAL_SURVEYED_LON}, ${fiducial_alt} m WGS84"
+		# Keep operational diagnostics out of the redirected YAML document.
+		echo "site: fiducial ${FIDUCIAL_SURVEYED_LAT}, ${FIDUCIAL_SURVEYED_LON}, ${fiducial_alt} m WGS84" >&2
 	fi
 } > "${SITE_PARAMS}"
