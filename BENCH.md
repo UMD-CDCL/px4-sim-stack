@@ -33,5 +33,7 @@ It is not a navigation or flight-safety aid. Disable it before flight:
 ./px4sim bench disable
 ```
 
-Stop the stack before either transition. The `BENCH_MODE` setting stays in
-`.env`. Bench mode also writes the UROC scene selection.
+Enable still requires the stack to be stopped, so it cannot alter a running
+non-bench container. Disable stops any running stack automatically before
+writing `BENCH_MODE=false`. The setting stays in `.env`. Bench mode also writes
+the UROC scene selection.
