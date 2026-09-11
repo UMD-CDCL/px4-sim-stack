@@ -199,8 +199,14 @@ bench_mode() {
 	[ "$FLEET_IS_SIMULATED" = false ] || die "bench mode is only for a real aircraft or ground station"
 	[ "${1:-}" = enable ] || [ "${1:-}" = disable ] || \
 		die "Use: ./px4sim bench enable 'ENABLE BENCH MODE' or ./px4sim bench disable"
-	if [ -n "$(COMPOSE_PROFILES="$ALL_PROFILES" $DC ps --status running -q 2>/dev/null)" ]; then
+	local running
+	running=$(COMPOSE_PROFILES="$ALL_PROFILES" $DC ps --status running -q 2>/dev/null)
+	if [ "$1" = enable ] && [ -n "$running" ]; then
 		die "Stop the stack before changing bench mode: ./px4sim stop"
+	fi
+	if [ "$1" = disable ] && [ -n "$running" ]; then
+		say "Stopping the stack before disabling GPS-free BENCH MODE"
+		stop_stack
 	fi
 	if [ "$1" = enable ]; then
 		[ "${2:-}" = "ENABLE BENCH MODE" ] || \
@@ -638,7 +644,7 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     endpoints           The addresses alone
     ui                  The same in a console, with a key for every command
     bench enable PHRASE Enable GPS-free bench reference (requires exact phrase)
-    bench disable       Disable bench reference before flight
+    bench disable       Stop the stack, then disable bench reference before flight
     fleet               Every vehicle: model, address, ports, domain, streams
     logs [opts] [svc]   Follow the logs. \`logs --since 5m $sample\` reads back.
 
@@ -994,8 +1000,9 @@ esac
 
 case "$cmd" in
 
-# Configuration changes still go through this front door; bench_mode refuses
-# to alter a running stack and requires an explicit confirmation phrase.
+# Configuration changes still go through this front door. Enabling refuses a
+# running stack and requires an explicit confirmation phrase; disabling stops
+# a running stack before clearing the flight-unsafe configuration.
 bench)  bench_mode "$@" ;;
 
 # The fleet profiles carry a router and a companion for each vehicle, and

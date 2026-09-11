@@ -41,7 +41,15 @@ if [ "${SIM}" = true ]; then
 	esac
 fi
 
-export ROS_DOMAIN_ID=$((60 + UAS_NUM))
+expected_ros_domain=$((60 + UAS_NUM))
+# Compose receives the declared value from the aircraft's .env so `docker
+# inspect` and PID 1 agree.  Do not silently correct a stale deployment: ROS
+# discovery on the wrong domain fails without a useful symptom.
+if [ -n "${ROS_DOMAIN_ID:-}" ] && [ "${ROS_DOMAIN_ID}" != "${expected_ros_domain}" ]; then
+	echo "uas${UAS_NUM} must use ROS_DOMAIN_ID=${expected_ros_domain}, not ${ROS_DOMAIN_ID}." >&2
+	exit 1
+fi
+export ROS_DOMAIN_ID=${expected_ros_domain}
 export ROS_LOCALHOST_ONLY=0
 # The air imagery profiles are Fast DDS XML, so the bridge needs this
 # implementation. The profiles themselves are set on the image bridge process
@@ -214,17 +222,10 @@ if [ "${SIM}" = true ]; then
 		calibrate "${CAMERA_HFOV_DEG}" simulated "${CAMERA_DIR}/gimbal.yaml"
 	fi
 
-	# Where the survey marker really is. A fiducial capture is localized and the
-	# difference between that and this is the correction the whole fleet's frame
-	# moves by, so an unset marker surveys against latitude zero and moves the
-	# frame across the planet. The scene carries the coordinates. The altitude is
-	# left at zero on purpose: tf_loc takes it from the ground model, which is
-	# right by construction on flat ground.
-	if [ "${FIDUCIAL_ENABLED:-0}" = 1 ] && [ -n "${FIDUCIAL_SURVEYED_LAT:-}" ]; then
-		printf '  tf_loc:\n    ros__parameters:\n      fiducial_lla: [%s, %s, 0.0]\n' \
-			"${FIDUCIAL_SURVEYED_LAT}" "${FIDUCIAL_SURVEYED_LON}" >> "${SITE_PARAMS}"
-		echo "site: fiducial surveyed at ${FIDUCIAL_SURVEYED_LAT}, ${FIDUCIAL_SURVEYED_LON}"
-	fi
+	# site-params.sh writes the known fiducial LLA for every projection node,
+	# including its terrain-derived AMSL altitude converted into the NavSatFix
+	# datum.  Do not add a tf_loc-only latitude/longitude override here: that
+	# would split localization from the terrain and buildings it must meet.
 
 	# The detector opens its camera once and dies if it is not there. On the
 	# aircraft the camera is a local socket that exists at boot; here it is a stream
@@ -278,9 +279,10 @@ else
 		echo "camera: rcam sockets ready after ${waited}s: $(basename -a -s _nv.sock /tmp/*ds_nv.sock | paste -sd' ' -)"
 	fi
 
-	# The lens, as compose mapped it. /dev/null (1:3) means .env names no
-	# ONBOARD_LENS_DEVICE, which a v3 needs and a v2 does not.
-	if [ "$(stat -c '%t:%T' /dev/lens 2>/dev/null)" = "1:3" ]; then
+	# The lens, as compose mapped it. /dev/null (1:3) is expected on a v2;
+	# only a v3 needs an SCF4. MODEL comes from UAS_MODEL on an aircraft and
+	# from UAS_FLEET for a simulated vehicle.
+	if [ "${MODEL:-}" = v3 ] && [ "$(stat -c '%t:%T' /dev/lens 2>/dev/null)" = "1:3" ]; then
 		echo "lens: /dev/lens is /dev/null. A v3 needs ONBOARD_LENS_DEVICE in .env." >&2
 	fi
 fi

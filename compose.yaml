@@ -250,6 +250,9 @@ x-offboard: &offboard
 
 x-offboard-env: &offboard-env
   <<: [*gpu-env, *x11-env]
+  # Keep Docker's declared environment aligned with the domain the entrypoint
+  # gives PID 1.  The real ground service overrides both values to 60 below.
+  ROS_DOMAIN_ID: ${GROUND_DOMAIN:-70}
   # See the onboard-env note: without this, everything the preview
   # ds_node says sits in a pipe buffer until the process exits.
   PYTHONUNBUFFERED: "1"
@@ -642,6 +645,13 @@ services:
       # variable here would stop the simulator. The entry point refuses an
       # empty value instead.
       UAS_NUM: ${UAS_NUM:-}
+      # deploy_onboard.sh writes this as 60 + UAS_NUM (uas1..uas4 are
+      # 61..64).  The entrypoint verifies it before launching ROS; an empty
+      # value is retained for a laptop that interpolates inactive profiles.
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-}
+      # A real deployment has one airframe. Pass its declared model through
+      # to onboard.launch.py instead of inferring it from a fleet slot.
+      MODEL: ${UAS_MODEL:-}
       # The scene the ground station draws, so the vehicle casts at the
       # surface the ground casts at. The dash form keeps an empty value
       # empty, the way `ground` reads it: SCENE= on a bench leaves both
@@ -719,10 +729,10 @@ services:
     environment:
       <<: *offboard-env
       RTSP_BASE: ${RTSP_BASE:-rtsp://127.0.0.1:8554}
-      # 60 beside the real fleet, which flies 61 to 69. The anchor's 70
-      # belongs to a simulated fleet. scripts/fleet.sh derives the same pair
-      # for the host, so a .env with no GROUND_DOMAIN line still agrees.
-      GROUND_DOMAIN: ${GROUND_DOMAIN:-60}
+      # The real ground station is always 60.  The aircraft are uas1..uas4
+      # on 61..64; 70 belongs only to the simulated ground station.
+      GROUND_DOMAIN: "60"
+      ROS_DOMAIN_ID: "60"
       # The dash form keeps an empty value empty: SCENE= in .env draws no
       # terrain on a bench, SCENE=lorton draws the site at the field.
       SCENE: ${SCENE-lorton}
