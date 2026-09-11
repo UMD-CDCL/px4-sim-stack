@@ -214,17 +214,10 @@ if [ "${SIM}" = true ]; then
 		calibrate "${CAMERA_HFOV_DEG}" simulated "${CAMERA_DIR}/gimbal.yaml"
 	fi
 
-	# Where the survey marker really is. A fiducial capture is localized and the
-	# difference between that and this is the correction the whole fleet's frame
-	# moves by, so an unset marker surveys against latitude zero and moves the
-	# frame across the planet. The scene carries the coordinates. The altitude is
-	# left at zero on purpose: tf_loc takes it from the ground model, which is
-	# right by construction on flat ground.
-	if [ "${FIDUCIAL_ENABLED:-0}" = 1 ] && [ -n "${FIDUCIAL_SURVEYED_LAT:-}" ]; then
-		printf '  tf_loc:\n    ros__parameters:\n      fiducial_lla: [%s, %s, 0.0]\n' \
-			"${FIDUCIAL_SURVEYED_LAT}" "${FIDUCIAL_SURVEYED_LON}" >> "${SITE_PARAMS}"
-		echo "site: fiducial surveyed at ${FIDUCIAL_SURVEYED_LAT}, ${FIDUCIAL_SURVEYED_LON}"
-	fi
+	# site-params.sh writes the known fiducial LLA for every projection node,
+	# including its terrain-derived AMSL altitude converted into the NavSatFix
+	# datum.  Do not add a tf_loc-only latitude/longitude override here: that
+	# would split localization from the terrain and buildings it must meet.
 
 	# The detector opens its camera once and dies if it is not there. On the
 	# aircraft the camera is a local socket that exists at boot; here it is a stream

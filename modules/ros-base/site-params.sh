@@ -29,5 +29,20 @@ print(subprocess.run(['GeoidEval'], input=f'{latitude} {longitude}',
 	export GEOID_HEIGHT_M
 	echo "site: geoid height ${GEOID_HEIGHT_M} m"
 fi
-printf '/**/*:\n  ros__parameters:\n    localization.geoid_height_m: %s\n' \
-	"${GEOID_HEIGHT_M}" > "${SITE_PARAMS}"
+{
+	printf '/**/*:\n  ros__parameters:\n    localization.geoid_height_m: %s\n' \
+		"${GEOID_HEIGHT_M}"
+	# Scenarios store the surveyed marker altitude above mean sea level, just
+	# like the terrain surface.  ROS/NavSatFix and the projection terrain use
+	# ellipsoidal height, so make this conversion once at the scene boundary
+	# and hand every local node the same known fiducial datum.
+	if [ "${FIDUCIAL_ENABLED:-0}" = 1 ] \
+		&& [ -n "${FIDUCIAL_SURVEYED_LAT:-}" ] \
+		&& [ -n "${FIDUCIAL_SURVEYED_LON:-}" ] \
+		&& [ -n "${FIDUCIAL_SURVEYED_ALT:-}" ]; then
+		fiducial_alt=$(python3 -c "print(float('${FIDUCIAL_SURVEYED_ALT}') + float('${GEOID_HEIGHT_M}'))")
+		printf '    fiducial_lla: [%s, %s, %s]\n' \
+			"${FIDUCIAL_SURVEYED_LAT}" "${FIDUCIAL_SURVEYED_LON}" "${fiducial_alt}"
+		echo "site: fiducial ${FIDUCIAL_SURVEYED_LAT}, ${FIDUCIAL_SURVEYED_LON}, ${fiducial_alt} m WGS84"
+	fi
+} > "${SITE_PARAMS}"
