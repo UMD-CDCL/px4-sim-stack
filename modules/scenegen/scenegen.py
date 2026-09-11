@@ -304,7 +304,8 @@ def _fetch_options(parser, *, required: bool) -> None:
     parser.add_argument("--imagery-zoom", type=int, default=DEFAULT_IMAGERY_ZOOM)
     parser.add_argument("--terrain-grid", type=int, default=DEFAULT_TERRAIN_GRID)
     parser.add_argument("--casualties",
-                        help="YAML casualty list to import as ground-truth "
+                        help="YAML list or ground-truth JSON to import as "
+                             "ground-truth "
                              "targets; scene.json owns them afterwards")
     parser.add_argument("--force", action="store_true",
                         help="refetch and overwrite an existing scene.json")
@@ -341,7 +342,7 @@ def main() -> int:
                        "ground-truth targets")
     importer.add_argument("--name", required=True)
     importer.add_argument("--casualties", required=True,
-                          help="YAML list; replaces earlier imported targets, "
+                          help="YAML list or ground-truth JSON; replaces earlier imported targets, "
                                "keeps hand-placed ones")
 
     detect = command("detect", cmd_detect, "find vehicles in the imagery")

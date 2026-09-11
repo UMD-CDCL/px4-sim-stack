@@ -236,6 +236,17 @@ def make_casualty_file(path: Path) -> None:
     path.write_text(yaml_text)
 
 
+def make_gt_casualty_file(path: Path) -> None:
+    path.write_text(json.dumps({"gt_casualty_locations": [
+        {"casualty_id": 17,
+         "position": {"lat": CENTER_LAT, "lon": CENTER_LON, "alt": 0.0},
+         "level": 1},
+        {"casualty_id": 23,
+         "position": {"lat": CENTER_LAT, "lon": CENTER_LON, "alt": 0.0},
+         "level": 2},
+    ]}))
+
+
 def run_build(tmp: Path) -> tuple[Path, Path]:
     data_dir = tmp / "data" / "synthtest"
     data_dir.mkdir(parents=True)
@@ -250,6 +261,14 @@ def run_build(tmp: Path) -> tuple[Path, Path]:
     imported, kept = scene_model.import_casualty_file(scene, casualties)
     check("a re-import replaces imports, not hand-placed targets",
           imported == 3 and kept == 9 and len(scene.targets) == 12)
+    gt_casualties = tmp / "casualties_gt.json"
+    make_gt_casualty_file(gt_casualties)
+    imported, kept = scene_model.import_casualty_file(scene, gt_casualties)
+    check("ground-truth JSON imports casualty locations",
+          imported == 2 and kept == 9
+          and [target.name for target in scene.targets[-2:]]
+          == ["casualty_17", "casualty_23"])
+    imported, kept = scene_model.import_casualty_file(scene, casualties)
     scene_model.save_scene(scene, data_dir / "scene.json")
     code = build_world.run(data_dir, scenes_dir)
     check("build exits 0", code == 0)

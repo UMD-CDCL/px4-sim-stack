@@ -318,10 +318,28 @@ def import_casualty_file(scene: SceneSpec, path: Path) -> tuple[int, int]:
 
     Each entry: lat and lon (required, WGS84 degrees), agl (optional
     meters above the terrain, absent sits on it), model (optional URI,
-    absent draws from the pool at build), name (optional).
+    absent draws from the pool at build), name (optional).  The ground
+    truth JSON export format is also accepted: its
+    ``gt_casualty_locations`` entries hold coordinates under ``position``
+    and an optional ``casualty_id`` used for the target name.
     """
     data = yaml.safe_load(path.read_text())
     entries = data.get("casualties", data) if isinstance(data, dict) else data
+    gt_locations = (data.get("gt_casualty_locations")
+                    if isinstance(data, dict) else None)
+    if gt_locations is not None:
+        if not isinstance(gt_locations, list):
+            raise ValueError(f"{path} has an invalid gt_casualty_locations list")
+        entries = []
+        for index, location in enumerate(gt_locations, start=1):
+            position = location.get("position") if isinstance(location, dict) else None
+            if not isinstance(position, dict):
+                raise ValueError(f"casualty {index} in {path} has no position")
+            entry = dict(position)
+            casualty_id = location.get("casualty_id")
+            if casualty_id is not None:
+                entry["name"] = f"casualty_{casualty_id}"
+            entries.append(entry)
     if not isinstance(entries, list):
         raise ValueError(f"{path} holds no casualty list")
     frame = geo.GeoFrame(scene.center_lat, scene.center_lon, scene.origin_alt_m)

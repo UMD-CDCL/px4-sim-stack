@@ -1,70 +1,118 @@
 {
  "name": "raley",
- "center_lat": 38.263458,
- "center_lon": -76.779413,
+ "center_lat": 38.263370415,
+ "center_lon": -76.77975497,
  "side_m": 200,
- "origin_alt_m": 4.69,
+ "origin_alt_m": 4.19,
  "imagery": {
   "source": "google",
   "zoom": 19,
   "file": "satellite.jpg",
   "width_px": 853,
-  "height_px": 857,
+  "height_px": 856,
   "m_per_px": 0.2344,
-  "origin_px": 38482998,
-  "origin_py": 51646323
+  "origin_px": 38482870,
+  "origin_py": 51646365
  },
  "elevation": {
   "grid_n": 128,
   "side_m": 200,
   "zoom": 15,
   "row0": "south",
-  "origin_alt_m": 4.69,
-  "min_m": 0.76,
-  "max_m": 5.83
+  "origin_alt_m": 4.19,
+  "min_m": 1.11,
+  "max_m": 5.62
  },
  "fiducial": {
-  "east_m": -28.01,
-  "north_m": -8.69,
+  "east_m": 0,
+  "north_m": 0,
   "diameter_m": 0.5,
   "placed_east_m": 0,
   "placed_north_m": 0
  },
  "buildings": [
   {
-   "length_m": 19.46,
-   "width_m": 10.83,
-   "yaw_deg": -36.2,
-   "height_m": 6,
+   "id": "b_manual_1",
+   "east_m": 8.67,
+   "north_m": 21.84,
+   "length_m": 20.51,
+   "width_m": 10.94,
+   "yaw_deg": -35.7,
+   "height_m": 8,
    "height_source": "manual",
-   "name": "",
    "map_height_m": null,
    "map_height_source": "",
+   "name": "",
    "outline_m": [],
    "holes_m": [],
    "extruded": true,
    "levels": [],
    "source": "manual",
    "model_uri": null,
-   "enabled": true,
-   "id": "b_manual_1",
-   "east_m": -21.78,
-   "north_m": 12.66
+   "enabled": true
   }
  ],
  "vehicles": [],
  "targets": [
   {
-   "name": "casualty_m1",
+   "id": "t_import_1",
+   "name": "casualty_1",
+   "east_m": 7.25,
+   "north_m": 2.84,
+   "agl_m": 0,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "import"
+  },
+  {
+   "id": "t_import_2",
+   "name": "casualty_2",
+   "east_m": 13.19,
+   "north_m": 3.6,
+   "agl_m": 0,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "import"
+  },
+  {
+   "id": "t_import_3",
+   "name": "casualty_3",
+   "east_m": 13.88,
+   "north_m": -2.75,
+   "agl_m": 0,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "import"
+  },
+  {
+   "id": "t_import_4",
+   "name": "casualty_4",
+   "east_m": 24.16,
+   "north_m": 7.37,
+   "agl_m": 0,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "import"
+  },
+  {
+   "id": "t_import_5",
+   "name": "casualty_5",
+   "east_m": -5.28,
+   "north_m": 19.8,
    "agl_m": 3,
    "on_building": true,
    "yaw_deg": null,
    "model_uri": null,
    "enabled": true,
-   "source": "manual",
-   "id": "t_manual_1",
-   "east_m": -34.78,
-   "north_m": 11.98
+   "source": "import"
   }
  ],
  "trees": [],

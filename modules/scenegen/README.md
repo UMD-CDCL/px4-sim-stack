@@ -326,9 +326,11 @@ person model OpenRobotics has on Fuel, about twenty poses: standing,
 walking, seated and lying down. Targets and vehicles snap to the
 building under them by default; the panel turns it off per object.
 
-File format: `lat`/`lon` required; `agl` (meters above the terrain,
-absent = on it), `model` and `name` optional. See
-`examples/casualties_example.yaml`. Everything downstream is unchanged:
+File format: a YAML casualty list has `lat`/`lon` required; `agl` (meters
+above the terrain, absent = on it), `model` and `name` optional. Ground-truth
+JSON exports with a `gt_casualty_locations` list are also accepted; each
+location uses `position.lat` and `position.lon`, and `casualty_id` becomes the
+target name. See `examples/casualties_example.yaml`. Everything downstream is unchanged:
 `spawn_scenario.py` places the scenario, so a target change after a
 rebuild needs `./px4sim scenario`, not a sim restart. The scenario also
 carries the `home_*` and `fiducial_*` lines the front doors read, and it
