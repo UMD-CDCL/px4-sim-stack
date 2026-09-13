@@ -37,6 +37,10 @@ stage mavinsight "$ws/src/MAVInsight" \
     --include='/resource/***' --include='/vehicles/***' --include='/sensors/***' \
     --include='/sites/***' --include='/setup.*' --include='/package.xml' \
     --include='/pyproject.toml' --include='/LICENSE*' --exclude='*'
+stage tracking_test "$ws/src/tracking_test_5g" \
+    --include='/tracking_test/***' --include='/launch/***' --include='/config/***' \
+    --include='/resource/***' --include='/setup.*' --include='/package.xml' \
+    --include='/pyproject.toml' --include='/LICENSE*' --exclude='*'
 for package in px4_msgs cdcl_umd_msgs; do
     stage "$package" "$ws/src/$package" \
         --include='/msg/***' --include='/srv/***' --include='/action/***' \

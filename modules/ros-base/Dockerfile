@@ -66,6 +66,17 @@ RUN --network=none \
        --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
                     -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
+FROM deps AS tracking_test
+ARG TARGETARCH
+ARG DS_TAG
+ARG ROS_BUILD_JOBS=4
+WORKDIR /home/user/ros2_ws
+COPY --from=tracking_test_src / src/tracking_test/
+RUN --network=none \
+    . /opt/ros/${ROS_DISTRO}/setup.sh \
+    && colcon build --executor sequential \
+       --packages-select tracking_test
+
 FROM deps AS umd_uas
 ARG TARGETARCH
 ARG DS_TAG
@@ -90,6 +101,7 @@ COPY --link --from=px4_msgs /home/user/ros2_ws/install/ /home/user/ros2_ws/insta
 COPY --link --from=cdcl_umd_msgs /home/user/ros2_ws/install/ /home/user/ros2_ws/install/
 COPY --link --from=mavinsight /home/user/ros2_ws/install/ /home/user/ros2_ws/install/
 COPY --link --from=umd_uas /home/user/ros2_ws/install/ /home/user/ros2_ws/install/
+COPY --link --from=tracking_test /home/user/ros2_ws/install/ /home/user/ros2_ws/install/
 COPY --link --from=mavros /opt/mavros/install/ /opt/mavros/install/
 COPY --link --from=parser /out/libnvdsinfer_custom_impl_Yolo.so /opt/ds-yolo/libnvdsinfer_custom_impl_Yolo.so
 COPY --link site-params.sh ros-env.sh /usr/local/bin/
