@@ -93,5 +93,11 @@ COPY --link --from=umd_uas /home/user/ros2_ws/install/ /home/user/ros2_ws/instal
 COPY --link --from=mavros /opt/mavros/install/ /opt/mavros/install/
 COPY --link --from=parser /out/libnvdsinfer_custom_impl_Yolo.so /opt/ds-yolo/libnvdsinfer_custom_impl_Yolo.so
 COPY --link site-params.sh ros-env.sh /usr/local/bin/
+
+# COPY --link can recreate destination path components as root. Restore the
+# runtime user's ownership of its home so ROS and other tools can create
+# per-user state such as ~/.ros, ~/.cache, and ~/.config.
+RUN chown "${HOST_UID}:${HOST_GID}" /home/user
+
 USER ${USERNAME}
 WORKDIR /home/user/ros2_ws
