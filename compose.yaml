@@ -137,6 +137,7 @@ x-onboard: &onboard
   # permitted" -- nearly two thousand lines on a machine that encodes in
   # software, burying the log -- and the binding silently does not happen.
   cap_add: [SYS_NICE]
+  stop_signal: SIGINT
   stop_grace_period: 20s
   volumes:
     # Detector and classifier artifacts. config/param_files/
