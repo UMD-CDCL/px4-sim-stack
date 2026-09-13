@@ -332,6 +332,7 @@ services:
         cdcl_umd_msgs_src: ./.build-contexts/cdcl_umd_msgs
         mavinsight_src: ./.build-contexts/mavinsight
         umd_uas_src: ./.build-contexts/umd_uas
+        tracking_test_src: ./.build-contexts/tracking_test
         mavros_src: ./.build-contexts/mavros
         angles_src: ./.build-contexts/angles
         mavros_patch_src: ./.build-contexts/mavros_patch
