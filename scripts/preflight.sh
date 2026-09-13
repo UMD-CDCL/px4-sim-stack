@@ -453,9 +453,12 @@ else
 	note "$ws/src/5g_drone missing. The onboard and offboard images build it.
         Check it out, or set ROS2_WS_DIR in .env."
 fi
-# The chimera-deploy checkout. compose passes it as a named build context for
-# every ros-base build, MAVROS_PATCH=0 included, because docker resolves a
-# named context before it reads the Dockerfile.
+for package in MAVInsight px4_msgs cdcl_umd_msgs; do
+	[ -f "$ws/src/$package/package.xml" ] \
+		|| note "$ws/src/$package/package.xml missing. Offline builds use this local checkout."
+done
+command -v rsync >/dev/null || note "rsync is required to stage the small container build contexts."
+# Only the patch and two submodules are staged from this checkout.
 deploy=${CHIMERA_DEPLOY_DIR:-../chimera-deploy}
 if [ ! -d "$deploy" ]; then
 	note "$deploy is missing. ros-base cannot build without it:
@@ -654,8 +657,8 @@ fi
 # `setup` clones the PX4 and QGroundControl sources, which only the simulator
 # builds. A real machine is one build and one start away from flying.
 if [ "$FLEET_IS_SIMULATED" = true ]; then
-	next="./px4sim setup, then ./px4sim restart"
+	next="./px4sim prepare, ./px4sim setup, then ./px4sim start"
 else
-	next="./px4sim restart"
+	next="./px4sim prepare once online, then ./px4sim start"
 fi
 echo "${GRN}Ready.${OFF} $warn warning(s). Next: $next."

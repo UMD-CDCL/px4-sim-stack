@@ -15,11 +15,8 @@ cd "$(dirname "$(readlink -f "$0")")"
 
 DC="docker compose"
 
-# Set by build_stack when nvcr.io cannot be resolved but the images from a
-# previous successful build are still here.  `up` must then be told not to
-# build (or pull) anything: a normal `up` is allowed to build a missing image,
-# which would put us straight back into the DNS timeout we avoided.
-DEEPSTREAM_OFFLINE_CACHE=false
+# Only prepare enables networking for build steps.
+export PX4SIM_BUILD_NETWORK=none
 
 # What a vehicle can be asked to capture. The console offers these, and the
 # `capture` arm below takes these, so one list answers both.
@@ -435,7 +432,7 @@ reload_world() {
 		has_service ground-router && reloading="$reloading ground-router"
 	fi
 	# shellcheck disable=SC2086
-	$DC up -d --force-recreate $reloading >/dev/null 2>&1
+	$DC up -d --no-build --pull never --force-recreate $reloading >/dev/null 2>&1
 }
 
 # What carries the picture. A pipeline opens its camera ONCE, so recreating
@@ -523,55 +520,49 @@ service_name() {
 	esac
 }
 
+# Build source changes using local parents. Network is disabled unless the
+# operator explicitly invokes prepare. No DNS probe can decide cache validity.
 build_stack() {
 	add_fleet_profiles
 	resolve_services "$@"
-
-	# The DeepStream base is both large and hosted on NVIDIA's registry.  An
-	# aircraft can lose DNS for a while, but it should still be able to restart
-	# using images which are already on disk.  Do not probe the registry over
-	# HTTPS here: the whole point is to avoid BuildKit's long resolver timeout.
-	# getent is bounded so a broken systemd-resolved socket cannot hold startup.
-	local ds_base_cached=false
-	docker image inspect "$DS_IMAGE" >/dev/null 2>&1 && ds_base_cached=true
-	if [ "$ds_base_cached" = false ] && [[ "$DS_IMAGE" == nvcr.io/* ]] && ! timeout 3 getent ahostsv4 nvcr.io >/dev/null 2>&1; then
-		local cached=true
-		for image in "px4simstack/ros-base:$DS_TAG"; do
-			docker image inspect "$image" >/dev/null 2>&1 || cached=false
-		done
-		if [[ ",${COMPOSE_PROFILES:-}," == *,ground,* || ",${COMPOSE_PROFILES:-}," == *,offboard,* ]]; then
-			docker image inspect "px4simstack/offboard:$DS_TAG" >/dev/null 2>&1 || cached=false
-		fi
-		# Simulated companions and the aircraft share this image.
-		if [[ ",${COMPOSE_PROFILES:-}," == *,sim,* || ",${COMPOSE_PROFILES:-}," == *,aircraft,* ]]; then
-			docker image inspect "px4simstack/onboard:$DS_TAG" >/dev/null 2>&1 || cached=false
-		fi
-		if [ "$cached" = true ]; then
-			warn "nvcr.io cannot be resolved; using cached DeepStream stack images."
-			warn "No source changes will be built until DNS returns."
-			DEEPSTREAM_OFFLINE_CACHE=true
-			return 0
-		fi
-		die "nvcr.io cannot be resolved and DeepStream $DS_IMAGE is not local. Connect DNS/network once to build the missing images."
-	fi
-
-	local needs_base=false
+	local needs_base=false svc
 	[ ${#SERVICES[@]} -eq 0 ] && needs_base=true
 	for svc in "${SERVICES[@]}"; do
 		case "$svc" in onboard* | offboard | ground | ros-base) needs_base=true ;; esac
 	done
 	if [ "$needs_base" = true ]; then
-		COMPOSE_PROFILES=base $DC build ros-base
+		local image
+		for image in ros-deps yolo-deps; do
+			docker image inspect "px4simstack/$image:$DS_TAG" >/dev/null 2>&1 \
+				|| die "Missing local $image:$DS_TAG. Run ./px4sim prepare once with internet."
+		done
+		export YOLO_CUDA_VERSION
+		YOLO_CUDA_VERSION=$(bash ./scripts/build-contexts.sh)
 	fi
+	# Compose follows the explicit ros_base service build contexts, so the base
+	# is built once and both derived images use that exact result.
+	$DC build "${SERVICES[@]}"
+}
 
-	local remaining=()
-	for svc in "${SERVICES[@]}"; do
-		[ "$svc" = ros-base ] || remaining+=("$svc")
+prepare_stack() {
+	[ $# -eq 0 ] || export COMPOSE_PROFILES="$1"
+	add_fleet_profiles
+	export YOLO_CUDA_VERSION PX4SIM_BUILD_NETWORK=host
+	YOLO_CUDA_VERSION=$(bash ./scripts/build-contexts.sh)
+	# BuildKit's intermediate cache alone does not guarantee a FROM image is
+	# resolvable offline. Retain the external parents in the local image store.
+	local parent
+	for parent in "$DS_IMAGE" ubuntu:24.04 debian:bookworm-slim; do
+		docker image inspect "$parent" >/dev/null 2>&1 || docker pull "$parent"
 	done
-	if [ ${#SERVICES[@]} -eq 0 ]; then
-		$DC build
-	elif [ ${#remaining[@]} -gt 0 ]; then
-		$DC build "${remaining[@]}"
+	COMPOSE_PROFILES=deps $DC build ros-deps yolo-deps
+	# Image-only services (for example video-router) must also be present before
+	# going offline. Downloading is confined to this explicit preparation step.
+	$DC pull --ignore-buildable
+	build_stack
+	if ! aircraft_selected; then
+		# setup/genscene also need their tool image available in the field.
+		COMPOSE_PROFILES=scenegen $DC build scenegen
 	fi
 }
 
@@ -673,11 +664,14 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     x11                 Let the containers draw on this display
 
   ${BOLD}Every day${OFF}
-    restart [profiles]  Stop, build, and start what .env selects. Now: ${COMPOSE_PROFILES:-none}
+    prepare [profiles]  Download dependencies and build images; run once online
+    build [services]    Build source changes offline without stopping containers
+    restart [profiles]  Build offline, then restart. Now: ${COMPOSE_PROFILES:-none}
                         sim,offboard is a simulator, ground a base station,
                         aircraft a vehicle
+                        --no-build restarts existing images without building
     stop                Stop and remove the containers. Volumes stay.
-    start [profiles]    Start only when the stack is stopped; otherwise no-op
+    start [profiles]    Start local images without building or pulling; otherwise no-op
     status              What is running, and the addresses to use
     endpoints           The addresses alone
     ui                  The same in a console, with a key for every command
@@ -995,7 +989,7 @@ fleet_edit() {
 	# and compose recreates them here. The world reloads with them.
 	add_fleet_profiles
 	say "reloading the world. Every vehicle respawns, which takes a moment."
-	$DC up -d
+	$DC up -d --no-build --pull never
 	echo
 	$DC ps --format 'table {{.Service}}\t{{.Status}}'
 	say "Wait for 'Ready for takeoff' in ./px4sim logs sim"
@@ -1051,7 +1045,13 @@ setup)    ./scripts/bootstrap.sh "$@" ;;
 
 x11)      add_fleet_profiles; ./scripts/x11-allow.sh ;;
 
+prepare|deps) prepare_stack "$@" ;;
+build) build_stack "$@" ;;
+
 restart|start|up|core)
+	local rebuild=false
+	case "$cmd" in restart|core) rebuild=true ;; esac
+	if [ "${1:-}" = --no-build ]; then rebuild=false; shift; fi
 	# A profile list can be given: ./px4sim restart ground. `start` is the
 	# non-disruptive counterpart: it does nothing while any stack service runs.
 	# `core` drops every named profile. The fleet is added below either way,
@@ -1066,9 +1066,18 @@ restart|start|up|core)
 		echo "  Use ./px4sim restart to stop, rebuild, and recreate the stack."
 		return 0
 	fi
+	if [ "$rebuild" = true ]; then
+		say "Building offline: $COMPOSE_PROFILES"
+		build_stack
+	fi
+	# Missing images fail before stopping an otherwise usable stack.
+	local image required_images
+	required_images=$($DC config --images)
+	while read -r image; do
+		docker image inspect "$image" >/dev/null 2>&1 \
+			|| die "Missing local image $image. Run ./px4sim prepare with internet."
+	done <<< "$required_images"
 	stop_stack
-	say "Building: $COMPOSE_PROFILES"
-	build_stack
 	./scripts/x11-allow.sh
 	# The log volumes bind here. scripts/fleet.sh says why, and who owns them.
 	make_bind_dirs logs logs/onboard logs/offboard logs/px4 logs/qgc
@@ -1085,11 +1094,7 @@ restart|start|up|core)
 			warn "PX4 will fly the coordinates inside the world file. ./px4sim origin"
 		fi
 	fi
-	if [ "$DEEPSTREAM_OFFLINE_CACHE" = true ]; then
-		$DC up -d --no-build --pull never
-	else
-		$DC up -d
-	fi
+	$DC up -d --no-build --pull never
 	echo
 	$DC ps --format 'table {{.Service}}\t{{.Status}}'
 	endpoints
@@ -1516,10 +1521,12 @@ place)
 	;;
 
 genscene)
-	# The generator runs once and exits. The first use builds its image,
-	# which downloads the CPU torch wheel and takes a few minutes.
+	# prepare supplies the image; scene generation may itself download new
+	# map/model data, but never implicitly rebuilds its container toolchain.
+	docker image inspect px4simstack/scenegen:1 >/dev/null 2>&1 \
+		|| die "Missing scenegen image. Run ./px4sim prepare once online."
 	# --service-ports exposes 8090 so `genscene edit` reaches the browser.
-	COMPOSE_PROFILES="scenegen" exec $DC run --rm --service-ports scenegen "$@"
+	COMPOSE_PROFILES="scenegen" exec $DC run --rm --no-deps --pull never --service-ports scenegen "$@"
 	;;
 
 # Not require_sim. The suite reads the same fleet definition this file does,

@@ -61,31 +61,9 @@ export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 # shellcheck disable=SC1091
 . /usr/local/bin/ros-env.sh
 
-# The bounding box parser nvinfer loads to turn the detector's output tensor
-# into boxes. onboard_container_params.yaml points model.custom_lib_path at
-# the model volume, and ds_node compiles one there when it finds none -- which
-# needs a CUDA compiler that no DeepStream base ships any more. modules/ros-base
-# built it against this release instead, so put it where ds_node looks.
-#
-# A parser belongs to the release it was compiled against, and the model volume
-# outlives the image, so the one left there by another release is replaced
-# rather than loaded. The stamp beside it says which release it came from.
-PARSER_SRC=/opt/ds-yolo/libnvdsinfer_custom_impl_Yolo.so
-PARSER_DIR=${MODEL_DIR:-/models}
-PARSER_DEST="${PARSER_DIR}/libnvdsinfer_custom_impl_Yolo.so"
-PARSER_STAMP="${PARSER_DIR}/.parser-deepstream"
-if [ -f "${PARSER_SRC}" ] && [ -w "${PARSER_DIR}" ]; then
-	want=${DS_RELEASE:-unknown}
-	have=$(cat "${PARSER_STAMP}" 2>/dev/null || echo none)
-	if [ ! -e "${PARSER_DEST}" ] || [ "${have}" != "${want}" ]; then
-		cp "${PARSER_SRC}" "${PARSER_DEST}"
-		echo "${want}" > "${PARSER_STAMP}"
-		echo "parser: ${PARSER_DEST} is the DeepStream ${want} build (was ${have})"
-	fi
-elif [ ! -e "${PARSER_DEST}" ]; then
-	echo "parser: no ${PARSER_DEST} and none to install. ds_node will try to" >&2
-	echo "        compile one, which needs a CUDA compiler this image has not got." >&2
-fi
+# Update the mounted parser by artifact hash, including within one DS release.
+bash /usr/local/bin/install-parser.sh /opt/ds-yolo/libnvdsinfer_custom_impl_Yolo.so \
+    "${MODEL_DIR:-/models}" "${DS_RELEASE:-unknown}"
 
 LENS_PARAMS=""
 # The bound on both camera waits below: the simulator's stream and the

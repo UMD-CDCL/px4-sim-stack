@@ -12,7 +12,7 @@ PX4SIM := ./px4sim
 .PHONY: help preflight bootstrap x11 up up-core down restart ps logs \
         sim qgc router onboard ground topics px4-console scenario scene origin reset \
         ui state \
-        genscene clean clean-src lint-docs check endpoints fleet streams layout
+        genscene clean clean-src lint-docs check endpoints fleet streams layout prepare build start
 
 ## ----------------------------------------------------------------- setup
 
@@ -30,7 +30,16 @@ x11: ## Write the X11 cookie the containers need
 
 ## ----------------------------------------------------------------- run
 
-up: ## Stop, build, and start the stack, following COMPOSE_PROFILES in .env
+prepare: ## Download dependencies and build selected images once online
+	@$(PX4SIM) prepare
+
+build: ## Build source changes offline without stopping containers
+	@$(PX4SIM) build $(S)
+
+start: ## Start existing images without building or pulling
+	@$(PX4SIM) start
+
+up: ## Build offline, then restart the stack, following COMPOSE_PROFILES in .env
 	@$(PX4SIM) restart
 
 up-core: ## Start the vehicles and QGC, with no ground station
@@ -39,7 +48,7 @@ up-core: ## Start the vehicles and QGC, with no ground station
 down: ## Stop the stack and remove the containers
 	@$(PX4SIM) stop
 
-restart: ## Stop, build, and start the whole stack
+restart: ## Build offline, then restart the whole stack
 	@$(PX4SIM) restart
 
 ps: ## Show the running services

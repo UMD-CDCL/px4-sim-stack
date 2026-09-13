@@ -71,6 +71,7 @@ x-ids: &ids
 x-mavlink-router: &mavlink-router
   build:
     context: ./modules/mavlink-router
+    network: ${PX4SIM_BUILD_NETWORK:-none}
   image: px4simstack/mavlink-router:1
   restart: unless-stopped
 
@@ -114,7 +115,9 @@ x-onboard-volumes:
 x-onboard: &onboard
   build:
     context: ./modules/onboard
+    network: none
     additional_contexts:
+      ros_base: service:ros-base
       # scripts/zoom.sh, the framing table. A build context cannot reach
       # outside itself, and the table has ONE copy: the simulator crops to a
       # preset and the companion writes the calibration for it, so a second
@@ -122,8 +125,8 @@ x-onboard: &onboard
       shared: ./scripts
     args:
       # Which ros-base to derive from. Everything heavy is there, so this image
-      # is its entry point and nothing else. `./px4sim restart` builds the base
-      # before creating containers. See modules/ros-base/Dockerfile.
+      # is its entry point and nothing else. The service context builds the
+      # base first. See modules/ros-base/Dockerfile.
       <<: *deepstream
   image: px4simstack/onboard:${DS_TAG:-7.1}
   runtime: nvidia
@@ -226,6 +229,9 @@ x-onboard-env: &onboard-env
 x-offboard: &offboard
   build:
     context: ./modules/offboard
+    network: none
+    additional_contexts:
+      ros_base: service:ros-base
     args:
       # See the onboard note above: everything heavy is in ros-base.
       <<: *deepstream
@@ -292,23 +298,47 @@ services:
   # Built, never run: DeepStream, ROS 2, MAVROS and the built ros2_ws, in one
   # image so the work happens once and one package list is maintained.
   # -------------------------------------------------------------------------
+  ros-deps:
+    profiles: [deps]
+    build:
+      context: ./modules/ros-deps
+      network: host
+      args:
+        <<: [*ids, *deepstream]
+    image: px4simstack/ros-deps:${DS_TAG:-7.1}
+    command: ["true"]
+
+  yolo-deps:
+    profiles: [deps]
+    build:
+      context: ./modules/yolo-deps
+      network: host
+      args:
+        <<: *deepstream
+        YOLO_CUDA_VERSION: ${YOLO_CUDA_VERSION:-12.6}
+    image: px4simstack/yolo-deps:${DS_TAG:-7.1}
+    command: ["true"]
+
   ros-base:
-    profiles: [base]
+    # Always visible to Compose's service build contexts, but never run.
+    scale: 0
     build:
       context: ./modules/ros-base
-      network: host
+      network: none
       additional_contexts:
-        # Where 5g_drone, cdcl_umd_msgs and MAVInsight are checked out. colcon
-        # builds them into the image, so nothing is mounted at run time.
-        ros2_ws: ${ROS2_WS_DIR:-../ros2_ws}
-        # remote/mavros_patch and the mavros and angles submodules, for the
-        # MAVROS that talks to PX4 v1.18. See modules/ros-base/Dockerfile.
-        # Every ros-base build needs this path, MAVROS_PATCH=0 included:
-        # docker resolves a named context before it reads the Dockerfile.
-        chimera_deploy: ${CHIMERA_DEPLOY_DIR:-../chimera-deploy}
+        # scripts/build-contexts.sh stages these small, filtered inputs.
+        px4_msgs_src: ./.build-contexts/px4_msgs
+        cdcl_umd_msgs_src: ./.build-contexts/cdcl_umd_msgs
+        mavinsight_src: ./.build-contexts/mavinsight
+        umd_uas_src: ./.build-contexts/umd_uas
+        mavros_src: ./.build-contexts/mavros
+        angles_src: ./.build-contexts/angles
+        mavros_patch_src: ./.build-contexts/mavros_patch
+        yolo_src: ./.build-contexts/yolo
       args:
         <<: [*ids, *deepstream]
         MAVROS_PATCH: ${MAVROS_PATCH:-1}
+        ROS_BUILD_JOBS: ${ROS_BUILD_JOBS:-4}
     image: px4simstack/ros-base:${DS_TAG:-7.1}
     command: ["true"]
 
@@ -321,6 +351,7 @@ services:
     profiles: [sim]
     build:
       context: ./modules/sim
+      network: ${PX4SIM_BUILD_NETWORK:-none}
       additional_contexts:
         # scripts/zoom.sh, the framing table. A build context cannot reach
         # outside itself, and the table has ONE copy: the simulator crops to a
@@ -807,6 +838,7 @@ services:
     profiles: [sim]
     build:
       context: ./modules/qgc
+      network: ${PX4SIM_BUILD_NETWORK:-none}
       dockerfile: Dockerfile
       args:
         <<: *ids
@@ -851,6 +883,7 @@ services:
     profiles: [qgc-dev]
     build:
       context: ./modules/qgc
+      network: ${PX4SIM_BUILD_NETWORK:-none}
       dockerfile: Dockerfile.dev
       args:
         <<: *ids
@@ -888,6 +921,7 @@ services:
     profiles: [scenegen]
     build:
       context: ./modules/scenegen
+      network: ${PX4SIM_BUILD_NETWORK:-none}
       args:
         <<: *ids
     image: px4simstack/scenegen:1
@@ -916,6 +950,7 @@ services:
     profiles: [xrce]
     build:
       context: ./modules/xrce-agent
+      network: ${PX4SIM_BUILD_NETWORK:-none}
       args:
         XRCE_AGENT_REF: ${XRCE_AGENT_REF:-v2.4.2}
     image: px4simstack/xrce-agent:${XRCE_AGENT_REF:-v2.4.2}

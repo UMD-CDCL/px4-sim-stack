@@ -1,0 +1,12 @@
+*
+!Dockerfile
+!gz_video_streamer/
+!gz_video_streamer/**
+!entrypoint.sh
+!px4-rcS
+!hold-stream-rates.sh
+!gimbal_rangefinder.py
+!scf4_emulator.py
+**/build/
+**/__pycache__/
+*.pyc

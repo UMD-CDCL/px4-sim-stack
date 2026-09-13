@@ -81,8 +81,9 @@ The simulator, on one laptop, with `COMPOSE_PROFILES=sim,offboard` and
 
 ```bash
 ./px4sim doctor    # check the driver, docker, GPU runtime and X11
-./px4sim setup     # clone PX4 into ./src and build the scenes
-./px4sim restart     # stop, build the cached images, and start the stack
+./px4sim prepare     # download dependencies and build images once online
+./px4sim setup       # clone PX4 into ./src and build the scenes
+./px4sim start       # start local images without building or pulling
 ```
 
 The real ground station on t500, with `COMPOSE_PROFILES=ground`, `UAS_BASE=0`
@@ -90,7 +91,8 @@ and `GROUND_DOMAIN=60`:
 
 ```bash
 ./px4sim doctor    # also lcam, mavlink-router, and the host ports 14402 and 8765
-./px4sim restart     # stop, build ros-base and ground, then start it
+./px4sim prepare     # prepare dependencies and ground images once online
+./px4sim start       # launch the prepared images, including offline
 ```
 
 The aircraft, with `COMPOSE_PROFILES=aircraft` and `UAS_BASE=0`, after
@@ -98,7 +100,8 @@ The aircraft, with `COMPOSE_PROFILES=aircraft` and `UAS_BASE=0`, after
 
 ```bash
 ./px4sim doctor    # also rcam, its sockets, the clock, the power mode and the lens
-./px4sim restart     # stop, build the arm64 images, then start onboard
+./px4sim prepare     # prepare dependencies and arm64 images once online
+./px4sim start       # launch onboard from local images
 ```
 
 The first build on the Orin compiles the whole ROS workspace at 15 W and takes
@@ -120,9 +123,18 @@ The first `./px4sim restart` builds PX4 inside the sim container. That takes 10 
 20 minutes and happens once, because the build output lands in
 `./src/PX4-Autopilot` on the host. Watch it with `./px4sim logs sim`.
 
-The onboard and offboard images build 5g_drone, cdcl_umd_msgs and MAVInsight
-with colcon. `ROS2_WS_DIR` in `.env` says where those sources are checked out,
-and every `./px4sim restart` rebuilds the selected images before creating containers.
+The onboard and offboard images build 5g_drone, MAVInsight, cdcl_umd_msgs and
+px4_msgs from local checkouts under `ROS2_WS_DIR/src`. Each package builds in
+its own stage, so a Python edit does not rebuild messages or the other Python
+package. `./px4sim restart` builds source changes with networking disabled
+before stopping the existing containers. `./px4sim build` builds without
+restarting; `./px4sim restart --no-build` restarts existing images only.
+
+Run `./px4sim prepare` online when first setting up a machine or deliberately
+changing dependencies. It creates local ROS and CUDA dependency images and
+prepares the selected services. Keep those images and the Docker build cache.
+Models remain on their mounted volume and need no image rebuild. See
+[the build and offline workflow](docs/container-builds.md) for details.
 
 `./px4sim` with no arguments prints every command, and names which of the three
 worlds this machine is. It is the front door: it reads `.env`, resolves the

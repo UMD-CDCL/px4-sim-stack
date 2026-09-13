@@ -537,17 +537,19 @@ to, so this floor belongs to the simulator alone.
 
 ## The flight code
 
-5g_drone, cdcl_umd_msgs and MAVInsight are not in this repository. `ROS2_WS_DIR`
-in `.env` names the checkout, and the onboard and offboard images build it with
-colcon. A change there is picked up by the next start, which always stops the
-current containers, builds the selected images, and starts fresh ones:
+5g_drone, MAVInsight, px4_msgs and cdcl_umd_msgs are local checkouts under
+`ROS2_WS_DIR/src`. Run `./px4sim prepare` once online to prepare dependency
+images. Each ROS package then builds independently without network access.
+`restart` builds successfully before stopping the current containers:
 
 ```bash
 ./px4sim restart
 ```
 
-Both images build the same workspace, so a change in a shared package needs
-both.
+Both images derive from the same assembled workspace. Compose builds that
+workspace once and reuses it for each selected service. `./px4sim build`
+builds without restarting; `./px4sim start` launches existing images without
+building or pulling. See [container builds](container-builds.md).
 
 The launch files take the identity as arguments, and the entry points fill them
 in from `UAS_NUM` and `UAS_FLEET`:
@@ -588,7 +590,7 @@ beside the simulator and 60 fielded.
 
 ### The MAVROS patch
 
-Every `./px4sim restart` builds the PX4 v1.18 MAVROS patch from
+When its inputs change, `./px4sim restart` builds the PX4 v1.18 MAVROS patch from
 `chimera-deploy/remote/mavros_patch` into `/opt/mavros`, so the simulator and
 the aircraft run one MAVROS. `CHIMERA_DEPLOY_DIR` in `.env` names the checkout
 (default `../chimera-deploy`). Check out its `submodules/mavros` and
