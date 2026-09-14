@@ -304,7 +304,8 @@ RUN /opt/ros/${ROS_DISTRO}/lib/mavros/install_geographiclib_datasets.sh
 RUN python3 -m pip install --no-cache-dir \
       "$([ "${ROS_DISTRO}" = humble ] && echo 'numpy==1.24.4' || echo 'numpy<2')" \
       "pymap3d" \
-      "folium"
+      "folium" \
+      "utm"
 
 # The bindings from the first stage. Installing the wheel, rather than copying
 # pyds*.so into site-packages, makes a wrong artifact fail here instead of at
