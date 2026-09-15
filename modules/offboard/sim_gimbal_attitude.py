@@ -15,7 +15,7 @@ class SimGimbalAttitude(Node):
         self.tf = StaticTransformBroadcaster(self)
         self.frame = f"d{int(uas)}_gimbal_frame"
         self.parent = f"d{int(uas)}_gimbal_frame_ref"
-        self.publish_tf()
+        self.create_timer(1.0, self.publish_tf)
         self.create_timer(0.1, self.publish)
 
     def publish(self) -> None:
