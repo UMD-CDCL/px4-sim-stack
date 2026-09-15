@@ -666,10 +666,10 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
   ${BOLD}Every day${OFF}
     prepare [profiles]  Download dependencies and build images; run once online
     build [services]    Build source changes offline without stopping containers
-    restart [profiles]  Build offline, then restart. Now: ${COMPOSE_PROFILES:-none}
+    restart [profiles]  Restart offline using prepared images. Now: ${COMPOSE_PROFILES:-none}
                         sim,offboard is a simulator, ground a base station,
                         aircraft a vehicle
-                        --no-build restarts existing images without building
+                        --build rebuilds changed services first, reusing cache
     stop                Stop and remove the containers. Volumes stay.
     start [profiles]    Start local images without building or pulling; otherwise no-op
     status              What is running, and the addresses to use
@@ -1050,7 +1050,8 @@ build) build_stack "$@" ;;
 
 restart|start|up|core)
 	local rebuild=false
-	case "$cmd" in restart|core) rebuild=true ;; esac
+	case "$cmd" in core) rebuild=true ;; esac
+	if [ "${1:-}" = --build ]; then rebuild=true; shift; fi
 	if [ "${1:-}" = --no-build ]; then rebuild=false; shift; fi
 	# A profile list can be given: ./px4sim restart ground. `start` is the
 	# non-disruptive counterpart: it does nothing while any stack service runs.
@@ -1067,10 +1068,9 @@ restart|start|up|core)
 		return 0
 	fi
 	if [ "$rebuild" = true ]; then
-		# Restart is a lifecycle operation. Prepared images are immutable inputs;
-		# rebuilding them here makes a restart depend on BuildKit cache details
-		# and can fail after the running stack has already been interrupted.
-		# Use ./px4sim build explicitly when source changes need a rebuild.
+		say "Rebuilding changed services with cache: $COMPOSE_PROFILES"
+		build_stack "$@"
+	else
 		say "Reusing prepared images: $COMPOSE_PROFILES"
 	fi
 	# Missing images fail before stopping an otherwise usable stack.

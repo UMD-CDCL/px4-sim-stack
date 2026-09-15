@@ -91,7 +91,7 @@ class Action(NamedTuple):
 # fills the menus, the hot keys, the footer and the help, so an action is
 # written down once.
 ACTIONS = (
-    Action(STACK, "r", "rebuild and restart the stack", ("restart",)),
+    Action(STACK, "r", "restart the stack using prepared images", ("restart",)),
     Action(STACK, "s", "start the stack if it is stopped", ("start",)),
     Action(STACK, "", "enable GPS-free BENCH MODE (select this menu item)",
            ("bench", "enable", "{value}"),
@@ -285,6 +285,9 @@ class Feed:
     def restart(self) -> None:
         """Read the facts again. A new world flies at another place."""
         self.restarting = True
+        with self.lock:
+            self.report = None
+            self.at = 0.0
         stop_process(self.process)
 
     def close(self) -> None:

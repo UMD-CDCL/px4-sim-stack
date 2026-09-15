@@ -23,6 +23,20 @@ same configuration and service front doors that an operator uses, with
 hardware-specific seams isolated so the procedure can later be adapted to a
 real aircraft.
 
+The packet entry points are `verify/code-test.sh`, `verify/bench-test.sh`,
+`verify/gps-test.sh`, and `verify/sim-test.sh`. They are dry-run by default:
+they record the selected existing stages and repository checkpoint under
+`verify/evidence/<stage>/`, then report `PENDING`. Use `--live` only when the
+required stack is already running; live mode never starts, stops, or resets
+services. A live `PASS` is based solely on the exit status and raw output of
+the selected stage runner, while a dry run is never evidence of a pass.
+
+The wrappers select these existing checks: code (`airframes contract units`),
+bench (`ground foxglove`), GPS (`localize ground`), and simulation
+(`vehicle flight captures foxglove`). The existing stage files remain the
+source of runtime assertions; the wrappers only provide isolation, checkpoint
+metadata, and retained reports.
+
 ## Baseline rule
 
 The baseline is recorded at a critical checkpoint, not on every code change.

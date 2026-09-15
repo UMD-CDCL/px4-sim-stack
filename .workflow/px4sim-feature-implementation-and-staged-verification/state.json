@@ -1,0 +1,20 @@
+{
+  "title": "px4sim feature implementation and staged verification",
+  "slug": "px4sim-feature-implementation-and-staged-verification",
+  "created_at": "2026-09-15T05:18:19+00:00",
+  "status": "executing",
+  "approval": {
+    "required": null,
+    "granted": null,
+    "notes": ""
+  },
+  "packets": [
+    {"id": "px4sim-ui", "owner": "Rawls", "status": "accepted"},
+    {"id": "runtime-features", "owner": "Herschel", "status": "rejected"},
+    {"id": "verification-harness", "owner": "Galileo", "status": "accepted"}
+  ],
+  "verification": {
+    "status": "not_started",
+    "checks": []
+  }
+}
