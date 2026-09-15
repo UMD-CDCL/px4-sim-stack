@@ -4,7 +4,7 @@
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
   "current_slice": "bench-gimbal-ownership-and-singleton-restart",
-  "last_verified": "2026-09-15: rebuilt MAVROS extras, gimbal ownership 11/191, bench 19 passed/2 failed, authenticated video readiness fixed, QGC count=1",
+  "last_verified": "2026-09-15: full px4sim restart --no-build reached readiness; old QGC container removed before replacement, one actual QGroundControl process, no singleton error",
   "approval": {
     "required": null,
     "granted": null,

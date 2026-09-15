@@ -70,6 +70,15 @@ the running singleton after a full front-door restart. A forced application
 crash/restart remains unverified because manually killing the packaged QGC
 process did not exercise the container's normal unexpected-exit path.
 
+The singleton behavior was rechecked with the complete front door on
+2026-09-15 using `./px4sim restart --no-build`. Compose stopped and removed
+the previous QGC container before creating the replacement; the readiness gate
+then reported all services ready. The replacement emitted one normal launch
+header, and an exact process listing showed one `/opt/qgc/usr/bin/QGroundControl`
+process. No `second instance` message appeared in the container log. A process
+count made with a self-matching `pgrep -f` pattern was discarded; the exact
+path check is the authoritative count.
+
 ## Reusable Follow-up
 
 The separate live GPS checkpoint then passed on 2026-09-15 with 21 assertions
