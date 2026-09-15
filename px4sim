@@ -503,6 +503,40 @@ wedged_services() {
 	done
 }
 
+# A container being Up is not enough for a simulated stack: PX4, the camera
+# stream, and the ROS companion become usable at different times. Consume the
+# readiness markers emitted by those front doors so restart does not report a
+# usable simulator while its readers are still starting.
+wait_sim_ready() {
+	local deadline=$((SECONDS + ${STARTUP_READY_S:-180}))
+	local sim_id companion_id world=false picture=false router=false n
+	while [ "$SECONDS" -lt "$deadline" ]; do
+		sim_id=$($DC ps -q sim 2>/dev/null)
+		[ -n "$sim_id" ] && [ "$(docker inspect -f '{{.State.Health.Status}}' \
+			"$($DC ps -q video-router 2>/dev/null)" 2>/dev/null)" = healthy ] && router=true
+		[ -n "$sim_id" ] && [ "$(docker logs "$sim_id" 2>&1 \
+			| grep -c 'Ready for takeoff')" -gt 0 ] && world=true
+		picture=true
+		for n in $(fleet_numbers); do
+			companion_id=$($DC ps -q "$(companion_service "$n")" 2>/dev/null)
+			if [ -z "$companion_id" ] || [ "$(docker logs "$companion_id" 2>&1 \
+				| grep -cE "camera: [a-z]+$n ready")" -eq 0 ]; then
+				picture=false
+			fi
+		done
+		[ "$router" = true ] && [ "$world" = true ] && [ "$picture" = true ] && {
+			say "simulator, cameras, and video router are ready"
+			return 0
+		}
+		sleep 2
+	done
+	warn "simulator startup did not become ready in ${STARTUP_READY_S:-180}s:"
+	[ "$router" = true ] || warn "  video-router is not healthy"
+	[ "$world" = true ] || warn "  PX4 never reported 'Ready for takeoff'"
+	[ "$picture" = true ] || warn "  one or more companion cameras never opened"
+	return 1
+}
+
 need_sources() {
 	[ -d src/PX4-Autopilot ] || die "No PX4 source. Run: ./px4sim setup"
 }
@@ -1098,6 +1132,9 @@ restart|start|up|core)
 		fi
 	fi
 	$DC up -d --no-build --pull never
+	if [ "$FLEET_IS_SIMULATED" = true ]; then
+		wait_sim_ready || die "the simulator stack is running but not ready"
+	fi
 	echo
 	$DC ps --format 'table {{.Service}}\t{{.Status}}'
 	endpoints
