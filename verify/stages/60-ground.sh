@@ -84,9 +84,21 @@ viewpoint=$(python3 verify/component/viewpoint.py \
 	--buildings "modules/sim/scenes/worlds/${SCENE}_buildings.json" 2>/dev/null)
 if [ -n "$viewpoint" ]; then
 	read -r aim_east aim_north aim_up aim_heading <<< "$viewpoint"
-	./px4sim uas "$lead" goto "$aim_east" "$aim_north" "$aim_up" \
-		--heading "$aim_heading" >/dev/null 2>&1 || true
-	./px4sim uas "$lead" gimbal "-${VERIFY_DEPRESSION_DEG:-45}" --yaw 0 >/dev/null 2>&1 || true
+	# Reposition is a flight command, not a takeoff command. A fresh restart
+	# leaves PX4 landed, where DO_REPOSITION can acknowledge without moving;
+	# never interpret that ground-level camera as a detector or TF failure.
+	if ! ./px4sim uas "$lead" takeoff "${VERIFY_HEIGHT_M:-20}" \
+		>/dev/null 2>&1; then
+		fail "the vehicle takes off for the bench viewpoint"
+		return 0
+	fi
+	if ! ./px4sim uas "$lead" goto "$aim_east" "$aim_north" "$aim_up" \
+		--heading "$aim_heading" >/dev/null 2>&1; then
+		fail "the vehicle reaches the bench viewpoint"
+		return 0
+	fi
+	./px4sim uas "$lead" gimbal "-${VERIFY_DEPRESSION_DEG:-45}" --yaw 0 \
+		>/dev/null 2>&1 || fail "the gimbal points at the bench viewpoint"
 fi
 ./px4sim uas "$lead" detect on >/dev/null 2>&1 || true
 sleep "${VERIFY_SETTLE_S:-12}"
