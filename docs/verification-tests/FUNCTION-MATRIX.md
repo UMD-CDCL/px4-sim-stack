@@ -11,7 +11,7 @@ the code or protocol that must be checked, rather than an assumed behavior.
 | Code | 5G Drone launch composition | `5g_drone/launch/onboard.launch.py`, `ground_station2.launch.py` | All expected executables and parameter files exist | Partially confirmed |
 | Code | MAVInsight build and entry points | MAVInsight package metadata and launch files | Package builds; executable names resolve | Needs explicit test |
 | Code | Models and runtime assets | 5G Drone model fetch/config code, compose mounts | Required assets exist; optional assets are labeled | ReID asset currently missing |
-| Bench | `px4sim` starts, reports status, and restarts cleanly | `px4sim`, Compose | All expected containers remain running after restart; QGC remains singleton; restart waits for PX4, camera, and video readiness | Confirmed 2026-09-15 at `073a9bf` |
+| Bench | `px4sim` starts, reports status, and restarts cleanly | `px4sim`, Compose | All expected containers remain running after restart; QGC remains singleton; restart waits for PX4, camera, video, and QGC readiness | Confirmed 2026-09-15 at `cdce6cd`, gate rerun before next checkpoint |
 | Bench | Foxglove ground bridge accepts the Foxglove protocol | `verify/component/foxglove_probe.py`, bridge launch | Bridge advertises expected layout topics/services and returns data where applicable | Partially confirmed |
 | Bench | Foxglove camera front door | `chimera_sim.json`, video-router config, camera nodes | Configured image and camera-info topics carry frames/calibration | Confirmed for RGB pipeline at baseline |
 | Bench | 5G Drone camera, zoom, framing, and SCF4 emulation | `scf4_emulator.py`, camera launch/config | Commands change observable zoom/framing state without hardware | Needs scripted action/assertion |

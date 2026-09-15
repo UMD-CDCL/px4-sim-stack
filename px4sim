@@ -509,9 +509,12 @@ wedged_services() {
 # usable simulator while its readers are still starting.
 wait_sim_ready() {
 	local deadline=$((SECONDS + ${STARTUP_READY_S:-180}))
-	local sim_id companion_id world=false picture=false router=false n
+	local sim_id qgc_id companion_id world=false picture=false router=false qgc=false n
 	while [ "$SECONDS" -lt "$deadline" ]; do
 		sim_id=$($DC ps -q sim 2>/dev/null)
+		qgc_id=$($DC ps -q qgc 2>/dev/null)
+		[ -n "$qgc_id" ] && [ "$(docker inspect -f '{{.State.Status}}' \
+			"$qgc_id" 2>/dev/null)" = running ] && qgc=true
 		[ -n "$sim_id" ] && [ "$(docker inspect -f '{{.State.Health.Status}}' \
 			"$($DC ps -q video-router 2>/dev/null)" 2>/dev/null)" = healthy ] && router=true
 		[ -n "$sim_id" ] && [ "$(docker logs "$sim_id" 2>&1 \
@@ -524,13 +527,14 @@ wait_sim_ready() {
 				picture=false
 			fi
 		done
-		[ "$router" = true ] && [ "$world" = true ] && [ "$picture" = true ] && {
-			say "simulator, cameras, and video router are ready"
+		[ "$router" = true ] && [ "$world" = true ] && [ "$picture" = true ] && [ "$qgc" = true ] && {
+			say "simulator, cameras, video router, and QGC are ready"
 			return 0
 		}
 		sleep 2
 	done
 	warn "simulator startup did not become ready in ${STARTUP_READY_S:-180}s:"
+	[ "$qgc" = true ] || warn "  QGC is not running"
 	[ "$router" = true ] || warn "  video-router is not healthy"
 	[ "$world" = true ] || warn "  PX4 never reported 'Ready for takeoff'"
 	[ "$picture" = true ] || warn "  one or more companion cameras never opened"
