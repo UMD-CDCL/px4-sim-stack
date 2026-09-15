@@ -137,11 +137,15 @@ held=$(uas click roi 320 180)
 # The state is latched and it speaks only when the mode changes, so it is read
 # with the latched reader. `published` speaks TargetBoxArray and can never
 # answer a String topic, which is what made this look like a broken gimbal.
-state=$(./px4sim uas "$lead" topic gimbal/state 2>/dev/null | tail -1)
-if printf '%s' "$state" | grep -q "mode=roi"; then
-	pass "a click in region of interest mode holds a place"
+roi_state_ready() {
+	./px4sim uas "$lead" topic gimbal/state 2>/dev/null | tail -1 | grep -q "mode=roi"
+}
+if await 15 "a click in region of interest mode holds a place" roi_state_ready; then
+	state=$(./px4sim uas "$lead" topic gimbal/state 2>/dev/null | tail -1)
+	# `await` already recorded the assertion; retain the state for diagnostics.
+	:
 else
-	fail "a click in region of interest mode holds a place"
+	state=$(./px4sim uas "$lead" topic gimbal/state 2>/dev/null | tail -1)
 	note "${state:-$held}"
 fi
 
