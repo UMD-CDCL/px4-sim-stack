@@ -1534,7 +1534,9 @@ fly)
 	# The autopilot forgets who holds the gimbal across the reboot the respawn
 	# causes, while the manager status still names the old owner. Without this
 	# the gimbal silently ignores every command and the state looks healthy.
-	timeout 60 $DC exec -T "$(companion_service "$n")" bash -lc '
+	companion_id=$($DC ps -q "$(companion_service "$n")" 2>/dev/null)
+	timeout --signal=KILL 10 docker exec \
+		-e ROS_DOMAIN_ID=$((60 + n)) "$companion_id" bash -lc '
 		. /usr/local/bin/ros-env.sh
 		exec ros2 topic pub --once -w 1 "$1" std_msgs/msg/Float32 "{data: -361.0}"
 		' _ "/uas$n/reassert_gimbal_cmd" >/dev/null 2>&1 || true
