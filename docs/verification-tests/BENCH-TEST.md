@@ -113,3 +113,9 @@ returned the same `+5.1 m` placement fault, with identical mesh, relief, span,
 texture orientation, and target-height values. The cross-door comparison rules
 out a stale-reader or wrong-container explanation; the remaining fault is in
 the shared scene placement or survey correction behavior.
+
+## Tested checkpoint
+
+On 2026-09-15, the restarted stack at root commit `5d6a275` completed the live
+bench packet with **21 passed, 0 failed**. Evidence is in
+`verify/evidence/bench/`; its metadata records the tested worktree state.
