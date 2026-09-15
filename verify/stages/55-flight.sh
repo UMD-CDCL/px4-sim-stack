@@ -276,8 +276,7 @@ if [ -n "$marker_xy" ] && printf '%s' "$stood" | grep -Fq "which is $expected_of
 	surveyed=$(uas fiducial --placed "$survey_east" "$survey_north")
 	# The line reads "<from> -> <to>\teast\tnorth\tup", so the numbers are the
 	# last three fields. Counting from the left picks up the arrow.
-	read -r east north <<< "$(printf '%s' "$surveyed" | grep fiducial_offset \
-		| awk '{ print $(NF - 2), $(NF - 1) }')"
+	read -r east north <<< "$(printf '%s' "$surveyed" | awk '$1 == "expected" { print $2, $3 }')"
 	if [ -n "${north:-}" ]; then
 		expect_eq "a survey of the marker recovers where it stands" True \
 			"$(python3 -c "
