@@ -267,6 +267,7 @@ wait_for_video_router() {
 import sys
 import time
 import urllib.request
+import urllib.error
 
 timeout = float(sys.argv[1])
 base = sys.argv[2]
@@ -281,6 +282,12 @@ while time.monotonic() < deadline:
             if response.status == 200:
                 print("video-router: API ready", flush=True)
                 raise SystemExit(0)
+    except urllib.error.HTTPError as exc:
+        # MediaMTX may require API credentials while still being fully ready;
+        # an authenticated endpoint returning 401 proves the listener exists.
+        if exc.code == 401:
+            print("video-router: API ready (authentication required)", flush=True)
+            raise SystemExit(0)
     except (OSError, ValueError):
         pass
     time.sleep(1)
