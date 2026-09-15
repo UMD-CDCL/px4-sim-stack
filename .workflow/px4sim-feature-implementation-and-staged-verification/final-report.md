@@ -25,8 +25,10 @@ Follow-up compatibility implementation: `5g_drone` commit `80d7dba` on
 wires it into scoring, ground projection, and mosaic. Simulation enables its
 latest-transform fallback through the existing `onboard_sim_params.yaml`
 layer; real-aircraft defaults remain strict historical lookup. This is source
-verified and pushed, but not yet runtime verified because the dependent onboard
-image still needs rebuilding.
+verified and pushed. The portable contexts were regenerated and the cached
+onboard/ros-base rebuild completed successfully on 2026-09-15; the new image is
+running after a readiness-gated restart. A fresh bench run is still required
+before promoting the behavior to the tested ledger state.
 
 At the 2026-09-15 checkpoint, `./px4sim restart --no-build` completed through the readiness gate. All seven services were running, `video-router` was healthy, simulator startup reported Gazebo world readiness, and `pgrep -x QGroundControl` reported exactly one process. `./px4sim probe 11 --deadline 3` completed successfully; topics without publishers are reported explicitly by the probe rather than treated as a launch failure.
 
