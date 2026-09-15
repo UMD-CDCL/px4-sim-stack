@@ -37,6 +37,11 @@
 
 . etc/init.d-posix/rcS
 
+# The Gazebo gimbal bridge only drives the simulated joints in MAVLink gimbal
+# output mode. Keep this in the simulator front door so a ROS setpoint changes
+# the rendered camera as well as the reported attitude.
+param set-default MNT_MODE_OUT 2
+
 router_port=$((14569 + px4_instance))
 rangefinder_port=$((14590 + px4_instance))
 
