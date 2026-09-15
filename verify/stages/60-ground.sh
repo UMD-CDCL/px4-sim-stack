@@ -96,7 +96,8 @@ if [ -n "$viewpoint" ]; then
 	# short, bounded settle window; without it DO_REPOSITION can acknowledge
 	# while the vehicle remains on its takeoff setpoint.
 	sleep "${VERIFY_FLIGHT_SETTLE_S:-5}"
-	if ! ./px4sim uas "$lead" goto "$aim_east" "$aim_north" "$aim_up" \
+	if ! PX4SIM_UAS_COMMAND_TIMEOUT_S=${VERIFY_UAS_COMMAND_TIMEOUT_S:-180} \
+		./px4sim uas "$lead" goto "$aim_east" "$aim_north" "$aim_up" \
 		--heading "$aim_heading" >/dev/null 2>&1; then
 		fail "the vehicle reaches the bench viewpoint"
 		return 0
