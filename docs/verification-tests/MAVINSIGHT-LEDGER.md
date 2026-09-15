@@ -8,7 +8,7 @@ source and classify it using the README status tags.
 with date, commit, Git status, and evidence; this inventory defaults to
 `Tested: NO`.
 
-| Status | Feature or responsibility | Source evidence to inspect | Intended evidence |
+| Intent | Feature or responsibility | Source evidence to inspect | Intended evidence |
 |---|---|---|---|
 | `CURRENT` | Site selection and site metadata | `models/site.py`, `sites/*.yaml`, `launch_site.launch.py` | Site loads with origin, datum, bounds, and labels |
 | `CURRENT` | Terrain mesh visualization | `models/terrain_viz.py`, `models/scene_ground.py` | Terrain appears at correct coordinates |
@@ -44,9 +44,10 @@ with date, commit, Git status, and evidence; this inventory defaults to
 
 ## Future additions to consider
 
-| Status | Planned or suspected feature | Why it may matter |
+| Intent | Planned or suspected feature | Why it may matter |
 |---|---|---|
 | `CURRENT` | Explicit visualization health/status for use in foxglove (likely as table for easy display), px4sim ui, and 5g send as uav status or whatever,  (move to different ledger if it fits better), should include differentiate between not started, starting but initializing, running, stopped due to error, and stopped intentionally | Makes stale bridges and publishers visible |
 | `CURRENT` | Multi-vehicle comparative view | Current configs suggest fleet operation |
 | `CURRENT` | Recording/replay of visualization inputs | Needed for deterministic regression tests |
 | `CURRENT` | Real-aircraft sensor calibration profiles | Separates sim assumptions from aircraft geometry |
+| `CURRENT` | Sim-aircraft gimbal matches real behavior | Reconcile Gazebo behavior with the real gimbal, including world-frame roll/pitch stabilization and the known yaw-frame/QGC display behavior | PX4 gimbal patches and real-aircraft behavior |

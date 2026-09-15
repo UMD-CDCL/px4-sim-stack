@@ -9,61 +9,64 @@ only available on real hardware; use `ORPHANED`, `MISSING`, `PLANNED`, or
 with date, commit, Git status, and evidence; this inventory defaults to
 `Tested: NO`.
 
-| Status | Feature | Source evidence to inspect | Intended evidence |
+| Intent | Feature | Source evidence to inspect | Intended evidence |
 |---|---|---|---|
-| `UNKNOWN` | Onboard launch composition | `launch/onboard.launch.py` | All active nodes, params, namespaces, and remaps resolve |
-| `UNKNOWN` | Ground-station launch composition | `launch/ground_station*.launch.py` | Ground bridge, HIL, video, and viz nodes work |
-| `UNKNOWN` | Offboard companion launch | `launch/offboard.launch.py` | Companion services and links start |
-| `UNKNOWN` | Per-UAS launch variants | `launch/uas1..uas4.launch.py` | Vehicle-specific configurations remain valid |
-| `UNKNOWN` | Thermal launch variants | `launch/*thermal.launch.py` | Thermal stream/calibration/path works |
-| `UNKNOWN` | No-GPS assessment variants | `launch/*no_gps*.launch.py` | GPS-dependent nodes fail safely or are omitted |
-| `UNKNOWN` | Postrun/replay variants | `launch/postrun*.launch.py` | Recorded/postrun inputs are consumed correctly |
-| `UNKNOWN` | MAVROS connection and plugin configuration | `config/param_files/px4_*.yaml`, launch files | State, telemetry, commands, and services work |
-| `UNKNOWN` | MAVLink system/heartbeat telemetry | MAVROS and router configs | Heartbeats/state are timely and correctly namespaced |
-| `UNKNOWN` | Global GPS position | params, `legacy_nodes/detect.py`, consumers | NavSatFix reaches all intended consumers |
-| `UNKNOWN` | Local position/odometry | params and localization consumers | Local pose and covariance are valid |
-| `UNKNOWN` | Compass heading | MAVROS params and detection code | Heading drives geometry correctly |
-| `UNKNOWN` | IMU/attitude | MAVROS params and vehicle nodes | Attitude is available with expected frame |
-| `UNKNOWN` | Rangefinder | gimbal rangefinder params and consumers | Range data is valid and bounded |
-| `UNKNOWN` | Gimbal command/state | gimbal node, params, services/topics | Ownership, commands, attitude, and feedback work |
-| `UNKNOWN` | Camera info/calibration | calibration files, `cam_info` launch | Camera info matches each stream |
-| `UNKNOWN` | RGB/gimbal/down/thermal cameras | launch params and camera bridges | Images publish at declared resolution/rate |
-| `UNKNOWN` | Camera zoom and framing | `config/foxglove`, zoom/gimbal code | Presets and continuous framing affect image |
-| `UNKNOWN` | DeepStream primary detection | `umd_uas/ds_ros_pipeline`, deepstream configs | Engine loads and detections publish |
-| `UNKNOWN` | Secondary injury/VLM inference | `config/deepstream/*secondary*`, pipeline code | Secondary results are emitted and correlated |
-| `UNKNOWN` | Detection enable/disable | pipeline services/topics and layout | State changes and data flow respond |
-| `UNKNOWN` | Detection preview image | `ds_ros_pipeline/ros_io.py` | Preview is encoded and reaches ground |
-| `UNKNOWN` | TargetBoxArray detections | `ros_io.py`, message definitions | Boxes, labels, timestamps, IDs are coherent |
-| `UNKNOWN` | Mosaic detections | `ros_io.py`, mosaic consumers | Mosaic output has correct geometry |
-| `UNKNOWN` | Fiducial capture/detections | fiducial config, pipeline services | Fiducial path is distinct and observable |
-| `UNKNOWN` | VLM capture/detections | capture services/topics, VLM config | Captures reach VLM path without ambiguity |
-| `UNKNOWN` | Target preprocessing | tracking launch and node | Input normalization produces expected observations |
-| `UNKNOWN` | Target tracking | tracking launch/package | Tracks persist, merge, expire, and publish |
-| `UNKNOWN` | Video annotation | tracking package annotator nodes | Boxes/tracks are drawn on output image |
-| `UNKNOWN` | Target location/localization | localization nodes, GPS/TF inputs | Target coordinates match source geometry |
-| `UNKNOWN` | Ignore zones | `config/ignore_zones/ignore_zones.yaml` | Suppressed regions are honored |
-| `UNKNOWN` | Mission management | `umd_uas_mission`, mission params | Mission state and advance command work |
-| `UNKNOWN` | Survey operation | survey node/launch/config | Survey starts, progresses, and reports status |
-| `UNKNOWN` | Mosaic capture | mosaic node and service/topic | Capture creates expected product/status |
-| `UNKNOWN` | Status/health reporting | status node and params | Health, rates, GPS, and link state are visible |
-| `UNKNOWN` | TF and frame publication | `tf_loc`, gimbal/camera configs | Frames are connected and physically consistent |
-| `UNKNOWN` | Domain bridges | `*domain_bridge*.yaml`, launch files | Only intended topics/services cross domains |
-| `UNKNOWN` | Foxglove bridge | `foxglove_bridge.launch.py`, layouts | Operator topics/services are advertised and live |
-| `UNKNOWN` | Service-domain forwarding | `service_domain_bridge` launch paths | Remote call-service actions reach owning node |
-| `UNKNOWN` | 5G network transport | docs/networking, router configs, offboard launch | Loss, reconnect, and routing behavior are bounded |
-| `UNKNOWN` | QoS choices for sensor/control data | node source and params | Data is not lost or blocked by incompatible QoS |
-| `UNKNOWN` | Recording and topic lists | docs/record_topic_list.txt, launch tools | Required evidence can be recorded/replayed |
-| `UNKNOWN` | Legacy perception/detection nodes | `legacy_nodes/*.py` | Determine active, replaceable, or abandoned paths |
-| `UNKNOWN` | Hardware serial/controller paths | docs, launch params, controller code | Real-drone adaptation boundary is documented |
-| `UNKNOWN` | Calibration and model asset fetch | calibration files, model scripts | Deployment has deterministic required assets |
-| `UNKNOWN` | Parameter precedence | common/container/sim/vehicle YAMLs | Last-wins behavior is intentional and tested |
+| `CURRENT` | Onboard launch composition | `launch/onboard.launch.py` | All active nodes, params, namespaces, and remaps resolve |
+| `CURRENT` | Ground-station launch composition | `launch/ground_station*.launch.py` | Ground bridge, HIL, video, and viz nodes work |
+| `CURRENT` | Offboard companion launch | `launch/offboard.launch.py` | Companion services and links start |
+| `ORPHANED` | Per-UAS launch variants: orphaned if not used by the px4sim front door, but if they are they should be kept and activated by the px4sim front door | `launch/uas1..uas4.launch.py` | Vehicle-specific configurations remain valid |
+| `ORPHANED` | Thermal launch variants: orphaned if not used by the px4sim front door, but if they are they should be kept and activated by the px4sim front door | `launch/*thermal.launch.py` | Thermal stream/calibration/path works |
+| `ORPHANED` | No-GPS assessment variants | `launch/*no_gps*.launch.py` | GPS-dependent nodes fail safely or are omitted |
+| `ORPHANED` | Postrun/replay variants | `launch/postrun*.launch.py` | Recorded/postrun inputs are consumed correctly |
+| `CURRENT` | MAVROS connection and plugin configuration | `config/param_files/px4_*.yaml`, launch files | State, telemetry, commands, and services work |
+| `ORPHANED` | MAVLink system/heartbeat telemetry | MAVROS and router configs | Heartbeats/state are timely and correctly namespaced |
+| `ORPHANED` | Global GPS position | params, `legacy_nodes/detect.py`, consumers | NavSatFix reaches all intended consumers |
+| `CURRENT` | Local position/odometry | params and localization consumers | Local pose and covariance are valid |
+| `CURRENT` | Compass heading | MAVROS params and detection code | Heading drives geometry correctly |
+| `CURRENT` | IMU/attitude | MAVROS params and vehicle nodes | Attitude is available with expected frame |
+| `CURRENT` | Rangefinder | gimbal rangefinder params and consumers | Range data is valid and bounded |
+| `CURRENT` | Gimbal command/state | gimbal node, params, services/topics | Ownership, commands, attitude, and feedback work |
+| `CURRENT` | Camera info/calibration | calibration files, `cam_info` launch | Camera info matches each stream |
+| `CURRENT` | RGB/gimbal/down/thermal cameras | launch params and camera bridges | Images publish at declared resolution/rate |
+| `CURRENT` | Camera zoom and framing | `config/foxglove`, zoom/gimbal code | Presets and continuous framing affect image |
+| `CURRENT` | DeepStream primary detection | `umd_uas/ds_ros_pipeline`, deepstream configs | Engine loads and detections publish |
+| `CURRENT` | Secondary injury/VLM inference | `config/deepstream/*secondary*`, pipeline code | Secondary results are emitted and correlated |
+| `CURRENT` | Detection enable/disable | pipeline services/topics and layout | State changes and data flow respond |
+| `CURRENT` | Detection preview image | `ds_ros_pipeline/ros_io.py` | Preview is encoded and reaches ground |
+| `CURRENT` | TargetBoxArray detections | `ros_io.py`, message definitions | Boxes, labels, timestamps, IDs are coherent |
+| `CURRENT` | Mosaic detections | `ros_io.py`, mosaic consumers | Mosaic output has correct geometry |
+| `CURRENT` | Fiducial capture/detections | fiducial config, pipeline services | Fiducial path is distinct and observable |
+| `CURRENT` | VLM capture/detections | capture services/topics, VLM config | Captures reach VLM path without ambiguity |
+| `CURRENT` | Target preprocessing | tracking launch and node | Input normalization produces expected observations |
+| `CURRENT` | Target tracking | tracking launch/package | Tracks persist, merge, expire, and publish |
+| `CURRENT` | Video annotation | tracking package annotator nodes | Boxes/tracks are drawn on output image |
+| `CURRENT` | Target location/localization | localization nodes, GPS/TF inputs | Target coordinates match source geometry |
+| `CURRENT` | Ignore zones | `config/ignore_zones/ignore_zones.yaml` | Suppressed regions are honored |
+| `CURRENT` | Mission management | `umd_uas_mission`, mission params | Mission state and advance command work |
+| `CURRENT` | Survey operation | survey node/launch/config | Survey starts, progresses, and reports status |
+| `CURRENT` | Mosaic capture | mosaic node and service/topic | Capture creates expected product/status |
+| `MISSING` | Status/health reporting: they exist but some are out of date or unreliable, should be updated to fit with the other parts of the system | status node and params | Health, rates, GPS, and link state are visible |
+| `CURRENT` | TF and frame publication | `tf_loc`, gimbal/camera configs | Frames are connected and physically consistent |
+| `CURRENT` | Domain bridges send/receive | `*domain_bridge*.yaml`, launch files | Only intended topics/services cross domains, and they all do so successfully |
+| `CURRENT` | Foxglove bridge | `foxglove_bridge.launch.py`, layouts | Operator topics/services are advertised and live |
+| `CURRENT` | Service-domain forwarding | `service_domain_bridge` launch paths | Remote call-service actions reach owning node |
+| `PLANNED` | 5G network transport | docs/networking, router configs, offboard launch | Loss, reconnect, and routing behavior are bounded |
+| `CURRENT` | QoS choices for sensor/control data | node source and params | Data is not lost or blocked by incompatible QoS |
+| `ORPHANED` | Recording and topic lists (lists should in general record all, the specific lists became largely unnecessary due to smaller image topics and domain ids/domain bridge) | docs/record_topic_list.txt, launch tools | Required evidence can be recorded/replayed |
+| `ORPHANED` | Legacy perception/detection nodes | `legacy_nodes/*.py` | Determine active, replaceable, or abandoned paths |
+| `CURRENT` | Hardware serial/controller paths | docs, launch params, controller code | Real-drone adaptation boundary is documented |
+| `CURRENT` | Calibration and model asset fetch | calibration files, model scripts | Deployment has deterministic required assets |
+| `CURRENT` | Parameter precedence | common/container/sim/vehicle YAMLs | Last-wins behavior is intentional and tested |
 
 ## Future additions to consider
 
-| Status | Planned feature | Design concern |
+| Intent | Planned feature | Design concern |
 |---|---|---|
-| `PLANNED` | Explicit real-drone profile from sim profile | Preserve topics, services, and Foxglove layout |
+| `CURRENT` | Explicit real-drone profile from sim profile | Preserve topics, services, and Foxglove layout, and maintain parity between sim and real |
 | `PLANNED` | 5G loss/reconnect test mode | Define acceptable stale-data and command behavior |
-| `PLANNED` | Model/version manifest | Prevent silent engine/config drift |
-| `PLANNED` | Deterministic synthetic camera fixtures | Make perception tests repeatable without Gazebo |
-| `PLANNED` | Safety interlocks for operator actions | Keep capture, gimbal, mission, and arm controls bounded |
+| `MISSING` | Model/version manifest | Prevent silent engine/config drift |
+| `CURRENT` | Deterministic synthetic camera fixtures | Make perception tests repeatable without Gazebo |
+| `CURRENT` | Safety interlocks for gimbal | Gimbal pitch roll and yaw should all have chimera version specific bounds, including ROI (our gimbal doesn't set these in hardware unfortunately, so if roi yaw exceeds limit convert it loudly to hold the max angle) |
+| `CURRENT` | Standard status heartbeats from nodes for use in the system | Nodes should be able to tell services/px4sim their status with standard states shared across the system |
+| `MISSING` | Intermediate fiducial frames | Prevent silent engine/config drift |
+| `MISSING` | Scoring frames | The scoring stuff in 3D should not move due to fiducial correction, it should be locked to the known fiducial, make sure this applies to the markers and the backend that does the verdict, I've observed a verdict marker that falls outside the 2m radius scoring bubble in the 3d vis scored correct despite visually being outside the bubble |

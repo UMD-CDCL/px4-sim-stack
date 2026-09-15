@@ -6,7 +6,7 @@ review field. Replace `UNKNOWN` only after tracing the current code and, where
 possible, observing the live Foxglove protocol. Add future capabilities with
 `PLANNED` status, including their intended checkpoint and design constraints.
 
-| Status | Layout feature | User action or output | Required code/config trace | Stage |
+| Intent | Layout feature | User action or output | Required code/config trace | Stage |
 |---|---|---|---|---|
 | `CURRENT` | `uas11_camera` | Live RGB image and camera info | camera stream, image bridge, layout Image panel | Bench/Sim |
 | `CURRENT` | `uas11_scene` | 3D scene/model view | scene source, Foxglove 3D panel | Bench/Sim |
