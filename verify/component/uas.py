@@ -1564,7 +1564,9 @@ def main() -> int:
     facing = sub.add_parser("heading")
     facing.add_argument("--origin", default="",
                         help="the frame to measure in. Default: the vehicle's home")
-    facing.add_argument("--deadline", type=float, default=20.0)
+    # The ground-domain bridge may need time to deliver the complete TF tree
+    # to a newly started verifier after the companion has already started.
+    facing.add_argument("--deadline", type=float, default=60.0)
 
     scene = sub.add_parser("scene")
     scene.add_argument("topic", nargs="?", default="/viz/scene/terrain")
