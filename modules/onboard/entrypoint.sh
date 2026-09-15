@@ -120,7 +120,8 @@ if [ "${SIM}" = true ]; then
 	# aircraft, so none of it runs there.
 	# ---------------------------------------------------------------------
 	mkdir -p "${LOG_DIR}/uas${UAS_NUM}"
-	python3 /usr/local/bin/sim_gimbal_attitude.py --ros-args -p uas:="${UAS_NUM}" \
+	python3 /usr/local/bin/sim_gimbal_attitude.py --ros-args -p use_sim_time:=true \
+		-p uas:="${UAS_NUM}" \
 		>"${LOG_DIR}/uas${UAS_NUM}/sim-gimbal-attitude.log" 2>&1 &
 
 	# The calibration of the camera that really made the picture. A simulated camera

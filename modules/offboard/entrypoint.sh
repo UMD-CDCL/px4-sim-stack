@@ -126,7 +126,8 @@ if [ "${1:-launch}" = "launch" ]; then
 	shift || true
 	if [ "${UAS_BASE}" = "10" ]; then
 		for number in ${numbers#,}; do
-			python3 /usr/local/bin/sim_gimbal_attitude.py --ros-args -p uas:="${number}" \
+			python3 /usr/local/bin/sim_gimbal_attitude.py --ros-args -p use_sim_time:=true \
+				-p uas:="${number}" \
 				> "/logs/sim-gimbal-attitude-${number}.log" 2>&1 &
 		done
 	fi
