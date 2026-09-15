@@ -3,3 +3,4 @@
 !entrypoint.sh
 !install-parser.sh
 !sim_calibration.py
+!sim_gimbal_attitude.py
