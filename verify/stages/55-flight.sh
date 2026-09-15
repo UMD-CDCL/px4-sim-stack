@@ -274,10 +274,25 @@ marker_pose=$(printf '%s' "$stood" | sed -nE 's/.*stands at \(([-+0-9.]+), ([-+0
 expected_offset=$(printf '(%+.2f, %+.2f)' "$survey_east" "$survey_north")
 if [ -n "$marker_pose" ] && printf '%s' "$stood" | grep -Fq "which is $expected_offset m"; then
 	read -r marker_east marker_north marker_up <<< "$marker_pose"
+	# Gazebo reports world metres, while the aircraft front door accepts ENU
+	# metres from home. Convert the scenario's surveyed LLA once, then apply
+	# the deliberate displacement in that same local frame.
+	read -r marker_local_east marker_local_north <<< "$(python3 - "$SCENARIO" "$survey_east" "$survey_north" <<'PY'
+import sys
+import pymap3d as pm
+import yaml
+
+scenario = yaml.safe_load(open(f"modules/sim/scenes/scenarios/{sys.argv[1]}.yaml", encoding="utf-8"))
+east, north, _ = pm.geodetic2enu(
+    scenario["fiducial_lat"], scenario["fiducial_lon"], scenario["home_alt"],
+    scenario["home_lat"], scenario["home_lon"], scenario["home_alt"])
+print(east + float(sys.argv[2]), north + float(sys.argv[3]))
+PY
+)"
 	# Stand off far enough that the camera, at this depression, looks at it.
-	uas goto "$marker_east" \
-		"$(python3 -c "print($marker_north - ${VERIFY_HEIGHT_M:-20})")" \
-		"$(python3 -c "print($marker_up + ${VERIFY_HEIGHT_M:-20})")" --heading 0 >/dev/null
+	uas goto "$marker_local_east" \
+		"$(python3 -c "print($marker_local_north - ${VERIFY_HEIGHT_M:-20})")" \
+		"${VERIFY_HEIGHT_M:-20}" --heading 0 >/dev/null
 	uas gimbal "-$depression" >/dev/null
 	surveyed=$(uas fiducial --placed "$survey_east" "$survey_north")
 	# The line reads "<from> -> <to>\teast\tnorth\tup", so the numbers are the
