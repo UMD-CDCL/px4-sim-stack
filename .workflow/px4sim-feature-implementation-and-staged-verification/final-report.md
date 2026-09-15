@@ -72,6 +72,11 @@ process did not exercise the container's normal unexpected-exit path.
 
 ## Reusable Follow-up
 
+The separate live GPS checkpoint then passed on 2026-09-15 with 21 assertions
+passing. It covered localization arithmetic and terrain cases, live GPS
+position/localization transport, 29 matching vehicle/ground boxes, scoring,
+and click geometry. The GPS stage is complete for this checkpoint.
+
 After the dynamic simulator gimbal TF fix, the full live bench checkpoint
 passed on 2026-09-15: 21 assertions passed, including 52 vehicle localizations
 matching 52 ground localizations, both scoring paths, and every Foxglove

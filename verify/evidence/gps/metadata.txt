@@ -1,0 +1,11 @@
+stage=gps
+mode=live
+started_utc=2026-09-15T15:35:31Z
+repo=/home/user/px4-sim-stack
+commit=4c0951a1421a42a7be378877a86cc72e30c70c0a
+branch=feature/px4sim-baseline-implementation
+git_state=dirty (generated GPS evidence pending commit)
+git_status=?? verify/evidence/gps/
+selected_stages=localize ground
+outcome=21 passed, 0 failed
+localization=29 boxes on both sides, 29 identical

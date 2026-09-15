@@ -1,0 +1,29 @@
+
+[1m== localize ==[0m
+  [32mok  [0ma centred box straight down lands on the anchor
+  [32mok  [0ma centred box 45 degrees down, due north, lands 50 m north
+  [32mok  [0ma preview box lands where the full size box lands
+  [32mok  [0man unset ground altitude comes from the terrain tiles
+  [32mok  [0ma box on a roof lands on the roof, not on the ground beside it
+  [32mok  [0ma target off the boresight lands in one place at the narrow framing
+  [32mok  [0ma target off the boresight lands in one place at the mid framing
+  [32mok  [0ma target off the boresight lands in one place at the wide framing
+  [32mok  [0ma box 10 degrees below the horizon is ignored
+  [32mok  [0ma box 45 degrees below the horizon is localized
+
+[1m== ground ==[0m
+  [32mok  [0mthe ground receives camera/camera_info
+  [32mok  [0mthe ground receives position
+  [32mok  [0mthe ground receives status
+  [32mok  [0muas11 points uas11 the way it is flying
+       [2mcompass	360.0 airframe	360.0 camera	1.3 footprint	not compared: the camera is -32 degrees below the horizon[0m
+  [32mok  [0mthe ground station points uas11 the way it is flying
+       [2mcompass	0.0 airframe	0.0 camera	0.0 footprint	not compared: the camera is 0 degrees below the horizon[0m
+  [32mok  [0mthe ground holds the scene's casualty locations
+  [32mok  [0mevery localization reaches the ground unchanged: 29 boxes on both sides, 29 identical
+  [32mok  [0muas11 scores the detections against the known targets
+  [32mok  [0mthe ground station scores the detections against the known targets
+  [32mok  [0ma click low in the image aims nearer than one high in it
+  [32mok  [0ma station whose clicks are off ignores them
+
+[1m21 passed, 0 failed[0m
