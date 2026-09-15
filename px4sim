@@ -1654,7 +1654,10 @@ uas|probe|foxglove)
 	# topic, so `probe 11 --deadline 5` still gets the list.
 	named_a_topic=false
 	for argument in "$@"; do
-		case "$argument" in -*) ;; *) named_a_topic=true ;; esac
+		# Probe options have values (for example `--deadline 3`). Only an
+		# absolute ROS topic names a requested topic; option values must not
+		# suppress the default topic set.
+		case "$argument" in /*) named_a_topic=true ;; esac
 	done
 	if [ "$cmd" = probe ] && [ "$named_a_topic" = false ]; then
 		set -- "/uas$n/state" "/uas$n/global_position/global" \
