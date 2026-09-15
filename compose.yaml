@@ -885,6 +885,10 @@ services:
       - ./logs/qgc:/home/dev/Documents/QGroundControl
       - /tmp/.X11-unix:/tmp/.X11-unix
       - ${XAUTH_FILE:-./.xauth}:/tmp/.docker.xauth
+    # QGroundControl owns a single-instance lock outside the process tree.
+    # Give it time to release that lock before a repeated px4sim restart
+    # creates the replacement container.
+    stop_grace_period: 30s
     networks:
       simnet:
         ipv4_address: ${SIMNET_PREFIX:-10.200.142}.224

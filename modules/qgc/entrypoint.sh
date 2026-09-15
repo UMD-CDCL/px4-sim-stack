@@ -5,6 +5,17 @@ set -euo pipefail
 VIDEO_URL=${QGC_VIDEO_URL:-rtsp://video-router:8554/rgb11}
 LISTEN_PORT=${QGC_UDP_PORT:-14550}
 
+# The config volume survives container recreation. Serialize stack launches
+# before QGroundControl itself starts, whose GUI-level single-instance error is
+# otherwise easy to trigger during a rapid restart. The lock is released when
+# this process exits and is never treated as application state.
+mkdir -p "$HOME/.config/QGroundControl"
+exec 9>"$HOME/.config/QGroundControl/px4sim-instance.lock"
+if ! flock -n 9; then
+	echo "QGroundControl is already running; leaving the existing instance active."
+	exit 0
+fi
+
 # QGroundControl 5 stores settings under the organization name "QGroundControl".
 # Version 4 used "QGroundControl.org". Seed both, so a change of QGC_REF does not
 # silently produce an unconfigured window.
