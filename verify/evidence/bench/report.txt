@@ -4,33 +4,12 @@
   [32mok  [0mthe ground receives position
   [32mok  [0mthe ground receives status
   [32mok  [0muas11 points uas11 the way it is flying
-       [2mcompass	69.8 airframe	69.8 camera	20.2 footprint	19.3	1 footprint	not compared: the camera is 3 degrees below the horizon[0m
+       [2mcompass	39.7 airframe	39.7 camera	360.0 footprint	44.8	0 footprint	not compared: the camera is 0 degrees below the horizon[0m
   [32mok  [0mthe ground station points uas11 the way it is flying
-       [2mcompass	69.8 airframe	69.8 camera	20.2 footprint	20.0	6 footprint	not compared: the camera is 3 degrees below the horizon[0m
+       [2mcompass	40.0 airframe	40.0 camera	50.0 footprint	58.4	10 footprint	not compared: the camera is 3 degrees below the horizon[0m
   [32mok  [0mthe ground holds the scene's casualty locations
   [31mFAIL[0m the vehicle publishes localizations
        [2mpoint the gimbal at the ground and turn detection on:[0m
        [2m  ./px4sim uas 11 gimbal -60 && ./px4sim uas 11 detect on[0m
   [31mFAIL[0m uas11 scores the detections against the known targets
   [32mok  [0mthe ground station scores the detections against the known targets
-  [32mok  [0ma click low in the image aims nearer than one high in it
-  [32mok  [0ma station whose clicks are off ignores them
-
-[1m== foxglove ==[0m
-  [32mok  [0mevery panel setting is one Foxglove accepts
-  [32mok  [0mFoxglove is offered every one of the 24 topics the layout draws
-  [32mok  [0mFoxglove is offered every one of the 3 services the layout's buttons call
-  [32mok  [0mthe Image panel's live view carries frames
-  [32mok  [0mthe live view is calibrated, so the boxes land on it
-  [32mok  [0mthe satellite map is drawn north up over the terrain
-       [2mvertices	16641 bytes	1990192 height	+5.1	expected	+4.2 relief	31.9	31.9 image	yes span	600	600	600 texture	north v 0.00	south v 1.00	east u 1.00	west u 0.00 roo[0m
-  [32mok  [0mevery known target has a 2 m outline in the color of its verdict
-       [2mcasualty_14	#9aa0a6	2.01 casualty_15	#9aa0a6	2.01 casualty_16	#9aa0a6	2.01 [0m
-  [32mok  [0mevery pin on true_positives says its verdict, what it touched and its nearest target
-       [2mempty[0m
-  [32mok  [0mevery pin on false_positives says its verdict, what it touched and its nearest target
-       [2mempty[0m
-  [32mok  [0mevery pin on missed_localizations says its verdict, what it touched and its nearest target
-       [2mempty[0m
-
-[1m19 passed, 2 failed[0m
