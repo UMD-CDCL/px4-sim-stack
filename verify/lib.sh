@@ -96,7 +96,11 @@ flying() {
 	# reporting only that a vehicle did not reach the air, which is the one
 	# thing the reader already knows.
 	local n=$1 height=${2:-30} said
-	said=$(./px4sim fly "$n" "$height" 2>&1)
+	# Respawn is a front-door operation and can recreate several services, but
+	# a verification packet must still have a finite budget when Docker or DDS
+	# wedges underneath it.
+	said=$(timeout --signal=TERM --kill-after=5 "${FLY_COMMAND_TIMEOUT_S:-240}" \
+		./px4sim fly "$n" "$height" 2>&1)
 	local flew=$?
 	printf '%s' "$said" | grep -q "is flying at" || {
 		printf '%s\n' "$said" | grep -E "never|not ready|will not climb" \
