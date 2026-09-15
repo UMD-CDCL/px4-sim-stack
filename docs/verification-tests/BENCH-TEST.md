@@ -68,3 +68,12 @@ verdict-layer structure passed. Vehicle localization still fails because the
 detector produced no usable pixel detections in this viewpoint, and the
 satellite terrain draw remains 5.1 m above the surface. The bench stage stays
 blocked and must not advance to GPS testing yet.
+
+Focused camera evidence from the same running stack: after `-30`, `-60`, and
+`-90` degree commands, MAVROS reported approximately 31, 61, and 90 degrees
+of depression respectively, but captured RGB frames remained clear-color sky
+or horizon imagery rather than the populated terrain. A temporary inversion of
+the Gazebo pitch joint axis made the attitude report negative without changing
+the rendered view and was reverted. This rules out treating the problem as a
+simple command retry or joint-axis-only fix; the optical-frame/rendered-view
+relationship still needs correction and a frame-level regression test.
