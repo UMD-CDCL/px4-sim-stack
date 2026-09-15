@@ -77,3 +77,10 @@ the Gazebo pitch joint axis made the attitude report negative without changing
 the rendered view and was reverted. This rules out treating the problem as a
 simple command retry or joint-axis-only fix; the optical-frame/rendered-view
 relationship still needs correction and a frame-level regression test.
+
+The terrain result was also queried through both available front doors on the
+same live stack: `./px4sim uas ground scene` and `./px4sim uas 11 scene` each
+returned the same `+5.1 m` placement fault, with identical mesh, relief, span,
+texture orientation, and target-height values. The cross-door comparison rules
+out a stale-reader or wrong-container explanation; the remaining fault is in
+the shared scene placement or survey correction behavior.
