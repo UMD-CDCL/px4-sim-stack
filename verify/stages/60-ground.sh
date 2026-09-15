@@ -91,6 +91,11 @@ if [ -n "$viewpoint" ]; then
 		fail "the vehicle takes off for the bench viewpoint"
 		return 0
 	fi
+	# PX4 reports the takeoff height before its global-position and navigator
+	# state have settled enough for a new reposition. Give those streams one
+	# short, bounded settle window; without it DO_REPOSITION can acknowledge
+	# while the vehicle remains on its takeoff setpoint.
+	sleep "${VERIFY_FLIGHT_SETTLE_S:-5}"
 	if ! ./px4sim uas "$lead" goto "$aim_east" "$aim_north" "$aim_up" \
 		--heading "$aim_heading" >/dev/null 2>&1; then
 		fail "the vehicle reaches the bench viewpoint"
