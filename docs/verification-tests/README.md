@@ -42,6 +42,44 @@ run often or after every edit. Its purpose is to establish a trustworthy
 baseline before substantial changes, then detect regressions at the next
 checkpoint.
 
+## Fast classification
+
+Use exactly one of these tags at the start of every feature record:
+
+| Tag | Meaning | How to decide quickly |
+|---|---|---|
+| `CURRENT` | Implemented in the checked-out code and reachable through the stated front door | Find the implementation, its launch/config wiring, and a live assertion |
+| `ORPHANED` | Described or configured, but no current code path reaches it | The old doc/config exists, but search finds no active launch, publisher, service, or caller |
+| `MISSING` | Required by the intended contract, but implementation or wiring is absent | The feature is named by the layout/requirements, but no implementation can be found |
+| `BLOCKED` | Implemented, but the current machine cannot exercise it | Code and wiring exist; record the concrete environmental blocker |
+| `UNKNOWN` | Evidence is insufficient or sources disagree | Do not infer; record the conflicting files or question for review |
+
+`CURRENT` requires both static and runtime evidence. A file existing is not
+enough. `ORPHANED` is for outdated documentation or dead configuration; use
+`MISSING` when the feature is still required. This distinction is the main
+review shortcut: **reachable code means `CURRENT`; dead description means
+`ORPHANED`; required but absent means `MISSING`.**
+
+## Exhaustive records
+
+Each stage document must record every feature it checks using the same fields:
+
+```text
+Status: CURRENT | ORPHANED | MISSING | BLOCKED | UNKNOWN
+Feature:
+User interaction/front door:
+Code/config evidence:
+Runtime assertion:
+Expected result:
+Observed result:
+Date:
+Git status and commits:
+Notes or reviewer question:
+```
+
+The stage documents are intentionally separate so a bench test can be run and
+reviewed without claiming that GPS or flight behavior was tested.
+
 ## Uncertainty policy
 
 Every assertion must be confirmed against code or observed protocol data. If
@@ -53,5 +91,9 @@ the baseline must distinguish that warning from a failed core pipeline.
 
 ## Stage matrix
 
-The proposed functions and evidence are in [FUNCTION-MATRIX.md](FUNCTION-MATRIX.md).
-Please edit that table before implementation of the stage scripts.
+The initial function list and evidence are in [FUNCTION-MATRIX.md](FUNCTION-MATRIX.md).
+The exhaustive feature inventory starts in [FEATURE-LEDGER.md](FEATURE-LEDGER.md),
+and the stage record templates are [CODE-TEST.md](CODE-TEST.md),
+[BENCH-TEST.md](BENCH-TEST.md), [GPS-TEST.md](GPS-TEST.md), and
+[SIM-TEST.md](SIM-TEST.md). Please edit the ledger classifications and expected
+results before implementation of the stage scripts.
