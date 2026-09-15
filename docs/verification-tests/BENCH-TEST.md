@@ -16,12 +16,14 @@ features are tracked for design impact but do not fail the current baseline.
 
 ## Checkpoint
 
-Tested: BLOCKED. Date: 2026-09-15. Latest test commit: `e1a4aa6` on
+Tested: BLOCKED. Date: 2026-09-15. Latest test commit: `a7f9b41` on
 `feature/px4sim-baseline-implementation`; Git status was clean. The ground
 station received camera info, position, status, and casualty truth. The
 simulator now publishes timestamped neutral gimbal telemetry and the live TF
 lookup `uas11_home_position -> d11_rgb_offset` succeeds. The bench verifier
-still fails its `d11_gimbal_frame` lookup intermittently and reports a 48 deg
-drawn-versus-0 deg flying heading discrepancy; DeepStream also respawns while
-RTSP streams initialize. No bench pass is claimed until those runtime and
-heading contracts are resolved and rerun. QGC was observed as one process.
+The companion-side heading check now passes (69.9 deg compass, airframe and
+camera). The ground-side check still receives a stale 0 deg compass through
+the ground-domain reference, while its frame is about 70 deg; this is a
+remaining bridge/reference issue. DeepStream also respawns while RTSP streams
+initialize. No bench pass is claimed until the ground heading and stream
+contracts are resolved and rerun. QGC was observed as one process.
