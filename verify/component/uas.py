@@ -1233,7 +1233,13 @@ def command_heading(uas: Uas, args) -> int:
     except TransformException:
         pass
 
-    view = uas.latest(CameraFOV, uas.topic("camera_fov"), RELIABLE_QOS, args.deadline)
+    # A level camera is deliberately not compared with its footprint. Do not
+    # wait for an optional, volatile camera_fov message in that case: after a
+    # fresh world the publisher may not emit one until the camera looks down.
+    view = None
+    if depression.get("camera", 0.0) >= FOOTPRINT_MIN_DEPRESSION_DEG:
+        view = uas.latest(CameraFOV, uas.topic("camera_fov"), RELIABLE_QOS,
+                          args.deadline)
     if view is not None and view.fov_polygon and origin_fix is not None:
         middle = [statistics.median([point.latitude for point in view.fov_polygon]),
                   statistics.median([point.longitude for point in view.fov_polygon])]
