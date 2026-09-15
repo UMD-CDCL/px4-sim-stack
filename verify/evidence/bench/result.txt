@@ -1,4 +1,4 @@
 result=INTERRUPTED
 exit_status=143
-finished_utc=2026-09-15T14:43:53Z
-reason=the shared flight setup reached heading checks, then hung in fly's Compose-based gimbal reassert; process stopped and stack left running
+finished_utc=2026-09-15T14:49:28Z
+reason=the heading probe exhausted its logical deadline while waiting for camera_fov; process stopped and stack left running

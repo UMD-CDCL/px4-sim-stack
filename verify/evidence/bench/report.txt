@@ -4,7 +4,4 @@
   [32mok  [0mthe ground receives position
   [32mok  [0mthe ground receives status
   [32mok  [0muas11 points uas11 the way it is flying
-       [2mcompass	359.9 airframe	359.9 camera	357.0 footprint	356.8	21[0m
-  [32mok  [0mthe ground station points uas11 the way it is flying
-       [2mcompass	0.0 airframe	0.0 camera	357.0 footprint	356.9	21[0m
-  [32mok  [0mthe ground holds the scene's casualty locations
+       [2mcompass	64.9 airframe	64.9 camera	17.1 gave up waiting for /uas11/camera_fov after 60s without progressfootprint	not compared: the camera is -0 degrees below the horizon[0m
