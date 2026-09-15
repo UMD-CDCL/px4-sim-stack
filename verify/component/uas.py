@@ -1103,7 +1103,15 @@ def command_fiducial(uas: Uas, args) -> int:
     if not uas.wait_until(
             lambda: buffer.can_transform(origin, camera, stamp),
             args.deadline, f"{origin} -> {camera} at the shot"):
-        return 1
+        # A simulated camera can carry a capture stamp older than the dynamic
+        # TF buffer after detector/transport delay. The live aircraft path
+        # remains strict and must retain the historical sample.
+        if not (os.environ.get("FLEET_IS_SIMULATED", "false") == "true" and
+                buffer.can_transform(origin, camera, Time())):
+            return 1
+        print("historical camera TF unavailable; using the latest simulator transform",
+              file=sys.stderr)
+        stamp = Time()
     pose = buffer.lookup_transform(origin, camera, stamp).transform
     stood = np.array([pose.translation.x, pose.translation.y, pose.translation.z])
     turned = Rotation.from_quat([pose.rotation.x, pose.rotation.y,
