@@ -26,11 +26,14 @@ The vehicle localization check still fails because the detector produces no
 usable pixel detections in the commanded viewpoint. QGC was observed as
 exactly one host process after restart. No bench pass is claimed.
 
-Post-map-fix checkpoint: on 2026-09-15, commit `3aec45b` on
+Post-map-fix checkpoint: on 2026-09-15, commit `3a160ec` on
 `feature/px4sim-baseline-implementation`, a clean checkout before the run,
-completed a fresh live bench run with 20 passes and 1 failure. Evidence is in
-`verify/evidence/bench/`; the map check now compares the rendered scene datum
-against the fiducial datum and passes (`height +5.1`, expected `+4.2`).
+completed a fresh live bench run with 19 passes and 2 failures. The restart
+front door waited for PX4, camera, and video readiness before this run.
+Evidence is in `verify/evidence/bench/`; the map check now compares the
+rendered scene datum against the fiducial datum and passes (`height +5.1`,
+expected `+4.2`). Vehicle localization and ground-station scoring remain
+blocked by absent detector output.
 
 The follow-up implementation checkpoint `d132a50` adds the simulator's
 `d11_gimbal_frame -> d11_rangefinder_frame` edge, which `tf_loc` had reported
