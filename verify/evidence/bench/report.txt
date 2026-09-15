@@ -4,9 +4,9 @@
   [32mok  [0mthe ground receives position
   [32mok  [0mthe ground receives status
   [32mok  [0muas11 points uas11 the way it is flying
-       [2mcompass	69.0 airframe	69.0 camera	21.0 footprint	20.1	0 footprint	not compared: the camera is 3 degrees below the horizon[0m
+       [2mcompass	97.2 airframe	97.2 camera	352.7 footprint	353.2	1 footprint	not compared: the camera is 3 degrees below the horizon[0m
   [32mok  [0mthe ground station points uas11 the way it is flying
-       [2mcompass	69.0 airframe	69.0 camera	21.0 footprint	21.4	5 footprint	not compared: the camera is 3 degrees below the horizon[0m
+       [2mcompass	97.2 airframe	97.2 camera	352.8 footprint	354.1	4 footprint	not compared: the camera is 3 degrees below the horizon[0m
   [32mok  [0mthe ground holds the scene's casualty locations
   [31mFAIL[0m the vehicle publishes localizations
        [2mpoint the gimbal at the ground and turn detection on:[0m
