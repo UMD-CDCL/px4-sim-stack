@@ -36,6 +36,13 @@ At the 2026-09-15 checkpoint, `./px4sim restart --no-build` completed through th
 The runtime feature packet remains to be reworked against tracked source. Existing fixture coverage still reports a missing `/src/tracking_test_5g` path, and `pytest` was unavailable on the host. The rebuilt onboard image now contains `5g_drone` `1552b31` and is running after the cached `./px4sim build onboard11` plus a readiness-gated restart. Runtime logs confirm the explicit simulator TF policy is active: footprint reports historical extrapolation fallback and uses the newest transform. The remaining bench blocker is upstream of TF: `img_processing` reports no target boxes, and the captured RGB stream is sky/structure rather than a usable target view. The score front door was bounded in root commit `5afed27`, so a wedged DDS call cannot strand a verification stage. The simulator image rebuild remains separately blocked by Docker container DNS resolving Ubuntu mirrors.
 
 QGroundControl launch serialization is enforced by the persistent config-volume
+An A/B runtime capture on 2026-09-15 tested v3 gimbal sensor yaw at `3.14` and
+`0` after `./px4sim uas 11 gimbal -90`; both retained the same sky/structure
+horizon while the command reported about 87 degrees of depression. Yaw is not
+the active cause of the missing detector boxes. The next target is the
+PX4-to-Gazebo pitch-joint command path; the exploratory yaw edit was reverted.
+
+QGroundControl launch serialization is enforced by the persistent config-volume
 flock and the compose restart policy. The restart checkpoint directly verified
 the running singleton after a full front-door restart. A forced application
 crash/restart remains unverified because manually killing the packaged QGC
