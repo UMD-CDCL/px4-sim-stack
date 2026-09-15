@@ -16,7 +16,7 @@ uas() {
 	# 900-second default. Keep the front door and its diagnostics, but give a
 	# packet a finite budget when DDS or a MAVROS service wedges.
 	PX4SIM_UAS_COMMAND_TIMEOUT_S=${VERIFY_UAS_COMMAND_TIMEOUT_S:-180} \
-		./px4sim uas "$lead" "$@" 2>&1 || true
+		./px4sim uas "$lead" "$@" 2>&1
 }
 # The front door now waits for the vehicle to report the framing it arrived
 # at, so a failure here is the lens and not a race with it.
