@@ -142,6 +142,7 @@ class Uas(Node):
         self.gimbal = None
         self.home = None
         self.height = None
+        self._temporary_subscriptions = []
 
         self.create_subscription(State, f"{self.namespace}/state",
                                  self._on_state, RELIABLE_QOS)
@@ -266,8 +267,9 @@ class Uas(Node):
         """The newest message on a topic, or None. Every reader here wants the
         same thing: subscribe, wait, take what came."""
         arrived = {}
-        self.create_subscription(message_type, topic,
-                                 lambda msg: arrived.__setitem__("msg", msg), qos)
+        self._temporary_subscriptions.append(
+            self.create_subscription(message_type, topic,
+                                     lambda msg: arrived.__setitem__("msg", msg), qos))
         self.wait_until(lambda: "msg" in arrived, deadline_s, topic)
         return arrived.get("msg")
 
