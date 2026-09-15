@@ -4,9 +4,9 @@
   [32mok  [0mthe ground receives position
   [32mok  [0mthe ground receives status
   [32mok  [0muas11 points uas11 the way it is flying
-       [2mcompass	68.7 airframe	68.7 camera	21.0 gave up waiting for /uas11/camera_fov after 60s without progress[0m
+       [2mcompass	68.9 airframe	68.9 camera	21.0 footprint	20.3	1 footprint	not compared: the camera is 3 degrees below the horizon[0m
   [32mok  [0mthe ground station points uas11 the way it is flying
-       [2mcompass	68.5 airframe	68.5 camera	21.1 footprint	20.9	0[0m
+       [2mcompass	68.9 airframe	68.9 camera	21.0 footprint	19.9	6 footprint	not compared: the camera is 3 degrees below the horizon[0m
   [32mok  [0mthe ground holds the scene's casualty locations
   [31mFAIL[0m the vehicle publishes localizations
        [2mpoint the gimbal at the ground and turn detection on:[0m
@@ -22,8 +22,8 @@
   [32mok  [0mFoxglove is offered every one of the 3 services the layout's buttons call
   [32mok  [0mthe Image panel's live view carries frames
   [32mok  [0mthe live view is calibrated, so the boxes land on it
-  [31mFAIL[0m the satellite map is drawn north up over the terrain
-       [2mvertices	16641 bytes	1990192 height	+5.1 relief	31.9	31.9 image	yes span	600	600	600 texture	north v 0.00	south v 1.00	east u 1.00	west u 0.00 roofs	2445	+9.7	+7.5 fault	drawn +5.1 m from the surface [0m
+  [32mok  [0mthe satellite map is drawn north up over the terrain
+       [2mvertices	16641 bytes	1990192 height	+5.1	expected	+4.2 relief	31.9	31.9 image	yes span	600	600	600 texture	north v 0.00	south v 1.00	east u 1.00	west u 0.00 roo[0m
   [32mok  [0mevery known target has a 2 m outline in the color of its verdict
        [2mcasualty_14	#9aa0a6	2.01 casualty_15	#9aa0a6	2.01 casualty_16	#9aa0a6	2.01 [0m
   [32mok  [0mevery pin on true_positives says its verdict, what it touched and its nearest target
@@ -33,4 +33,4 @@
   [32mok  [0mevery pin on missed_localizations says its verdict, what it touched and its nearest target
        [2mempty[0m
 
-[1m19 passed, 2 failed[0m
+[1m20 passed, 1 failed[0m

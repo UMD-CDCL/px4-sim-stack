@@ -18,14 +18,19 @@ features are tracked for design impact but do not fail the current baseline.
 
 Tested: BLOCKED. Date: 2026-09-15. Latest root test commit: `03d3e0b` on
 `feature/px4sim-baseline-implementation`; the root checkout was clean before
-this ledger update. The latest live run produced 17 passes and 4 failures.
-Ground telemetry, heading/TF, casualty truth, ground scoring, Foxglove
-layout/topic/service contracts, live image data, calibration, and
-verdict-layer structure passed. ReID loaded from the installed tracking
-package, but the detector still reported `0 pixel det(s)` and the vehicle
-localization check failed. The other failures are click-distance behavior and
-a 5.1 m drawn-map height offset. QGC was observed as exactly one host process
-after restart. No bench pass is claimed.
+this ledger update. The latest live run produced 20 passes and 1 failure.
+Ground telemetry, heading/TF, casualty truth, ground and station scoring,
+click behavior, Foxglove layout/topic/service contracts, live image data,
+calibration, datum-aware map placement, and verdict-layer structure passed.
+The vehicle localization check still fails because the detector produces no
+usable pixel detections in the commanded viewpoint. QGC was observed as
+exactly one host process after restart. No bench pass is claimed.
+
+Post-map-fix checkpoint: on 2026-09-15, commit `3aec45b` on
+`feature/px4sim-baseline-implementation`, a clean checkout before the run,
+completed a fresh live bench run with 20 passes and 1 failure. Evidence is in
+`verify/evidence/bench/`; the map check now compares the rendered scene datum
+against the fiducial datum and passes (`height +5.1`, expected `+4.2`).
 
 The follow-up implementation checkpoint `d132a50` adds the simulator's
 `d11_gimbal_frame -> d11_rangefinder_frame` edge, which `tf_loc` had reported
