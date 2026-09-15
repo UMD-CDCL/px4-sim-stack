@@ -16,7 +16,7 @@ features are tracked for design impact but do not fail the current baseline.
 
 ## Checkpoint
 
-Tested: BLOCKED. Date: 2026-09-15. Latest test commit: `af115e3` on
+Tested: BLOCKED. Date: 2026-09-15. Latest test commit: `cdad465` on
 `feature/px4sim-baseline-implementation`; Git status was clean before this
 ledger update. A live run produced 16 passes and 5 failures. Ground camera,
 position, status, heading, casualty truth, Foxglove layout/topic/service/frame
