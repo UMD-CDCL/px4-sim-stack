@@ -374,8 +374,9 @@ mirrors in `/srv/git` and serves them read-only over `git://10.200.142.60:9418`.
 `--push-new`. Nothing is force-pushed. A branch that cannot fast-forward is
 reported and left for a person.
 
-**Which repositories.** `cdcl_umd_msgs`, `MAVInsight`, `5g_drone`, `px4_msgs`,
-`px4-sim-stack` and `chimera-deploy`, plus the chimera-deploy submodules.
+**Which repositories.** `cdcl_umd_msgs`, `MAVInsight`, `5g_drone`,
+`tracking_test_5g`, `px4_msgs`, `px4-sim-stack` and `chimera-deploy`, plus the
+chimera-deploy submodules.
 `umd_uas.git` is a symlink to `5g_drone.git`, for a clone made before the
 rename.
 
