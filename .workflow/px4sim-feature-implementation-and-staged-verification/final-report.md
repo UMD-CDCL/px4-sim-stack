@@ -23,4 +23,10 @@ The code stage passed 17/17 assertions at `dd42eca`. The bench stage remains blo
 ## Remaining Risks
 The runtime feature packet remains to be reworked against tracked source. Existing fixture coverage still reports a missing `/src/tracking_test_5g` path, and `pytest` was unavailable for the rejected packet. The rebuilt images containing the new frame/readiness changes still need a successful networked build and restart before live bench rerun.
 
+QGroundControl launch serialization was added in `c5bf7c5`: a persistent
+config-volume flock plus a 30-second stop grace period. The current running
+stack has exactly one QGroundControl process. Rebuilding that image to exercise
+the entrypoint is currently blocked by package-mirror DNS, so runtime
+single-instance behavior remains pending direct evidence.
+
 ## Reusable Follow-up
