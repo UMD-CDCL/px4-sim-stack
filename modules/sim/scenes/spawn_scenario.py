@@ -257,7 +257,7 @@ def move_fiducial(world: str, east: float, north: float) -> int:
         terrain_height(world, base[0], base[1])
     z = base[2] if height is None or was is None else base[2] + height - was
     ok = gz_service(
-        f"/world/{world}/set_pose", "gz.msgs.Pose",
+        f"/world/{world}/set_pose/blocking", "gz.msgs.Pose",
         f'name: "{FIDUCIAL_MODEL}", position: {{x: {east_at}, y: {north_at}, '
         f"z: {z}}}, orientation: {{x: 0, y: 0, z: 0, w: 1}}",
         label=FIDUCIAL_MODEL)
