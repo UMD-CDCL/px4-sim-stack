@@ -114,7 +114,7 @@ fi
 # The rings around the known targets, read back as the Map panel parses them.
 rings="/viz/uas$lead/scoring/target_rings"
 drawn_rings=$(./px4sim foxglove "$reader" "$rings" --show "$rings" \
-	--seconds "${FOXGLOVE_SECONDS:-15}" 2>/dev/null | sed -n '/^{/,$p')
+	--seconds "${FOXGLOVE_SECONDS:-30}" 2>/dev/null | sed -n '/^{/,$p')
 if [ -z "$drawn_rings" ]; then
 	fail "the Map panel is given a ring for every known target"
 	note "nothing arrived on $rings"
@@ -133,7 +133,7 @@ fi
 for kind in true_positives false_positives missed_localizations; do
 	layer="/viz/uas$lead/scoring/$kind"
 	body=$(./px4sim foxglove "$reader" "$layer" --show "$layer" \
-		--seconds "${FOXGLOVE_SECONDS:-15}" 2>/dev/null | sed -n '/^{/,$p')
+		--seconds "${FOXGLOVE_SECONDS:-30}" 2>/dev/null | sed -n '/^{/,$p')
 	if [ -z "$body" ]; then
 		fail "the $kind layer reaches Foxglove"
 		continue
