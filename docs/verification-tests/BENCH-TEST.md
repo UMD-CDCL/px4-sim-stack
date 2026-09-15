@@ -11,4 +11,5 @@ tracking inputs, status, services, and safe failure of GPS-dependent features.
 The test owns setup, fixture data, environment, startup, teardown, and its
 evidence directory. It must not consume a GPS or flight result from another
 stage. Record every applicable ledger feature and every observed refusal as
-`CURRENT`, `BLOCKED`, or `UNKNOWN` with the reason.
+`CURRENT`, `PLANNED`, `BLOCKED`, or `UNKNOWN` with the reason. Planned bench
+features are tracked for design impact but do not fail the current baseline.

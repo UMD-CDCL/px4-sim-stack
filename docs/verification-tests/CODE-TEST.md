@@ -11,4 +11,5 @@ No running system is evidence for this stage.
 Record each row from [FEATURE-LEDGER.md](FEATURE-LEDGER.md), plus every launch
 node, service, publisher, subscriber, model, and front-door command found by
 tracing the source. Use the record format in the README. A static-only finding
-must not be marked `CURRENT` until its runtime stage passes.
+must not be marked `CURRENT` until its runtime stage passes. Record planned
+features and their intended ownership even when no source exists yet.

@@ -3,7 +3,8 @@
 This ledger is seeded directly from the 27 entries in
 `5g_drone/config/foxglove/chimera_sim.json`. The status is deliberately a
 review field. Replace `UNKNOWN` only after tracing the current code and, where
-possible, observing the live Foxglove protocol.
+possible, observing the live Foxglove protocol. Add future capabilities with
+`PLANNED` status, including their intended checkpoint and design constraints.
 
 | Status | Layout feature | User action or output | Required code/config trace | Stage |
 |---|---|---|---|---|
@@ -36,4 +37,6 @@ possible, observing the live Foxglove protocol.
 | `UNKNOWN` | `uas11_detection_off` | Disable detection | detection control path and DeepStream | Bench/Sim |
 
 Add every non-layout function discovered during code tracing below this table.
-Each addition must cite the source file and one of the four stage documents.
+Each addition must cite the source file, requirement or decision that
+establishes it, and one of the four stage documents or a future checkpoint.
+A planned row must state the checkpoint where it becomes required.

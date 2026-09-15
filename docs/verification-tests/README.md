@@ -51,21 +51,23 @@ Use exactly one of these tags at the start of every feature record:
 | `CURRENT` | Implemented in the checked-out code and reachable through the stated front door | Find the implementation, its launch/config wiring, and a live assertion |
 | `ORPHANED` | Described or configured, but no current code path reaches it | The old doc/config exists, but search finds no active launch, publisher, service, or caller |
 | `MISSING` | Required by the intended contract, but implementation or wiring is absent | The feature is named by the layout/requirements, but no implementation can be found |
+| `PLANNED` | Intentionally deferred future capability that may affect later design or status reports | Approved or proposed for a later increment, outside the current baseline contract |
 | `BLOCKED` | Implemented, but the current machine cannot exercise it | Code and wiring exist; record the concrete environmental blocker |
 | `UNKNOWN` | Evidence is insufficient or sources disagree | Do not infer; record the conflicting files or question for review |
 
 `CURRENT` requires both static and runtime evidence. A file existing is not
 enough. `ORPHANED` is for outdated documentation or dead configuration; use
-`MISSING` when the feature is still required. This distinction is the main
-review shortcut: **reachable code means `CURRENT`; dead description means
-`ORPHANED`; required but absent means `MISSING`.**
+`MISSING` when it is required now, and `PLANNED` when it is deliberately
+deferred. This distinction is the main review shortcut: **reachable code means
+`CURRENT`; dead description means `ORPHANED`; required but absent means
+`MISSING`; intentionally deferred means `PLANNED`.**
 
 ## Exhaustive records
 
 Each stage document must record every feature it checks using the same fields:
 
 ```text
-Status: CURRENT | ORPHANED | MISSING | BLOCKED | UNKNOWN
+Status: CURRENT | ORPHANED | MISSING | PLANNED | BLOCKED | UNKNOWN
 Feature:
 User interaction/front door:
 Code/config evidence:
@@ -88,6 +90,13 @@ the implementation does not expose a clear contract, the test report must say
 decision is needed. In particular, the optional ReID model is currently
 referenced by launch/runtime code but was not present in the verified image;
 the baseline must distinguish that warning from a failed core pipeline.
+
+Planned features belong in the ledger even without implementation. Record
+their proposed interaction, owner, front door, dependencies, and checkpoint.
+They are not current-baseline failures, but must appear in status reports so
+later work does not accidentally make their design impossible. At the stated
+checkpoint, a planned feature either remains `PLANNED` or becomes `MISSING` if
+it is now part of the required contract.
 
 ## Stage matrix
 

@@ -10,4 +10,5 @@ scoring, mosaic, fiducial operations, and GPS-dependent Foxglove panels.
 
 This stage starts from its own clean setup and records the injected or
 simulated fix, datum, tolerances, and teardown. Bench evidence may identify
-prerequisites, but cannot substitute for GPS-stage evidence.
+prerequisites, but cannot substitute for GPS-stage evidence. Future GPS
+capabilities remain `PLANNED` until their checkpoint makes them required.
