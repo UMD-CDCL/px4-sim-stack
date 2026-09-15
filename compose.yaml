@@ -893,6 +893,10 @@ services:
     # Give it time to release that lock before a repeated px4sim restart
     # creates the replacement container.
     stop_grace_period: 30s
+    # Recover from an application exit without creating a second instance:
+    # entrypoint.sh holds the singleton lock across AppRun and Docker starts
+    # the same container only after that process has released it.
+    restart: unless-stopped
     networks:
       simnet:
         ipv4_address: ${SIMNET_PREFIX:-10.200.142}.224
