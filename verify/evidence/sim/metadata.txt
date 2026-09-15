@@ -1,12 +1,13 @@
 stage=sim
 mode=live
-started_utc=2026-09-15T16:11:41Z
+started_utc=2026-09-15T16:32:04Z
 repo=/home/user/px4-sim-stack
-commit=c3172315cc2a766823c4b4a70b5ebfc5c9eda955
+commit=e477eb4e229f8d829a4023f8c401c1b38dcbb99a
 branch=feature/px4sim-baseline-implementation
-git_state=dirty
+git_state=dirty (generated sim evidence pending commit)
 git_status= M verify/evidence/sim/metadata.txt
 git_status_continued= M verify/evidence/sim/report.txt
 selected_stages=vehicle flight captures foxglove
-outcome=INTERRUPTED during focused rerun after bounded ROI polling
-diagnostic=ROI state probe reached its 15s bound; click publication succeeded but gimbal state did not consistently report mode=roi
+outcome=29 passed, 3 failed
+failures=intermittent boresight click; terrain localization timing; marker survey camera TF lookup
+roi=mode and repoint passed after bounded latched-state polling

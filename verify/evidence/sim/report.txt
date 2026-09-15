@@ -8,26 +8,49 @@
   [32mok  [0mgimbal_lidar_50m carries data
 
 [1m== flight ==[0m
-       [2muas11 ready after 10s[0m
   [32mok  [0mthe gimbal points where it is told
-  [32mok  [0ma click on the boresight moves nothing
+  [31mFAIL[0m a click on the boresight moves nothing
   [32mok  [0man off-boresight click slews by the angle the lens says
   [32mok  [0ma sideways click turns the camera by the angle the lens says
   [32mok  [0ma sideways click spends its move on yaw, not on pitch
   [32mok  [0mthe wide framing publishes a calibration
   [32mok  [0mthe mid framing publishes a calibration
   [32mok  [0mthe narrow framing publishes a calibration
-  [32mok  [0mcasualties localize onto the terrain: 3 of them
-  [31mFAIL[0m a click in region of interest mode holds a place
-       [2mgave up after 15s[0m
-       [2mclicked 320.0, 180.0: depression 46.3 -> 31.4 degrees, azimuth -4.0 -> -6.2 degrees right of the nose[0m
-  [31mFAIL[0m the gimbal repoints to hold that place as the aircraft moves
+  [31mFAIL[0m casualties localize onto the terrain
+       [2m  person 0.60 at 350, 195 (40 x 39 px)   person 0.76 at 426, 229 (35 x 60 px)   person 0.80 at 482, 124 (28 x 87 px) [0m
+  [32mok  [0ma click in region of interest mode holds a place
+  [32mok  [0mthe gimbal repoints to hold that place as the aircraft moves
   [32mok  [0mthe overlay is drawn about ten times a second
-  [31mFAIL[0m the boxes are published with the verdicts that judge them
-       [2mwant True, got False[0m
-       [2mverdicts 16, boxes 21, marks 80 in 8s[0m
+  [32mok  [0mthe boxes are published with the verdicts that judge them
+       [2mverdicts 21, boxes 24, marks 80 in 8s[0m
   [32mok  [0mthe marks come back when the camera does
   [32mok  [0ma capture asked for from the ground reaches the vehicle
        [2mreceived=1, added_to_mosaic=0, dropped=1[0m
   [2m--  [0mthe map is drawn into the terrain: the frame was old ground
-t a passing result.
+  [31mFAIL[0m a survey of the marker recovers where it stands
+       [2mgave up waiting for uas11_home_position -> d11_rgb_offset at the shot after 20s without progress[0m
+
+[1m== captures ==[0m
+       [2mskipped. VERIFY_FULL=1 includes it[0m
+
+[1m== foxglove ==[0m
+  [32mok  [0mevery panel setting is one Foxglove accepts
+  [32mok  [0mFoxglove is offered every one of the 24 topics the layout draws
+  [32mok  [0mFoxglove is offered every one of the 3 services the layout's buttons call
+  [32mok  [0mthe Image panel's live view carries frames
+  [32mok  [0mthe live view is calibrated, so the boxes land on it
+  [32mok  [0mthe satellite map is drawn north up over the terrain
+       [2mvertices	16641 bytes	1990192 height	+5.1	expected	+4.2 relief	31.9	31.9 image	yes span	600	600	600 texture	north v 0.00	south v 1.00	east u 1.00	west u 0.00 roo[0m
+  [32mok  [0mevery known target has a 2 m outline in the color of its verdict
+       [2mcasualty_14	#9aa0a6	2.01 casualty_15	#9aa0a6	2.01 casualty_16	#9aa0a6	2.01 [0m
+  [32mok  [0mevery pin on true_positives says its verdict, what it touched and its nearest target
+       [2mempty[0m
+  [32mok  [0mevery pin on false_positives says its verdict, what it touched and its nearest target
+       [2mempty[0m
+  [32mok  [0mevery pin on missed_localizations says its verdict, what it touched and its nearest target
+       [2mempty[0m
+
+[1m29 passed, 3 failed[0m
+   [2mempty[0m
+
+[1m28 passed, 4 failed[0m
