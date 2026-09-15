@@ -4,6 +4,10 @@ This intentionally over-includes behavior inferred from the current package
 under `.build-contexts/mavinsight/`. Verify each row against the checked-out
 source and classify it using the README status tags.
 
+`Status` records intended scope, not verification. Add `Tested: YES|NO|BLOCKED`
+with date, commit, Git status, and evidence; this inventory defaults to
+`Tested: NO`.
+
 | Status | Feature or responsibility | Source evidence to inspect | Intended evidence |
 |---|---|---|---|
 | `UNKNOWN` | Site selection and site metadata | `models/site.py`, `sites/*.yaml`, `launch_site.launch.py` | Site loads with origin, datum, bounds, and labels |

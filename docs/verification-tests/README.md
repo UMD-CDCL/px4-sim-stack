@@ -44,30 +44,35 @@ checkpoint.
 
 ## Fast classification
 
-Use exactly one of these tags at the start of every feature record:
+Use one intent tag and, independently, a tested marker for every feature
+record. `CURRENT` describes the intended baseline contract, not proof that the
+feature works.
 
 | Tag | Meaning | How to decide quickly |
 |---|---|---|
-| `CURRENT` | Implemented in the checked-out code and reachable through the stated front door | Find the implementation, its launch/config wiring, and a live assertion |
+| `CURRENT` | Intended to be part of the current baseline contract | The feature belongs in the current user-facing system, whether or not it is implemented yet |
 | `ORPHANED` | Described or configured, but no current code path reaches it | The old doc/config exists, but search finds no active launch, publisher, service, or caller |
-| `MISSING` | Required by the intended contract, but implementation or wiring is absent | The feature is named by the layout/requirements, but no implementation can be found |
+| `MISSING` | Intended in the current contract, but implementation or wiring is absent | The feature is required now, but no implementation can be found |
 | `PLANNED` | Intentionally deferred future capability that may affect later design or status reports | Approved or proposed for a later increment, outside the current baseline contract |
 | `BLOCKED` | Implemented, but the current machine cannot exercise it | Code and wiring exist; record the concrete environmental blocker |
 | `UNKNOWN` | Evidence is insufficient or sources disagree | Do not infer; record the conflicting files or question for review |
 
-`CURRENT` requires both static and runtime evidence. A file existing is not
-enough. `ORPHANED` is for outdated documentation or dead configuration; use
-`MISSING` when it is required now, and `PLANNED` when it is deliberately
-deferred. This distinction is the main review shortcut: **reachable code means
-`CURRENT`; dead description means `ORPHANED`; required but absent means
-`MISSING`; intentionally deferred means `PLANNED`.**
+`TESTED` is independent of intent. Write `Tested: YES` only when the feature
+passes its stage assertion at a recorded checkpoint. Use `Tested: NO` when it
+has not been exercised and `Tested: BLOCKED` when the environment prevents the
+test. A file existing is not enough for `TESTED`.
+
+The shortcut is: **intended now means `CURRENT`; dead description means
+`ORPHANED`; intended now but absent means `MISSING`; intentionally deferred
+means `PLANNED`; verified at a dated checkpoint means `Tested: YES`.**
 
 ## Exhaustive records
 
 Each stage document must record every feature it checks using the same fields:
 
 ```text
-Status: CURRENT | ORPHANED | MISSING | PLANNED | BLOCKED | UNKNOWN
+Intent: CURRENT | ORPHANED | MISSING | PLANNED | UNKNOWN
+Tested: YES | NO | BLOCKED
 Feature:
 User interaction/front door:
 Code/config evidence:
@@ -76,6 +81,7 @@ Expected result:
 Observed result:
 Date:
 Git status and commits:
+Test evidence and checkpoint:
 Notes or reviewer question:
 ```
 

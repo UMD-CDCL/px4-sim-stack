@@ -5,6 +5,10 @@ scene generation, portability, and operator diagnostics in the current
 `px4-sim-stack` source. It is intentionally broad; classify each row after
 tracing implementation and running the narrowest possible assertion.
 
+`Status` records intended scope, not verification. Add `Tested: YES|NO|BLOCKED`
+with date, commit, Git status, and evidence; this inventory defaults to
+`Tested: NO`.
+
 | Status | Feature | Source evidence to inspect | Intended evidence |
 |---|---|---|---|
 | `UNKNOWN` | Host doctor/preflight checks | `scripts/preflight.sh`, `px4sim doctor` | Reports actionable host readiness |

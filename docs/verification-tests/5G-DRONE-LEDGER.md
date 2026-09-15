@@ -5,6 +5,10 @@ launch paths. It intentionally includes features that may be abandoned or
 only available on real hardware; use `ORPHANED`, `MISSING`, `PLANNED`, or
 `BLOCKED` rather than deleting them during the first review.
 
+`Status` records intended scope, not verification. Add `Tested: YES|NO|BLOCKED`
+with date, commit, Git status, and evidence; this inventory defaults to
+`Tested: NO`.
+
 | Status | Feature | Source evidence to inspect | Intended evidence |
 |---|---|---|---|
 | `UNKNOWN` | Onboard launch composition | `launch/onboard.launch.py` | All active nodes, params, namespaces, and remaps resolve |
