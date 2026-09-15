@@ -1725,6 +1725,7 @@ uas|probe|foxglove)
 	command_timeout=${PX4SIM_UAS_COMMAND_TIMEOUT_S:-900}
 	case " $* " in
 		*" score "*) command_timeout=${PX4SIM_SCORE_COMMAND_TIMEOUT_S:-90} ;;
+		*" heading "*) command_timeout=${PX4SIM_HEADING_COMMAND_TIMEOUT_S:-120} ;;
 	esac
 	timeout --signal=TERM --kill-after=5 "$command_timeout" docker exec -e ROS_DOMAIN_ID="$domain" "$container" bash -lc '
 		set -e
