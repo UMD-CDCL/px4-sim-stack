@@ -18,7 +18,7 @@ features and their intended ownership even when no source exists yet.
 ## Checkpoint
 
 Tested: YES for the executed code-stage assertions (17 passed, 0 failed).
-Date: 2026-09-15. Commit: `dd42eca`. Branch: `feature/px4sim-baseline-implementation`.
+Date: 2026-09-15. Commit: `373fee7`. Branch: `feature/px4sim-baseline-implementation`.
 Git status at test start: clean. Evidence: external checkpoint report under
 `/tmp/px4sim-verification/code/`; this does not certify runtime bench, GPS, or
 flight behavior.

@@ -1,0 +1,9 @@
+stage=code
+mode=live
+started_utc=2026-09-15T09:24:23Z
+repo=/home/user/px4-sim-stack
+commit=373fee7b611019541531e7c32f541f536ecddf03
+branch=feature/px4sim-baseline-implementation
+git_state=dirty
+git_status=?? verify/evidence/
+selected_stages=airframes contract units

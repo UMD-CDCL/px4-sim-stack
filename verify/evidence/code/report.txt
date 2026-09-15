@@ -1,0 +1,25 @@
+
+[1m== airframes ==[0m
+  [32mok  [0muas11 (chimera_v3) expands
+  [32mok  [0muas11 carries every named link and sensor
+  [32mok  [0muas11 is a v3 and carries the fixed down camera
+
+[1m== contract ==[0m
+  [32mok  [0muas11 address
+  [32mok  [0muas11 MAVLink TCP port
+  [32mok  [0muas11 Foxglove port
+  [32mok  [0muas11 system id
+  [32mok  [0monboard11 is uas11
+  [32mok  [0monboard11 system id
+  [32mok  [0mground station takes uas11 on 14561
+  [32mok  [0mground station address
+  [32mok  [0mground router is the ground station
+  [32mok  [0muas11 router sends to the ground station on 14561
+  [32mok  [0muas11 router passes only system 11 and 255
+  [32mok  [0muas11 router serves the companion on 14402
+
+[1m== units ==[0m
+  [32mok  [0mterrain and ground frame: 43 passed
+  [32mok  [0mthe drawn map's axes and texture: 4 passed
+
+[1m17 passed, 0 failed[0m
