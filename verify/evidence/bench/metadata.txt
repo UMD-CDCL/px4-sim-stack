@@ -10,3 +10,5 @@ git_status_continued= M verify/evidence/bench/report.txt
 selected_stages=ground foxglove
 outcome=20 passed, 1 failed
 failure=vehicle publishes localizations; setup command was suggested but did not produce a localization
+runtime_observation=rgb11 snapshot visibly contains casualty scene; detector produced 3 boxes; tf_loc rejected boxes as 0-3 degrees below horizon
+sim_rebuild=blocked by Docker DNS resolving archive.ubuntu.com/security.ubuntu.com

@@ -77,3 +77,12 @@ passing and one failing: vehicle localization after the prescribed gimbal and
 detection setup. Foxglove passed all of its live front-door checks, including
 frames, calibration, map, target outlines, and scoring contracts. The remaining
 bench blocker is now focused on the localization/detector pipeline.
+
+The live checkpoint also captured `rgb11` after the prescribed setup: the
+image visibly contains the casualty scene and `uas11 detections` produced
+three person boxes. `tf_loc`, however, rejected the boxes as only 0--3 degrees
+below its horizon gate, while the gimbal status reported about 46 degrees
+down. This is a confirmed camera-frame/geometry disagreement, not an empty
+camera stream or detector startup failure. Rebuilding the simulator image to
+apply the checked-out PX4 gimbal source remains blocked by Docker DNS while
+resolving the Ubuntu mirrors.
