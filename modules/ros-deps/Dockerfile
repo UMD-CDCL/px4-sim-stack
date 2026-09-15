@@ -307,6 +307,7 @@ RUN python3 -m pip install --no-cache-dir \
       "pymap3d" \
       "folium" \
       "utm" \
+      "onnxruntime==1.18.1" \
       "tensorrt==10.3.0"
 
 # The bindings from the first stage. Installing the wheel, rather than copying
