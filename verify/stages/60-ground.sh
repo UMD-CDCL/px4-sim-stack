@@ -84,11 +84,10 @@ viewpoint=$(python3 verify/component/viewpoint.py \
 	--buildings "modules/sim/scenes/worlds/${SCENE}_buildings.json" 2>/dev/null)
 if [ -n "$viewpoint" ]; then
 	read -r aim_east aim_north aim_up aim_heading <<< "$viewpoint"
-	# Reposition is a flight command, not a takeoff command. A fresh restart
-	# leaves PX4 landed, where DO_REPOSITION can acknowledge without moving;
-	# never interpret that ground-level camera as a detector or TF failure.
-	if ! ./px4sim uas "$lead" takeoff "${VERIFY_HEIGHT_M:-20}" \
-		>/dev/null 2>&1; then
+	# Reposition is a flight command, not a takeoff command. Use the shared
+	# flying front door: it respawns a known start, waits for the world and
+	# camera, and retries a takeoff when PX4 acknowledges without climbing.
+	if ! flying "$lead" "${VERIFY_HEIGHT_M:-20}"; then
 		fail "the vehicle takes off for the bench viewpoint"
 		return 0
 	fi
