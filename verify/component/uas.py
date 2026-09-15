@@ -305,6 +305,9 @@ class Uas(Node):
             return None
         future = client.call_async(request)
         rclpy.spin_until_future_complete(self, future, timeout_sec=SERVICE_WAIT_S)
+        if not future.done():
+            print(f"{what} service timed out at {client.srv_name}", file=sys.stderr)
+            return None
         return future.result()
 
     @property
