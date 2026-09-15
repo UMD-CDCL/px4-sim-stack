@@ -42,6 +42,14 @@ horizon while the command reported about 87 degrees of depression. Yaw is not
 the active cause of the missing detector boxes. The next target is the
 PX4-to-Gazebo pitch-joint command path; the exploratory yaw edit was reverted.
 
+Gazebo transport inspection confirmed the model exposes
+`/model/uas11_10/command/gimbal_pitch`, but the authoritative `camera_link`
+pose remains near zero pitch after the front-door `gimbal -90` command. A
+direct one-shot Gazebo publish is overwritten, indicating PX4's bridge is
+continuously publishing the neutral joint target. The next code slice is the
+PX4 `GZGimbal` runtime/image provenance and setpoint-to-joint publication, not
+camera yaw or detector thresholds.
+
 QGroundControl launch serialization is enforced by the persistent config-volume
 flock and the compose restart policy. The restart checkpoint directly verified
 the running singleton after a full front-door restart. A forced application
