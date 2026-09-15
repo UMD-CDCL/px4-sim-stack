@@ -1,11 +1,12 @@
 stage=bench
 mode=live
-started_utc=2026-09-15T14:52:02Z
+started_utc=2026-09-15T14:59:38Z
 repo=/home/user/px4-sim-stack
-commit=3cb269cd2e0d98850a985109e71164908d658e13
+commit=92784f18cfd26e089ebb0be3459ecb2ed871e0a3
 branch=feature/px4sim-baseline-implementation
-git_state=dirty (evidence files updated; source tree unchanged)
+git_state=dirty (generated bench evidence pending commit)
 git_status= M verify/evidence/bench/metadata.txt
+git_status_continued= M verify/evidence/bench/report.txt
 selected_stages=ground foxglove
-diagnostic_recheck_utc=2026-09-15T14:55:00Z
-diagnostic_recheck=uas11_10 Gazebo pose z=19.94m; PX4 armed AUTO.LOITER 20.1m; bounded goto passed
+outcome=20 passed, 1 failed
+failure=vehicle publishes localizations; setup command was suggested but did not produce a localization

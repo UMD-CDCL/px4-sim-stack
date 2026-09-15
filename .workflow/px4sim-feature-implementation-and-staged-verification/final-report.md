@@ -71,3 +71,9 @@ crash/restart remains unverified because manually killing the packaged QGC
 process did not exercise the container's normal unexpected-exit path.
 
 ## Reusable Follow-up
+
+The next live bench checkpoint completed on 2026-09-15 with 20 assertions
+passing and one failing: vehicle localization after the prescribed gimbal and
+detection setup. Foxglove passed all of its live front-door checks, including
+frames, calibration, map, target outlines, and scoring contracts. The remaining
+bench blocker is now focused on the localization/detector pipeline.
