@@ -1,4 +1,3 @@
 *
 !Dockerfile
 !entrypoint.sh
-!sim_gimbal_attitude.py
