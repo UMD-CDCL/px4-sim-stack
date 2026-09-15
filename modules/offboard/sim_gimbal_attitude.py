@@ -2,7 +2,7 @@
 """Publish neutral, timestamped gimbal telemetry for simulated vehicles."""
 import rclpy
 from geometry_msgs.msg import Quaternion
-from geometry_msgs.msg import Transform, TransformStamped
+from geometry_msgs.msg import TransformStamped
 from mavros_msgs.msg import GimbalDeviceAttitudeStatus
 from rclpy.node import Node
 from tf2_ros import TransformBroadcaster
@@ -27,7 +27,7 @@ class SimGimbalAttitude(Node):
         edge.header.stamp = msg.header.stamp
         edge.header.frame_id = self.parent
         edge.child_frame_id = self.frame
-        edge.transform = Transform(rotation=msg.q)
+        edge.transform.rotation = msg.q
         self.tf.sendTransform(edge)
 
 def main() -> None:
