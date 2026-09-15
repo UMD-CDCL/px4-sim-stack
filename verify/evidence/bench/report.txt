@@ -4,13 +4,11 @@
   [32mok  [0mthe ground receives position
   [32mok  [0mthe ground receives status
   [32mok  [0muas11 points uas11 the way it is flying
-       [2mcompass	0.0 airframe	0.0 camera	356.9 footprint	356.8	21[0m
+       [2mcompass	360.0 airframe	360.0 camera	4.2 footprint	not compared: the camera is -46 degrees below the horizon[0m
   [32mok  [0mthe ground station points uas11 the way it is flying
-       [2mcompass	0.0 airframe	0.0 camera	356.9 footprint	356.8	21[0m
+       [2mcompass	360.0 airframe	360.0 camera	355.8 footprint	355.6	21[0m
   [32mok  [0mthe ground holds the scene's casualty locations
-  [31mFAIL[0m the vehicle publishes localizations
-       [2mpoint the gimbal at the ground and turn detection on:[0m
-       [2m  ./px4sim uas 11 gimbal -60 && ./px4sim uas 11 detect on[0m
+  [32mok  [0mevery localization reaches the ground unchanged: 52 boxes on both sides, 52 identical
   [32mok  [0muas11 scores the detections against the known targets
   [32mok  [0mthe ground station scores the detections against the known targets
   [32mok  [0ma click low in the image aims nearer than one high in it
@@ -33,4 +31,4 @@
   [32mok  [0mevery pin on missed_localizations says its verdict, what it touched and its nearest target
        [2mempty[0m
 
-[1m20 passed, 1 failed[0m
+[1m21 passed, 0 failed[0m

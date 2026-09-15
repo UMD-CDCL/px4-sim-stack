@@ -72,6 +72,11 @@ process did not exercise the container's normal unexpected-exit path.
 
 ## Reusable Follow-up
 
+After the dynamic simulator gimbal TF fix, the full live bench checkpoint
+passed on 2026-09-15: 21 assertions passed, including 52 vehicle localizations
+matching 52 ground localizations, both scoring paths, and every Foxglove
+front-door check. The bench stage is complete for this checkpoint.
+
 The next live bench checkpoint completed on 2026-09-15 with 20 assertions
 passing and one failing: vehicle localization after the prescribed gimbal and
 detection setup. Foxglove passed all of its live front-door checks, including
