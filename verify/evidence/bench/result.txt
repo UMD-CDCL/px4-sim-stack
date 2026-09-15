@@ -1,4 +1,4 @@
 result=INTERRUPTED
 exit_status=143
-finished_utc=2026-09-15T14:35:00Z
-reason=after the corrected flight setup, heading and localization comparison passed; verification process stopped before scoring and Foxglove checks, stack left running
+finished_utc=2026-09-15T14:43:53Z
+reason=the shared flight setup reached heading checks, then hung in fly's Compose-based gimbal reassert; process stopped and stack left running
