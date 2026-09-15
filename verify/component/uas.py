@@ -17,6 +17,7 @@ import json
 import math
 import os
 import statistics
+import subprocess
 import struct
 import sys
 import time
@@ -1314,13 +1315,29 @@ def command_scene(uas: Uas, args) -> int:
     relief = max(grid) - min(grid)
     lowest, highest = drawn["up"]
     drawn_relief = highest - lowest
-    # The model is built about the scene centre and placed by its pose.
+    # The model is built about the scene centre and placed by its pose. The
+    # surface altitude is MSL, while a fiducial NavSatFix is ellipsoid height;
+    # account for that datum and for a marker that is not at scene centre.
     height = model.pose.position.z + statistics.median([lowest, highest]) \
         - statistics.median(grid)
+    expected_height = 0.0
+    if (message.entities and message.entities[0].frame_id == "fiducial"
+            and "origin_lla" in surface):
+        fiducial = uas.latest(NavSatFix, "/fiducial/fix", RELIABLE_QOS, 5.0)
+        if fiducial is not None:
+            lat, lon, msl_alt = (float(value) for value in surface["origin_lla"])
+            try:
+                geoid = float(subprocess.run(
+                    ["GeoidEval"], input=f"{lat} {lon}\n", text=True,
+                    capture_output=True, check=True).stdout.strip())
+            except (OSError, ValueError, subprocess.CalledProcessError):
+                geoid = 0.0
+            expected_height = msl_alt + geoid - float(fiducial.altitude) \
+                - 0.05
 
     print(f"vertices\t{drawn['vertices']}")
     print(f"bytes\t{len(model.data)}")
-    print(f"height\t{height:+.1f}")
+    print(f"height\t{height:+.1f}\texpected\t{expected_height:+.1f}")
     print(f"relief\t{drawn_relief:.1f}\t{relief:.1f}")
     print(f"image\t{'yes' if drawn['image'] else 'no'}")
     print(f"span\t{drawn['east_span']:.0f}\t{drawn['north_span']:.0f}"
@@ -1333,8 +1350,8 @@ def command_scene(uas: Uas, args) -> int:
     tolerance = (SCENE_HEIGHT_TOLERANCE_REAL_M if args.real_fix
                  else SCENE_HEIGHT_TOLERANCE_M)
     faults = []
-    if abs(height) > tolerance:
-        faults.append(f"drawn {height:+.1f} m from the surface file")
+    if abs(height - expected_height) > tolerance:
+        faults.append(f"drawn {height:+.1f} m, expected {expected_height:+.1f} m")
     if abs(drawn_relief - relief) > SCENE_HEIGHT_TOLERANCE_M:
         faults.append(f"relief {drawn_relief:.1f} m against {relief:.1f} m")
     if not drawn["image"]:
