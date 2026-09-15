@@ -1,13 +1,9 @@
 stage=code
 mode=live
-started_utc=2026-09-15T11:57:00Z
+started_utc=2026-09-15T12:45:23Z
 repo=/home/user/px4-sim-stack
-commit=3a160ec9985e64f0cb9b97630d99a0f0c4ab5789
+commit=c1d8785beb93ff3474ba9b77a804c95d1ddc2d67
 branch=feature/px4sim-baseline-implementation
-git_state=clean_before_test
-git_status_after_test= M verify/evidence/bench/metadata.txt
-git_status_after_test_continued= M verify/evidence/bench/report.txt
-git_status_after_test_continued= M verify/evidence/bench/result.txt
-git_status_after_test_continued= M verify/evidence/code/metadata.txt
-git_status_after_test_continued= M verify/evidence/code/result.txt
+git_state=dirty
+git_status= M verify/evidence/code/metadata.txt
 selected_stages=airframes contract units

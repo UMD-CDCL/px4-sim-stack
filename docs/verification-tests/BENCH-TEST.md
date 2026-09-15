@@ -16,6 +16,18 @@ features are tracked for design impact but do not fail the current baseline.
 
 ## Checkpoint
 
+Current live checkpoint: 2026-09-15, root commit `c1d8785` on
+`feature/px4sim-baseline-implementation`. A complete runtime sequence
+(`vehicle flight ground foxglove`) produced 40 passes and 4 failures. The
+camera-frame correction now produces detector boxes: vehicle and ground
+station scoring pass, as do gimbal pointing, click behavior, zoom calibration,
+capture delivery, live image/calibration, map rendering, and all Foxglove
+topic/service/layout checks. Remaining failures are vehicle target
+localization, verdict-count consistency, fiducial survey framing, and empty
+verdict-pin assertions. This is still blocked and must not advance to GPS
+testing. The run was performed with the stack up and QGC singleton handling
+intact; no second QGC process was launched.
+
 Tested: BLOCKED. Date: 2026-09-15. Latest root test commit: `03d3e0b` on
 `feature/px4sim-baseline-implementation`; the root checkout was clean before
 this ledger update. The latest live run produced 20 passes and 1 failure.
