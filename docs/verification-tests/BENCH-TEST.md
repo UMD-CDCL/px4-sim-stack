@@ -26,3 +26,9 @@ failures are localization publication, click-distance behavior, Foxglove image
 data/calibration, target rings and verdict layers, and a 5.1 m drawn-map height
 offset. The run still exposes a gimbal bridge durability warning. QGC was
 observed as exactly one host process after restart. No bench pass is claimed.
+
+The follow-up implementation checkpoint `d132a50` adds the simulator's
+`d11_gimbal_frame -> d11_rangefinder_frame` edge, which `tf_loc` had reported
+missing. After restart, `/tf_static` was inspected directly and contained both
+the gimbal edge and this rangefinder edge. This fix still requires a fresh live
+bench result before changing the tested status.
