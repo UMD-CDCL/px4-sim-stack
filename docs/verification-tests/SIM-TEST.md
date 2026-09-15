@@ -14,13 +14,15 @@ specific readiness log, topic/service data, and user-facing result for every
 feature record. Record future flight capabilities as `PLANNED` with their
 intended checkpoint and dependencies; do not count them as baseline failures.
 
-## Current checkpoint
+## Tested checkpoint
 
-On 2026-09-15 at root commit `c1d8785`, the live flight/ground/Foxglove
-sequence reached 40 passes and 4 failures. PX4 takeoff, gimbal motion, zoom
-calibration, detector box production, vehicle and ground scoring, click/ROI
-behavior, capture delivery, map rendering, and Foxglove live topics/services
-passed. Target localization, verdict-count consistency, fiducial survey
-framing, and verdict-pin population failed. The stage remains `BLOCKED`; this
-is evidence for implementation progress, not a sim-test pass. QGC remained a
-singleton throughout the run.
+On 2026-09-15 at root commit `b5d0b43`, the live sequence completed **33
+passed, 0 failed**. It verified PX4 readiness and flight, MAVLink routing,
+5G companion behavior, MAVInsight gimbal/zoom/click/ROI behavior, target
+localization and scoring, capture delivery and mosaic rendering, fiducial
+survey correction, and every Foxglove topic, service, image, calibration, map,
+outline, and verdict layer exercised by the packet. QGC remained a singleton.
+
+The evidence metadata records the worktree state at test start. Generated
+evidence is committed only when this packet is green; older failed evidence is
+historical and is not reclassified by this checkpoint.
