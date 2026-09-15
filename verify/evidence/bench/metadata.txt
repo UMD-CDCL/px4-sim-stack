@@ -1,0 +1,9 @@
+stage=bench
+mode=live
+started_utc=2026-09-15T09:56:25Z
+repo=/home/user/px4-sim-stack
+commit=a2f06231ce773e48bbd5aeb5046b30a15b98c223
+branch=feature/px4sim-baseline-implementation
+git_state=dirty
+git_status=?? verify/evidence/bench/
+selected_stages=ground foxglove

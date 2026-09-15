@@ -16,7 +16,7 @@ features are tracked for design impact but do not fail the current baseline.
 
 ## Checkpoint
 
-Tested: BLOCKED. Date: 2026-09-15. Latest root test commit: `a2f0623` on
+Tested: BLOCKED. Date: 2026-09-15. Latest root test commit: `03d3e0b` on
 `feature/px4sim-baseline-implementation`; the root checkout was clean before
 this ledger update. The latest live run produced 17 passes and 4 failures.
 Ground telemetry, heading/TF, casualty truth, ground scoring, Foxglove
@@ -57,7 +57,9 @@ configure service. Live checks found one MAVROS gimbal status publisher,
 `gimbal control held by 11/191`, PX4 primary control `11/191`, and a valid
 quaternion after `./px4sim uas 11 gimbal -60`. This is a component pass, not a
 bench pass: detector/localization, click-distance, and map-height checks still
-need a fresh complete run.
+need a fresh complete run. The 19-pass/2-failure result is retained in
+`verify/evidence/bench/` and was captured before the subsequent sim restart;
+the authenticated MediaMTX readiness correction is now in `03d3e0b`.
 
 Fresh persistent-image bench run after this checkpoint: 19 passed, 2 failed.
 Vehicle gimbal control, both scoring checks, click-distance behavior, all
