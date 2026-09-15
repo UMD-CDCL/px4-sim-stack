@@ -18,12 +18,11 @@ features are tracked for design impact but do not fail the current baseline.
 
 Tested: BLOCKED. Date: 2026-09-15. Latest test commit: `cdad465` on
 `feature/px4sim-baseline-implementation`; Git status was clean before this
-ledger update. A live run produced 16 passes and 5 failures. Ground camera,
-position, status, heading, casualty truth, Foxglove layout/topic/service/frame
-contracts, and QGC singleton behavior passed. The rebuilt portable image also
-contains the ReID model at the installed tracking package path. Remaining
-failures are localization/detection/scoring output, click-distance behavior,
-and map north-up orientation. The run also reported incompatible durability
-QoS for the bridged gimbal command topics; this is an implementation issue to
-resolve, not evidence that the command path is correct. QGC was observed as
-exactly one host process after restart. No bench pass is claimed.
+ledger update. The latest live run produced 12 passes and 9 failures. Ground
+telemetry, heading/TF, casualty truth, both scoring checks, and Foxglove
+layout/topic/service contracts passed. ReID loaded from the installed tracking
+package and the detector produced enough output for scoring. Remaining
+failures are localization publication, click-distance behavior, Foxglove image
+data/calibration, target rings and verdict layers, and a 5.1 m drawn-map height
+offset. The run still exposes a gimbal bridge durability warning. QGC was
+observed as exactly one host process after restart. No bench pass is claimed.
