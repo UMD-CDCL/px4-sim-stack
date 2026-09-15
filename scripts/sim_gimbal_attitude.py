@@ -16,6 +16,7 @@ class SimGimbalAttitude(Node):
         self.tf = StaticTransformBroadcaster(self)
         self.frame = f"d{uas}_gimbal_frame"
         self.parent = f"d{uas}_gimbal_frame_ref"
+        self.rangefinder = f"d{uas}_rangefinder_frame"
         self.pitch = 0.0
         self.yaw = 0.0
         self.create_service(GimbalManagerConfigure,
@@ -62,7 +63,12 @@ class SimGimbalAttitude(Node):
         edge.header.frame_id = self.parent
         edge.child_frame_id = self.frame
         edge.transform.rotation.w = 1.0
-        self.tf.sendTransform(edge)
+        range_edge = TransformStamped()
+        range_edge.header.stamp = edge.header.stamp
+        range_edge.header.frame_id = self.frame
+        range_edge.child_frame_id = self.rangefinder
+        range_edge.transform.rotation.w = 1.0
+        self.tf.sendTransform([edge, range_edge])
 
 def main() -> None:
     rclpy.init()
