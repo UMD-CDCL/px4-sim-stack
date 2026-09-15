@@ -8,24 +8,38 @@ front door that can report synthetic success or state.
 import rclpy
 from geometry_msgs.msg import TransformStamped
 from rclpy.node import Node
-from tf2_ros import StaticTransformBroadcaster
+from mavros_msgs.msg import GimbalDeviceAttitudeStatus
+from tf2_ros import TransformBroadcaster
 
 class SimGimbalAttitude(Node):
     def __init__(self) -> None:
         super().__init__("sim_gimbal_attitude")
         uas = int(self.declare_parameter("uas", 11).value)
-        self.tf = StaticTransformBroadcaster(self)
+        self.tf = TransformBroadcaster(self)
         self.frame = f"d{uas}_gimbal_frame"
         self.parent = f"d{uas}_gimbal_frame_ref"
         self.rangefinder = f"d{uas}_rangefinder_frame"
-        self.create_timer(1.0, self.publish_tf)
+        self._attitude = None
+        self.create_subscription(
+            GimbalDeviceAttitudeStatus,
+            f"/uas{uas}/gimbal_control/device/attitude_status",
+            self.attitude_cb,
+            10,
+        )
+        self.create_timer(0.05, self.publish_tf)
+
+    def attitude_cb(self, msg: GimbalDeviceAttitudeStatus) -> None:
+        self._attitude = msg.q
 
     def publish_tf(self) -> None:
         edge = TransformStamped()
         edge.header.stamp = self.get_clock().now().to_msg()
         edge.header.frame_id = self.parent
         edge.child_frame_id = self.frame
-        edge.transform.rotation.w = 1.0
+        if self._attitude is None:
+            edge.transform.rotation.w = 1.0
+        else:
+            edge.transform.rotation = self._attitude
         range_edge = TransformStamped()
         range_edge.header.stamp = edge.header.stamp
         range_edge.header.frame_id = self.frame
