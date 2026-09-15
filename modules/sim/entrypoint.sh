@@ -258,7 +258,38 @@ serves() {
 	return 1
 }
 
+# Keep direct entrypoint use safe too. This is bounded readiness, not a
+# fallback: an unavailable router still fails with its real startup cause.
+wait_for_video_router() {
+	local timeout=${VIDEO_ROUTER_WAIT_S:-120}
+	log "Waiting for MediaMTX at $VIDEO_SINK_BASE"
+	python3 - "$timeout" "${VIDEO_SINK_BASE%:*}" <<'PY'
+import sys
+import time
+import urllib.request
+
+timeout = float(sys.argv[1])
+base = sys.argv[2]
+if not base.startswith(("rtsp://", "rtmp://")):
+    raise SystemExit("VIDEO_SINK_BASE must use rtsp:// or rtmp://")
+host = base.split("//", 1)[1].rsplit(":", 1)[0]
+api = "http://%s:9997/v3/paths/list" % host
+deadline = time.monotonic() + timeout
+while time.monotonic() < deadline:
+    try:
+        with urllib.request.urlopen(api, timeout=2) as response:
+            if response.status == 200:
+                print("video-router: API ready", flush=True)
+                raise SystemExit(0)
+    except (OSError, ValueError):
+        pass
+    time.sleep(1)
+raise SystemExit("video-router did not become ready within %.0fs" % timeout)
+PY
+}
+
 # ------------------------------------------------------ 5. the camera encoders
+wait_for_video_router
 mkdir -p "$STREAM_CONF_DIR"
 for index in "${!FLEET[@]}"; do
 	model=${FLEET[$index]}

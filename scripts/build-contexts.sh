@@ -32,6 +32,10 @@ stage umd_uas "$ws/src/5g_drone" \
     --include='/umd_uas/***' --include='/config/***' --include='/launch/***' \
     --include='/resource/***' --include='/setup.*' --include='/package.xml' \
     --include='/pyproject.toml' --include='/LICENSE*' --exclude='*'
+# The bench is a simulated vehicle even though it uses the ground/offboard
+# launch. Keep the external launch's MAVInsight tree on the simulated vehicle
+# schema, whose home-position and sensor-frame contract matches PX4-SITL.
+patch -d "$root/umd_uas" -p1 < "$PWD/patches/umd-uas-bench-sim-frame.patch"
 stage mavinsight "$ws/src/MAVInsight" \
     --include='/mavinsight/***' --include='/models/***' --include='/launch/***' \
     --include='/resource/***' --include='/vehicles/***' --include='/sensors/***' \

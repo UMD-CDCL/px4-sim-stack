@@ -1,0 +1,8 @@
+--- a/launch/offboard.launch.py
++++ b/launch/offboard.launch.py
+@@ -427,4 +427,5 @@
+             launch_arguments={'uas': str(number), 'model': model,
++                              'sim': 'true' if bench else 'false',
+                               'bench': 'true' if bench else 'false',
+                               'publish_fiducial_edge': 'false',
+                               'fiducial_lla': fiducial_arg}.items(),

@@ -454,7 +454,7 @@ services:
         ipv4_address: ${SIMNET_PREFIX:-10.200.142}.220
     depends_on:
       video-router:
-        condition: service_started
+        condition: service_healthy
     stop_grace_period: 20s
 
   # -------------------------------------------------------------------------
@@ -746,7 +746,9 @@ services:
     networks:
       simnet:
         ipv4_address: ${SIMNET_PREFIX:-10.200.142}.210
-    depends_on: [video-router]
+    depends_on:
+      video-router:
+        condition: service_healthy
 
   # -------------------------------------------------------------------------
   # ground - the real ground station. Profile ground. The same image on the
@@ -833,6 +835,15 @@ services:
       simnet:
         ipv4_address: ${SIMNET_PREFIX:-10.200.142}.222
     restart: unless-stopped
+    # MediaMTX is a minimal image with no shell or wget. Use its built-in
+    # version command as a process liveness check; the simulator entrypoint
+    # performs the API readiness check before publishing streams.
+    healthcheck:
+      test: ["CMD", "/mediamtx", "--version"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 2s
 
   # -------------------------------------------------------------------------
   # qgc - QGroundControl, the released build. Use the qgc-dev profile to build
