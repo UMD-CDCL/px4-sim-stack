@@ -151,8 +151,10 @@ class Uas(Node):
                                  self._on_local, SENSOR_QOS)
         self.create_subscription(Altitude, f"{self.namespace}/altitude",
                                  self._on_altitude, SENSOR_QOS)
+        # MAVROS home_position/home is volatile on both SITL and aircraft;
+        # transient-local would make the subscriber incompatible with it.
         self.create_subscription(HomePosition, f"{self.namespace}/home_position/home",
-                                 self._on_home, LATCHED_QOS)
+                                 self._on_home, RELIABLE_QOS)
         self.create_subscription(
             GimbalDeviceAttitudeStatus,
             f"{self.namespace}/gimbal_control/device/attitude_status",
