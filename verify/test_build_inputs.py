@@ -28,6 +28,7 @@ class BuildInputs(unittest.TestCase):
                 "5g_drone/config/params.yaml": "enabled: true\n",
                 "5g_drone/perception_models/a.onnx": "weights",
                 "5g_drone/models/mesh.stl": "runtime mesh",
+                "tracking_test_5g/tracking_test/__init__.py": "",
                 "5g_drone/build/stale.py": "generated",
                 "5g_drone/.git/index": "git state",
                 "5g_drone/config/deepstream/nvdsinfer_custom_impl_Yolo/Makefile": "all:\n",
@@ -41,7 +42,8 @@ class BuildInputs(unittest.TestCase):
                 path = ws / "src" / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(content)
-            for name in ("submodules/mavros", "submodules/angles", "remote/mavros_patch"):
+            for name in ("submodules/mavros", "submodules/angles", "remote/mavros_patch",
+                         "submodules/geographic_info/geographic_msgs"):
                 (deploy / name).mkdir(parents=True)
             env = dict(os.environ, ROS2_WS_DIR=str(ws), CHIMERA_DEPLOY_DIR=str(deploy), DS_VERSION="7.1")
             staged = root / "repo/.build-contexts"
