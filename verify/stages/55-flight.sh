@@ -264,14 +264,14 @@ fi
 survey_east=6
 survey_north=-9
 stood=$(./px4sim fiducial "$survey_east" "$survey_north" 2>&1)
-marker_xy=$(printf '%s' "$stood" | sed -nE 's/.*stands at \(([-+0-9.]+), ([-+0-9.]+),.*/\1 \2/p')
+marker_pose=$(printf '%s' "$stood" | sed -nE 's/.*stands at \(([-+0-9.]+), ([-+0-9.]+), ([-+0-9.]+)\).*/\1 \2 \3/p')
 expected_offset=$(printf '(%+.2f, %+.2f)' "$survey_east" "$survey_north")
-if [ -n "$marker_xy" ] && printf '%s' "$stood" | grep -Fq "which is $expected_offset m"; then
-	read -r marker_east marker_north <<< "$marker_xy"
+if [ -n "$marker_pose" ] && printf '%s' "$stood" | grep -Fq "which is $expected_offset m"; then
+	read -r marker_east marker_north marker_up <<< "$marker_pose"
 	# Stand off far enough that the camera, at this depression, looks at it.
 	uas goto "$marker_east" \
 		"$(python3 -c "print($marker_north - ${VERIFY_HEIGHT_M:-20})")" \
-		"${VERIFY_HEIGHT_M:-20}" --heading 0 >/dev/null
+		"$(python3 -c "print($marker_up + ${VERIFY_HEIGHT_M:-20})")" --heading 0 >/dev/null
 	uas gimbal "-$depression" >/dev/null
 	surveyed=$(uas fiducial --placed "$survey_east" "$survey_north")
 	# The line reads "<from> -> <to>\teast\tnorth\tup", so the numbers are the
