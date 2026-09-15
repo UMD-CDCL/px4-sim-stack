@@ -48,7 +48,7 @@ read -r view_east view_north view_up view_heading <<< "$viewpoint"
 uas goto "$view_east" "$view_north" "$view_up" --heading "$view_heading" >/dev/null
 
 # ---------------------------------------------------------------- the gimbal
-pointing=$(uas gimbal "-$depression")
+pointing=$(uas gimbal "-$depression" --settle 8)
 reported=$(printf '%s' "$pointing" | sed -n 's/^reported depression \([-0-9.]*\).*/\1/p')
 if [ -z "$reported" ]; then
 	fail "the gimbal reports where it points"
@@ -71,7 +71,7 @@ else
 fi
 
 # Off the boresight the slew is the angle the intrinsics say it is.
-uas gimbal "-$depression" >/dev/null
+uas gimbal "-$depression" --settle 8 >/dev/null
 moved=$(printf '%s' "$(uas click point 320 90)" | sed -n 's/.*depression \([-0-9.]*\) -> \([-0-9.]*\).*/\1 \2/p')
 read -r was now <<< "${moved:-0 0}"
 fx=$(focal_px)
@@ -91,7 +91,7 @@ fi
 # rather than by pitching. The turn is bigger than the offset in the picture
 # and it grows as the camera looks further down, because the offset is measured
 # across the picture and the turn is measured about the vertical.
-uas gimbal "-$depression" --yaw 0 >/dev/null
+uas gimbal "-$depression" --yaw 0 --settle 8 >/dev/null
 turned=$(uas click point 480 180)
 sideways=$(printf '%s' "$turned" | sed -n \
 	's/.*depression \([-0-9.]*\) -> \([-0-9.]*\).*azimuth \([-0-9.]*\) -> \([-0-9.]*\).*/\1 \2 \3 \4/p')
