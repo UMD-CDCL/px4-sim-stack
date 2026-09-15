@@ -21,6 +21,7 @@ needs no Python bindings.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -161,7 +162,8 @@ def wait_for_poses(world: str, names: list[str]) -> dict[str, tuple[float, float
 
 
 def write_resolved(world: str, entities: list[dict],
-                   actual: dict[str, tuple[float, float, float]]) -> None:
+                   actual: dict[str, tuple[float, float, float]],
+                   scenario_path: Path) -> None:
     """Record the actual pose of every entity we placed."""
     if not actual:
         print("    could not read back poses from Gazebo; scoring will use the "
@@ -179,7 +181,9 @@ def write_resolved(world: str, entities: list[dict],
                          "pose": [x, y, z], "requested": asked,
                          "drift_m": round(drift, 3)})
     RESOLVED_FILE.write_text(yaml.safe_dump(
-        {"world": world, "entities": resolved}, sort_keys=False))
+        {"world": world,
+         "scenario_sha256": hashlib.sha256(scenario_path.read_bytes()).hexdigest(),
+         "entities": resolved}, sort_keys=False))
     worst = max((e["drift_m"] for e in resolved), default=0.0)
     print(f"    recorded {len(resolved)} actual poses to {RESOLVED_FILE} "
           f"(largest difference from the request: {worst:.2f} m)")
@@ -361,7 +365,8 @@ def cmd_spawn(world: str, path: Path) -> int:
 
     save_state(world, placed)
     actual = wait_for_poses(world, placed)
-    write_resolved(world, [e for e in entities if e.get("name") in placed], actual)
+    write_resolved(world, [e for e in entities if e.get("name") in placed],
+                   actual, path)
     print(f"Scenario '{data.get('name', path.stem)}': {len(placed)} of {len(entities)} entities placed.")
     if len(placed) < len(entities):
         print("A Fuel model downloads on first use. Check the network and try again.",
