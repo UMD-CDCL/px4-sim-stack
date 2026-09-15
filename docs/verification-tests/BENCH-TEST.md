@@ -16,17 +16,16 @@ features are tracked for design impact but do not fail the current baseline.
 
 ## Checkpoint
 
-Tested: BLOCKED. Date: 2026-09-15. Latest test commit: `9a5d7bb` in the
-`5g_drone` repository on `feature/ubuntu24-compat`; the root checkout was
-clean before this ledger update. The latest live run produced 16 passes and 5
-failures. Ground telemetry, heading/TF, casualty truth, Foxglove layout,
-topic/service contracts, live image data, calibration, and verdict-layer
-structure passed. ReID loaded from the installed tracking package, but the
-detector reported `0 pixel det(s)` and the localization node reported
-`localized 0 box(es)` throughout the run, so neither scoring check can pass.
-The other failures are click-distance behavior and a 5.1 m drawn-map height
-offset. QGC was observed as exactly one host process after restart. No bench
-pass is claimed.
+Tested: BLOCKED. Date: 2026-09-15. Latest root test commit: `0bea3dd` on
+`feature/px4sim-baseline-implementation`; the root checkout was clean before
+this ledger update. The latest live run produced 17 passes and 4 failures.
+Ground telemetry, heading/TF, casualty truth, ground scoring, Foxglove
+layout/topic/service contracts, live image data, calibration, and
+verdict-layer structure passed. ReID loaded from the installed tracking
+package, but the detector still reported `0 pixel det(s)` and the vehicle
+localization check failed. The other failures are click-distance behavior and
+a 5.1 m drawn-map height offset. QGC was observed as exactly one host process
+after restart. No bench pass is claimed.
 
 The follow-up implementation checkpoint `d132a50` adds the simulator's
 `d11_gimbal_frame -> d11_rangefinder_frame` edge, which `tf_loc` had reported
@@ -41,3 +40,11 @@ rangefinder edge. This removes the earlier exception path, but it does not
 create detections; the remaining localization/scoring blocker is currently
 upstream in detector input or inference, not proven to be a TF frame-name
 problem.
+
+The `0bea3dd` gimbal-mode change was tested first by copying the committed
+`modules/sim/px4-rcS` into the already-built simulator container, because the
+image rebuild was blocked by BuildKit DNS failures reaching Ubuntu and Debian
+repositories. With `MNT_MODE_IN=4` and `MNT_MODE_OUT=2`, a `-60` command changed
+the captured Gazebo camera view from a horizon view to a downward view. The
+source change is committed and pushed; a clean image rebuild remains required
+before this result is promoted to a persistent deployment checkpoint.
