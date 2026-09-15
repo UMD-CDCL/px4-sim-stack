@@ -1718,7 +1718,13 @@ uas|probe|foxglove)
 	# and nothing else does, so that is what comes back. The Foxglove probe
 	# speaks no DDS and has nothing to strip.
 	probe_answer() { if [ "$cmd" = probe ]; then awk -F'\t' 'NF == 3'; else cat; fi; }
-	docker exec -e ROS_DOMAIN_ID="$domain" "$container" bash -lc '
+	# Bound the process as well as the ROS client's logical wait. DDS can block
+	# below that wait when a graph or service call wedges.
+	command_timeout=${PX4SIM_UAS_COMMAND_TIMEOUT_S:-900}
+	case " $* " in
+		*" score "*) command_timeout=${PX4SIM_SCORE_COMMAND_TIMEOUT_S:-90} ;;
+	esac
+	timeout --signal=TERM --kill-after=5 "$command_timeout" docker exec -e ROS_DOMAIN_ID="$domain" "$container" bash -lc '
 		set -e
 		. /usr/local/bin/ros-env.sh
 		exec python3 /tmp/'"$tool"' "$@"' _ "$@" | probe_answer
