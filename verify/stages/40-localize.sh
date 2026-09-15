@@ -39,15 +39,23 @@ output=$(docker run --rm --entrypoint bash \
 		source /home/user/ros2_ws/install/setup.bash
 		mkdir -p /tmp/terrain && cp /scenes/worlds/$(basename "$surface") /tmp/terrain/
 		python3 /verify/component/localize.py /tmp/terrain/$(basename "$surface") 2>/tmp/log
-	" 2>&1) || true
+	" 2>&1)
+	status=$?
 
-if ! printf '%s' "$output" | grep -q $'\t'; then
+verdicts=$(printf '%s' "$output" | grep -E $'^(ok|FAIL)\t' || true)
+if [ "$status" -ne 0 ] && [ -z "$verdicts" ]; then
 	fail "the localization harness ran"
 	note "$(printf '%s' "$output" | tail -3)"
+	return 0
+fi
+
+if [ -z "$verdicts" ]; then
+	fail "the localization harness emitted assertions"
+	note "no ok/FAIL records were produced"
 	return 0
 fi
 
 while IFS=$'\t' read -r verdict what detail; do
 	[ -n "$what" ] || continue
 	if [ "$verdict" = ok ]; then pass "$what"; else fail "$what"; note "$detail"; fi
-done <<< "$(printf '%s' "$output" | grep -E $'^(ok|FAIL)\t')"
+done <<< "$verdicts"

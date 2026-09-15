@@ -54,7 +54,13 @@ has_element() { grep -q "<$1 name='$2'" "$expansion" && echo yes || echo no; }
 
 for n in $(fleet_numbers); do
 	model=$(model_of "$n")
-	expand_airframe "$model" || true
+	: >"$expansion"
+	: >"$sdf_errors"
+	if ! expand_airframe "$model"; then
+		fail "uas$n ($model) expands"
+		note "airframe expansion command failed: $(head -3 "$sdf_errors")"
+		continue
+	fi
 
 	if [ ! -s "$expansion" ] || grep -q '^Error' "$sdf_errors"; then
 		fail "uas$n ($model) expands"

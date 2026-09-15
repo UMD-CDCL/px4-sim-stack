@@ -141,6 +141,18 @@ def distance_sensor(seq: int, sysid: int, sensor_id: int, distance_m: float,
                  sysid, MAV_COMP_ID_ONBOARD_COMPUTER)
 
 
+def range_reading(measured: float, min_m: float, max_m: float) -> tuple[float, bool]:
+    """Return a MAVLink-safe value and validity for one Gazebo reading.
+
+    Gazebo uses non-finite values for no return, while values outside the
+    declared sensor interval are physically invalid as well.  Carry the
+    maximum as the wire value for every invalid reading so consumers never
+    receive an infinite or below-minimum distance marked as valid.
+    """
+    valid = math.isfinite(measured) and min_m <= measured <= max_m
+    return (measured if valid else max_m), valid
+
+
 def sensor_ids_in(datagram: bytes):
     """Every DISTANCE_SENSOR id in one datagram. PX4 packs several messages
     into one, so this walks the whole buffer."""
@@ -282,9 +294,9 @@ def main() -> int:
             # would reach the mission node as an infinite range rather than as
             # no reading, because the consumer only takes min(range, 200).
             measured = float(found.group(1))
-            valid = math.isfinite(measured) and measured <= max_m
+            measured, valid = range_reading(measured, min_m, max_m)
             send(distance_sensor(seq, args.sysid, args.sensor_id,
-                                 measured if valid else max_m,
+                                 measured,
                                  min_m, max_m, valid))
     except KeyboardInterrupt:
         pass

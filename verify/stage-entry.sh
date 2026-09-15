@@ -26,6 +26,11 @@ case "${1:-}" in
 	-h|--help|help) usage; exit 0 ;;
 	*) printf 'unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
 esac
+[ "$#" -le 1 ] || {
+	printf 'too many arguments\n' >&2
+	usage >&2
+	exit 2
+}
 
 metadata=$evidence_dir/metadata.txt
 {
@@ -33,20 +38,25 @@ metadata=$evidence_dir/metadata.txt
 	printf 'repo=%s\ncommit=%s\nbranch=%s\n' "$repo" \
 		"$(git -C "$repo" rev-parse HEAD 2>/dev/null || printf unknown)" \
 		"$(git -C "$repo" branch --show-current 2>/dev/null || printf unknown)"
-	printf 'git_status='; git -C "$repo" status --short 2>/dev/null || printf unknown; printf '\n'
+	status=$(git -C "$repo" status --short 2>/dev/null || printf unknown)
+	if [ -z "$status" ]; then status=clean; fi
+	case "$status" in clean) printf 'git_state=clean\n' ;; *) printf 'git_state=dirty\n' ;; esac
+	printf 'git_status=%s\n' "$status" | sed '2,$s/^/git_status_continued=/'
 	printf 'selected_stages=%s\n' "$stages"
 } >"$metadata"
 
 printf 'stage=%s mode=%s\nselected: %s\nevidence: %s\n' "$name" "$mode" "$stages" "$evidence_dir"
 
 if [ "$mode" = dry-run ]; then
-	printf 'result=PENDING (dry-run produced no test evidence)\n' | tee "$evidence_dir/result.txt"
+	printf 'result=PENDING (dry-run produced no test evidence)\nstatus=PENDING\nfinished_utc=%s\n' \
+		"$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee "$evidence_dir/result.txt"
 	exit 0
 fi
 
 report=$evidence_dir/report.txt
 set +e
-(cd "$repo" && ./verify/run.sh $stages) 2>&1 | tee "$report"
+	read -r -a selected_stages <<< "$stages"
+	(cd "$repo" && ./verify/run.sh "${selected_stages[@]}") 2>&1 | tee "$report"
 status=${PIPESTATUS[0]}
 set -e
 printf 'result=%s\nexit_status=%s\nfinished_utc=%s\n' \

@@ -1109,7 +1109,7 @@ stop|down)
 
 status|ps)
 	COMPOSE_PROFILES="$ALL_PROFILES" $DC ps \
-		--format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
+		--format 'table {{.Service}}\t{{.State}}\t{{.Health}}\t{{.Status}}\t{{.Ports}}'
 	# Up is not the same as reachable, and the table above only knows Up.
 	wedged=$(wedged_services)
 	if [ -n "$wedged" ]; then

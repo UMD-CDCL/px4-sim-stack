@@ -19,9 +19,10 @@ run_tests() {
 			source /opt/ros/\$ROS_DISTRO/setup.bash
 			source /home/user/ros2_ws/install/setup.bash
 			cd /src && python3 -m pytest $* -q 2>&1
-		" 2>&1) || true
+		" 2>&1)
+	status=$?
 	summary=$(printf '%s' "$output" | grep -oE '[0-9]+ (passed|failed)[^,]*' | tr '\n' ' ')
-	if printf '%s' "$output" | grep -qE '^[0-9]+ passed'; then
+	if [ "$status" -eq 0 ] && printf '%s' "$output" | grep -qE '(^|[[:space:]])[0-9]+ passed'; then
 		pass "$what: ${summary% }"
 	else
 		fail "$what: ${summary:-no result}"
