@@ -289,11 +289,13 @@ east, north, _ = pm.geodetic2enu(
 print(east + float(sys.argv[2]), north + float(sys.argv[3]))
 PY
 )"
-	# Stand off far enough that the camera, at this depression, looks at it.
+	# Put the aircraft directly over the marker for the calibration shot. This
+	# removes terrain/building occlusion and makes the survey geometry independent
+	# of the preceding oblique target-viewpoint flight.
 	uas goto "$marker_local_east" \
-		"$(python3 -c "print($marker_local_north - ${VERIFY_HEIGHT_M:-20})")" \
+		"$marker_local_north" \
 		"${VERIFY_HEIGHT_M:-20}" --heading 0 >/dev/null
-	uas gimbal "-$depression" >/dev/null
+	uas gimbal -90 >/dev/null
 	surveyed=$(uas fiducial --placed "$survey_east" "$survey_north")
 	# The line reads "<from> -> <to>\teast\tnorth\tup", so the numbers are the
 	# last three fields. Counting from the left picks up the arrow.
