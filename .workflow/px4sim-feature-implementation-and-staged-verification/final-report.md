@@ -17,10 +17,10 @@ The MAVInsight parser change was rejected because it exists only in the ignored 
 ## Conflicts Resolved
 
 ## Verification Evidence
-Passed: `./px4sim check`; `./px4sim help`; Python compilation; shell syntax checks; all four wrapper dry runs; workflow artifact validation; `git diff --check`.
-The wrappers correctly report `PENDING` in dry-run mode. No bench, GPS, or flight pass is claimed yet.
+Passed: `./px4sim check`; `./px4sim help`; Python compilation; shell syntax checks; all four wrapper dry runs; workflow artifact validation; `git diff --check`; simulator range-reading unit tests; startup/frame contract checks.
+The code stage passed 17/17 assertions at `dd42eca`. The bench stage remains blocked by TF/frame parity and startup resource timing. A cache-aware rebuild reached cached layers but was blocked by DNS resolution of Ubuntu package mirrors; no new runtime evidence is claimed from that build.
 
 ## Remaining Risks
-The runtime feature packet remains to be reworked against tracked source. Existing fixture coverage still reports a missing `/src/tracking_test_5g` path, and `pytest` was unavailable for the rejected packet.
+The runtime feature packet remains to be reworked against tracked source. Existing fixture coverage still reports a missing `/src/tracking_test_5g` path, and `pytest` was unavailable for the rejected packet. The rebuilt images containing the new frame/readiness changes still need a successful networked build and restart before live bench rerun.
 
 ## Reusable Follow-up
