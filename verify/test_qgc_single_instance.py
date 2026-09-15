@@ -17,3 +17,10 @@ def test_qgc_entrypoint_serializes_instances():
     script = (ROOT / "modules/qgc/entrypoint.sh").read_text()
     assert 'flock -n 9' in script
     assert "px4sim-instance.lock" in script
+
+
+def test_sim_gimbal_does_not_shadow_mavros_front_door():
+    script = (ROOT / "scripts/sim_gimbal_attitude.py").read_text()
+    assert "GimbalManagerConfigure" not in script
+    assert "gimbal_control/manager/configure" not in script
+    assert "GimbalDeviceAttitudeStatus" not in script

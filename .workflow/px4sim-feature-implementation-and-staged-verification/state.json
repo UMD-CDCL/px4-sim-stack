@@ -2,7 +2,9 @@
   "title": "px4sim feature implementation and staged verification",
   "slug": "px4sim-feature-implementation-and-staged-verification",
   "created_at": "2026-09-15T05:18:19+00:00",
-  "status": "checkpointed",
+  "status": "in_progress",
+  "current_slice": "bench-gimbal-ownership-and-singleton-restart",
+  "last_verified": "2026-09-15: px4sim restart --no-build twice, QGC count=1, all services running",
   "approval": {
     "required": null,
     "granted": null,

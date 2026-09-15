@@ -48,3 +48,13 @@ repositories. With `MNT_MODE_IN=4` and `MNT_MODE_OUT=2`, a `-60` command changed
 the captured Gazebo camera view from a horizon view to a downward view. The
 source change is committed and pushed; a clean image rebuild remains required
 before this result is promoted to a persistent deployment checkpoint.
+
+The persistent component checkpoint is now improved: `chimera-deploy` commit
+`72ba138` builds `mavros_extras` into the MAVROS overlay, and the rebuilt
+`ros-base`, `onboard`, and `offboard` images were started on 2026-09-15. The
+simulator helper no longer publishes synthetic gimbal status or registers the
+configure service. Live checks found one MAVROS gimbal status publisher,
+`gimbal control held by 11/191`, PX4 primary control `11/191`, and a valid
+quaternion after `./px4sim uas 11 gimbal -60`. This is a component pass, not a
+bench pass: detector/localization, click-distance, and map-height checks still
+need a fresh complete run.
