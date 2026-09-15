@@ -356,7 +356,10 @@ services:
     profiles: [sim]
     build:
       context: ./modules/sim
-      network: ${PX4SIM_BUILD_NETWORK:-none}
+      # Dependency layers need repository access on a cold or invalidated
+      # cache. Callers that require an isolated build can still set
+      # PX4SIM_BUILD_NETWORK=none explicitly.
+      network: ${PX4SIM_BUILD_NETWORK:-default}
       additional_contexts:
         # scripts/zoom.sh, the framing table. A build context cannot reach
         # outside itself, and the table has ONE copy: the simulator crops to a
