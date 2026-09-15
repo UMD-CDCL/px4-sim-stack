@@ -77,6 +77,12 @@ passing. It covered localization arithmetic and terrain cases, live GPS
 position/localization transport, 29 matching vehicle/ground boxes, scoring,
 and click geometry. The GPS stage is complete for this checkpoint.
 
+The full live sim checkpoint reached 29 passing assertions and 3 failures.
+Gimbal pointing/click geometry, all three framing calibrations, terrain
+localization, overlays, capture transport, and Foxglove passed. The remaining
+sim failures are isolated to ROI point mode, ROI repointing during movement,
+and marker survey placement; they are recorded separately in the sim evidence.
+
 After the dynamic simulator gimbal TF fix, the full live bench checkpoint
 passed on 2026-09-15: 21 assertions passed, including 52 vehicle localizations
 matching 52 ground localizations, both scoring paths, and every Foxglove

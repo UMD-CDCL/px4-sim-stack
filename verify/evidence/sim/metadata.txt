@@ -1,0 +1,11 @@
+stage=sim
+mode=live
+started_utc=2026-09-15T15:42:47Z
+repo=/home/user/px4-sim-stack
+commit=027f2b010b8eea792853a485e6b2c54649ca29bf
+branch=feature/px4sim-baseline-implementation
+git_state=dirty (generated sim evidence pending commit)
+git_status=?? verify/evidence/sim/
+selected_stages=vehicle flight captures foxglove
+outcome=29 passed, 3 failed
+failures=ROI point mode and repoint-after-motion; marker survey placement

@@ -1,0 +1,54 @@
+
+[1m== vehicle ==[0m
+  [32mok  [0mstate carries data
+  [32mok  [0mglobal_position/global carries data
+  [32mok  [0mhome_position/fix carries data
+  [32mok  [0mcamera/camera_info carries data
+  [32mok  [0mgimbal_control/device/attitude_status carries data
+  [32mok  [0mgimbal_lidar_50m carries data
+
+[1m== flight ==[0m
+  [32mok  [0mthe gimbal points where it is told
+  [32mok  [0ma click on the boresight moves nothing
+  [32mok  [0man off-boresight click slews by the angle the lens says
+  [32mok  [0ma sideways click turns the camera by the angle the lens says
+  [32mok  [0ma sideways click spends its move on yaw, not on pitch
+  [32mok  [0mthe wide framing publishes a calibration
+  [32mok  [0mthe mid framing publishes a calibration
+  [32mok  [0mthe narrow framing publishes a calibration
+  [32mok  [0mcasualties localize onto the terrain: 3 of them
+  [31mFAIL[0m a click in region of interest mode holds a place
+       [2mmode=point primary=11/191[0m
+  [31mFAIL[0m the gimbal repoints to hold that place as the aircraft moves
+       [2mwant True, got False[0m
+  [32mok  [0mthe overlay is drawn about ten times a second
+  [32mok  [0mthe boxes are published with the verdicts that judge them
+       [2mverdicts 24, boxes 24, marks 80 in 8s[0m
+  [32mok  [0mthe marks come back when the camera does
+  [32mok  [0ma capture asked for from the ground reaches the vehicle
+       [2mreceived=1, added_to_mosaic=0, dropped=1[0m
+  [2m--  [0mthe map is drawn into the terrain: the frame was old ground
+  [31mFAIL[0m a survey of the marker recovers where it stands
+       [2mthe marker is not in front of the camera[0m
+
+[1m== captures ==[0m
+       [2mskipped. VERIFY_FULL=1 includes it[0m
+
+[1m== foxglove ==[0m
+  [32mok  [0mevery panel setting is one Foxglove accepts
+  [32mok  [0mFoxglove is offered every one of the 24 topics the layout draws
+  [32mok  [0mFoxglove is offered every one of the 3 services the layout's buttons call
+  [32mok  [0mthe Image panel's live view carries frames
+  [32mok  [0mthe live view is calibrated, so the boxes land on it
+  [32mok  [0mthe satellite map is drawn north up over the terrain
+       [2mvertices	16641 bytes	1990192 height	+5.1	expected	+4.2 relief	31.9	31.9 image	yes span	600	600	600 texture	north v 0.00	south v 1.00	east u 1.00	west u 0.00 roo[0m
+  [32mok  [0mevery known target has a 2 m outline in the color of its verdict
+       [2mcasualty_14	#9aa0a6	2.01 casualty_15	#9aa0a6	2.01 casualty_16	#9aa0a6	2.01 [0m
+  [32mok  [0mevery pin on true_positives says its verdict, what it touched and its nearest target
+       [2mempty[0m
+  [32mok  [0mevery pin on false_positives says its verdict, what it touched and its nearest target
+       [2mempty[0m
+  [32mok  [0mevery pin on missed_localizations says its verdict, what it touched and its nearest target
+       [2mempty[0m
+
+[1m29 passed, 3 failed[0m
