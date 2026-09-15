@@ -50,7 +50,7 @@ POSE_POLL_INTERVAL_S = 0.2
 FIDUCIAL_MODEL = "fiducial_marker"
 
 
-def gz_service(service: str, reqtype: str, req: str, timeout_ms: int = 8000,
+def gz_service(service: str, reqtype: str, req: str, timeout_ms: int = 30000,
                label: str = "") -> bool:
     """Call one Gazebo service. Return True when Gazebo answers with data: true.
 
