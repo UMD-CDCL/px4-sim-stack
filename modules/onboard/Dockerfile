@@ -15,12 +15,12 @@ FROM ros_base
 ARG USERNAME=user
 
 USER root
-COPY entrypoint.sh sim_calibration.py sim_gimbal_attitude.py install-parser.sh /usr/local/bin/
+COPY entrypoint.sh sim_calibration.py install-parser.sh /usr/local/bin/
 # The framing table, from the repository root. A build context cannot reach
 # outside itself, so compose gives this image a second one rather than the
 # stack keeping a copy of the table for each image that reads it.
 COPY --from=shared zoom.sh /usr/local/bin/zoom.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/sim_gimbal_attitude.py
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 USER ${USERNAME}
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
