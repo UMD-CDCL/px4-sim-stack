@@ -57,6 +57,13 @@ The corrected flight prerequisite was then exercised directly on 2026-09-15:
 `camera_fov` was therefore a startup/level-view timing condition, not a lost
 publisher once the vehicle is airborne and the camera is aimed at the ground.
 
+The subsequent bench interruption was rechecked against the correct Gazebo
+entity. The nested `base_link` link is near the launch pad by design; the
+authoritative `uas11_10` model pose was at `z=19.94 m`, while PX4 reported
+armed `AUTO.LOITER` and `20.1 m` over home. A bounded `goto 44.4 159.9 20
+--heading 0` then completed in 4.2 seconds. The prior report of a grounded
+vehicle was a diagnostic false positive and is superseded by this evidence.
+
 QGroundControl launch serialization is enforced by the persistent config-volume
 flock and the compose restart policy. The restart checkpoint directly verified
 the running singleton after a full front-door restart. A forced application

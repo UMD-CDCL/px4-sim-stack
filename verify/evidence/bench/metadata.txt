@@ -1,9 +1,11 @@
 stage=bench
 mode=live
-started_utc=2026-09-15T14:47:20Z
+started_utc=2026-09-15T14:52:02Z
 repo=/home/user/px4-sim-stack
-commit=97bf64bcd0287cb02dcf0a5d02650c0f316a16df
+commit=3cb269cd2e0d98850a985109e71164908d658e13
 branch=feature/px4sim-baseline-implementation
-git_state=dirty
+git_state=dirty (evidence files updated; source tree unchanged)
 git_status= M verify/evidence/bench/metadata.txt
 selected_stages=ground foxglove
+diagnostic_recheck_utc=2026-09-15T14:55:00Z
+diagnostic_recheck=uas11_10 Gazebo pose z=19.94m; PX4 armed AUTO.LOITER 20.1m; bounded goto passed
