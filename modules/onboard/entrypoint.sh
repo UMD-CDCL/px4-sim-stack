@@ -118,6 +118,7 @@ if [ "${SIM}" = true ]; then
 	# Everything the simulator stands in for. None of it exists on the
 	# aircraft, so none of it runs there.
 	# ---------------------------------------------------------------------
+	mkdir -p "${LOG_DIR}/uas${UAS_NUM}"
 	python3 /usr/local/bin/sim_gimbal_attitude.py --ros-args -p uas:="${UAS_NUM}" \
 		>"${LOG_DIR}/uas${UAS_NUM}/sim-gimbal-attitude.log" 2>&1 &
 
