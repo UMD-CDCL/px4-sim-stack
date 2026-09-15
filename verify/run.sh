@@ -8,6 +8,16 @@
 # what it found through pass and fail, and nothing else decides.
 set -u
 
+# A live stage owns the vehicle command path. Prevent a second packet (or a
+# stale wrapper that was started by an earlier timeout) from issuing commands
+# concurrently and turning valid runtime evidence into a race.
+VERIFY_LOCK=${PX4SIM_VERIFY_LOCK:-${TMPDIR:-/tmp}/px4sim-verify.lock}
+exec 9>"$VERIFY_LOCK"
+if ! flock -n 9; then
+	printf 'verification already running (lock: %s)\n' "$VERIFY_LOCK" >&2
+	exit 2
+fi
+
 cd "$(dirname "$(readlink -f "$0")")/.."
 
 # shellcheck disable=SC1091
