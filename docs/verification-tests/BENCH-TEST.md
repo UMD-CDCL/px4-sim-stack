@@ -16,14 +16,15 @@ features are tracked for design impact but do not fail the current baseline.
 
 ## Checkpoint
 
-Tested: BLOCKED. Date: 2026-09-15. Latest test commit: `9e68756` on
+Tested: BLOCKED. Date: 2026-09-15. Latest test commit: `95e71bb` on
 `feature/px4sim-baseline-implementation`; Git status was clean. The ground
 station received camera info, position, status, and casualty truth. The
 simulator now publishes timestamped neutral gimbal telemetry and the live TF
 lookup `uas11_home_position -> d11_rgb_offset` succeeds. The bench verifier
-Both companion and ground heading/TF checks now pass (about 69 deg compass,
-airframe and camera). Ground camera info, position, status, and casualty truth
-also pass. The remaining failure is vehicle localization after the scripted
-gimbal-pointing/detection action; DeepStream continues respawning while RTSP
-streams initialize. No bench pass is claimed until localization and stream
-contracts are resolved and rerun. QGC was observed as one process.
+Both companion and ground heading/TF checks now pass, as do ground camera
+info, position, status, and casualty truth. The router no longer reports RTSP
+authentication failures and both `rgb11` and `rgbl11` reach online state, but
+the run still stalls before reliable camera-FOV/localization output while
+DeepStream respawns during stream startup. No bench pass is claimed until
+camera-FOV, detection, and localization output are reliable. QGC was observed
+as one process.
