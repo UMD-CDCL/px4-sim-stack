@@ -289,12 +289,12 @@ east, north, _ = pm.geodetic2enu(
 print(east + float(sys.argv[2]), north + float(sys.argv[3]))
 PY
 )"
-	# Put the aircraft directly over the marker for the calibration shot. This
-	# removes terrain/building occlusion and makes the survey geometry independent
-	# of the preceding oblique target-viewpoint flight.
-	uas goto "$marker_local_east" \
-		"$marker_local_north" \
-		"${VERIFY_HEIGHT_M:-20}" --heading 0 >/dev/null
+	# Hover over the surveyed coordinate, not over the deliberately displaced
+	# marker. At 50 m the 10.8 m displacement remains inside the camera view,
+	# while the overhead shot removes terrain/building occlusion.
+	uas goto "$(python3 -c "print($marker_local_east - $survey_east)")" \
+		"$(python3 -c "print($marker_local_north - $survey_north)")" \
+		50 --heading 0 >/dev/null
 	uas gimbal -90 >/dev/null
 	surveyed=$(uas fiducial --placed "$survey_east" "$survey_north")
 	# The line reads "<from> -> <to>\teast\tnorth\tup", so the numbers are the
