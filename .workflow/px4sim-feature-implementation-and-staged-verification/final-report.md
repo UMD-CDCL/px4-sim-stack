@@ -96,6 +96,12 @@ focused survey run was not promoted: concurrent stale verification processes
 held the vehicle command path, so its takeoff result was not trustworthy and
 was terminated before producing a valid survey result.
 
+To preserve stage isolation, `verify/run.sh` now takes a non-blocking host lock
+at `/tmp/px4sim-verify.lock`, overrideable with `PX4SIM_VERIFY_LOCK`. A second
+live packet fails immediately with an explicit lock message instead of issuing
+competing vehicle commands. This is committed as `65525a4`; `./px4sim check`
+passes afterward.
+
 ## Reusable Follow-up
 
 The separate live GPS checkpoint then passed on 2026-09-15 with 21 assertions
