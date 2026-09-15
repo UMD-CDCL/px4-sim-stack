@@ -18,7 +18,7 @@ features are tracked for design impact but do not fail the current baseline.
 
 Tested: BLOCKED. Date: 2026-09-15. Latest test commit: `cdad465` on
 `feature/px4sim-baseline-implementation`; Git status was clean before this
-ledger update. The latest live run produced 12 passes and 9 failures. Ground
+ledger update. The latest live run produced 16 passes and 5 failures. Ground
 telemetry, heading/TF, casualty truth, both scoring checks, and Foxglove
 layout/topic/service contracts passed. ReID loaded from the installed tracking
 package and the detector produced enough output for scoring. Remaining
@@ -32,3 +32,8 @@ The follow-up implementation checkpoint `d132a50` adds the simulator's
 missing. After restart, `/tf_static` was inspected directly and contained both
 the gimbal edge and this rangefinder edge. This fix still requires a fresh live
 bench result before changing the tested status.
+
+The fresh post-fix run still reports no usable gimbal pose at measurement
+timestamps, although live `/tf` contains `d11_gimbal_frame` and `/tf_static`
+contains the rangefinder edge. The remaining issue is temporal TF availability,
+not the frame name itself.
