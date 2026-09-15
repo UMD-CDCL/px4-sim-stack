@@ -1674,8 +1674,7 @@ uas|probe|foxglove)
 	# and nothing else does, so that is what comes back. The Foxglove probe
 	# speaks no DDS and has nothing to strip.
 	probe_answer() { if [ "$cmd" = probe ]; then awk -F'\t' 'NF == 3'; else cat; fi; }
-	docker exec -e ROS_DOMAIN_ID="$domain" \
-		-e FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/udp-only.xml "$container" bash -lc '
+	docker exec -e ROS_DOMAIN_ID="$domain" "$container" bash -lc '
 		set -e
 		. /usr/local/bin/ros-env.sh
 		exec python3 /tmp/'"$tool"' "$@"' _ "$@" | probe_answer

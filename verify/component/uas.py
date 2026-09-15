@@ -787,7 +787,7 @@ def command_record(uas: Uas, args) -> int:
     caller can redirect one and read the other.
     """
     tree = Buffer()
-    TransformListener(tree, uas)
+    tf_listener = TransformListener(tree, uas)
     casualties = Casualties(uas)
     origin = f"uas{args.number}_home_position"
     camera_frame = f"d{args.number}_rgb_offset"
@@ -1058,7 +1058,7 @@ def command_fiducial(uas: Uas, args) -> int:
     placed_east, placed_north = args.placed
 
     buffer = Buffer()
-    TransformListener(buffer, uas)
+    tf_listener = TransformListener(buffer, uas)
     frames = {}
     uas.create_subscription(
         TargetBoxArray, uas.topic("target_detections/fiducial"),
@@ -1183,7 +1183,7 @@ def command_heading(uas: Uas, args) -> int:
     beside the others.
     """
     buffer = Buffer()
-    TransformListener(buffer, uas)
+    tf_listener = TransformListener(buffer, uas)
     heading = {}
     uas.create_subscription(Float64, uas.topic("global_position/compass_hdg"),
                             lambda msg: heading.__setitem__("compass", msg.data),

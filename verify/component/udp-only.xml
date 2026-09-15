@@ -8,7 +8,8 @@
      and the stack quietly stops hearing itself.
 
      The nodes under test keep shared memory, which is what they use in
-     earnest. The tools that watch them do not need it. -->
+     earnest. The tools that watch them do not need it. Keep built-in UDP
+     discovery enabled for short-lived verifiers. -->
 <profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
   <transport_descriptors>
     <transport_descriptor>
@@ -18,10 +19,7 @@
   </transport_descriptors>
   <participant profile_name="udp_only_participant" is_default_profile="true">
     <rtps>
-      <userTransports>
-        <transport_id>udp_only</transport_id>
-      </userTransports>
-      <useBuiltinTransports>false</useBuiltinTransports>
+      <useBuiltinTransports>true</useBuiltinTransports>
     </rtps>
   </participant>
 </profiles>
