@@ -28,6 +28,27 @@ The stack has three worlds. `.env` says which one this machine is.
 
 ## `./px4sim`
 
+### Portable setup
+
+Use the feature branch in every checkout that may be changed, then use this
+front door sequence from the stack directory. It works on Ubuntu 24.04 hosts;
+the simulator's DeepStream 7.1 dependency image intentionally remains Ubuntu
+22.04 because it carries ROS 2 Humble.
+
+```bash
+git switch feature/ubuntu24-compat
+./px4sim doctor
+./px4sim prepare
+./px4sim setup
+./px4sim start
+./px4sim status
+```
+
+`prepare` is the only step that needs network access. It stages the local ROS
+and deployment checkouts, builds the dependency images, and builds the
+selected service images. Later rebuilds use `./px4sim build` or
+`./px4sim restart`; `./px4sim start` never pulls or builds.
+
 **For.** Every day-to-day action on the stack: the host check, the image build,
 the start and the stop, the readings, and one vehicle's nodes.
 

@@ -49,6 +49,7 @@ for package in px4_msgs cdcl_umd_msgs; do
 done
 stage mavros "$deploy/submodules/mavros"
 stage angles "$deploy/submodules/angles"
+stage geographic_msgs "$deploy/submodules/geographic_info/geographic_msgs"
 stage mavros_patch "$deploy/remote/mavros_patch"
 stage yolo "$ws/src/5g_drone/config/deepstream/nvdsinfer_custom_impl_Yolo"
 

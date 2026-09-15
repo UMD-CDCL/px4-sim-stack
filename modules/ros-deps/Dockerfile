@@ -144,7 +144,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential \
       cmake \
       geographiclib-tools \
+      libgeographic-dev \
       git \
+      libasio-dev \
       iproute2 \
       iputils-ping \
       nano \
@@ -162,13 +164,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3-yaml \
       ros-${ROS_DISTRO}-cv-bridge \
       ros-${ROS_DISTRO}-diagnostic-msgs \
+      ros-${ROS_DISTRO}-diagnostic-updater \
       ros-${ROS_DISTRO}-domain-bridge \
       ros-${ROS_DISTRO}-foxglove-bridge \
       ros-${ROS_DISTRO}-foxglove-msgs \
+      ros-${ROS_DISTRO}-eigen-stl-containers \
       ros-${ROS_DISTRO}-image-geometry \
       ros-${ROS_DISTRO}-image-transport \
-      ros-${ROS_DISTRO}-mavros \
-      ros-${ROS_DISTRO}-mavros-extras \
+      ros-${ROS_DISTRO}-mavlink \
       ros-${ROS_DISTRO}-message-filters \
       ros-${ROS_DISTRO}-nav-msgs \
       ros-${ROS_DISTRO}-rosbag2-py \
@@ -180,6 +183,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-${ROS_DISTRO}-tf2-ros \
       ros-${ROS_DISTRO}-vision-msgs \
       ros-${ROS_DISTRO}-visualization-msgs \
+    && geographiclib-get-geoids egm96-5 \
     && rm -rf /var/lib/apt/lists/*
 
 ENV LANG=en_US.UTF-8
@@ -289,9 +293,6 @@ RUN if python3 -m pip install --help 2>/dev/null | grep -q -- --break-system-pac
         printf '[install]\nbreak-system-packages = true\n' > /etc/pip.conf; \
     fi
 
-# MAVROS refuses to convert between AMSL and ellipsoid height without these.
-RUN /opt/ros/${ROS_DISTRO}/lib/mavros/install_geographiclib_datasets.sh
-
 # ---------------------------------------------------------------------------
 
 # pymap3d is what tf_loc and MAVInsight convert LLA with. folium is the mosaic
@@ -305,7 +306,8 @@ RUN python3 -m pip install --no-cache-dir \
       "$([ "${ROS_DISTRO}" = humble ] && echo 'numpy==1.24.4' || echo 'numpy<2')" \
       "pymap3d" \
       "folium" \
-      "utm"
+      "utm" \
+      "tensorrt==10.3.0"
 
 # The bindings from the first stage. Installing the wheel, rather than copying
 # pyds*.so into site-packages, makes a wrong artifact fail here instead of at

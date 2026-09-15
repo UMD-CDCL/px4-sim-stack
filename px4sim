@@ -1067,8 +1067,11 @@ restart|start|up|core)
 		return 0
 	fi
 	if [ "$rebuild" = true ]; then
-		say "Building offline: $COMPOSE_PROFILES"
-		build_stack
+		# Restart is a lifecycle operation. Prepared images are immutable inputs;
+		# rebuilding them here makes a restart depend on BuildKit cache details
+		# and can fail after the running stack has already been interrupted.
+		# Use ./px4sim build explicitly when source changes need a rebuild.
+		say "Reusing prepared images: $COMPOSE_PROFILES"
 	fi
 	# Missing images fail before stopping an otherwise usable stack.
 	local image required_images
