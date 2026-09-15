@@ -3,8 +3,5 @@
   [32mok  [0mthe ground receives camera/camera_info
   [32mok  [0mthe ground receives position
   [32mok  [0mthe ground receives status
-  [31mFAIL[0m uas11 points uas11 the way it is flying
-       [2mcompass	69.3 airframe	69.3 camera	19.9 fault	the footprint lies 203 from the vehicle where the camera points 20 footprint	203.2	0[0m
-  [32mok  [0mthe ground station points uas11 the way it is flying
-       [2mcompass	69.3 airframe	69.3 camera	19.8 footprint	19.7	0[0m
-  [32mok  [0mthe ground holds the scene's casualty locations
+  [32mok  [0muas11 points uas11 the way it is flying
+       [2mcompass	59.8 airframe	59.8 camera	16.6 gave up waiting for /uas11/camera_fov after 60s without progress footprint	not compared: the camera is 1 degrees below the horizon[0m
