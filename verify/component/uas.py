@@ -1071,7 +1071,7 @@ def command_fiducial(uas: Uas, args) -> int:
         lambda msg: frames.__setitem__("msg", msg), RELIABLE_QOS)
     correction = {}
     uas.create_subscription(TransformStamped, uas.topic("fiducial_update"),
-                            lambda msg: correction.setdefault("msg", msg),
+                            lambda msg: correction.__setitem__("msg", msg),
                             RELIABLE_QOS)
     info = uas.latest(CameraInfo, uas.topic("camera/camera_info"),
                       LATCHED_QOS, args.deadline)
@@ -1122,6 +1122,8 @@ def command_fiducial(uas: Uas, args) -> int:
     ray = turned.inv().apply(marker - stood)
     pixel = body_ray_pixels(info, [ray])[0]
     if not np.all(np.isfinite(pixel)):
+        print(f"marker={marker.tolist()} camera={stood.tolist()} ray={ray.tolist()}",
+              file=sys.stderr)
         print("the marker is not in front of the camera", file=sys.stderr)
         return 1
 
@@ -1151,7 +1153,15 @@ def command_fiducial(uas: Uas, args) -> int:
     uas.call(uas.localize, TBALocalization.Request(un_localized=marked),
              "tba_loczn")
 
-    if not uas.wait_until(lambda: "msg" in correction, args.deadline,
+    def fresh_correction():
+        msg = correction.get("msg")
+        if msg is None:
+            return False
+        stamp = msg.header.stamp
+        shot_stamp = shot.header.stamp
+        return (stamp.sec, stamp.nanosec) >= (shot_stamp.sec, shot_stamp.nanosec)
+
+    if not uas.wait_until(fresh_correction, args.deadline,
                           "a fiducial correction"):
         return 1
     moved = correction["msg"].transform.translation
