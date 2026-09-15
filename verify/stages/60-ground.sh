@@ -99,8 +99,17 @@ if [ -n "$viewpoint" ]; then
 	if ! PX4SIM_UAS_COMMAND_TIMEOUT_S=${VERIFY_UAS_COMMAND_TIMEOUT_S:-180} \
 		./px4sim uas "$lead" goto "$aim_east" "$aim_north" "$aim_up" \
 		--heading "$aim_heading" >/dev/null 2>&1; then
+		# DO_REPOSITION can acknowledge during the short interval in which the
+		# freshly airborne vehicle's local-position stream is still settling.
+		sleep 5
+		if PX4SIM_UAS_COMMAND_TIMEOUT_S=${VERIFY_UAS_COMMAND_TIMEOUT_S:-180} \
+			./px4sim uas "$lead" goto "$aim_east" "$aim_north" "$aim_up" \
+			--heading "$aim_heading" >/dev/null 2>&1; then
+			:
+		else
 		fail "the vehicle reaches the bench viewpoint"
 		return 0
+		fi
 	fi
 	./px4sim uas "$lead" gimbal "-${VERIFY_DEPRESSION_DEG:-45}" --yaw 0 \
 		>/dev/null 2>&1 || fail "the gimbal points at the bench viewpoint"
