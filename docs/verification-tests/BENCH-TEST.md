@@ -32,7 +32,10 @@ Integration run: the isolated bench stage at root commit `82c2317` and the
 onboard image before `b426326` completed with 19 passes and 2 failures. The
 cached onboard image was then rebuilt from `b426326`, which adds the footprint
 node to the shared simulator latest-TF lookup policy, and restarted through the
-readiness gate. A post-`b426326` bench result is still pending.
+readiness gate. The post-`b426326` bench run completed with 19 passes and 2
+failures: ground-station scoring passed, while vehicle localization and
+vehicle scoring failed. This confirms the helper is active in at least the
+ground path, but the onboard `tf_loc` ray path remains the next blocker.
 
 Tested: BLOCKED. Date: 2026-09-15. Latest root test commit: `03d3e0b` on
 `feature/px4sim-baseline-implementation`; the root checkout was clean before
