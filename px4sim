@@ -429,6 +429,15 @@ reload_world() {
 	# they fight the native lcam and mavlink-router for their ports.
 	if [ "$(world_of)" = simulator ]; then
 		reloading="sim $reloading"
+		# PX4 is respawned with the world. Its MAVLink peer is the numbered
+		# router, so keeping that router alive across a simulator reload leaves
+		# the fresh autopilot talking to a stale endpoint and all commands wait
+		# until their timeout. Recreate the router before its companion consumers.
+		for number in $(fleet_numbers); do
+			if has_service "uas$number"; then
+				reloading="uas$number $reloading"
+			fi
+		done
 		has_service ground-router && reloading="$reloading ground-router"
 	fi
 	# shellcheck disable=SC2086
