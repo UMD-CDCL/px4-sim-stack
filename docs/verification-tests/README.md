@@ -110,6 +110,7 @@ The initial function list and evidence are in [FUNCTION-MATRIX.md](FUNCTION-MATR
 The exhaustive feature inventory starts in [FEATURE-LEDGER.md](FEATURE-LEDGER.md),
 with broader package inventories in [MAVINSIGHT-LEDGER.md](MAVINSIGHT-LEDGER.md),
 [PX4SIM-LEDGER.md](PX4SIM-LEDGER.md), and [5G-DRONE-LEDGER.md](5G-DRONE-LEDGER.md),
+plus the deployment inventory in [CHIMERA-DEPLOY-LEDGER.md](CHIMERA-DEPLOY-LEDGER.md),
 and the stage record templates are [CODE-TEST.md](CODE-TEST.md),
 [BENCH-TEST.md](BENCH-TEST.md), [GPS-TEST.md](GPS-TEST.md), and
 [SIM-TEST.md](SIM-TEST.md). Please edit the ledger classifications and expected
