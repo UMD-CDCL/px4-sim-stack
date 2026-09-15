@@ -18,6 +18,7 @@ esac
 # The dash form keeps an empty value empty: the aircraft passes SCENE="".
 SCENE=${SCENE-lorton}
 TERRAIN_DIR=${TERRAIN_DIR:-/terrain}
+LOG_DIR=${LOG_DIR:-/logs}
 
 # The airframe model. In the simulator UAS_FLEET is the one source of truth for
 # the whole fleet, the same list the simulator builds its models from, so the
