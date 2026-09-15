@@ -18,15 +18,17 @@ The MAVInsight parser change was rejected because it exists only in the ignored 
 
 ## Verification Evidence
 Passed: `./px4sim check`; `./px4sim help`; Python compilation; shell syntax checks; all four wrapper dry runs; workflow artifact validation; `git diff --check`; simulator range-reading unit tests; startup/frame contract checks.
-The code stage passed 17/17 assertions at `dd42eca`. The bench stage remains blocked by TF/frame parity and startup resource timing. A cache-aware rebuild reached cached layers but was blocked by DNS resolution of Ubuntu package mirrors; no new runtime evidence is claimed from that build.
+The live code stage passed 17/17 assertions. The bench stage remains blocked by the camera/detector path: telemetry, Foxglove contracts, images, calibration, datum-aware map checks, and target layers pass, while vehicle localization and ground-station scoring receive no usable pixel detections.
+
+At the 2026-09-15 checkpoint, `./px4sim restart --no-build` completed through the readiness gate. All seven services were running, `video-router` was healthy, simulator startup reported Gazebo world readiness, and `pgrep -x QGroundControl` reported exactly one process. `./px4sim probe 11 --deadline 3` completed successfully; topics without publishers are reported explicitly by the probe rather than treated as a launch failure.
 
 ## Remaining Risks
 The runtime feature packet remains to be reworked against tracked source. Existing fixture coverage still reports a missing `/src/tracking_test_5g` path, and `pytest` was unavailable for the rejected packet. The rebuilt images containing the new frame/readiness changes still need a successful networked build and restart before live bench rerun.
 
-QGroundControl launch serialization was added in `c5bf7c5`: a persistent
-config-volume flock plus a 30-second stop grace period. The current running
-stack has exactly one QGroundControl process. Rebuilding that image to exercise
-the entrypoint is currently blocked by package-mirror DNS, so runtime
-single-instance behavior remains pending direct evidence.
+QGroundControl launch serialization is enforced by the persistent config-volume
+flock and the compose restart policy. The restart checkpoint directly verified
+the running singleton after a full front-door restart. A forced application
+crash/restart remains unverified because manually killing the packaged QGC
+process did not exercise the container's normal unexpected-exit path.
 
 ## Reusable Follow-up
