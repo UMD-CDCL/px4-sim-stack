@@ -16,7 +16,8 @@ ARG USERNAME=user
 
 USER root
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+COPY --from=shared sim_gimbal_attitude.py /usr/local/bin/sim_gimbal_attitude.py
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/sim_gimbal_attitude.py
 
 USER ${USERNAME}
 EXPOSE 8765/tcp

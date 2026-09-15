@@ -233,6 +233,7 @@ x-offboard: &offboard
     network: none
     additional_contexts:
       ros_base: service:ros-base
+      shared: ./scripts
     args:
       # See the onboard note above: everything heavy is in ros-base.
       <<: *deepstream
