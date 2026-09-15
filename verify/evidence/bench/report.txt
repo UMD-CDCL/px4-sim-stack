@@ -4,7 +4,7 @@
   [32mok  [0mthe ground receives position
   [32mok  [0mthe ground receives status
   [31mFAIL[0m uas11 points uas11 the way it is flying
-       [2mcompass	42.5 airframe	42.5 camera	43.9 fault	the footprint lies 234 from the vehicle where the camera points 44 footprint	233.6	0[0m
+       [2mcompass	69.3 airframe	69.3 camera	19.9 fault	the footprint lies 203 from the vehicle where the camera points 20 footprint	203.2	0[0m
   [32mok  [0mthe ground station points uas11 the way it is flying
-       [2mcompass	42.5 airframe	42.5 camera	44.0 footprint	44.0	0[0m
+       [2mcompass	69.3 airframe	69.3 camera	19.8 footprint	19.7	0[0m
   [32mok  [0mthe ground holds the scene's casualty locations

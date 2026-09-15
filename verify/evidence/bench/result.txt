@@ -1,4 +1,4 @@
 result=INTERRUPTED
 exit_status=143
-finished_utc=2026-09-15T13:56:00Z
-reason=vehicle-side bench sequence continued into a long goto after the footprint failure; verification process stopped, stack left running
+finished_utc=2026-09-15T14:22:04Z
+reason=takeoff completed but DO_REPOSITION did not move the vehicle; verification process stopped while goto waited, stack left running
