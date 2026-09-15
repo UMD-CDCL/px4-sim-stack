@@ -1,9 +1,11 @@
 stage=bench
 mode=live
-started_utc=2026-09-15T14:27:12Z
+started_utc=2026-09-15T14:31:48Z
 repo=/home/user/px4-sim-stack
-commit=d5a28a00152260dc595339117979a793ba688df2
+commit=02d8a1b2ef8a210e4b6c8d4ea251789d9d61764d
 branch=feature/px4sim-baseline-implementation
 git_state=dirty
 git_status= M verify/evidence/bench/metadata.txt
+git_status_continued= M verify/evidence/code/metadata.txt
+git_status_continued= M verify/evidence/code/result.txt
 selected_stages=ground foxglove
