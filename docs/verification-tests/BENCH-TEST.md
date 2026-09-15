@@ -16,12 +16,12 @@ features are tracked for design impact but do not fail the current baseline.
 
 ## Checkpoint
 
-Tested: BLOCKED. Date: 2026-09-15. Commit at test start: `2e23566` on
+Tested: BLOCKED. Date: 2026-09-15. Latest test commit: `e1a4aa6` on
 `feature/px4sim-baseline-implementation`; Git status was clean. The ground
-station received camera info, position, status, and casualty truth, but both
-vehicle and ground frame checks failed because
-`uas11_home_position -> d11_gimbal_frame` did not become available. The run
-also observed repeated DeepStream exits with `Could not open resource for
-reading` while the RTSP publisher was still coming online. No bench pass is
-claimed until the frame contract and stream readiness behavior are fixed and
-rerun.
+station received camera info, position, status, and casualty truth. The
+simulator now publishes timestamped neutral gimbal telemetry and the live TF
+lookup `uas11_home_position -> d11_rgb_offset` succeeds. The bench verifier
+still fails its `d11_gimbal_frame` lookup intermittently and reports a 48 deg
+drawn-versus-0 deg flying heading discrepancy; DeepStream also respawns while
+RTSP streams initialize. No bench pass is claimed until those runtime and
+heading contracts are resolved and rerun. QGC was observed as one process.
