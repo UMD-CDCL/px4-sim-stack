@@ -3,8 +3,8 @@
   "slug": "px4sim-feature-implementation-and-staged-verification",
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
-  "current_slice": "bench-gimbal-ownership-and-singleton-restart",
-  "last_verified": "2026-09-15: full px4sim restart --no-build reached readiness; old QGC container removed before replacement, one actual QGroundControl process, no singleton error",
+  "current_slice": "sim-gimbal-single-authority",
+  "last_verified": "2026-09-15: rebuilt onboard/offboard after removing duplicate simulator gimbal TF launch; live gimbal TF is non-identity and gimbal range returns 29.64 m instead of max-range 50 m",
   "approval": {
     "required": null,
     "granted": null,

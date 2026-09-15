@@ -79,6 +79,23 @@ process. No `second instance` message appeared in the container log. A process
 count made with a self-matching `pgrep -f` pattern was discarded; the exact
 path check is the authoritative count.
 
+The next simulator component checkpoint found a second front-door authority in
+the gimbal tree. Both root entrypoints launched `sim_gimbal_attitude.py`, while
+MAVInsight's gimbal node already consumed the PX4 attitude status and published
+the calibrated `gimbal_ref_frame -> gimbal_frame` edge, including the FRD to
+FLU conversion. The duplicate root publisher could race that edge and leave an
+identity orientation. The root launch blocks were removed on
+`feature/px4sim-baseline-implementation`, and cached onboard/offboard images
+were rebuilt using the existing layer cache.
+
+After the readiness-gated restart, the live range topic reported `29.64 m`
+instead of its `50 m` no-return limit, and `tf2_echo` showed a non-identity
+gimbal attitude (about 20.7 degrees yaw and 3.3 degrees pitch). This is a
+component-level pass for single gimbal TF authority and range transport. The
+focused survey run was not promoted: concurrent stale verification processes
+held the vehicle command path, so its takeoff result was not trustworthy and
+was terminated before producing a valid survey result.
+
 ## Reusable Follow-up
 
 The separate live GPS checkpoint then passed on 2026-09-15 with 21 assertions
