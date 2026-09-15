@@ -50,6 +50,13 @@ continuously publishing the neutral joint target. The next code slice is the
 PX4 `GZGimbal` runtime/image provenance and setpoint-to-joint publication, not
 camera yaw or detector thresholds.
 
+The corrected flight prerequisite was then exercised directly on 2026-09-15:
+`./px4sim fly 11 20` reached 20 m, followed by `gimbal -45 --yaw 0` and
+`heading --deadline 30`. The heading probe passed with compass `59.8`, camera
+`13.6`, and footprint `13.4` degrees at an 18 m range. The earlier missing
+`camera_fov` was therefore a startup/level-view timing condition, not a lost
+publisher once the vehicle is airborne and the camera is aimed at the ground.
+
 QGroundControl launch serialization is enforced by the persistent config-volume
 flock and the compose restart policy. The restart checkpoint directly verified
 the running singleton after a full front-door restart. A forced application
