@@ -13,6 +13,7 @@ script because the quoting of nested JSON in a heredoc is not worth the trouble.
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import subprocess
@@ -22,6 +23,8 @@ import urllib.request
 
 API = next((word for word in sys.argv[1:] if not word.startswith("-")),
              "http://localhost:9997")
+API_USER = "px4sim"
+API_PASSWORD = "px4sim-local"
 PROBE_SECONDS = 5
 # gst-discoverer text when no server or no mount accepts the connection.
 REFUSED_TEXT = "Could not open resource for reading"
@@ -29,7 +32,11 @@ REFUSED_TEXT = "Could not open resource for reading"
 
 def main() -> int:
     try:
-        with urllib.request.urlopen(f"{API}/v3/paths/list", timeout=5) as r:
+        request = urllib.request.Request(f"{API}/v3/paths/list")
+        credentials = f"{API_USER}:{API_PASSWORD}".encode("ascii")
+        request.add_header("Authorization", "Basic " +
+                           base64.b64encode(credentials).decode("ascii"))
+        with urllib.request.urlopen(request, timeout=5) as r:
             data = json.load(r)
     except urllib.error.HTTPError as e:
         print(f"  the video router API answered {e.code}.")

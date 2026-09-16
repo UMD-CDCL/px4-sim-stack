@@ -37,6 +37,19 @@ logDestinations: [stdout]
 api: true
 apiAddress: :9997
 
+# The API is consumed by the host-side `px4sim streams` front door. MediaMTX
+# 1.21 requires an explicit API permission even when the endpoint is local.
+authInternalUsers:
+  - user: any
+    pass:
+    permissions:
+      - action: publish
+      - action: read
+  - user: px4sim
+    pass: px4sim-local
+    permissions:
+      - action: api
+
 # The simulator network is private to the compose project. Keep its RTSP
 # producer and consumer contract anonymous: the clients use plain
 # rtsp://video-router:8554/<stream> URLs, and MediaMTX auth challenges are not
