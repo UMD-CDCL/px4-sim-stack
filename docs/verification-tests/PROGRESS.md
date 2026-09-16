@@ -16,13 +16,10 @@ repositories changed for this work remain on and pushed from
 | GPS | 21/0 live | `verify/evidence/gps/` |
 | Sim | 40/0 live | `verify/evidence/sim/` |
 
-The previously certified bench checkpoint remains **21/0**. A later live
-retry after the onboard image refresh passed ground camera, position, status,
-and heading readiness, but did not complete: the simulator takeoff/reposition
-command remained stuck and was stopped after its bounded diagnostic window.
-The ground stage now waits for all three telemetry topics before probing and
-wraps both reposition attempts in a timeout; a fresh full bench checkpoint is
-still required.
+The earlier incomplete bench retry is retained in git history as a diagnostic
+checkpoint. The current rebuilt-image bench result supersedes it: **26/0**.
+The ground stage waits for all three telemetry topics before probing and wraps
+both reposition attempts in a timeout.
 
 The sim checkpoint covers QGC singleton behavior, PX4/MAVLink readiness,
 gimbal and zoom control, raw coordinate ROI, localization, capture/mosaic,
@@ -72,13 +69,10 @@ camera contract is restored.
 - PX4-Autopilot: `639154f` on `feature/ubuntu24-compat`
 
 The working tree is clean apart from generated evidence directories that are
-intentionally excluded from commits. The next implementation item is paused:
-live-test the RTSP preflight deadline fix after rebuilding the onboard image.
-The cache-preserving rebuild and live startup passed (`rgb11 ready after 57s`,
-then `ds_node: pipelines PLAYING, services up`); deliberate deadline-expiry
-coverage is now covered by a deterministic source-contract test, while a live
-timeout-expiration run remains pending. The transient RTSP source-loss observation remains
-documented in `SIM-TEST.md`. No deployment-only Chimera work was started.
+intentionally excluded from commits. The RTSP preflight fix and persistent
+rebuilt-image startup are covered by the current bench and sim checkpoints;
+the transient RTSP source-loss observation remains documented in `SIM-TEST.md`.
+No deployment-only Chimera work was started.
 
 Verification is a critical-checkpoint activity, not a per-edit requirement.
 
