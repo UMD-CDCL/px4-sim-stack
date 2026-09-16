@@ -129,3 +129,9 @@ verification of that supervisor are pending: BuildKit cannot currently resolve
 Ubuntu/Debian apt archives, even though ordinary containers can resolve them.
 This is diagnostic evidence only and does not replace the green `5d6a275`
 checkpoint.
+
+Isolation fix checkpoint: commit `b3213e9` makes live bench runs reset the
+simulated fleet through `./px4sim place` and wait for respawn initialization.
+The fresh packet then completed **21 passed, 0 failed** on 2026-09-16,
+including vehicle/ground heading, 184 identical localization samples,
+scoring, click behavior, image/calibration, map, and all Foxglove checks.
