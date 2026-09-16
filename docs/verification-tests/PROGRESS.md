@@ -136,6 +136,14 @@ sim-tested checkpoint: vehicle readiness, flight and gimbal behavior, click
 and raw-ROI retention through movement, capture, survey, Foxglove panels and
 all five scoring metrics completed successfully.
 
+The post-MCAP rebuilt-image sim run on 2026-09-16 completed **36 passed, 4
+failed** at `2026-09-16T21:05:29Z`. Vehicle telemetry, gimbal framing,
+perception annotations, capture delivery, scoring, and all Foxglove layout/data
+checks passed. The failures are bounded to raw-ROI acceptance/retention and one
+survey-position assertion (`fiducial -> uas11_home_position -0.29,0.69,0.52`
+versus expected `-6.00,9.00`); no code change is being claimed until those
+paths are reconciled against the current source and scenario.
+
 The 5G Drone ROI safety slice was implemented on `feature/ubuntu24-compat`
 as commit `db780ed`. The affected images rebuilt from local cached parents in
 about seconds of package compilation, and a restarted live stack rejected a
