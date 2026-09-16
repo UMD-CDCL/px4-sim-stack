@@ -79,6 +79,7 @@ fi
 if grep -q 'record)' px4sim \
 	&& grep -q 'recording name contains unsafe characters' px4sim \
 	&& grep -q 'RECORD_STORAGE' px4sim \
+	&& grep -q 'stop \[name\]' px4sim \
 	&& grep -q './logs/recordings:/recordings' compose.yaml; then
 	pass "px4sim recording front door and persistent mount"
 else
