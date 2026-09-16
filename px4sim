@@ -1298,6 +1298,9 @@ record)
 	start)
 		name=${1:-mcap-$(date -u +%Y%m%dT%H%M%SZ)}
 		case "$name" in *[!A-Za-z0-9_.-]*) die "recording name contains unsafe characters" ;; esac
+		docker exec "$container" bash -lc \
+			". /usr/local/bin/ros-env.sh; ros2 bag record -h | grep -Eq '(^|[ ,{])mcap([ ,}]|$)'" \
+			|| die "MCAP storage is unavailable in the offboard image; rebuild with the rosbag2 MCAP plugin"
 		topics=$(recording_topics)
 		docker exec -d -e ROS_DOMAIN_ID="${GROUND_DOMAIN:-70}" "$container" bash -lc \
 			". /usr/local/bin/ros-env.sh; exec ros2 bag record -s mcap --storage-preset-profile zstd_fast -o /recordings/$name $topics" >/dev/null
