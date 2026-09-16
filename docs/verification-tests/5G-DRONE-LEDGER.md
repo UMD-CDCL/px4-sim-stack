@@ -47,7 +47,7 @@ with date, commit, Git status, and evidence; this inventory defaults to
 | `CURRENT` | Mission management | `umd_uas_mission`, mission params | Mission state and advance command work |
 | `CURRENT` | Survey operation | survey node/launch/config | Survey starts, progresses, and reports status |
 | `CURRENT` | Mosaic capture | mosaic node and service/topic | Capture creates expected product/status |
-| `MISSING` | Status/health reporting: they exist but some are out of date or unreliable, should be updated to fit with the other parts of the system | status node and params | Health, rates, GPS, and link state are visible |
+| `PARTIAL` | Status/health reporting: the status node publishes a consolidated node-status bitmask, GPS/RTK freshness, MAVROS state, heading, and telemetry; richer lifecycle states (starting, initialization, intentional stop, and error reason) are not yet represented | `umd_uas/status.py`, `test/test_status_health.py`, `ChimeraStatus.msg` | Source and live stages verify the current bitmask/telemetry path; the richer lifecycle contract remains `PLANNED` |
 | `CURRENT` | TF and frame publication | `tf_loc`, gimbal/camera configs | Frames are connected and physically consistent |
 | `CURRENT` | Domain bridges send/receive | `*domain_bridge*.yaml`, launch files | Only intended topics/services cross domains, and they all do so successfully |
 | `CURRENT` | Foxglove bridge | `foxglove_bridge.launch.py`, layouts | Operator topics/services are advertised and live |
