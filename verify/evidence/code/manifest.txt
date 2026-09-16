@@ -1,7 +1,7 @@
-manifest_utc=2026-09-16T17:35:32Z
+manifest_utc=2026-09-16T17:49:10Z
 root=/home/user/px4-sim-stack
 branch=feature/px4sim-baseline-implementation
-commit=c9d6fa6488d906a11ba5ed20dc3b458a03b9d9e6
+commit=94ec02313da6390d5746adfaeeaf94e8c60df40a
 world=simulator
 profiles=offboard,sim,uas11,onboard11
 scene=campus

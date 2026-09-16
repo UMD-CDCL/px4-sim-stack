@@ -11,7 +11,7 @@ repositories changed for this work remain on and pushed from
 
 | Stage | Result | Evidence |
 |---|---:|---|
-| Code | 20/0 live | `verify/evidence/code/` |
+| Code | 21/0 live | `verify/evidence/code/` |
 | Bench | 26/0 live | `verify/evidence/bench/` |
 | GPS | 21/0 live | `verify/evidence/gps/` |
 | Sim | 40/0 live | `verify/evidence/sim/` |
@@ -63,7 +63,7 @@ camera contract is restored.
 
 ## Source checkpoints
 
-- Root: `c9d6fa6` (source checkpoint for this test run)
+- Root: `94ec023` (source checkpoint for this test run)
 - 5G Drone: `496a825` on `feature/ubuntu24-compat`
 - MAVInsight: `0fb189b` on `feature/ubuntu24-compat`
 - PX4-Autopilot: `639154f` on `feature/ubuntu24-compat`
@@ -109,10 +109,11 @@ plugin. The installed image reports only `sqlite3` and a test plugin, so the
 front door correctly refuses to start and identifies the required rosbag2
 MCAP dependency. Video synchronization and MCAP image support remain planned.
 
-The code stage completed **20 passed, 0 failed** on 2026-09-16 at 17:35:44Z.
+The code stage completed **21 passed, 0 failed** on 2026-09-16 at 17:49:21Z.
 It verified airframe expansion, service/address/MAVLink contracts, the
-px4sim UI helper, QGC singleton behavior, 43 terrain/frame checks, 137 5G
-Drone functional checks, and four map-axis/texture checks.
+px4sim UI helper, QGC singleton behavior, the recording front door and
+persistent mount contract, 43 terrain/frame checks, 137 5G Drone functional
+checks, and four map-axis/texture checks.
 
 The GPS stage completed **21 passed, 0 failed** on 2026-09-16 at 17:18:25Z.
 It recorded 203 identical localization samples across vehicle and ground

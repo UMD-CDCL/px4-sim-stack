@@ -20,10 +20,11 @@ manifest=/home/user/px4-sim-stack/verify/evidence/code/manifest.txt
   [32mok  [0muas11 router serves the companion on 14402
   [32mok  [0mpx4sim UI helper behavior
   [32mok  [0mQGroundControl has one active process
+  [32mok  [0mpx4sim recording front door and persistent mount
 
 [1m== units ==[0m
   [32mok  [0mterrain and ground frame: 43 passed
   [32mok  [0m5G Drone functional suite: 137 passed
   [32mok  [0mthe drawn map's axes and texture: 4 passed
 
-[1m20 passed, 0 failed[0m
+[1m21 passed, 0 failed[0m
