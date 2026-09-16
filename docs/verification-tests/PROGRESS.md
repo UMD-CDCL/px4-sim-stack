@@ -54,9 +54,19 @@ machine therefore needs a later build-portability fix or an available local
 BuildKit image import before the scorer can be runtime-certified. No green
 result is claimed from this attempt.
 
+On 2026-09-16, `./px4sim restart --no-build` completed and reported all seven
+runtime services up. PX4 logged `Ready for takeoff`, MediaMTX eventually
+reported `rgb11` and `rgbl11` publishing, and HTTP probes for `rgb11`,
+`pilot11`, and `thermal11` succeeded. The QGC container contained exactly one
+`QGroundControl` process. Initialization is still incomplete: onboard and
+offboard DeepStream repeatedly exit with `Could not open resource for reading`,
+and `/uas11/camera/camera_info` produced no sample during a ten-second probe;
+the resulting gimbal, footprint, and scoring warnings are expected until that
+camera contract is restored.
+
 ## Source checkpoints
 
-- Root: `de383e3` (current implementation checkpoint)
+- Root: `9af9443` (current implementation checkpoint)
 - 5G Drone: `8296fe0` on `feature/ubuntu24-compat`
 - MAVInsight: `0fb189b` on `feature/ubuntu24-compat`
 - PX4-Autopilot: `639154f` on `feature/ubuntu24-compat`
