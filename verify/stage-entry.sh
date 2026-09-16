@@ -33,6 +33,7 @@ esac
 }
 
 metadata=$evidence_dir/metadata.txt
+manifest=$evidence_dir/manifest.txt
 {
 	printf 'stage=%s\nmode=%s\nstarted_utc=%s\n' "$name" "$mode" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 	printf 'repo=%s\ncommit=%s\nbranch=%s\n' "$repo" \
@@ -43,6 +44,7 @@ metadata=$evidence_dir/metadata.txt
 	case "$status" in clean) printf 'git_state=clean\n' ;; *) printf 'git_state=dirty\n' ;; esac
 	printf 'git_status=%s\n' "$status" | sed '2,$s/^/git_status_continued=/'
 	printf 'selected_stages=%s\n' "$stages"
+	printf 'manifest=%s\n' "$manifest"
 } >"$metadata"
 
 printf 'stage=%s mode=%s\nselected: %s\nevidence: %s\n' "$name" "$mode" "$stages" "$evidence_dir"
@@ -56,7 +58,7 @@ fi
 report=$evidence_dir/report.txt
 set +e
 	read -r -a selected_stages <<< "$stages"
-	(cd "$repo" && ./verify/run.sh "${selected_stages[@]}") 2>&1 | tee "$report"
+	(cd "$repo" && VERIFY_MANIFEST_FILE="$manifest" ./verify/run.sh "${selected_stages[@]}") 2>&1 | tee "$report"
 status=${PIPESTATUS[0]}
 set -e
 printf 'result=%s\nexit_status=%s\nfinished_utc=%s\n' \

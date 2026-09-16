@@ -1,3 +1,4 @@
+manifest=/home/user/px4-sim-stack/verify/evidence/code/manifest.txt
 
 [1m== airframes ==[0m
   [32mok  [0muas11 (chimera_v3) expands

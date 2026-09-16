@@ -130,6 +130,14 @@ else
 	fi
 fi
 
+ # A packet wrapper supplies this path so the exact runtime-resolved state is
+ # retained alongside the stage report. Keep one manifest for the packet: all
+ # selected stages run against the same stack and configuration.
+ if [ -n "${VERIFY_MANIFEST_FILE:-}" ]; then
+ 	./px4sim manifest >"$VERIFY_MANIFEST_FILE"
+ 	printf 'manifest=%s\n' "$VERIFY_MANIFEST_FILE"
+ fi
+
 for f in $files; do
 	stage "$(stage_name "$f")"
 	# shellcheck disable=SC1090
