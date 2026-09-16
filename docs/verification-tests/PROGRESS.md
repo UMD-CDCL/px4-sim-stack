@@ -40,6 +40,12 @@ sim restart: an isolated offboard recreation left `/uas11/home_position/fix`
 without a sample, preventing ground-truth placement and making all scoring
 metrics correctly silent.
 
+The subsequent clean restart restored `/uas11/home_position/fix`, but the
+focused Foxglove run still found the scenario messages had no usable position:
+the simulator logged 322 entities placed while the scorer logged zero targets
+placed against the origin. This is now a distinct scenario-truth data-contract
+issue to trace; the scoring implementation remains runtime-unverified.
+
 ## Source checkpoints
 
 - Root: `fc3acf6` (code-stage evidence recorded at this source checkpoint)
