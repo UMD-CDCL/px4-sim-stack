@@ -3,8 +3,8 @@
   "slug": "px4sim-feature-implementation-and-staged-verification",
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
-  "current_slice": "gps-stage-live-checkpoint",
-  "last_verified": "2026-09-16: root commit 2d5cb22 plus live GPS evidence; code gate 20/0 and bench gate 21/0. Live GPS gate 21/0: terrain-datum localization, roof intersection, framing, below-horizon handling, ground propagation, scoring, and click geometry. The bench goto sub-check reached its timeout bound while the stage continued and passed; command latency remains a review item. Sparse three-vehicle preview media remains resource-limited and open.",
+  "current_slice": "sim-stage-live-checkpoint",
+  "last_verified": "2026-09-16: root commit fc53f1a plus live sim evidence; code 20/0, bench 21/0, and GPS 21/0. Live sim gate 33/0: vehicle data, gimbal/lens control, ROI tracking, overlays and annotations, ground capture-to-mosaic flow, survey recovery, and Foxglove rendering. The captures substage was intentionally skipped because VERIFY_FULL=1 was not set; full capture-only coverage remains open. The bench goto sub-check reached its timeout bound while the stage continued and passed; command latency remains a review item. Sparse three-vehicle preview media remains resource-limited and open.",
   "approval": {
     "required": null,
     "granted": null,
