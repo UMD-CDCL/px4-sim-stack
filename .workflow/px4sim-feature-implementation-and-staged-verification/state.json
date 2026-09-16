@@ -3,8 +3,8 @@
   "slug": "px4sim-feature-implementation-and-staged-verification",
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
-  "current_slice": "front-door-lifecycle-and-verification-hardening",
-  "last_verified": "2026-09-16: code 20/0; isolated bench 21/0; GPS 21/0; sim 33/0; px4sim check passed; QGC exactly one process; rebuilt simulator runtime; video API and rgb11/rgbl11 front door online; ordinary restart green",
+  "current_slice": "gimbal-ownership-and-runtime-front-door-hardening",
+  "last_verified": "2026-09-16: root 0556fd8; code 20/0 including QGC exactly one process and 5G Drone suite 135; isolated bench 21/0; GPS 21/0; sim 33/0; px4sim check passed; rebuilt runtime video API and rgb11/rgbl11 online; ordinary restart green",
   "approval": {
     "required": null,
     "granted": null,
