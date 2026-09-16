@@ -1,3 +1,4 @@
+manifest=/home/user/px4-sim-stack/verify/evidence/sim/manifest.txt
 
 [1m== vehicle ==[0m
   [32mok  [0mstate carries data
@@ -10,35 +11,29 @@
 [1m== flight ==[0m
   [32mok  [0mthe gimbal points where it is told
   [32mok  [0ma click on the boresight moves nothing
-  [32mok  [0man off-boresight click slews by the angle the lens says
+  [31mFAIL[0m an off-boresight click slews by the angle the lens says
   [32mok  [0ma sideways click turns the camera by the angle the lens says
   [32mok  [0ma sideways click spends its move on yaw, not on pitch
   [32mok  [0mthe wide framing publishes a calibration
   [32mok  [0mthe mid framing publishes a calibration
   [32mok  [0mthe narrow framing publishes a calibration
-  [32mok  [0mcasualties localize onto the terrain: 4 of them
+  [32mok  [0mcasualties localize onto the terrain: 3 of them
   [32mok  [0ma click in region of interest mode holds a place
   [32mok  [0mthe gimbal repoints to hold that place as the aircraft moves
   [32mok  [0mthe overlay is drawn about ten times a second
   [32mok  [0mjudged frames publish image annotations
-       [2mverdicts 16, annotations 18 (including unjudged boxes), marks 78 in 8s[0m
+       [2mverdicts 16, annotations 19 (including unjudged boxes), marks 78 in 8s[0m
   [32mok  [0mthe marks come back when the camera does
-  [32mok  [0ma capture asked for from the ground reaches the vehicle
-       [2mreceived=1, added_to_mosaic=1, dropped=0[0m
-  [32mok  [0mthe map is drawn into the terrain, one surface
-       [2mafter 1.00s[0m
-       [2mthe vehicle's map over 0.0% of it (138x107 px[0m
+  [31mFAIL[0m a capture asked for from the ground reaches the vehicle
+       [2mthe mosaic node saw no captures, was none[0m
+  [31mFAIL[0m the map is drawn into the terrain, one surface
+       [2mgave up after 40s[0m
+       [2mthe mosaic took the frame and the terrain never drew it[0m
   [32mok  [0ma survey of the marker recovers where it stands
-       [2mfiducial -> uas11_home_position	-6.03	9.05	-4.39 expected	-6.00	9.00[0m
+       [2mfiducial -> uas11_home_position	-6.03	9.04	-4.22 expected	-6.00	9.00[0m
 
 [1m== captures ==[0m
-  [32mok  [0mthe mosaic took 2 frames from the flight
-  [32mok  [0mthe mosaic wrote d11_rgb_mosaic_overlay.png (49611 bytes)
-  [2m--  [0mthe mosaic map HTML is written at shutdown, so a flying vehicle has none
-  [32mok  [0mthe fiducial capture is accepted
-  [32mok  [0mthe vlm capture is accepted
-  [32mok  [0ma marked capture produces a survey the site could hold: the marker is not in front of the camera
-  [32mok  [0mthe VLM image reaches the ground
+       [2mskipped. VERIFY_FULL=1 includes it[0m
 
 [1m== foxglove ==[0m
   [32mok  [0mevery panel setting is one Foxglove accepts
@@ -47,14 +42,19 @@
   [32mok  [0mthe Image panel's live view carries frames
   [32mok  [0mthe live view is calibrated, so the boxes land on it
   [32mok  [0mthe satellite map is drawn north up over the terrain
-       [2mvertices	16641 bytes	1990160 height	+5.1	expected	+4.2 relief	31.9	31.9 image	yes span	600	600	600 texture	north v 0.00	south v 1.00	east u 1.00	west u 0.00 roo[0m
+       [2mvertices	16641 bytes	1990192 height	+5.1	expected	+4.2 relief	31.9	31.9 image	yes span	600	600	600 texture	north v 0.00	south v 1.00	east u 1.00	west u 0.00 roo[0m
   [32mok  [0mevery known target has a 2 m outline in the color of its verdict
        [2mcasualty_14	#9aa0a6	2.01 casualty_15	#9aa0a6	2.01 casualty_16	#9aa0a6	2.01 [0m
   [32mok  [0mevery pin on true_positives says its verdict, what it touched and its nearest target
-       [2mperson 0_0	TP	casualty_23	0.51 person 0_1	TP	casualty_22	0.25 [0m
+       [2mempty[0m
   [32mok  [0mevery pin on false_positives says its verdict, what it touched and its nearest target
        [2mempty[0m
   [32mok  [0mevery pin on missed_localizations says its verdict, what it touched and its nearest target
        [2mempty[0m
+  [32mok  [0mscoring plot metric recall reaches Foxglove
+  [31mFAIL[0m scoring plot metric precision reaches Foxglove
+  [32mok  [0mscoring plot metric detection_recall reaches Foxglove
+  [31mFAIL[0m scoring plot metric detection_precision reaches Foxglove
+  [31mFAIL[0m scoring plot metric position_error reaches Foxglove
 
-[1m39 passed, 0 failed[0m
+[1m32 passed, 6 failed[0m

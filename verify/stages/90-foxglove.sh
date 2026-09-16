@@ -147,3 +147,16 @@ for kind in true_positives false_positives missed_localizations; do
 		note "$(printf '%s' "$read_back" | tail -2 | tr '\n' ' ')"
 	fi
 done
+
+# The plot panels are not proven by layout parsing alone: each configured
+# Float64 metric must reach the same Foxglove bridge as the scoring layers.
+for metric in recall precision detection_recall detection_precision position_error; do
+	metric_topic="/uas$lead/$metric"
+	metric_seen=$(./px4sim foxglove "$reader" "$metric_topic" --seconds "${FOXGLOVE_SECONDS:-30}" 2>/dev/null \
+		| awk -F'\t' -v topic="$metric_topic" '$1 == topic { print $3; exit }')
+	if [ "$metric_seen" = data ]; then
+		pass "scoring plot metric $metric reaches Foxglove"
+	else
+		fail "scoring plot metric $metric reaches Foxglove"
+	fi
+done
