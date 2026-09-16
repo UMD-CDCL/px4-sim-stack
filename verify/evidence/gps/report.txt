@@ -17,11 +17,11 @@ manifest=/home/user/px4-sim-stack/verify/evidence/gps/manifest.txt
   [32mok  [0mthe ground receives position
   [32mok  [0mthe ground receives status
   [32mok  [0muas11 points uas11 the way it is flying
-       [2mcompass	0.0 airframe	0.0 camera	357.6 footprint	357.4	15[0m
+       [2mcompass	0.0 airframe	0.0 camera	356.2 footprint	not compared: the camera is 9 degrees below the horizon[0m
   [32mok  [0mthe ground station points uas11 the way it is flying
-       [2mcompass	0.0 airframe	0.0 camera	357.7 footprint	357.5	15[0m
+       [2mcompass	360.0 airframe	360.0 camera	356.2 footprint	not compared: the camera is 9 degrees below the horizon[0m
   [32mok  [0mthe ground holds the scene's casualty locations
-  [32mok  [0mevery localization reaches the ground unchanged: 203 boxes on both sides, 203 identical
+  [32mok  [0mevery localization reaches the ground unchanged: 191 boxes on both sides, 191 identical
   [32mok  [0muas11 scores the detections against the known targets
   [32mok  [0mthe ground station scores the detections against the known targets
   [32mok  [0ma click low in the image aims nearer than one high in it

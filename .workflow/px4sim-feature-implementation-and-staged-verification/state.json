@@ -3,8 +3,8 @@
   "slug": "px4sim-feature-implementation-and-staged-verification",
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
-  "current_slice": "5g-health-wiring",
-  "last_verified": "2026-09-16: root e33521c; 5G Drone b269aa0 on feature/ubuntu24-compat. Source slice aligns the gimbal heartbeat topic with status, rejects invalid GPS health, and clears stale RTK health on non-RTK fixes; Python syntax validation passed. Rebuilt-image bench stage completed 26/0 at 18:16:33Z. Host pytest is unavailable. Recording front door remains selectively controllable and MCAP remains unavailable. Root check is green for compose, parameter files, layout, and front-door references; its documentation word-style lint remains advisory.",
+  "current_slice": "gps-checkpoint-after-health-wiring",
+  "last_verified": "2026-09-16: root baa8af6; 5G Drone b269aa0 on feature/ubuntu24-compat. Source slice aligns the gimbal heartbeat topic with status, rejects invalid GPS health, and clears stale RTK health on non-RTK fixes; Python syntax validation passed. Rebuilt-image bench stage completed 26/0 at 18:16:33Z. A clean GPS retry completed 21/0 at 18:33:07Z after an earlier warm-up attempt produced 20/1. Host pytest is unavailable. Recording front door remains selectively controllable and MCAP remains unavailable. Root check is green for compose, parameter files, layout, and front-door references; its documentation word-style lint remains advisory.",
   "approval": {
     "required": null,
     "granted": null,

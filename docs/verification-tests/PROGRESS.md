@@ -63,7 +63,7 @@ camera contract is restored.
 
 ## Source checkpoints
 
-- Root: `956d05f` (source checkpoint for this test run)
+- Root: `baa8af6` (source checkpoint for this test run)
 - 5G Drone: `b269aa0` on `feature/ubuntu24-compat`
 - MAVInsight: `0fb189b` on `feature/ubuntu24-compat`
 - PX4-Autopilot: `639154f` on `feature/ubuntu24-compat`
@@ -140,3 +140,10 @@ clears stale RTK state. Python syntax validation passed, and the rebuilt-image
 bench stage completed **26 passed, 0 failed** at 2026-09-16T18:16:33Z. Package
 pytest remains unavailable on the host; the live bench result is the runtime
 evidence for this slice.
+
+The GPS stage first produced 20/1 while the detector was still warming after
+restart. A clean retry completed **21 passed, 0 failed** at
+2026-09-16T18:33:07Z, including localization, GPS/RTK-dependent geometry,
+heading/TF, casualty truth, scoring, and click behavior. The failed attempt is
+retained in the stage evidence as a diagnostic run; the retry is the current
+GPS checkpoint.
