@@ -328,7 +328,10 @@ PY
 		"$(python3 -c "print($marker_local_north - $survey_north)")" \
 		50 --heading 0 >/dev/null
 	uas gimbal -90 >/dev/null
-	surveyed=$(uas fiducial --placed "$survey_east" "$survey_north")
+	# The marker was already displaced physically through the px4sim front door.
+	# `--placed` describes a synthetic displacement used by the verifier's ray
+	# model, so leave it at zero here or the deliberate offset is applied twice.
+	surveyed=$(uas fiducial --placed 0 0)
 	# The line reads "<from> -> <to>\teast\tnorth\tup", so the numbers are the
 	# last three fields. Counting from the left picks up the arrow.
 	read -r east north <<< "$(printf '%s' "$surveyed" | awk '$1 == "fiducial" { print $4, $5 }')"
