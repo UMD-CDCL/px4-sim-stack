@@ -84,6 +84,15 @@ def test_record_front_door_confirms_recorder_survives_launch():
     assert "pgrep -af '[r]os2 bag record'" in text
 
 
+def test_record_image_builds_and_installs_the_pinned_mcap_plugin():
+    text = (ROOT / "modules/ros-deps/Dockerfile").read_text()
+    assert "ARG MCAP_STORAGE_REF=" in text
+    assert "ros-${ROS_DISTRO}-zstd-vendor" in text
+    assert "https://github.com/ros-tooling/rosbag2_storage_mcap.git" in text
+    assert "--packages-select rosbag2_storage_mcap" in text
+    assert "-DBUILD_TESTING=OFF" in text
+
+
 def test_scoring_gate_radius_is_carried_to_mavinsight_bubbles():
     scorer = (ROOT.parent / "ros2_ws/src/5g_drone/umd_uas/scoring.py").read_text()
     viz = (ROOT.parent / "ros2_ws/src/MAVInsight/models/scoring_viz.py").read_text()
