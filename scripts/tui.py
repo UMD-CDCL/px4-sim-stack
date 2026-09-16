@@ -211,6 +211,16 @@ def wrap_output(lines: list[str], width: int) -> list[str]:
     return wrapped
 
 
+def complete_text(answer: str, candidates: list[str], index: int = 0) -> tuple[str, int]:
+    """Cycle the current whitespace-delimited token through matching values."""
+    head, separator, token = answer.rpartition(" ")
+    matches = [value for value in candidates if value.startswith(token)]
+    if not matches:
+        return answer, 0
+    choice = matches[index % len(matches)]
+    return f"{head}{separator}{choice}", (index + 1) % len(matches)
+
+
 def cursor(shown: int) -> None:
     """Some terminals cannot hide the cursor. That is no reason to stop."""
     try:
@@ -885,8 +895,10 @@ class Console:
         except KeyboardInterrupt:
             return -1
 
-    def ask_text(self, prompt: str, default: str = "") -> str | None:
+    def ask_text(self, prompt: str, default: str = "",
+                 completions: list[str] | None = None) -> str | None:
         answer = default
+        completion_index = 0
         cursor(1)
         try:
             while True:
@@ -901,10 +913,16 @@ class Console:
                     return answer.strip()
                 if key == 27:
                     return None
+                if key == ord("\t") and completions:
+                    answer, completion_index = complete_text(
+                        answer, completions, completion_index)
+                    continue
                 if key in (curses.KEY_BACKSPACE, 127, 8):
                     answer = answer[:-1]
+                    completion_index = 0
                 elif 32 <= key < 127:
                     answer += chr(key)
+                    completion_index = 0
         except KeyboardInterrupt:
             return None
         finally:
@@ -1055,9 +1073,21 @@ class Console:
         self.choose("every action, and what it runs", lines)
 
     def typed(self) -> None:
-        typed = self.ask_text("px4sim", "")
+        typed = self.ask_text("px4sim", "", self.command_candidates())
         if typed and not self.runner.start(typed.split()):
             self.message = "one command runs at a time. Press esc to stop it."
+
+    def command_candidates(self) -> list[str]:
+        """Commands and live config values accepted by the front door."""
+        commands = ["check", "doctor", "restart", "start", "stop", "build",
+                    "setup", "status", "fleet", "streams", "origin", "layout",
+                    "verify", "fly", "place", "scenario", "fiducial", "capture",
+                    "zoom", "uas", "topics", "foxglove", "logs", "shell"]
+        values = []
+        for key in ("scene", "scenario", "models", "streams", "zoom_presets"):
+            values.extend(str(self.rows.config.get(key, "")).replace(",", " ").split())
+        values.extend(str(vehicle.get("n", "")) for vehicle in self.rows.vehicles)
+        return list(dict.fromkeys(commands + values))
 
     def hotkey(self, key: str) -> bool:
         for scope in (self.pane, STACK):
