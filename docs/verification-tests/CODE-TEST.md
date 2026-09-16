@@ -23,6 +23,9 @@ Git status at test start: dirty only from retained generated evidence. Evidence
 is `verify/evidence/code/`; this does not certify runtime bench, GPS, or flight
 behavior.
 
-Latest tested checkpoint: **18 passed, 0 failed** on 2026-09-16 at commit
-`e31e1e6`, including the PX4SIM UI autocomplete/output-wrapping regression
-checks and packaged terrain/MAVInsight tests.
+Latest tested checkpoint: **19 passed, 0 failed** on 2026-09-16 at the
+pre-commit working tree, including the PX4SIM UI autocomplete/output-wrapping
+regression checks, the complete functional 5G Drone suite (133 passed), and
+packaged terrain/MAVInsight tests. The test runner now quotes pytest arguments
+when invoking the onboard container. QGC is explicitly front-door owned and
+does not auto-restart after its singleton guard rejects a duplicate launch.

@@ -14,12 +14,14 @@ fi
 
 run_tests() {
 	local what=$1 package=$2; shift 2
+	local pytest_args
+	printf -v pytest_args ' %q' "$@"
 	output=$(docker run --rm --entrypoint bash \
 		-v "$workspace/src/$package:/src:ro" "$onboard_image" -c "
 			source /opt/ros/\$ROS_DISTRO/setup.bash
 			[ ! -f /opt/mavros/install/setup.bash ] || source /opt/mavros/install/setup.bash
 			source /home/user/ros2_ws/install/setup.bash
-			cd /src && python3 -m pytest $* -q 2>&1
+			cd /src && python3 -m pytest${pytest_args} -q 2>&1
 		" 2>&1)
 	status=$?
 	summary=$(printf '%s' "$output" | grep -oE '[0-9]+ (passed|failed)[^,]*' | tr '\n' ' ')
@@ -32,6 +34,10 @@ run_tests() {
 }
 
 run_tests "terrain and ground frame" 5g_drone test/test_terrain.py test/test_ground_frame.py
+# The package's complete behavioral suite belongs to the code gate as well.
+# Keep legacy lint/docstring tests separate: their existing baseline violations
+# are useful ledger findings, but must not hide functional regressions.
+run_tests "5G Drone functional suite" 5g_drone -k "not flake8 and not pep257"
 # Which way up and which way round the ground is drawn. A model that is turned
 # or mirrored publishes exactly as convincingly as a correct one.
 run_tests "the drawn map's axes and texture" MAVInsight test/test_gltf.py
