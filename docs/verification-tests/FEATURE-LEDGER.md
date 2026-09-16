@@ -32,7 +32,7 @@ possible, observing the live Foxglove protocol. Add future capabilities with
 | `CURRENT` | `uas11_vlm_capture` | Capture VLM input | capture publisher and consumer | Bench/Sim |
 | `CURRENT` | `uas11_fiducial_capture` | Capture fiducial input | capture publisher and consumer | Bench/GPS |
 | `CURRENT` | `uas11_advance_mission` | Advance mission | mission command and PX4 state | GPS/Sim |
-| `PLANNED` | `uas11_raw_roi` | Publish raw ROI | raw ROI publisher and consumer | Bench/Sim |
+| `CURRENT (source-confirmed 2026-09-16)` | `uas11_raw_roi` | Publish raw ROI | Canonical layout publishes `sensor_msgs/msg/NavSatFix` to `/uas11/raw_roi_point_cmd`; `gimbal.py` subscribes through `gimbal.topic.raw_roi_point_cmd`. Live actuation remains unverified. | Bench/Sim |
 | `CURRENT` | `uas11_detection_on` | Enable detection | detection control path and DeepStream | Bench/Sim |
 | `CURRENT` | `uas11_detection_off` | Disable detection | detection control path and DeepStream | Bench/Sim |
 

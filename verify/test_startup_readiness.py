@@ -43,3 +43,15 @@ def test_manifest_is_a_documented_read_only_front_door():
     assert "manifest)" in text
     assert "manifest            Record branches, commits, config, and image digests" in text
     assert "dirty_files" in text
+
+
+def test_canonical_layout_raw_roi_matches_gimbal_contract():
+    layout = yaml.safe_load(
+        (ROOT.parent / "ros2_ws/src/5g_drone/config/foxglove/chimera_sim.json").read_text()
+    )
+    panel = layout["configById"]["Publish!uas11_raw_roi"]
+    assert panel["topicName"] == "/uas11/raw_roi_point_cmd"
+    assert panel["datatype"] == "sensor_msgs/msg/NavSatFix"
+    gimbal = (ROOT.parent / "ros2_ws/src/5g_drone/umd_uas/gimbal.py").read_text()
+    assert '"gimbal.topic.raw_roi_point_cmd": "raw_roi_point_cmd"' in gimbal
+    assert "NavSatFix, self._raw_roi_topic" in gimbal
