@@ -93,6 +93,10 @@ class Action(NamedTuple):
 ACTIONS = (
     Action(STACK, "r", "restart the stack using prepared images", ("restart",)),
     Action(STACK, "s", "start the stack if it is stopped", ("start",)),
+    Action(STACK, "", "prepare sources and dependencies", ("setup",),
+           confirm="Prepare the PX4 and stack sources?", refresh=True),
+    Action(STACK, "", "build selected stack images", ("build",),
+           confirm="Build the stack images?", refresh=True),
     Action(STACK, "", "enable GPS-free BENCH MODE (select this menu item)",
            ("bench", "enable", "{value}"),
            ask=Ask("type ENABLE BENCH MODE", "ENABLE BENCH MODE"),
