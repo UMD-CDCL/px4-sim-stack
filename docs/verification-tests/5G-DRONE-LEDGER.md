@@ -25,7 +25,7 @@ with date, commit, Git status, and evidence; this inventory defaults to
 | `CURRENT` | Compass heading | MAVROS params and detection code | Heading drives geometry correctly |
 | `CURRENT` | IMU/attitude | MAVROS params and vehicle nodes | Attitude is available with expected frame |
 | `CURRENT` | Rangefinder | gimbal rangefinder params and consumers | Range data is valid and bounded |
-| `CURRENT` | Gimbal command/state | gimbal node, params, services/topics | Ownership, commands, attitude, and feedback work |
+| `TESTED (code 2026-09-16, 5g_drone 7f92ac5)` | Gimbal command/state | gimbal node, params, services/topics, canonical `config/foxglove/chimera_sim.json` | Full functional code suite passed 137 tests; canonical sim gimbal command now carries `FOLLOW_BODY_YAW` flags (`44`) and matches the gimbal implementation. Live command/feedback remains covered by the staged sim gate. |
 | `CURRENT` | Camera info/calibration | calibration files, `cam_info` launch | Camera info matches each stream |
 | `CURRENT` | RGB/gimbal/down/thermal cameras | launch params and camera bridges | Images publish at declared resolution/rate |
 | `CURRENT` | Camera zoom and framing | `config/foxglove`, zoom/gimbal code | Presets and continuous framing affect image |
