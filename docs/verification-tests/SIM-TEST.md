@@ -34,3 +34,10 @@ The remaining failure is verdict/box timing consistency (`15` verdicts,
 `21` boxes, `79` marks in 8 seconds). This is a targeted perception timing
 defect and does not replace the last green sim checkpoint. The camera
 supervisor source is also not present in the prepared image used by this run.
+
+Corrected follow-up packet: **33 passed, 0 failed** on 2026-09-16 at root
+commit `5819048`. The annotation check now follows the source contract:
+verdicts judge a subset of recently published boxes, while `scoring_viz.py`
+keeps unjudged boxes visible. Flight, gimbal/ROI, captures, map,
+localization, and Foxglove checks all passed. The camera-supervisor recovery
+change still awaits a rebuilt simulator image.
