@@ -62,7 +62,7 @@ vehicle_ready() {
 	# one. Waiting for the lens is what makes those checks mean anything.
 	while true; do
 		ready=true
-		for topic in altitude camera/camera_info; do
+		for topic in altitude camera/camera_info gimbal/state; do
 			[ "$(./px4sim probe "$n" "/uas$n/$topic" 2>/dev/null | cut -f3)" = data ] \
 				|| ready=false
 		done
