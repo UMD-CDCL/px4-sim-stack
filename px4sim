@@ -706,6 +706,16 @@ manifest() {
 	printf 'world=%s\nprofiles=%s\nscene=%s\nscenario=%s\nlayout=%s\nfleet=%s\n' \
 		"$(world_of)" "${COMPOSE_PROFILES:-}" "${SCENE:-}" \
 		"${SCENARIO:-}" "$canonical_layout" "${UAS_FLEET:-}"
+	model_manifest=$(realpath -m "${ONBOARD_MODEL_DIR:-$ROS2_WS_DIR/src/5g_drone/perception_models}/manifest.json")
+	if [ -f "$model_manifest" ]; then
+		printf 'model_manifest_configured=%s sha256=%s\n' "$model_manifest" "$(sha256sum "$model_manifest" | awk '{print $1}')"
+	else
+		printf 'model_manifest_configured=%s unavailable\n' "$model_manifest"
+	fi
+	model_source_manifest=$(realpath -m "$ROS2_WS_DIR/src/5g_drone/perception_models/manifest.json")
+	if [ "$model_source_manifest" != "$model_manifest" ] && [ -f "$model_source_manifest" ]; then
+		printf 'model_manifest_source=%s sha256=%s\n' "$model_source_manifest" "$(sha256sum "$model_source_manifest" | awk '{print $1}')"
+	fi
 	for repo in "$(realpath -m "$ROS2_WS_DIR/src/5g_drone")" \
 		"$(realpath -m "$ROS2_WS_DIR/src/MAVInsight")" \
 		"$PWD/src/PX4-Autopilot"; do

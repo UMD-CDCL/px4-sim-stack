@@ -20,6 +20,12 @@ The sim checkpoint covers QGC singleton behavior, PX4/MAVLink readiness,
 gimbal and zoom control, raw coordinate ROI, localization, capture/mosaic,
 fiducial correction, Foxglove contracts, and all five scoring metrics.
 
+The portability manifest also fingerprints the 5G Drone model manifest, so a
+checkpoint can detect model-selection drift independently of source and image
+commits. The current machine exposes a configuration mismatch: `.env` points
+to `/home/user/deepstream-work/models`, which has no manifest, while the
+canonical source manifest is present; the manifest now reports both facts.
+
 ## Source checkpoints
 
 - Root: `39c1581`

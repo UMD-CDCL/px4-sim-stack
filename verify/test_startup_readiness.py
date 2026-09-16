@@ -53,6 +53,9 @@ def test_manifest_is_a_documented_read_only_front_door():
     assert "manifest)" in text
     assert "manifest            Record branches, commits, config, and image digests" in text
     assert "dirty_files" in text
+    assert "model_manifest_configured=" in text
+    assert "model_manifest_source=" in text
+    assert "sha256sum" in text
 
 
 def test_canonical_layout_raw_roi_matches_gimbal_contract():

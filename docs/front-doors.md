@@ -98,8 +98,10 @@ name, so the list cannot drift.
 ### The portability manifest
 
 `./px4sim manifest` is read-only. It records the UTC checkpoint, selected
-world/configuration, canonical Foxglove layout, fleet, every source checkout's
-branch/commit/dirty count, and local Compose image IDs or digests. Save its
+world/configuration, canonical Foxglove layout, fleet, the configured model
+manifest and (when different) the canonical source model manifest with their
+SHA-256 values, every source checkout's branch/commit/dirty count,
+and local Compose image IDs or digests. Save its
 output beside verification evidence at critical checkpoints; it is not needed
 for every routine restart.
 
