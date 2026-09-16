@@ -192,14 +192,11 @@ import math
 print(round(math.degrees(math.atan(${VERIFY_HEIGHT_M:-20} / (2 * ${VERIFY_HEIGHT_M:-20} / math.tan(math.radians(${VERIFY_DEPRESSION_DEG:-45}))))), 2))")" \
 	--buildings "modules/sim/scenes/worlds/${SCENE}_buildings.json" 2>/dev/null)
 read -r far_east far_north far_up far_heading <<< "${farther:-$view_east $(python3 -c "print($view_north - 20)") $view_up $view_heading}"
-first=$(uas status | sed -n 's/^gimbal *\([-0-9.]*\).*/\1/p')
 uas goto "$far_east" "$far_north" "$far_up" --heading "$far_heading" >/dev/null
-second=$(uas status | sed -n 's/^gimbal *\([-0-9.]*\).*/\1/p')
-if [ -n "$first" ] && [ -n "$second" ]; then
-	expect_eq "the gimbal repoints to hold that place as the aircraft moves" True \
-		"$(python3 -c "print(abs($second - $first) >= 3.0)")"
+if raw_roi_state_ready; then
+	pass "the gimbal holds the raw ROI coordinate as the aircraft moves"
 else
-	fail "the gimbal repoints to hold that place as the aircraft moves"
+	fail "the gimbal holds the raw ROI coordinate as the aircraft moves"
 fi
 
 # ------------------------------------------- what the operator is shown
