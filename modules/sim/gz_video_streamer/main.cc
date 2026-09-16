@@ -64,7 +64,12 @@ namespace {
 
 std::atomic<bool> g_run{true};
 
-void OnSignal(int) { g_run = false; }
+// GStreamer and gz-transport callbacks can be active on other threads. Letting
+// the main loop tear down both libraries from a signal handler leaves those
+// callbacks holding pointers into freed state and can turn a supervised stop
+// into SIGSEGV. The supervisor owns recovery, so exit immediately and make the
+// termination non-successful.
+void OnSignal(int signal) { std::_Exit(128 + signal); }
 
 // Split "a=1,b=2" into pairs.
 std::vector<std::pair<std::string, std::string>> ParseKeyValues(const std::string &s) {
