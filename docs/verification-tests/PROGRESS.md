@@ -213,3 +213,10 @@ offset. The associated scenegen test was extended. A full flight retry reached
 the gimbal/ROI checks but was stopped after a later ROI polling loop exceeded
 its useful test window; it remains incomplete evidence and does not promote
 the flight stage. One pre-existing gimbal-pointing assertion remains failing.
+
+After correcting the verification pitch sign, a clean flight-stage retry was
+started on the same stack. The router reported live vehicle traffic, but the
+stage remained in `uas11 takeoff 20` beyond its useful observation window and
+was stopped. This is recorded as a runtime takeoff-readiness failure; no
+flight-stage pass is claimed from this attempt. The direct gimbal front-door
+probe passed with `+45` commanded and `46.19` degrees reported.
