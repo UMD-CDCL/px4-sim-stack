@@ -4,7 +4,7 @@
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
   "current_slice": "gimbal-ownership-and-runtime-front-door-hardening",
-  "last_verified": "2026-09-16: root sim checkpoint; code 20/0 including QGC exactly one process and 5G Drone suite 135; rebuilt-image bench 21/0; GPS 21/0; sim 33/0 including gimbal, capture, terrain map, annotations, and Foxglove; px4sim check passed; video API and rgb11/rgbl11 online; supervised streamer recovery green",
+  "last_verified": "2026-09-16: root commit 4ae70b8; code 20/0 including QGC exactly one process and 5G Drone suite 137; bench 21/0; GPS 21/0; sim 33/0 including gimbal, capture, terrain map, annotations, survey recovery, and Foxglove; px4sim check passed; video API and rgb11/rgbl11 online; supervised streamer recovery green",
   "approval": {
     "required": null,
     "granted": null,
