@@ -94,6 +94,9 @@ ARRIVED_M = 2.0
 GROUNDED_M = 1.5
 # Movement that counts as getting closer rather than as noise.
 PROGRESS_M = 0.5
+# Progress may justify extra time in a slow simulator, but it must not turn a
+# command into an unbounded wait when the vehicle never reaches its target.
+PROGRESS_BUDGET_FACTOR = 1.0
 # MAV_CMD_DO_REPOSITION, with the frame whose altitude is metres over home.
 # This is the "fly here" a ground station sends, and it needs no setpoint
 # stream, which is what the vehicle's MAVROS is built to carry.
@@ -284,7 +287,9 @@ class Uas(Node):
         runs at a fraction of real time, and a wall clock deadline then gives up
         on a vehicle that is flying perfectly well, only slowly.
         """
-        end = time.monotonic() + deadline_s
+        started = time.monotonic()
+        end = started + deadline_s
+        progress_end = started + deadline_s * (1.0 + PROGRESS_BUDGET_FACTOR)
         closest = None
         while time.monotonic() < end:
             rclpy.spin_once(self, timeout_sec=SETTLE_POLL_S)
@@ -294,7 +299,7 @@ class Uas(Node):
                 left = remaining()
                 if closest is None or left < closest - PROGRESS_M:
                     closest = left
-                    end = time.monotonic() + deadline_s
+                    end = min(time.monotonic() + deadline_s, progress_end)
         print(f"gave up waiting for {what} after {deadline_s:.0f}s without progress",
               file=sys.stderr)
         return False
