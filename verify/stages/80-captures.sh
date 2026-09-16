@@ -46,9 +46,16 @@ fi
 # whichever scene is loaded, and it is as short as a mosaic will accept.
 read -r east north up _ <<< "$viewpoint"
 flying "$lead" 40 || fail "uas$lead reaches the air"
-uas detect on >/dev/null
 for step in 0 25 50; do
 	uas goto "$east" "$(python3 -c "print($north + $step)")" 40 --heading 0 >/dev/null
+	# PX4 reports AUTO.TAKEOFF for a short interval after climbing. Enabling
+	# detection there leaves the mission leg closed, so the mosaic capture has
+	# no consumer. Enable it after the first reposition, when mission mode is
+	# established, and let the node publish its state before capturing.
+	if [ "$step" = 0 ]; then
+		uas detect on >/dev/null
+		sleep "${VERIFY_DETECTION_SETTLE_S:-5}"
+	fi
 	uas gimbal -85 >/dev/null
 	uas capture mosaic >/dev/null
 done
