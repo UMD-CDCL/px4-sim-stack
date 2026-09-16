@@ -166,10 +166,13 @@ fi
 raw_roi_state_ready() {
 	local expected
 	expected=$(printf 'target=%.7f,%.7f' "$HOME_LAT" "$HOME_LON")
-	PX4SIM_UAS_COMMAND_TIMEOUT_S=30 ./px4sim uas "$lead" topic gimbal/state 2>/dev/null \
+	timeout --signal=TERM --kill-after=5 30s env PX4SIM_UAS_COMMAND_TIMEOUT_S=25 \
+		./px4sim uas "$lead" topic gimbal/state 2>/dev/null \
 		| tail -1 | grep -q "mode=roi.*$expected"
 }
-raw_roi_output=$(uas raw-roi "$HOME_LAT" "$HOME_LON" "${HOME_ALT:-0}")
+raw_roi_output=$(timeout --signal=TERM --kill-after=5 30s \
+	env PX4SIM_UAS_COMMAND_TIMEOUT_S=25 ./px4sim uas "$lead" raw-roi \
+		"$HOME_LAT" "$HOME_LON" "${HOME_ALT:-0}")
 if await 15 "the raw ROI coordinate is accepted" raw_roi_state_ready; then
 	pass "the raw ROI topic holds the requested coordinate"
 else
