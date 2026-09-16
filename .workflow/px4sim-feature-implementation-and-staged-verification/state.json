@@ -3,8 +3,8 @@
   "slug": "px4sim-feature-implementation-and-staged-verification",
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
-  "current_slice": "raw-roi-qos-checkpoint",
-  "last_verified": "2026-09-16: post-hardening full staged sim completed 46/0. Readiness telemetry, flight, raw ROI acceptance and exact target retention after movement, captures, fiducial, VLM, scoring metrics, map, annotations, and all canonical Foxglove topics/services passed. The raw-ROI publisher uses the canonical latched QoS, repeats four samples across discovery, and its outer probes did not orphan or emit the prior incompatible-QoS warning. Manifest tested root cf45a1f, 5G Drone 0bb58e8, MAVInsight 0fb189b, and PX4 feature/ubuntu24-compat 639154f. Canonical chimera_sim.json remains the default; sparse multi-vehicle preview media remains resource-limited.",
+  "current_slice": "recording-front-door-documentation",
+  "last_verified": "2026-09-16: root 7e463ce. Code stage completed 21/0 live at 17:49:21Z, including the px4sim recording front-door and persistent-mount contract. Live SQLite recording smoke6 completed start, active status, clean stop, and output inspection (5,122 messages, 23 MB); MCAP remains unavailable in the installed image. Bench 26/0, GPS 21/0, and Sim 40/0 remain the latest green staged results. The front-door check then found and is correcting the missing record entry in ./px4sim help.",
   "approval": {
     "required": null,
     "granted": null,
@@ -18,6 +18,6 @@
   "verification": {
     "status": "baseline_stages_passed_with_runtime_front_doors_verified",
     "checks": ["px4sim check 0 (lint advisory)", "python compilation", "shell syntax", "stage dry runs", "workflow validation", "git diff --check", "code 20/0 with manifest", "bench 21/0", "gps 21/0", "sim 33/0", "full sim 39/0", "QGC singleton", "QGC sequential restart twice"],
-  "pending": ["investigate the ds_node resource-open failures seen in isolated runs", "repeat sparse multi-vehicle media with sufficient GPU/media capacity", "advance remaining ledger CURRENT and PLANNED features"]
+    "pending": ["investigate the ds_node resource-open failures seen in isolated runs", "repeat sparse multi-vehicle media with sufficient GPU/media capacity", "advance remaining ledger CURRENT and PLANNED features", "provide MCAP rosbag storage and synchronized video recording"]
   }
 }

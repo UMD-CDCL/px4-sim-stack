@@ -829,6 +829,7 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     manifest            Record branches, commits, config, and image digests
     verify [stage]      Run the verification stages. \`verify help\` lists them.
     clean               Remove containers, networks and volumes
+    record start|stop|status  Record ROS topics into host-persisted bags
     help                This list, and which of the three worlds this is
 
   ${BOLD}The scene${OFF}
