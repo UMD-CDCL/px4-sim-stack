@@ -39,7 +39,7 @@ with date, commit, Git status, and evidence; this inventory defaults to
 | `CURRENT` | Multi-vehicle namespaces | launch files, vehicle config | Multiple vehicles do not collide |
 | `CURRENT` | Missing/stale model handling | loaders in `models/` | Errors are explicit and do not silently render defaults |
 | `CURRENT` | Coordinate transforms and geodetic conversion | `models/frame_utils.py`, `site.py` | WGS84/site/map transforms agree |
-| `CURRENT` | Resource path portability | package resource/install metadata | Installed package works outside source tree |
+| `TESTED (source 2026-09-16)` | Resource path portability | `setup.py`, `launch/launch_*.launch.py`, package resource install metadata | Source review confirms package-share lookup and packaged vehicle, sensor, site, and visualization resources; installed-path runtime remains covered by the full sim image gate. |
 | `CURRENT` | Foxglove-compatible output schemas | model publishers and layout consumers | Advertised schemas match panel expectations |
 
 ## Future additions to consider

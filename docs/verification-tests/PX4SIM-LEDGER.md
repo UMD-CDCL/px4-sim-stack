@@ -161,8 +161,8 @@ table should be reviewed as possible `ORPHANED` features.
 | `CURRENT` | UI key for `fiducial` | Stack action exposes `F`; source/code-tested 2026-09-16, live reposition and cleanup remain unverified | `tui.py`, `fiducial` |
 | `TESTED (live 2026-09-16, root c245d77)` | Raw ROI front door | `px4sim uas N raw-roi`, canonical `chimera_sim.json`, `gimbal.py` | Full staged sim assertion accepted the coordinate and confirmed the exact target remained in `mode=roi` after movement. | `verify/component/uas.py`, `verify/stages/55-flight.sh` |
 | `CURRENT` | UI router-log visibility | Vehicle action exposes router log follow; source/code-tested 2026-09-16, live interactive follow remains unverified | `tui.py`, `logs` |
-| `CURRENT` | UI `build`/`prepare` action | Front door supports build/prepare, but `ACTIONS` has no direct UI action; it should be usable from the UI | decide whether omission is intentional |
-| `CURRENT` | UI `setup`/`bootstrap` action | Front door supports setup, but UI has no setup action; it should be usable from the UI | decide whether omission is intentional |
+| `CURRENT (source-confirmed 2026-09-16)` | UI `build`/`prepare` action | Stack action menu exposes the shared `build` command; preparation is the documented build/setup lifecycle and remains confirmation-gated | `scripts/tui.py:ACTIONS`, `px4sim build` |
+| `CURRENT (source-confirmed 2026-09-16)` | UI `setup`/`bootstrap` action | Stack action menu exposes the shared `setup` command; it is confirmation-gated and runs through the px4sim front door | `scripts/tui.py:ACTIONS`, `px4sim setup` |
 | `MISSING` | UI `fleet` edit prompt beyond add/remove | CLI supports more fleet controls than the action table; expose required controls from the UI | action table and fleet CLI |
 
 For every row, keep the intent status above and append `Tested: YES|NO|BLOCKED`
