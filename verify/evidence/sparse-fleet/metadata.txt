@@ -1,0 +1,8 @@
+stage=sparse-fleet
+mode=live
+tested_utc=2026-09-16T06:10:00Z
+repo=/home/user/px4-sim-stack
+commit=b2dfc8c
+branch=feature/px4sim-baseline-implementation
+git_state=clean-at-tested-checkpoint
+configuration=UAS_FLEET="chimera_v3 chimera_v3 chimera_v2 chimera_v2" UAS_ACTIVE="1,3,4"
