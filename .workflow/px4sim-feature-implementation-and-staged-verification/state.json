@@ -3,8 +3,8 @@
   "slug": "px4sim-feature-implementation-and-staged-verification",
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
-  "current_slice": "canonical-gimbal-code-and-bench",
-  "last_verified": "2026-09-16: 5g_drone commit 7f92ac5 fixes canonical sim gimbal flags from 12 to FOLLOW_BODY_YAW 44. Live code gate passed 20/0 including 137 5G Drone functional tests; live bench gate passed 21/0 with ground localization, scoring, and Foxglove layout checks. Root commits 054ca8e and current evidence checkpoint pending. Canonical chimera_sim.json layout is the default in every world; chimera_real.json is explicit compatibility-only via FOXGLOVE_LAYOUT. Full VERIFY_FULL sim gate 39/0 remains green at prior checkpoint 8074c4b. Dedicated detections remain absent from compact state; sparse three-vehicle preview media remains resource-limited.",
+  "current_slice": "canonical-gimbal-code-bench-gps",
+  "last_verified": "2026-09-16: 5g_drone commit 7f92ac5 fixes canonical sim gimbal flags from 12 to FOLLOW_BODY_YAW 44. Live code gate passed 20/0 including 137 5G Drone functional tests; live bench gate passed 21/0; live GPS gate passed 21/0 with localization geometry, terrain/roof handling, ground propagation, scoring, and Foxglove checks. Root evidence checkpoint is current commit. Canonical chimera_sim.json layout is the default in every world; chimera_real.json is explicit compatibility-only via FOXGLOVE_LAYOUT. Full VERIFY_FULL sim gate 39/0 remains green at prior checkpoint 8074c4b. Dedicated detections remain absent from compact state; sparse three-vehicle preview media remains resource-limited.",
   "approval": {
     "required": null,
     "granted": null,

@@ -1,8 +1,8 @@
 stage=gps
 mode=live
-started_utc=2026-09-16T06:37:24Z
+started_utc=2026-09-16T10:07:39Z
 repo=/home/user/px4-sim-stack
-commit=2d5cb22be68c7209a5ca9d101a1c6638a9c3ad06
+commit=8f91fab956bce237682c3115bd039d3ea63abe02
 branch=feature/px4sim-baseline-implementation
 git_state=dirty
 git_status= M verify/evidence/gps/metadata.txt
