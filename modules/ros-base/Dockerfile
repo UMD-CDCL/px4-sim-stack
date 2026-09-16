@@ -1,9 +1,11 @@
 # No dependency downloads here. Prepare local parents with ./px4sim deps.
 # Each package is an independent branch; assembly copies only installed files.
 ARG DS_TAG=7.1
-FROM px4simstack/ros-deps:${DS_TAG} AS deps
+ARG DEPS_IMAGE=px4simstack/ros-deps:7.1
+ARG YOLO_DEPS_IMAGE=px4simstack/yolo-deps:7.1
+FROM ${DEPS_IMAGE} AS deps
 
-FROM px4simstack/yolo-deps:${DS_TAG} AS parser
+FROM ${YOLO_DEPS_IMAGE} AS parser
 COPY --from=yolo_src / /src
 RUN --network=none set -eux; \
     cmp /src/cuda-version /opt/ds-yolo/cuda-requested; \

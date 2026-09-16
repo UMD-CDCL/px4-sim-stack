@@ -343,6 +343,8 @@ services:
         yolo_src: ./.build-contexts/yolo
       args:
         <<: [*ids, *deepstream]
+        DEPS_IMAGE: ${DEPS_IMAGE:-px4simstack/ros-deps:${DS_TAG:-7.1}}
+        YOLO_DEPS_IMAGE: ${YOLO_DEPS_IMAGE:-px4simstack/yolo-deps:${DS_TAG:-7.1}}
         MAVROS_PATCH: ${MAVROS_PATCH:-1}
         ROS_BUILD_JOBS: ${ROS_BUILD_JOBS:-4}
     image: px4simstack/ros-base:${DS_TAG:-7.1}

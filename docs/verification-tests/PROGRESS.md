@@ -66,8 +66,8 @@ camera contract is restored.
 
 ## Source checkpoints
 
-- Root: `9af9443` (current implementation checkpoint)
-- 5G Drone: `889c277` on `feature/ubuntu24-compat`
+- Root: `61f41ba` (source checkpoint for this test run)
+- 5G Drone: `496a825` on `feature/ubuntu24-compat`
 - MAVInsight: `0fb189b` on `feature/ubuntu24-compat`
 - PX4-Autopilot: `639154f` on `feature/ubuntu24-compat`
 
@@ -90,3 +90,15 @@ respawn then retried after the emulator became available. The retry reached
 preprocessing logged successful camera-info consumption. This confirms the
 startup-race fix, but a rebuilt image is still required for persistent
 certification.
+
+The scorer follow-up at `496a825` publishes an initial zero position error
+when truth is ready but no detector frame has arrived. After rebuilding
+`ros-base`, onboard, and offboard from local registry parents, the live bench
+stage completed **26 passed, 0 failed** at 2026-09-16T17:10:23Z. This covered
+ground camera/position/status/heading, localization transfer, target scoring,
+Foxglove layout topics/services/images/map/pins, and all five scoring metrics.
+
+The ROS base Dockerfile now accepts explicit `DEPS_IMAGE` and
+`YOLO_DEPS_IMAGE` build arguments, defaulting to the existing parent names.
+This permits a prepared machine to reuse local-registry parents while keeping
+the normal defaults unchanged; the tested build used `localhost:5000`.

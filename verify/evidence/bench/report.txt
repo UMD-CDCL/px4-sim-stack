@@ -1,14 +1,15 @@
+manifest=/home/user/px4-sim-stack/verify/evidence/bench/manifest.txt
 
 [1m== ground ==[0m
   [32mok  [0mthe ground receives camera/camera_info
   [32mok  [0mthe ground receives position
   [32mok  [0mthe ground receives status
   [32mok  [0muas11 points uas11 the way it is flying
-       [2mcompass	69.0 airframe	69.0 camera	20.9 footprint	not compared: the camera is 3 degrees below the horizon[0m
+       [2mcompass	68.9 airframe	68.9 camera	21.0 footprint	not compared: the camera is 3 degrees below the horizon[0m
   [32mok  [0mthe ground station points uas11 the way it is flying
-       [2mcompass	69.0 airframe	69.0 camera	20.9 footprint	not compared: the camera is 3 degrees below the horizon[0m
+       [2mcompass	69.0 airframe	69.0 camera	21.0 footprint	not compared: the camera is 3 degrees below the horizon[0m
   [32mok  [0mthe ground holds the scene's casualty locations
-  [32mok  [0mevery localization reaches the ground unchanged: 156 boxes on both sides, 156 identical
+  [32mok  [0mevery localization reaches the ground unchanged: 191 boxes on both sides, 191 identical
   [32mok  [0muas11 scores the detections against the known targets
   [32mok  [0mthe ground station scores the detections against the known targets
   [32mok  [0ma click low in the image aims nearer than one high in it
@@ -30,5 +31,10 @@
        [2mempty[0m
   [32mok  [0mevery pin on missed_localizations says its verdict, what it touched and its nearest target
        [2mempty[0m
+  [32mok  [0mscoring plot metric recall reaches Foxglove
+  [32mok  [0mscoring plot metric precision reaches Foxglove
+  [32mok  [0mscoring plot metric detection_recall reaches Foxglove
+  [32mok  [0mscoring plot metric detection_precision reaches Foxglove
+  [32mok  [0mscoring plot metric position_error reaches Foxglove
 
-[1m21 passed, 0 failed[0m
+[1m26 passed, 0 failed[0m
