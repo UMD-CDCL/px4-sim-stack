@@ -1,12 +1,11 @@
 stage=sim
 mode=live
-started_utc=2026-09-16T11:39:36Z
+started_utc=2026-09-16T12:11:33Z
 repo=/home/user/px4-sim-stack
-commit=e8efaf11292a7fdaed1405a74f4968849a23ee96
+commit=f7ebeb06f2c5db0ab24532af36608c7dc66a6f75
 branch=feature/px4sim-baseline-implementation
 git_state=dirty
 git_status= M verify/evidence/sim/metadata.txt
-git_status_continued= M verify/stages/90-foxglove.sh
 git_status_continued=?? verify/evidence/flight-debug/
 git_status_continued=?? verify/evidence/flight/
 git_status_continued=?? verify/evidence/survey/
