@@ -1,7 +1,7 @@
 import unittest
 
-from scripts.tui import (Action, FRONT_DOOR, complete_text, state_watch_command,
-                          wrap_output)
+from scripts.tui import (ACTIONS, Action, FRONT_DOOR, complete_text,
+                          state_watch_command, wrap_output)
 from scripts.state import service_lifecycle
 
 
@@ -38,6 +38,16 @@ class TuiHelpers(unittest.TestCase):
         self.assertEqual(state_watch_command(2.0), [
             str(FRONT_DOOR),
             "state", "--watch", "2.0", "--initial-delay", "0"])
+
+    def test_verification_is_selected_by_stage_and_checks_are_menu_only(self):
+        verify = next(action for action in ACTIONS
+                      if action.scope == "stack" and action.label == "run one verification stage")
+        self.assertEqual(verify.command, ("verify", "{value}"))
+        self.assertEqual(verify.ask.choices, ("code", "bench", "gps", "sim"))
+        for label in ("check the front door and the docs", "check the host",
+                      "where the Foxglove layout lives"):
+            action = next(action for action in ACTIONS if action.label == label)
+            self.assertEqual(action.key, "")
 
 
 if __name__ == "__main__":
