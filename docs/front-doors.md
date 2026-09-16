@@ -95,6 +95,14 @@ aircraft, which is the vehicle and serves its own bridge.
 `./px4sim check` reads that text back and fails on a command the help does not
 name, so the list cannot drift.
 
+### The portability manifest
+
+`./px4sim manifest` is read-only. It records the UTC checkpoint, selected
+world/configuration, canonical Foxglove layout, fleet, every source checkout's
+branch/commit/dirty count, and local Compose image IDs or digests. Save its
+output beside verification evidence at critical checkpoints; it is not needed
+for every routine restart.
+
 ### The simulator world, on t500
 
 `.env` carries `COMPOSE_PROFILES=sim,offboard`, `UAS_BASE=10`, a `SCENE` and a

@@ -36,3 +36,10 @@ def test_scenegen_persists_fiducial_coordinate_and_placement_separately():
     assert "fiducial_lon" in editor
     assert "placed_east_m" in editor
     assert "placed_north_m" in editor
+
+
+def test_manifest_is_a_documented_read_only_front_door():
+    text = (ROOT / "px4sim").read_text()
+    assert "manifest)" in text
+    assert "manifest            Record branches, commits, config, and image digests" in text
+    assert "dirty_files" in text

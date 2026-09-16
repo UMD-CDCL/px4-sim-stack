@@ -697,6 +697,36 @@ enter_service() {
 # world decides which ones act: require_sim and require_sim_edit refuse the
 # simulator's own commands anywhere else, so they stand in a section of their
 # own with that rule over them.
+manifest() {
+	add_fleet_profiles
+	printf 'manifest_utc=%s\nroot=%s\nbranch=%s\ncommit=%s\n' \
+		"$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PWD" \
+		"$(git branch --show-current)" "$(git rev-parse HEAD)"
+	canonical_layout=$(realpath -m "${LAYOUT_TEMPLATE:-}")
+	printf 'world=%s\nprofiles=%s\nscene=%s\nscenario=%s\nlayout=%s\nfleet=%s\n' \
+		"$(world_of)" "${COMPOSE_PROFILES:-}" "${SCENE:-}" \
+		"${SCENARIO:-}" "$canonical_layout" "${UAS_FLEET:-}"
+	for repo in "$(realpath -m "$ROS2_WS_DIR/src/5g_drone")" \
+		"$(realpath -m "$ROS2_WS_DIR/src/MAVInsight")" \
+		"$PWD/src/PX4-Autopilot"; do
+		if [ -d "$repo/.git" ]; then
+			printf 'repo=%s branch=%s commit=%s dirty_files=%s\n' "$repo" \
+				"$(git -C "$repo" branch --show-current)" \
+				"$(git -C "$repo" rev-parse HEAD)" \
+				"$(git -C "$repo" status --porcelain | wc -l | tr -d ' ')"
+		else
+			printf 'repo=%s unavailable\n' "$repo"
+		fi
+	done
+	printf '%s\n' 'images:'
+	while read -r image; do
+		[ -n "$image" ] || continue
+		digest=$(docker image inspect "$image" --format '{{index .RepoDigests 0}}' 2>/dev/null || true)
+		id=$(docker image inspect "$image" --format '{{.Id}}' 2>/dev/null || true)
+		printf 'image=%s id=%s digest=%s\n' "$image" "${id:-missing}" "${digest:-local-only}"
+	done < <($DC config --images 2>/dev/null | sort -u)
+}
+
 usage() {
 	local world footer kinds presets sample
 	kinds=${CAPTURE_KINDS// /, }
@@ -770,6 +800,7 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
 
   ${BOLD}Housekeeping${OFF}
     check               Validate the compose file and lint the docs
+    manifest            Record branches, commits, config, and image digests
     verify [stage]      Run the verification stages. \`verify help\` lists them.
     clean               Remove containers, networks and volumes
     help                This list, and which of the three worlds this is
@@ -1778,6 +1809,10 @@ uas|probe|foxglove)
 		set -e
 		. /usr/local/bin/ros-env.sh
 		exec python3 /tmp/'"$tool"' "$@"' _ "$@" | probe_answer
+	;;
+
+manifest)
+	manifest
 	;;
 
 check)

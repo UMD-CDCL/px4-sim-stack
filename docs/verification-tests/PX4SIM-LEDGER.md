@@ -54,6 +54,7 @@ with date, commit, Git status, and evidence; this inventory defaults to
 | `CURRENT` | Branch portability contract | `.env`, build contexts, docs | Changed repos are on `feature/ubuntu24-compat` |
 | `CURRENT` | Docker logs and readiness markers | Compose logs, entrypoints | “Up” is distinguished from initialized |
 | `CURRENT` | Evidence retention | `logs/`, verification test design | Test artifacts include date, commits, and status |
+| `TESTED (live 2026-09-16)` | Portability manifest front door | `px4sim manifest` | Emits UTC checkpoint, world/config/layout/fleet, repository branches and commits with dirty counts, and local Compose image IDs/digests; live output confirmed all compatibility branches and canonical `chimera_sim.json`. |
 
 ## Future additions to consider
 
