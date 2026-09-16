@@ -142,15 +142,14 @@ about seconds of package compilation, and a restarted live stack rejected a
 `nan` raw-ROI input while accepting `38.9869000,-76.9426000,39.9` and reporting
 that exact target in `gimbal/state`.
 
-The recording slice is currently `PARTIAL`: `./px4sim record start|stop|status`
-now resolves the canonical ground container, persists output under
-`logs/recordings`, validates recording names, and preflights the MCAP storage
-plugin. The installed image reports only `sqlite3` and a test plugin, so the
-front door correctly refuses to start and identifies the required rosbag2
-MCAP dependency. The lifecycle was additionally live-tested with
-`RECORD_STORAGE=sqlite3` at this checkpoint: named start, status, and named stop
-completed successfully, and startup now confirms the recorder survives before
-reporting success. Video synchronization and MCAP image support remain planned.
+The recording slice is now `PARTIAL`: `./px4sim record start|stop|status`
+resolves the canonical ground container, persists output under
+`logs/recordings`, validates names, and starts the pinned upstream rosbag2 MCAP
+plugin in the rebuilt image. Live start, status, named stop, output inspection,
+and `ros2 bag info` passed for `mcap_checkpoint`; the result was
+`mcap_checkpoint_0.mcap` with populated status and scene topics. Synchronized
+video capture remains planned, so this does not yet promote the whole recording
+feature to complete.
 
 The code stage completed **21 passed, 0 failed** on 2026-09-16 at 17:54:21Z.
 It verified airframe expansion, service/address/MAVLink contracts, the
@@ -167,14 +166,14 @@ horizon gating, heading/TF, casualty truth, scoring, and click behavior.
 The SQLite fallback lifecycle was exercised live on 2026-09-16: start,
 active-PID status, clean stop, and output inspection all passed. The 8-second
 `smoke6` bag contains 5,122 messages and a 23 MB SQLite database. This is
-recording-front-door evidence only; it does not promote the feature beyond
-`PARTIAL` because MCAP and synchronized video are still unavailable.
+recording-front-door evidence only; MCAP is now verified, while synchronized
+video remains unavailable.
 
 Named recording selection was exercised live on 2026-09-16: two simultaneous
 SQLite bags (`named_a` and `named_b`) were started, stopping `named_a` left
 `named_b` active, and the remaining bag was then stopped cleanly. This proves
 selective lifecycle control while the MCAP and synchronized-video limitations
-remain unchanged.
+remain unchanged for video synchronization.
 
 The 5G Drone health wiring slice was source- and bench-verified and pushed as `b269aa0`
 on `feature/ubuntu24-compat`: the gimbal heartbeat default now agrees with

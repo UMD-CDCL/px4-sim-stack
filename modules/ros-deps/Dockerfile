@@ -93,6 +93,10 @@ ARG USERNAME=user
 ARG HOST_UID=1000
 ARG HOST_GID=1000
 ARG WORKSPACE_DIR=/home/user/ros2_ws
+# Pinned upstream ROS 2 storage plugin. The ROS Humble apt index ships the
+# SQLite plugin but not MCAP, so this is built once in the prepared dependency
+# image and inherited by ros-base, onboard, and offboard.
+ARG MCAP_STORAGE_REF=c1c2159679921a4f4392f370172c28e7b3b01452
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +179,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-${ROS_DISTRO}-message-filters \
       ros-${ROS_DISTRO}-nav-msgs \
       ros-${ROS_DISTRO}-rosbag2-py \
+      ros-${ROS_DISTRO}-zstd-vendor \
       ros-${ROS_DISTRO}-rqt-gui \
       ros-${ROS_DISTRO}-rqt-gui-py \
       ros-${ROS_DISTRO}-rosidl-runtime-py \
@@ -185,6 +190,36 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-${ROS_DISTRO}-visualization-msgs \
     && geographiclib-get-geoids egm96-5 \
     && rm -rf /var/lib/apt/lists/*
+
+# ROS Humble has no binary rosbag2 MCAP plugin in the configured repository.
+# Build the pinned upstream plugin here, where network access is already part
+# of the explicit `px4sim prepare` operation; all derived runtime images stay
+# offline and reuse the installed result.
+RUN set -eux; \
+    mkdir -p /tmp/rosbag2_storage_mcap; \
+    git clone --depth 1 https://github.com/ros-tooling/rosbag2_storage_mcap.git \
+      /tmp/rosbag2_storage_mcap; \
+    git -C /tmp/rosbag2_storage_mcap fetch --depth 1 origin "${MCAP_STORAGE_REF}"; \
+    git -C /tmp/rosbag2_storage_mcap checkout --detach "${MCAP_STORAGE_REF}"; \
+    # Humble's setup scripts read optional variables under nounset. Source the
+    # environment with nounset briefly disabled, then restore strict mode for
+    # the actual build and cleanup.
+    set +u; . /opt/ros/${ROS_DISTRO}/setup.sh; set -u; \
+    colcon build --merge-install \
+      --base-paths /tmp/rosbag2_storage_mcap \
+      --install-base /opt/ros/${ROS_DISTRO} \
+      --build-base /tmp/rosbag2_storage_mcap-build \
+      --packages-select mcap_vendor rosbag2_storage_mcap_testdata \
+      --cmake-args -DCMAKE_BUILD_TYPE=Release; \
+    set +u; . /opt/ros/${ROS_DISTRO}/setup.sh; set -u; \
+    colcon build --merge-install \
+      --base-paths /tmp/rosbag2_storage_mcap \
+      --install-base /opt/ros/${ROS_DISTRO} \
+      --build-base /tmp/rosbag2_storage_mcap-build \
+      --packages-select rosbag2_storage_mcap \
+      --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF; \
+    rm -rf /tmp/rosbag2_storage_mcap /tmp/rosbag2_storage_mcap-build \
+      /root/.colcon
 
 ENV LANG=en_US.UTF-8
 
