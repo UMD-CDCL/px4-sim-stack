@@ -15,7 +15,9 @@ fi
 # The bridges take a moment to forward what the vehicle latched, and a stage
 # that asks first reads an empty graph.
 waited=0
-until [ "$(./px4sim probe ground "/uas$lead/camera/camera_info" 2>/dev/null | cut -f3)" = data ]; do
+until [ "$(./px4sim probe ground "/uas$lead/camera/camera_info" 2>/dev/null | cut -f3)" = data ] \
+	&& [ "$(./px4sim probe ground "/uas$lead/position" 2>/dev/null | cut -f3)" = data ] \
+	&& [ "$(./px4sim probe ground "/uas$lead/status" 2>/dev/null | cut -f3)" = data ]; do
 	if [ "$waited" -ge "${GROUND_READY_S:-180}" ]; then
 		fail "the ground receives uas$lead after ${waited}s"
 		return 0
@@ -96,13 +98,15 @@ if [ -n "$viewpoint" ]; then
 	# short, bounded settle window; without it DO_REPOSITION can acknowledge
 	# while the vehicle remains on its takeoff setpoint.
 	sleep "${VERIFY_FLIGHT_SETTLE_S:-5}"
-	if ! PX4SIM_UAS_COMMAND_TIMEOUT_S=${VERIFY_UAS_COMMAND_TIMEOUT_S:-180} \
+	if ! timeout --signal=TERM --kill-after=5 "${VERIFY_UAS_COMMAND_TIMEOUT_S:-180}" \
+		 env PX4SIM_UAS_COMMAND_TIMEOUT_S=${VERIFY_UAS_COMMAND_TIMEOUT_S:-180} \
 		./px4sim uas "$lead" goto "$aim_east" "$aim_north" "$aim_up" \
 		--heading "$aim_heading" >/dev/null 2>&1; then
 		# DO_REPOSITION can acknowledge during the short interval in which the
 		# freshly airborne vehicle's local-position stream is still settling.
 		sleep 5
-		if PX4SIM_UAS_COMMAND_TIMEOUT_S=${VERIFY_UAS_COMMAND_TIMEOUT_S:-180} \
+		if timeout --signal=TERM --kill-after=5 "${VERIFY_UAS_COMMAND_TIMEOUT_S:-180}" \
+			env PX4SIM_UAS_COMMAND_TIMEOUT_S=${VERIFY_UAS_COMMAND_TIMEOUT_S:-180} \
 			./px4sim uas "$lead" goto "$aim_east" "$aim_north" "$aim_up" \
 			--heading "$aim_heading" >/dev/null 2>&1; then
 			:
