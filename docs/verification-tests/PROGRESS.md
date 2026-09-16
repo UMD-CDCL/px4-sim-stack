@@ -118,3 +118,9 @@ The GPS stage completed **21 passed, 0 failed** on 2026-09-16 at 17:18:25Z.
 It recorded 203 identical localization samples across vehicle and ground
 front doors and passed terrain/roof geometry, multiple camera framings,
 horizon gating, heading/TF, casualty truth, scoring, and click behavior.
+
+The SQLite fallback lifecycle was exercised live on 2026-09-16: start,
+active-PID status, clean stop, and output inspection all passed. The 8-second
+`smoke6` bag contains 5,122 messages and a 23 MB SQLite database. This is
+recording-front-door evidence only; it does not promote the feature beyond
+`PARTIAL` because MCAP and synchronized video are still unavailable.
