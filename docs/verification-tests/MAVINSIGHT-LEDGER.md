@@ -51,3 +51,11 @@ with date, commit, Git status, and evidence; this inventory defaults to
 | `CURRENT` | Recording/replay of visualization inputs | Needed for deterministic regression tests |
 | `CURRENT` | Real-aircraft sensor calibration profiles | Separates sim assumptions from aircraft geometry |
 | `CURRENT` | Sim-aircraft gimbal matches real behavior | Reconcile Gazebo behavior with the real gimbal, including world-frame roll/pitch stabilization and the known yaw-frame/QGC display behavior | PX4 gimbal patches and real-aircraft behavior |
+
+## Tested checkpoint
+
+On 2026-09-16, MAVInsight commit `0fb189b` on `feature/ubuntu24-compat`
+passed 11 focused packaged tests in the onboard `7.1` runtime, covering scene
+ground, GLTF resources, and gimbal-frame behavior. This supports the current
+resource-path and visualization component baseline; it does not mark the
+future health/status, recording, or real-aircraft features implemented.
