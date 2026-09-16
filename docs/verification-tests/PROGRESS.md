@@ -130,6 +130,12 @@ green at **21 passed, 0 failed**, and a live probe now returns the latched ROI
 state. The full sim stage still needs a fresh end-to-end run at a later
 checkpoint.
 
+After the DDS discovery fix, the complete live sim stage passed **40 passed,
+0 failed** at `2026-09-16T19:54:26Z` from commit `bd7122b`. This is the current
+sim-tested checkpoint: vehicle readiness, flight and gimbal behavior, click
+and raw-ROI retention through movement, capture, survey, Foxglove panels and
+all five scoring metrics completed successfully.
+
 The recording slice is currently `PARTIAL`: `./px4sim record start|stop|status`
 now resolves the canonical ground container, persists output under
 `logs/recordings`, validates recording names, and preflights the MCAP storage
