@@ -1,6 +1,6 @@
 import unittest
 
-from scripts.tui import (ACTIONS, VERIFICATION_STAGES, Action, FRONT_DOOR, complete_text,
+from scripts.tui import (ACTIONS, VERIFICATION_STAGES, Action, Console, FRONT_DOOR, complete_text,
                           state_watch_command, wrap_output)
 from scripts.state import service_lifecycle
 
@@ -46,6 +46,20 @@ class TuiHelpers(unittest.TestCase):
         self.assertEqual(verify.ask.choices, VERIFICATION_STAGES)
         self.assertIn("contract", VERIFICATION_STAGES)
         self.assertIn("foxglove", VERIFICATION_STAGES)
+
+    def test_command_candidates_include_front_door_and_live_config_values(self):
+        ui = object.__new__(Console)
+        ui.rows = type("Rows", (), {
+            "config": {"scene": "uroc", "scenario": "uroc_casualties",
+                       "models": "chimera_v3", "streams": "rgb11",
+                       "zoom_presets": "wide narrow"},
+            "vehicles": [{"n": 11}],
+        })()
+        candidates = Console.command_candidates(ui)
+        self.assertIn("verify", candidates)
+        self.assertIn("uroc_casualties", candidates)
+        self.assertIn("chimera_v3", candidates)
+        self.assertIn("11", candidates)
         for label in ("check the front door and the docs", "check the host",
                       "where the Foxglove layout lives"):
             action = next(action for action in ACTIONS if action.label == label)

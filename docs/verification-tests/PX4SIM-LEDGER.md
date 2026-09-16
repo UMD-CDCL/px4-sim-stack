@@ -90,7 +90,7 @@ table should be reviewed as possible `ORPHANED` features.
 | `CURRENT` | `=` add vehicle | Prompts for airframe, changes fleet, reloads world | `fleet add`, simulator only |
 | `CURRENT` | `P` place fleet | Confirms respawn at start position | `place`, simulator only |
 | `CURRENT` | `A` place targets | Recreates scenario targets | `scenario` with no value |
-| `ORPHANED` | `N` switch scene: scenario should now determine scene | Prompts for scene, writes selection, refreshes | `scene`, simulator/ground |
+| `CURRENT` | `N` switch scene | Prompts for scene, writes selection, refreshes; scenario-parent selection remains a separate live verification item | `scene`, simulator/ground |
 | `CURRENT` | `T` switch targets: renamed to switch scenario | Prompts from available scenarios and reloads | `scenario`, simulator/ground |
 | `CURRENT` | `F` move fiducial | Prompts east/north metres or lat/lon and changes marker | `fiducial`, simulator only |
 | `TESTED (code/static)` | Verification stage selector | The stack menu now selects `code`, `bench`, `gps`, or `sim` and invokes the existing named stage through `px4sim verify`; live interactive selection remains to be exercised | `scripts/tui.py`, `verify/run.sh` |
@@ -143,7 +143,7 @@ table should be reviewed as possible `ORPHANED` features.
 | `CURRENT` | `q` exit | Closes feed and leaves curses cleanly | `Feed.close`, curses teardown |
 | `CURRENT` | World filtering | Hides simulator-only actions on ground/air worlds | `worlds`, `world_of()` |
 | `CURRENT` | Prompt defaults | Uses scene, scenario, model, stream, and UAS values | `Ask`, substitutions |
-| `MISSING` | Tab autocomplete available options | Uses scene, scenario, model, stream, and UAS values | `Ask`, substitutions |
+| `CURRENT` | Tab autocomplete available options | Source/code-tested 2026-09-16: typed-command candidates include front-door commands plus configured scene, scenario, model, stream, zoom, and live UAS values | `Ask`, `command_candidates` |
 | `CURRENT` | Confirmation handling | Requires explicit confirmation for destructive/flying actions | `Action.confirm` |
 | `CURRENT` | Terminal width fallback: double check me on this, but the terminal seems fine as is but should work with arbitrary widths within reason | UI claims 100-column usability; narrow terminals need verification | module docstring, rendering widths |
 | `CURRENT` | Terminal resize handling: double check me on this, but the terminal seems fine as is but should work with arbitrary widths within reason | Determine whether panes redraw safely after SIGWINCH | curses setup/render loop |
