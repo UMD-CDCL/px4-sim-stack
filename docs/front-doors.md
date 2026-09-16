@@ -206,6 +206,7 @@ The boot unit does not need that group. `onboard.service` carries
 ./px4sim ui                # the console
 ./px4sim state             # one JSON object
 ./px4sim state --watch     # one object for each line, about every two seconds
+# The UI adds --initial-delay 0 so its first report is requested immediately.
 ```
 
 The console starts nothing of its own. Every action runs `./px4sim ...`, so it
