@@ -31,6 +31,7 @@ with date, commit, Git status, and evidence; this inventory defaults to
 | `CURRENT` | Camera zoom and framing | `config/foxglove`, zoom/gimbal code | Presets and continuous framing affect image |
 | `CURRENT` | DeepStream primary detection | `umd_uas/ds_ros_pipeline`, deepstream configs | Engine loads and detections publish |
 | `TESTED (live 2026-09-16, commit 0bb58e8)` | Scoring metric publication | `umd_uas/scoring.py`, canonical Foxglove plot topics | Empty rate denominators publish explicit zeroes, and the full staged sim observed all five scoring metrics through the Foxglove bridge. Position error remains conditional on localized estimates, which were present in the flight path. |
+| `TESTED (live 2026-09-16, commit 0bb58e8)` | Raw coordinate ROI hold | `umd_uas/gimbal.py`, `raw_roi_point_cmd` | Full flight-stage test accepted a NavSatFix coordinate and retained the exact target in ROI mode after movement. |
 | `CURRENT` | Secondary injury/VLM inference | `config/deepstream/*secondary*`, pipeline code | Secondary results are emitted and correlated |
 | `CURRENT` | Detection enable/disable | pipeline services/topics and layout | State changes and data flow respond |
 | `CURRENT` | Detection preview image | `ds_ros_pipeline/ros_io.py` | Preview is encoded and reaches ground |
