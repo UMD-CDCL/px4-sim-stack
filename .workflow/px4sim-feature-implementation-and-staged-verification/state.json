@@ -4,7 +4,7 @@
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
   "current_slice": "px4sim-ui-verification-stage-selector",
-  "last_verified": "2026-09-16: root commit a08cb93; UI action table now selects code/bench/gps/sim verification stages and informational check/doctor/layout actions are menu-only. Focused UI tests 7/7, Python/shell syntax, px4sim check, and diff validation pass. Prior QGC sequential restart acceptance passed twice with exactly one process and no singleton error. Sparse three-vehicle preview media remains resource-limited and open.",
+  "last_verified": "2026-09-16: root commit 392902a; UI action table derives verification stages from verify/stages/*.sh in numeric runner order, and informational check/doctor/layout actions are menu-only. Focused UI tests 7/7, selected contract stage 14/0, Python/shell syntax, px4sim check, and diff validation pass. Prior QGC sequential restart acceptance passed twice with exactly one process and no singleton error. Sparse three-vehicle preview media remains resource-limited and open.",
   "approval": {
     "required": null,
     "granted": null,
