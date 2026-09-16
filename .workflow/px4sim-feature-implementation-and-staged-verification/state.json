@@ -4,7 +4,7 @@
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
   "current_slice": "compact-detection-state-and-cache-boundary",
-  "last_verified": "2026-09-16: compact state remains live from root commit a09c669; focused UI/state checks passed 9/9 and live state queries returned bounded detection rows (live boxes=0 on one run, unavailable after the four-second no-message timeout on another). Offline build front door now requests --pull=false, but verify/build-cache.py remains blocked by this BuildKit builder resolving local px4simstack/ros-deps and yolo-deps parents through Docker Hub; classic builder cannot consume additional contexts. Prior live code/bench/GPS/full-sim gates remain green at 20/0, 21/0, 21/0, and 39/0. Canonical chimera_sim.json remains the default; sparse multi-vehicle preview media remains resource-limited.",
+  "last_verified": "2026-09-16: compact state remains live from root commit a09c669; focused UI/state checks passed 9/9. Offline cache matrix passed using the local Docker builder: unchanged build 1.9s, isolated package edits rebuilt only their owning stages, restored inputs rebuilt nothing, and offline ROS type support passed. Prior live code/bench/GPS/full-sim gates remain green at 20/0, 21/0, 21/0, and 39/0. Canonical chimera_sim.json remains the default; sparse multi-vehicle preview media remains resource-limited.",
   "approval": {
     "required": null,
     "granted": null,

@@ -43,8 +43,9 @@ def main():
                              "mavros", "angles", "mavros_patch", "yolo")
             }},
         }}}))
-        command = ["docker", "compose", "--progress", "plain", "-f",
-                   str(ROOT / "compose.yaml"), "-f", str(override), "build", "ros-base"]
+        command = ["docker", "compose", "--progress", "plain",
+                   "-f", str(ROOT / "compose.yaml"), "-f", str(override),
+                   "build", "--builder", "default", "--pull=false", "ros-base"]
 
         def build(label, changed):
             started = time.monotonic()

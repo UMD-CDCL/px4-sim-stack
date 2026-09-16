@@ -603,7 +603,9 @@ build_stack() {
 	# Offline callers have already checked every required parent in the local
 	# image store. Prevent BuildKit from turning a cache test into a registry
 	# lookup, which makes portability depend on network availability.
-	[ "${PX4SIM_BUILD_NETWORK:-}" = none ] && build_options+=(--pull=false)
+	if [ "${PX4SIM_BUILD_NETWORK:-}" = none ]; then
+		build_options+=(--pull=false --builder default)
+	fi
 	$DC build "${build_options[@]}" "${SERVICES[@]}"
 }
 
