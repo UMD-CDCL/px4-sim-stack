@@ -76,6 +76,18 @@ gimbal_framings_deg() {
 }
 
 children=()
+streamer_supervisor() {
+	local rc
+	while :; do
+		if gz_video_streamer "$@"; then
+			return 0
+		else
+			rc=$?
+		fi
+		warn "camera streamer stopped (exit $rc); retrying in 2s"
+		sleep 2
+	done
+}
 cleanup() {
 	for pid in "${children[@]:-}"; do
 		[ -n "${pid:-}" ] && kill "$pid" 2>/dev/null || true
@@ -394,7 +406,10 @@ for index in "${!FLEET[@]}"; do
 	fi
 
 	log "Starting the uas$UAS_NUM camera encoders: ${served[*]}"
-	gz_video_streamer "${args[@]}" &
+	# Gazebo and MediaMTX can become ready in either order. Keep the camera
+	# contract alive if the first connection loses that race; otherwise the
+	# container stays Up while Foxglove sees an advertised but empty image.
+	streamer_supervisor "${args[@]}" &
 	children+=($!)
 done
 unset UAS_NUM GZ_MODEL
