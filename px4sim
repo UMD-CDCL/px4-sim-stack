@@ -599,7 +599,12 @@ build_stack() {
 	fi
 	# Compose follows the explicit ros_base service build contexts, so the base
 	# is built once and both derived images use that exact result.
-	$DC build "${SERVICES[@]}"
+	local -a build_options=()
+	# Offline callers have already checked every required parent in the local
+	# image store. Prevent BuildKit from turning a cache test into a registry
+	# lookup, which makes portability depend on network availability.
+	[ "${PX4SIM_BUILD_NETWORK:-}" = none ] && build_options+=(--pull=false)
+	$DC build "${build_options[@]}" "${SERVICES[@]}"
 }
 
 prepare_stack() {

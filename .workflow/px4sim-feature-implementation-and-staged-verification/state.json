@@ -3,8 +3,8 @@
   "slug": "px4sim-feature-implementation-and-staged-verification",
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
-  "current_slice": "compact-detection-state",
-  "last_verified": "2026-09-16: root compact-state implementation is live. ./px4sim state returned a per-UAS detection summary from onboard ROS (`uas11: live, boxes=0`), and TUI rows retain/render it; focused UI/state checks passed 9/9. Prior live code/bench/GPS/full-sim gates remain green at 20/0, 21/0, 21/0, and 39/0 respectively. Canonical chimera_sim.json is the default in every world; chimera_real.json is explicit compatibility-only via FOXGLOVE_LAYOUT. Sparse multi-vehicle preview media remains resource-limited.",
+  "current_slice": "compact-detection-state-and-cache-boundary",
+  "last_verified": "2026-09-16: compact state remains live from root commit a09c669; focused UI/state checks passed 9/9 and live state queries returned bounded detection rows (live boxes=0 on one run, unavailable after the four-second no-message timeout on another). Offline build front door now requests --pull=false, but verify/build-cache.py remains blocked by this BuildKit builder resolving local px4simstack/ros-deps and yolo-deps parents through Docker Hub; classic builder cannot consume additional contexts. Prior live code/bench/GPS/full-sim gates remain green at 20/0, 21/0, 21/0, and 39/0. Canonical chimera_sim.json remains the default; sparse multi-vehicle preview media remains resource-limited.",
   "approval": {
     "required": null,
     "granted": null,
