@@ -110,6 +110,18 @@ failed. Narrow zoom passed in this run; all other flight, localization,
 capture, survey, Foxglove, and scoring checks passed. The readiness and
 raw-ROI contract is the next target, and no current sim pass is claimed.
 
+At 19:19:31Z another live sim run was started from commit `d6006e2` and was
+paused after the vehicle checks and the first flight checks passed because the
+harness hung waiting for a later gimbal-state read. A direct
+`./px4sim uas 11 raw-roi 38.9869 -76.9426 39.9` probe during the same running
+stack was accepted by the onboard gimbal, which logged three `holding ...
+(fix)` callbacks. This confirms the px4sim raw-ROI front door and onboard
+subscription work in isolation, but it does not certify the complete sim
+stage; the harness readiness/state wait remains open. No implementation change
+was made for this diagnostic run. Generated evidence is retained as an
+incomplete checkpoint, and implementation is paused here pending the next
+work session.
+
 The recording slice is currently `PARTIAL`: `./px4sim record start|stop|status`
 now resolves the canonical ground container, persists output under
 `logs/recordings`, validates recording names, and preflights the MCAP storage
