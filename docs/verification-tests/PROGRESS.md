@@ -14,7 +14,7 @@ repositories changed for this work remain on and pushed from
 | Code | 21/0 live | `verify/evidence/code/` |
 | Bench | 26/0 live | `verify/evidence/bench/` |
 | GPS | 21/0 live | `verify/evidence/gps/` |
-| Sim | 39/2 live | `verify/evidence/sim/` |
+| Sim | 36/4 live | `verify/evidence/sim/` |
 
 The earlier incomplete bench retry is retained in git history as a diagnostic
 checkpoint. The current rebuilt-image bench result supersedes it: **26/0**.
@@ -103,6 +103,12 @@ failed** at 18:50:05Z: narrow framing camera-info was silent and returning to
 mid framing did not complete. All other flight, localization, ROI, capture,
 survey, Foxglove, and scoring checks passed. The narrow-zoom regression is the
 next implementation target; no current sim pass is claimed.
+
+A warmed rerun completed **36 passed, 4 failed** at 19:15:09Z: initial
+vehicle state was silent and raw ROI acceptance plus coordinate retention
+failed. Narrow zoom passed in this run; all other flight, localization,
+capture, survey, Foxglove, and scoring checks passed. The readiness and
+raw-ROI contract is the next target, and no current sim pass is claimed.
 
 The recording slice is currently `PARTIAL`: `./px4sim record start|stop|status`
 now resolves the canonical ground container, persists output under

@@ -3,8 +3,8 @@
   "slug": "px4sim-feature-implementation-and-staged-verification",
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
-  "current_slice": "sim-narrow-zoom-regression",
-  "last_verified": "2026-09-16: root baa8af6; 5G Drone b269aa0 on feature/ubuntu24-compat. Source slice aligns the gimbal heartbeat topic with status, rejects invalid GPS health, and clears stale RTK health on non-RTK fixes; Python syntax validation passed. Rebuilt-image bench stage completed 26/0 at 18:16:33Z. A clean GPS retry completed 21/0 at 18:33:07Z after an earlier warm-up attempt produced 20/1. Current rebuilt-image sim stage completed 39/2 at 18:50:05Z, with narrow framing camera-info silent and mid-framing return failing; all other flight, ROI, capture, survey, Foxglove, and scoring checks passed. Host pytest is unavailable. Recording front door remains selectively controllable and MCAP remains unavailable.",
+  "current_slice": "sim-readiness-and-raw-roi",
+  "last_verified": "2026-09-16: root baa8af6; 5G Drone b269aa0 on feature/ubuntu24-compat. Source slice aligns the gimbal heartbeat topic with status, rejects invalid GPS health, and clears stale RTK health on non-RTK fixes; Python syntax validation passed. Rebuilt-image bench stage completed 26/0 at 18:16:33Z. A clean GPS retry completed 21/0 at 18:33:07Z. Warming the rebuilt stack did not produce a sim pass: the rerun completed 36/4 at 19:15:09Z, with initial vehicle state silent and raw ROI acceptance/retention failing; narrow zoom passed this time. Host pytest is unavailable. Recording front door remains selectively controllable and MCAP remains unavailable.",
   "approval": {
     "required": null,
     "granted": null,
