@@ -102,6 +102,13 @@ The full sim stage completed **40 passed, 0 failed** on 2026-09-16 at
 terrain localization, raw ROI hold, overlays, capture and mosaic, fiducial
 survey, Foxglove data, and all five scoring metrics.
 
+The recording slice is currently `PARTIAL`: `./px4sim record start|stop|status`
+now resolves the canonical ground container, persists output under
+`logs/recordings`, validates recording names, and preflights the MCAP storage
+plugin. The installed image reports only `sqlite3` and a test plugin, so the
+front door correctly refuses to start and identifies the required rosbag2
+MCAP dependency. Video synchronization and MCAP image support remain planned.
+
 The code stage completed **20 passed, 0 failed** on 2026-09-16 at 17:35:44Z.
 It verified airframe expansion, service/address/MAVLink contracts, the
 px4sim UI helper, QGC singleton behavior, 43 terrain/frame checks, 137 5G
