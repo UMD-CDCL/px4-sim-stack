@@ -3,8 +3,8 @@
   "slug": "px4sim-feature-implementation-and-staged-verification",
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
-  "current_slice": "full-sim-capture-checkpoint",
-  "last_verified": "2026-09-16: root commit 8074c4b plus live full VERIFY_FULL sim evidence; complete sim gate 39/0. Verified vehicle data, gimbal/lens control, detection and annotation synchronization, ROI tracking, ground capture handoff, mosaic terrain rendering, overlay export, fiducial/VLM captures, survey recovery, and Foxglove rendering. Sparse three-vehicle preview media remains resource-limited and open.",
+  "current_slice": "uas-state-inspection-partial",
+  "last_verified": "2026-09-16: root commit 2a2e666; complete VERIFY_FULL sim gate 39/0 remains green. Live px4sim state output reports link health, MAVLink message rate, system IDs, position, altitude, heading, gimbal attitude, GPS fix, and satellites. Compact state still lacks dedicated detections, stream-health/bandwidth, and mission-phase fields; those remain implementation work. Sparse three-vehicle preview media remains resource-limited and open.",
   "approval": {
     "required": null,
     "granted": null,

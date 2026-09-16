@@ -44,7 +44,7 @@ with date, commit, Git status, and evidence; this inventory defaults to
 | `CURRENT` | Foxglove protocol probing | `foxglove_probe.py` | Advertised channels/services carry data |
 | `TESTED (2026-09-16, commit 8074c4b)` | Capture front door | `px4sim capture` now retries transient ROS discovery; live full sim coverage passed mosaic, fiducial, and VLM capture paths, including ground delivery and overlay export | `px4sim`, `verify/stages/80-captures.sh` |
 | `UNKNOWN` | PX4 command front door | `px4sim px4` | Commands are scoped to selected simulated UAS |
-| `ORPHANED` | UAS topic/node inspection: update it to make drone status more relevant to testing, with reports that start with `px4sim ui` and cover detections, stream health, MAVLink, bandwidth, mission phase, and other source-available values | `px4sim uas`, `scripts/state.py` | Status, heading, detections, and state are readable |
+| `PARTIAL (live 2026-09-16)` | UAS topic/node inspection | `px4sim state`/UI live output reports link health, MAVLink message rate, system IDs, position, altitude, heading, gimbal attitude, GPS fix, and satellites. Dedicated detections, stream-health/bandwidth, and mission-phase fields are still absent from the compact state payload and remain implementation work | `scripts/state.py`, `scripts/tui.py`, `px4sim uas` |
 | `CURRENT` | Gimbal/zoom helper commands | `scripts/zoom.sh`, `sweep-gimbal.py` | Helpers exercise declared control paths |
 | `CURRENT` | X11/QGC setup | `scripts/x11-allow.sh`, QGC modules | QGC starts with display/auth and video |
 | `CURRENT` | QGC configuration/autoconnect | `modules/qgc/entrypoint.sh`, Compose | QGC receives intended MAVLink/video endpoints |
