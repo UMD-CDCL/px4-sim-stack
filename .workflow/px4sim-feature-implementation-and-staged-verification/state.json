@@ -3,8 +3,8 @@
   "slug": "px4sim-feature-implementation-and-staged-verification",
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
-  "current_slice": "sim-gimbal-single-authority",
-  "last_verified": "2026-09-15: rebuilt onboard/offboard after removing duplicate simulator gimbal TF launch; live gimbal TF is non-identity and gimbal range returns 29.64 m instead of max-range 50 m",
+  "current_slice": "baseline-code-bench-gps-sim",
+  "last_verified": "2026-09-16: code checks passed; live bench 21 passed/0 failed; live GPS 21 passed/0 failed; live sim 33 passed/0 failed; QGC had exactly one process",
   "approval": {
     "required": null,
     "granted": null,
@@ -16,7 +16,7 @@
     {"id": "verification-harness", "owner": "Galileo", "status": "accepted"}
   ],
   "verification": {
-    "status": "component_passed",
-    "checks": ["px4sim check", "python compilation", "shell syntax", "stage dry runs", "workflow validation", "git diff --check"]
+    "status": "baseline_stages_passed",
+    "checks": ["px4sim check", "python compilation", "shell syntax", "stage dry runs", "workflow validation", "git diff --check", "bench 21/0", "gps 21/0", "sim 33/0", "QGC singleton"]
   }
 }
