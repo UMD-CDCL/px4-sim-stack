@@ -1,0 +1,6 @@
+stage=qgc-restart
+mode=live
+started_utc=2026-09-16T04:12:54Z
+repo=/home/user/px4-sim-stack
+commit=f2bed82d23c0bdd665e64ff3c0502b3d0f01fafd
+branch=feature/px4sim-baseline-implementation
