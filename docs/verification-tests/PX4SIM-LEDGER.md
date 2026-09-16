@@ -166,7 +166,7 @@ For every row, keep the intent status above and append `Tested: YES|NO|BLOCKED`
 with the checkpoint date and commit. A UI action can be `CURRENT` while its
 underlying system is not yet tested; it becomes `Tested: YES` only after the
 command, resulting state, and cleanup have all been observed.
-| `MISSING` | Variable fiducial lat/lon in scenegen | enable user to set lat lon of fiducial in scenegen instead of having local offset |
+| `CURRENT` | Variable fiducial lat/lon in scenegen | Source/code-tested 2026-09-16: the editor persists the surveyed fiducial coordinate into `fiducial_lat`/`fiducial_lon` while retaining independent `east_m`/`north_m` placement for simulated frame error; interactive editor round-trip remains unverified | `modules/scenegen/editor.html`, scene/scenario writers |
 | `MISSING` | Offboard compute companion path | a setup that's easily chosen to essentially do the onboard stuff for a real drone on the ground (will need different mode of the rtsp server to encode livestream with network time for timesyncing on the ground with mavlink data) trades a bit of latency for unrestricted compute |
 | `MISSING` | Recording front door | Should have a way to start, monitor, and inspect recordings on the drone, namely mcaps of configurable subsets of data synchronized with videos recording onboard or offboard (synced start times in name of file are good enough, but the more synced the better) |
 | `CURRENT` | px4sim UI text wrapping | Source/code-tested 2026-09-16: `wrap_output` splits long tokens to the available pane width and `draw_output` applies it before rendering; narrow-terminal resize behavior remains unverified | `scripts/tui.py`, `verify/test_tui_helpers.py` |

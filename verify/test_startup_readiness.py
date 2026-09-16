@@ -28,3 +28,11 @@ def test_sim_layout_remains_the_single_simulation_layout_authority():
     text = (ROOT / "scripts/fleet.sh").read_text()
     assert "DEFAULT_LAYOUT=chimera_sim.json" in text
     assert text.count("chimera_sim.json") == 1
+
+
+def test_scenegen_persists_fiducial_coordinate_and_placement_separately():
+    editor = (ROOT / "modules/scenegen/editor.html").read_text()
+    assert "fiducial_lat" in editor
+    assert "fiducial_lon" in editor
+    assert "placed_east_m" in editor
+    assert "placed_north_m" in editor
