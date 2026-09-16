@@ -8,7 +8,7 @@
   [32mok  [0mthe ground station points uas11 the way it is flying
        [2mcompass	69.0 airframe	69.0 camera	20.9 footprint	not compared: the camera is 3 degrees below the horizon[0m
   [32mok  [0mthe ground holds the scene's casualty locations
-  [32mok  [0mevery localization reaches the ground unchanged: 167 boxes on both sides, 167 identical
+  [32mok  [0mevery localization reaches the ground unchanged: 156 boxes on both sides, 156 identical
   [32mok  [0muas11 scores the detections against the known targets
   [32mok  [0mthe ground station scores the detections against the known targets
   [32mok  [0ma click low in the image aims nearer than one high in it
