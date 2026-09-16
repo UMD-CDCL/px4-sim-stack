@@ -255,6 +255,7 @@ x-offboard: &offboard
     # Read only, and only the ground truth node and the terrain link read it.
     - ./modules/sim/scenes:/scenes:ro
     - ./logs/offboard:/logs
+    - ./logs/recordings:/recordings
     - /tmp/.X11-unix:/tmp/.X11-unix
     - ${XAUTH_FILE:-./.xauth}:/tmp/.docker.xauth
 

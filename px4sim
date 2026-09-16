@@ -578,6 +578,22 @@ service_name() {
 	esac
 }
 
+recording_container() {
+	add_fleet_profiles
+	local id
+	id=$(COMPOSE_PROFILES="$ALL_PROFILES" $DC ps -q offboard 2>/dev/null || true)
+	[ -n "$id" ] || die "offboard is not running. Run: ./px4sim restart"
+	echo "$id"
+}
+
+recording_topics() {
+	if [ -n "${RECORD_TOPICS:-}" ]; then
+		printf '%s\n' "$RECORD_TOPICS"
+	else
+		printf '%s\n' '-a'
+	fi
+}
+
 # Build source changes using local parents. Network is disabled unless the
 # operator explicitly invokes prepare. No DNS probe can decide cache validity.
 build_stack() {
@@ -1272,6 +1288,33 @@ logs)
 	[ ${#OPTIONS[@]} -eq 0 ] && OPTIONS=(-f --tail=100)
 	resolve_services "$@"
 	COMPOSE_PROFILES="$ALL_PROFILES" $DC logs "${OPTIONS[@]}" "${SERVICES[@]}"
+	;;
+
+record)
+	container=$(recording_container)
+	action=${1:-status}
+	shift || true
+	case "$action" in
+	start)
+		name=${1:-mcap-$(date -u +%Y%m%dT%H%M%SZ)}
+		case "$name" in *[!A-Za-z0-9_.-]*) die "recording name contains unsafe characters" ;; esac
+		topics=$(recording_topics)
+		docker exec -d -e ROS_DOMAIN_ID="${GROUND_DOMAIN:-70}" "$container" bash -lc \
+			". /usr/local/bin/ros-env.sh; exec ros2 bag record -s mcap --storage-preset-profile zstd_fast -o /recordings/$name $topics" >/dev/null
+		echo "recording started: $name"
+		;;
+	stop)
+		pids=$(docker exec "$container" sh -lc "pgrep -f '[r]os2 bag record' || true")
+		[ -n "$pids" ] || die "no recording is active"
+		docker exec "$container" sh -lc "kill -INT $pids"
+		echo "recording stopped"
+		;;
+	status)
+		docker exec "$container" sh -lc "pgrep -af '[r]os2 bag record' || true"
+		find logs/recordings -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort
+		;;
+	*) die "record takes start [name], stop, or status" ;;
+	esac
 	;;
 
 console)
