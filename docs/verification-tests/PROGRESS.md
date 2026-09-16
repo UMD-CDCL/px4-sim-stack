@@ -46,9 +46,17 @@ the simulator logged 322 entities placed while the scorer logged zero targets
 placed against the origin. This is now a distinct scenario-truth data-contract
 issue to trace; the scoring implementation remains runtime-unverified.
 
+The pushed scorer fix was confirmed present in the staged build context, but
+not in the existing `ros-base` image. An offline `docker compose build
+--pull=false ros-base` still attempted to resolve the locally tagged
+`px4simstack/ros-deps:7.1` and `yolo-deps:7.1` parents through Docker Hub. The
+machine therefore needs a later build-portability fix or an available local
+BuildKit image import before the scorer can be runtime-certified. No green
+result is claimed from this attempt.
+
 ## Source checkpoints
 
-- Root: `fc3acf6` (code-stage evidence recorded at this source checkpoint)
+- Root: `de383e3` (current implementation checkpoint)
 - 5G Drone: `8296fe0` on `feature/ubuntu24-compat`
 - MAVInsight: `0fb189b` on `feature/ubuntu24-compat`
 - PX4-Autopilot: `639154f` on `feature/ubuntu24-compat`
