@@ -99,7 +99,7 @@ skip "the mosaic map HTML is written at shutdown, so a flying vehicle has none"
 # hand a vision model.
 read -r view_east view_north view_up view_heading <<< "$viewpoint"
 uas goto "$view_east" "$view_north" "$view_up" --heading "$view_heading" >/dev/null
-uas gimbal "-${VERIFY_DEPRESSION_DEG:-45}" >/dev/null
+uas gimbal "${VERIFY_DEPRESSION_DEG:-45}" >/dev/null
 
 for what in fiducial vlm; do
 	answer=$(uas capture "$what")

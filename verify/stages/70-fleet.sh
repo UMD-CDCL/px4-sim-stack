@@ -70,7 +70,7 @@ station() {
 	# rest of the fleet down with it.
 	fly "$n" takeoff 30
 	fly "$n" goto "$east" "$north" "$up" --heading "$heading"
-	fly "$n" gimbal "-$depression"
+	fly "$n" gimbal "$depression"
 	fly "$n" detect on
 }
 work=$(mktemp -d)

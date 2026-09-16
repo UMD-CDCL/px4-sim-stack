@@ -48,7 +48,9 @@ read -r view_east view_north view_up view_heading <<< "$viewpoint"
 uas goto "$view_east" "$view_north" "$view_up" --heading "$view_heading" >/dev/null
 
 # ---------------------------------------------------------------- the gimbal
-pointing=$(uas gimbal "-$depression" --settle 8)
+# The gimbal front door accepts MAVLink elevation. Positive elevation is a
+# downward optical attitude in the forward-right-DOWN report frame.
+pointing=$(uas gimbal "$depression" --settle 8)
 reported=$(printf '%s' "$pointing" | sed -n 's/^reported depression \([-0-9.]*\).*/\1/p')
 if [ -z "$reported" ]; then
 	fail "the gimbal reports where it points"
@@ -75,7 +77,7 @@ else
 fi
 
 # Off the boresight the slew is the angle the intrinsics say it is.
-uas gimbal "-$depression" --settle 8 >/dev/null
+uas gimbal "$depression" --settle 8 >/dev/null
 moved=$(printf '%s' "$(uas click point 320 90)" | sed -n 's/.*depression \([-0-9.]*\) -> \([-0-9.]*\).*/\1 \2/p')
 read -r was now <<< "${moved:-0 0}"
 fx=$(focal_px)

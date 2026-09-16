@@ -115,7 +115,7 @@ if [ -n "$viewpoint" ]; then
 		return 0
 		fi
 	fi
-	./px4sim uas "$lead" gimbal "-${VERIFY_DEPRESSION_DEG:-45}" --yaw 0 \
+	./px4sim uas "$lead" gimbal "${VERIFY_DEPRESSION_DEG:-45}" --yaw 0 \
 		>/dev/null 2>&1 || fail "the gimbal points at the bench viewpoint"
 fi
 ./px4sim uas "$lead" detect on >/dev/null 2>&1 || true
