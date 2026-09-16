@@ -4,7 +4,7 @@
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
   "current_slice": "sim-readiness-and-raw-roi",
-  "last_verified": "2026-09-16: root baa8af6; 5G Drone b269aa0 on feature/ubuntu24-compat. Source slice aligns the gimbal heartbeat topic with status, rejects invalid GPS health, and clears stale RTK health on non-RTK fixes; Python syntax validation passed. Rebuilt-image bench stage completed 26/0 at 18:16:33Z. A clean GPS retry completed 21/0 at 18:33:07Z. Warming the rebuilt stack did not produce a sim pass: the rerun completed 36/4 at 19:15:09Z, with initial vehicle state silent and raw ROI acceptance/retention failing; narrow zoom passed this time. Host pytest is unavailable. Recording front door remains selectively controllable and MCAP remains unavailable.",
+  "last_verified": "2026-09-16: root 69d5db8 on feature/px4sim-baseline-implementation and feature/ubuntu24-compat-derived; 5G Drone b269aa0 on feature/ubuntu24-compat. Source slice aligns the gimbal heartbeat topic with status, rejects invalid GPS health, and clears stale RTK health on non-RTK fixes. The uas topic front door now retries DDS discovery within its deadline. Python compilation and unittest verification passed 21/21. Rebuilt-image bench stage completed 26/0 at 18:16:33Z. GPS completed 21/0 at 18:33:07Z. Full live sim completed 40/0 at 19:54:26Z, including raw ROI retention through aircraft movement. Host pytest is unavailable. Recording front door remains selectively controllable and MCAP remains unavailable.",
   "approval": {
     "required": null,
     "granted": null,
