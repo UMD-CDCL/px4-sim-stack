@@ -1,8 +1,8 @@
 stage=sim
 mode=live
-started_utc=2026-09-16T03:09:38Z
+started_utc=2026-09-16T03:50:04Z
 repo=/home/user/px4-sim-stack
-commit=057f00d02dfb2b438ab308e5689f52f74e25379e
+commit=297dc5b605ace12e3565754ce8313b692223e3ba
 branch=feature/px4sim-baseline-implementation
 git_state=dirty
 git_status= M verify/evidence/sim/metadata.txt
