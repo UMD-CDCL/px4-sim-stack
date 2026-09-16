@@ -20,7 +20,7 @@ with date, commit, Git status, and evidence; this inventory defaults to
 | `CURRENT` | Status and fleet facts | `px4sim status`, `scripts/fleet.sh` | Addresses, ports, models, streams are truthful |
 | `TESTED` | Dynamic fleet selection, including non-monotonic active slots (for example 1,3,4), keyed from the single source in `.env` | `UAS_ACTIVE`, `px4sim fleet`, `scripts/fleet.sh`, simulator/offboard/router entrypoints | Code-tested and runtime-tested 2026-09-16: slots preserve `uas11`, `uas13`, `uas14` and model mapping; invalid/duplicate slots reject; selected services and telemetry run, QGC remains singleton. Evidence: `verify/evidence/sparse-fleet/`. Three-vehicle preview media is resource-limited on this host and remains a documented limitation. Compose retains its declared service ceiling. |
 | `CURRENT` | Fleet numbering/sysid/domain allocation | `scripts/fleet.sh`, `compose.yaml` | UAS 11-19 remain collision-free |
-| `MISSING` | Scene/origin/scenario selection in `px4sim ui`; choose valid combinations, with scenarios constrained to parent scenes so the scenario determines scene, scenario, and origin | `.env`, `scripts/origin-env.sh`, scenegen | Selected scene and origin reach sim/runtime |
+| `CURRENT` | Scene/origin/scenario selection in `px4sim ui`; choose valid combinations, with scenarios constrained to parent scenes so the scenario determines scene, scenario, and origin | `.env`, `.workflow`, `scripts/origin-env.sh`, scenegen, `scripts/tui.py` | Source/code-tested 2026-09-16: scene and scenario actions exist, scenario choices come from runtime config, and origin is exposed; live selection/respawn remains unverified |
 | `CURRENT` | World/scenario generation | `modules/scenegen/*.py` | World, models, casualties, terrain are reproducible |
 | `CURRENT` | Scene editor/server | `editor_server.py`, `editor.html` | Editor loads and changes supported scene data |
 | `CURRENT` | Terrain and building source ingestion | `sources.py`, `terrain_mesh.py`, `building_mesh.py` | Source assets convert with declared errors |
@@ -48,7 +48,7 @@ with date, commit, Git status, and evidence; this inventory defaults to
 | `CURRENT` | Gimbal/zoom helper commands | `scripts/zoom.sh`, `sweep-gimbal.py` | Helpers exercise declared control paths |
 | `CURRENT` | X11/QGC setup | `scripts/x11-allow.sh`, QGC modules | QGC starts with display/auth and video |
 | `CURRENT` | QGC configuration/autoconnect | `modules/qgc/entrypoint.sh`, Compose | QGC receives intended MAVLink/video endpoints |
-| `TESTED` | QGC singleton across repeated restarts | `verify/qgc-restart-test.sh`, QGC entrypoint lock | 2026-09-16, checkpoint `f2bed82` plus runtime rerun: two consecutive `./px4sim restart --no-build` cycles, one process each, no singleton error |
+| `TESTED` | QGC singleton across repeated restarts | `verify/qgc-restart-test.sh`, QGC entrypoint lock | 2026-09-16, checkpoint `62ac538`: two consecutive `./px4sim restart --no-build` cycles, one process each, no singleton error |
 | `CURRENT` | Documentation/front-door consistency | `docs/front-doors.md`, `px4sim check` | Named commands and variables exist |
 | `CURRENT` | Cache/layer reuse | Dockerfiles, ccache mounts, build scripts | Incremental source edit avoids unrelated rebuilds |
 | `CURRENT` | Branch portability contract | `.env`, build contexts, docs | Changed repos are on `feature/ubuntu24-compat` |
@@ -153,11 +153,11 @@ table should be reviewed as possible `ORPHANED` features.
 | `CURRENT` | Foreground command cleanup | Viewer/console processes release sockets on Escape/q | `stop_process`, process groups |
 | `CURRENT` | Empty fleet/stack rendering | UI remains usable when no services or UAS exist | state parsing/rendering |
 | `CURRENT` | Real-aircraft world safety | Simulator-only keys are absent and typed commands are guarded | world filtering and `check_mode` |
-| `ORPHANED` | UI key for `fleet add` outside simulator menus | Older docs say fleet maintenance is not on a key/menu, but current `ACTIONS` has `=` | reconcile docs with `tui.py` |
-| `ORPHANED` | UI key for `fleet remove` outside simulator menus | Older docs say it is absent, but current vehicle action has `-` | reconcile docs with `tui.py` |
-| `ORPHANED` | UI key for `scene`/`scenario` outside menus | Older front-door text claims these are omitted while current actions expose `N`/`T` | reconcile docs with implementation |
-| `ORPHANED` | UI key for `fiducial` | Older docs describe it as omitted; current stack action exposes `F` | reconcile docs with implementation |
-| `ORPHANED` | UI router-log visibility | Older docs say router log is absent from menus; current simulator vehicle action exposes it | reconcile docs with implementation |
+| `CURRENT` | UI key for `fleet add` outside simulator menus | `ACTIONS` exposes `=` and routes to the fleet front door; source/code-tested 2026-09-16, live mutation remains unverified | `tui.py`, `fleet add` |
+| `CURRENT` | UI key for `fleet remove` outside simulator menus | Vehicle actions expose `-`; source/code-tested 2026-09-16, live mutation remains unverified | `tui.py`, `fleet remove` |
+| `CURRENT` | UI key for `scene`/`scenario` outside menus | Stack actions expose `N`/`T`; source/code-tested 2026-09-16, live selection remains unverified | `tui.py`, `scene`, `scenario` |
+| `CURRENT` | UI key for `fiducial` | Stack action exposes `F`; source/code-tested 2026-09-16, live reposition and cleanup remain unverified | `tui.py`, `fiducial` |
+| `CURRENT` | UI router-log visibility | Vehicle action exposes router log follow; source/code-tested 2026-09-16, live interactive follow remains unverified | `tui.py`, `logs` |
 | `CURRENT` | UI `build`/`prepare` action | Front door supports build/prepare, but `ACTIONS` has no direct UI action; it should be usable from the UI | decide whether omission is intentional |
 | `CURRENT` | UI `setup`/`bootstrap` action | Front door supports setup, but UI has no setup action; it should be usable from the UI | decide whether omission is intentional |
 | `MISSING` | UI `fleet` edit prompt beyond add/remove | CLI supports more fleet controls than the action table; expose required controls from the UI | action table and fleet CLI |
