@@ -136,6 +136,12 @@ sim-tested checkpoint: vehicle readiness, flight and gimbal behavior, click
 and raw-ROI retention through movement, capture, survey, Foxglove panels and
 all five scoring metrics completed successfully.
 
+The 5G Drone ROI safety slice was implemented on `feature/ubuntu24-compat`
+as commit `db780ed`. The affected images rebuilt from local cached parents in
+about seconds of package compilation, and a restarted live stack rejected a
+`nan` raw-ROI input while accepting `38.9869000,-76.9426000,39.9` and reporting
+that exact target in `gimbal/state`.
+
 The recording slice is currently `PARTIAL`: `./px4sim record start|stop|status`
 now resolves the canonical ground container, persists output under
 `logs/recordings`, validates recording names, and preflights the MCAP storage
