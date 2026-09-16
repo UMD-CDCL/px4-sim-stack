@@ -74,7 +74,7 @@ tests were exercised.
 |---|---|---|
 | `CURRENT` | Explicit real-drone profile from sim profile | Preserve topics, services, and Foxglove layout, and maintain parity between sim and real |
 | `PLANNED` | 5G loss/reconnect test mode | Define acceptable stale-data and command behavior |
-| `MISSING` | Model/version manifest | Prevent silent engine/config drift |
+| `CURRENT` / `Tested: YES (2026-09-16, root 8bd53ee)` | Model/version manifest fingerprint | `px4sim manifest` records the configured model-manifest path and SHA-256, plus the canonical 5G Drone source manifest when the configured artifact bundle differs. Current machine evidence shows `/home/user/deepstream-work/models/manifest.json` is unavailable while the source manifest exists; artifact/source alignment remains follow-up work. |
 | `CURRENT` | Deterministic synthetic camera fixtures | Make perception tests repeatable without Gazebo |
 | `CURRENT` | Safety interlocks for gimbal | Gimbal pitch roll and yaw should all have chimera version specific bounds, including ROI (our gimbal doesn't set these in hardware unfortunately, so if roi yaw exceeds limit convert it loudly to hold the max angle) |
 | `CURRENT` | Standard status heartbeats from nodes for use in the system | Nodes should be able to tell services/px4sim their status with standard states shared across the system |
