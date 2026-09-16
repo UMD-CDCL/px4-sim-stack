@@ -82,3 +82,12 @@ def test_record_front_door_confirms_recorder_survives_launch():
     assert "recording failed to start" in text
     assert "rosbag recorder exited before becoming active" in text
     assert "pgrep -af '[r]os2 bag record'" in text
+
+
+def test_scoring_gate_radius_is_carried_to_mavinsight_bubbles():
+    scorer = (ROOT.parent / "ros2_ws/src/5g_drone/umd_uas/scoring.py").read_text()
+    viz = (ROOT.parent / "ros2_ws/src/MAVInsight/models/scoring_viz.py").read_text()
+    assert "detection.bbox.size.x = detection.bbox.size.y = detection.bbox.size.z" in scorer
+    assert "2.0 * self.gate" in scorer
+    assert "detection.bbox.size.x" in viz
+    assert "sphere(header, \"targets\", index, fiducial_position" in viz
