@@ -48,11 +48,14 @@ NAME_COLUMN = 15
 ESCAPE_CODES = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b[=>]|[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 FRONT_DOOR = Path(__file__).resolve().parents[1] / "px4sim"
-VERIFICATION_STAGES = tuple(sorted(
+VERIFICATION_STAGES = tuple(
     path.stem.split("-", 1)[1]
-    for path in (FRONT_DOOR.parent / "verify" / "stages").glob("[0-9]*-*.sh")
+    for path in sorted(
+        (FRONT_DOOR.parent / "verify" / "stages").glob("[0-9]*-*.sh"),
+        key=lambda path: int(path.stem.split("-", 1)[0]),
+    )
     if "-" in path.stem
-))
+)
 
 
 def state_watch_command(period: float) -> list[str]:
