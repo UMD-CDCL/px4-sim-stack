@@ -14,10 +14,15 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     TZ=UTC
 
+# Some Ubuntu hosts advertise IPv6 archive records while Docker's build
+# network has no usable IPv6 route. Keep builds portable by making apt use the
+# IPv4 records that the same host can resolve and reach.
+RUN printf '%s\n' 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4
+
 # ---------------------------------------------------------------------------
 # Base toolchain.
 # ---------------------------------------------------------------------------
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get -o Acquire::Retries=3 update && apt-get install -y --no-install-recommends \
       bc \
       build-essential \
       ca-certificates \
@@ -54,7 +59,7 @@ RUN mkdir -p /tmp/px4-setup && cd /tmp/px4-setup \
 # Gazebo development headers and the GStreamer set the video streamer needs.
 # ubuntu.sh already added the osrfoundation apt repository.
 # ---------------------------------------------------------------------------
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get -o Acquire::Retries=3 update && apt-get install -y --no-install-recommends \
       libgz-transport13-dev \
       libgz-msgs10-dev \
       libgz-common5-dev \
