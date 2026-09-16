@@ -41,3 +41,20 @@ verdicts judge a subset of recently published boxes, while `scoring_viz.py`
 keeps unjudged boxes visible. Flight, gimbal/ROI, captures, map,
 localization, and Foxglove checks all passed. The camera-supervisor recovery
 change still awaits a rebuilt simulator image.
+
+Final raw-ROI follow-up packet: **46 passed, 0 failed** on 2026-09-16. This
+checkpoint additionally verified the canonical raw coordinate ROI command,
+retention of the exact target after movement, and all five scoring metrics
+(`recall`, `precision`, `detection_recall`, `detection_precision`, and
+`position_error`) through the Foxglove path. The packet used root commit
+`39c1581` as its evidence checkpoint; the retained manifest records the
+source commits used by the running images.
+
+During isolated restarts, `ds_node` sometimes logged GStreamer
+`Could not open resource for reading` with `No supported authentication
+protocol was found` while the simulator publisher was temporarily absent.
+The configured source was the expected `rtsp://video-router:8554/rgbl11`, a
+direct GStreamer read succeeded after recovery, and the ground-station
+`respawn` contract restored the viewer. Treat this as a transient publisher
+availability observation, not a failed baseline assertion; repeat it at the
+next critical checkpoint if startup reliability is changed.
