@@ -63,7 +63,8 @@ cat > "$CONF" <<-EOF
 	Port = ${QGC_PORT}
 EOF
 
-for SLOT in ${UAS_ACTIVE//,/ }; do
+active_slots=$(printf '%s' "$UAS_ACTIVE" | tr ',' ' ')
+for SLOT in $active_slots; do
 	case "$SLOT" in ''|*[!0-9]*) echo "UAS_ACTIVE entry '$SLOT' is not a fleet slot." >&2; exit 1;; esac
 	[ "$SLOT" -ge 1 ] && [ "$SLOT" -le "$COUNT" ] || { echo "UAS_ACTIVE slot '$SLOT' is outside UAS_FLEET (1-$COUNT)." >&2; exit 1; }
 	N=$((${UAS_BASE:-10} + SLOT))

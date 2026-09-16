@@ -22,6 +22,11 @@ def fleet_shell(*, active="1,3,4", command="fleet_numbers"):
 
 
 class SparseFleet(unittest.TestCase):
+    def test_posix_router_does_not_use_bash_parameter_substitution(self):
+        text = (ROOT / "modules/offboard/mavlink-router/entrypoint.sh").read_text()
+        self.assertNotIn("${UAS_ACTIVE//,/ }", text)
+        self.assertIn("tr ',' ' '", text)
+
     def test_active_slots_preserve_numbers_and_models(self):
         result = fleet_shell(command='printf "numbers=%s\\n" "$(fleet_numbers | paste -sd, -)"; for n in $(fleet_numbers); do printf "%s=%s " "$n" "$(model_of "$n")"; done')
         self.assertEqual(result.returncode, 0, result.stderr)
