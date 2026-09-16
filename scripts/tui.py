@@ -962,6 +962,10 @@ class Console:
         return self.rows.placeholders(self.pane, row)
 
     def run(self, action: Action) -> None:
+        if action.command == ("__cancel_running__",):
+            self.runner.cancel()
+            self.message = "running command stopped"
+            return
         filling = self.placeholders() if action.scope != STACK else {}
         if action.scope != STACK and not filling:
             self.message = f"no {action.scope} is selected"
@@ -1053,6 +1057,9 @@ class Console:
 
     def stack_menu(self) -> None:
         actions = self.actions_for(STACK)
+        if self.runner.busy:
+            actions = [Action(STACK, "", "stop the running command",
+                              ("__cancel_running__",))] + actions
         picked = self.choose("the stack: what to do",
                              [f"{action.key or ' '}  {action.label}" for action in actions])
         if picked >= 0:

@@ -32,3 +32,7 @@ does not auto-restart after its singleton guard rejects a duplicate launch.
 After `./px4sim restart --no-build`, all services reached ready state and the
 QGC container had exactly one `/opt/qgc/usr/bin/QGroundControl` process; its
 logs showed normal initialization and no second-instance error.
+
+The same code packet also covers the TUI stack-menu cancellation action, which
+uses the existing process-group cleanup path; the focused helper packet is
+four tests and the full code gate remains **19 passed, 0 failed**.

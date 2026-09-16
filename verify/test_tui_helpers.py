@@ -1,6 +1,6 @@
 import unittest
 
-from scripts.tui import complete_text, wrap_output
+from scripts.tui import Action, complete_text, wrap_output
 
 
 class TuiHelpers(unittest.TestCase):
@@ -17,6 +17,11 @@ class TuiHelpers(unittest.TestCase):
     def test_wrap_output_handles_empty_and_long_lines(self):
         self.assertEqual(wrap_output([""], 4), [""])
         self.assertEqual(wrap_output(["abcdefgh"], 4), ["abcd", "efgh"])
+
+    def test_cancel_menu_action_is_a_runner_action(self):
+        action = Action("stack", "", "stop the running command",
+                        ("__cancel_running__",))
+        self.assertEqual(action.command, ("__cancel_running__",))
 
 
 if __name__ == "__main__":
