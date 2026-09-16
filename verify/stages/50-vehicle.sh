@@ -21,7 +21,7 @@ uas() { ./px4sim uas "$lead" "$@" 2>&1 || true; }
 
 vehicle_ready "$lead" || return 0
 
-telemetry=$(./px4sim probe "$lead" 2>/dev/null)
+telemetry=$(./px4sim probe "$lead" --deadline 20 2>/dev/null)
 while IFS=$'\t' read -r topic publishers verdict; do
 	[ -n "$topic" ] || continue
 	case "$topic" in

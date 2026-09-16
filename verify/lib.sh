@@ -63,7 +63,7 @@ vehicle_ready() {
 	while true; do
 		ready=true
 		for topic in altitude camera/camera_info gimbal/state; do
-			[ "$(./px4sim probe "$n" "/uas$n/$topic" 2>/dev/null | cut -f3)" = data ] \
+			[ "$(./px4sim probe "$n" --deadline 20 "/uas$n/$topic" 2>/dev/null | cut -f3)" = data ] \
 				|| ready=false
 		done
 		[ "$ready" = true ] && break
