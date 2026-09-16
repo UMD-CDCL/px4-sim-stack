@@ -16,6 +16,7 @@ SCENE=${SCENE:-lorton}
 # than to the mark: uas13 and uas14 are both v2 and carry different lenses.
 # .env.example says where each number came from.
 UAS_FLEET=${UAS_FLEET:-"chimera_v3 chimera_v3 chimera_v2 chimera_v2"}
+UAS_ACTIVE=${UAS_ACTIVE:-}
 # Simulated vehicles are numbered from 11, so they never take a system id, a
 # port, a DDS domain or an address from a real one. Do not set this to 0: PX4
 # instance 0 puts our rangefinder link on 14590, which its own offboard link
@@ -41,6 +42,7 @@ warn() { printf '\033[33m    %s\033[0m\n' "$*"; }
 die()  { printf '\033[31m!!! %s\033[0m\n' "$*" >&2; exit 1; }
 
 read -r -a FLEET <<< "$UAS_FLEET"
+read -r -a ACTIVE_SLOTS <<< "${UAS_ACTIVE//,/ }"
 read -r -a GIMBAL_HFOV <<< "$UAS_GIMBAL_HFOV_DEG"
 read -r -a THERMAL_HFOV <<< "$UAS_THERMAL_HFOV_DEG"
 read -r -a DOWN_HFOV <<< "$UAS_DOWN_HFOV_DEG"
@@ -49,6 +51,17 @@ read -r -a STREAM_CHOICE <<< "${UAS_STREAMS:-gimbal}"
 . /opt/sim/zoom.sh
 [ ${#FLEET[@]} -ge 1 ] || die "UAS_FLEET is empty. Give one model name for each vehicle."
 [ ${#FLEET[@]} -le 9 ] || die "UAS_FLEET has ${#FLEET[@]} vehicles. The simulator numbers them 11 to 19."
+
+if [ ${#ACTIVE_SLOTS[@]} -eq 0 ]; then
+	for index in "${!FLEET[@]}"; do ACTIVE_SLOTS+=("$((index + 1))"); done
+fi
+declare -A ACTIVE=()
+for slot in "${ACTIVE_SLOTS[@]}"; do
+	[[ "$slot" =~ ^[0-9]+$ ]] || die "UAS_ACTIVE entry '$slot' is not a fleet slot. Use 1,3,4."
+	[ "$slot" -ge 1 ] && [ "$slot" -le "${#FLEET[@]}" ] || die "UAS_ACTIVE slot '$slot' is outside UAS_FLEET (1-${#FLEET[@]})."
+	[ -z "${ACTIVE[$slot]:-}" ] || die "UAS_ACTIVE names slot $slot more than once."
+	ACTIVE[$slot]=1
+done
 
 radians() { awk -v deg="$1" 'BEGIN { printf "%.6f", deg * atan2(0, -1) / 180 }'; }
 
@@ -174,6 +187,7 @@ WORLD_FILE="$MERGED/worlds/$SCENE.sdf"
 # ${PX4_GZ_MODELS}/<model>/model.sdf and names the entity <model>_<instance>,
 # so uas11 becomes the Gazebo model uas11_10.
 for index in "${!FLEET[@]}"; do
+	[ -n "${ACTIVE[$((index + 1))]:-}" ] || continue
 	model=${FLEET[$index]}
 	template="$SCENES_DIR/models/$model/model.sdf"
 	[ -f "$template" ] || die "No vehicle model named '$model' in $SCENES_DIR/models"
@@ -311,6 +325,7 @@ PY
 wait_for_video_router
 mkdir -p "$STREAM_CONF_DIR"
 for index in "${!FLEET[@]}"; do
+	[ -n "${ACTIVE[$((index + 1))]:-}" ] || continue
 	model=${FLEET[$index]}
 	# Simulated vehicles are 11 upwards, so a simulator can fly beside the real
 	# fleet without taking a system id from it. PX4 gives MAV_SYS_ID =
@@ -430,6 +445,7 @@ unset UAS_NUM GZ_MODEL
 # camera still has a lens, and zoom.py takes itself down when the controller
 # never turns up.
 for index in "${!FLEET[@]}"; do
+	[ -n "${ACTIVE[$((index + 1))]:-}" ] || continue
 	[ "$(mark_of_model "${FLEET[$index]}")" = v3 ] || continue
 	uas_num=$((UAS_BASE + index + 1))
 	port=$(zoom_port "$uas_num")
@@ -525,5 +541,6 @@ start_vehicle() {
 }
 
 for index in $(seq $(( ${#FLEET[@]} - 1 )) -1 0); do
+	[ -n "${ACTIVE[$((index + 1))]:-}" ] || continue
 	start_vehicle "$index" $((UAS_BASE + index + 1)) "${FLEET[$index]}"
 done

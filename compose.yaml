@@ -178,6 +178,7 @@ x-onboard-env: &onboard-env
   UAS_BASE: ${UAS_BASE:-10}
   # One source of truth for the airframe of each vehicle. See modules/onboard/entrypoint.sh.
   UAS_FLEET: ${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2}
+  UAS_ACTIVE: ${UAS_ACTIVE:-}
   # The same list the simulator renders with. cam_info needs the calibration of
   # the camera that really produced the picture, and a simulated camera's is its
   # field of view. See modules/onboard/sim_calibration.py.
@@ -390,6 +391,7 @@ services:
       # The fields of view are degrees and belong to the vehicle: uas13 and uas14
       # are both v2 and carry different lenses. See .env.example.
       UAS_FLEET: ${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2}
+      UAS_ACTIVE: ${UAS_ACTIVE:-}
       # The first simulated vehicle is UAS_BASE + 1. Every entry point derives
       # its identifiers from it, so the host and the container have to read the
       # same number: scripts/fleet.sh holds the same default.

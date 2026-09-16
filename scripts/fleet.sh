@@ -70,7 +70,36 @@ SIMNET_PREFIX=${SIMNET_PREFIX:-10.200.142}
 # other. modules/offboard/entrypoint.sh derives the same number.
 GROUND_DOMAIN=${GROUND_DOMAIN:-$((60 + UAS_BASE))}
 
-fleet_numbers() { seq "$FIRST_UAS" "$LAST_UAS"; }
+# UAS_ACTIVE names one-based slots in UAS_FLEET, not vehicle numbers.  Empty
+# means every configured slot. Keep this parsing here: compose profile
+# generation, simulator spawning, offboard launch and state facts must agree
+# on the same sparse fleet without duplicating the mapping.
+fleet_all_numbers() { seq "$FIRST_UAS" "$LAST_UAS"; }
+active_slots=()
+if [ -n "${UAS_ACTIVE:-}" ]; then
+	for slot in ${UAS_ACTIVE//,/ }; do
+		case "$slot" in ''|*[!0-9]*)
+			printf 'UAS_ACTIVE entry %s is not a fleet slot (use 1,3,4).\n' "$slot" >&2
+			return 1 2>/dev/null || exit 1 ;;
+		esac
+		if [ "$slot" -lt 1 ] || [ "$slot" -gt "$UAS_COUNT" ]; then
+			printf 'UAS_ACTIVE slot %s is outside UAS_FLEET (1-%s).\n' "$slot" "$UAS_COUNT" >&2
+			return 1 2>/dev/null || exit 1
+		fi
+		case " ${active_slots[*]} " in *" $slot "*)
+			printf 'UAS_ACTIVE names slot %s more than once.\n' "$slot" >&2
+			return 1 2>/dev/null || exit 1 ;;
+		esac
+		active_slots+=("$slot")
+	done
+else
+	for slot in $(seq 1 "$UAS_COUNT"); do active_slots+=("$slot"); done
+fi
+fleet_numbers() {
+	local slot
+	for slot in "${active_slots[@]}"; do echo "$((UAS_BASE + slot))"; done
+}
+active_slots_csv() { (IFS=,; echo "${active_slots[*]}"); }
 
 # The airframe of one vehicle, and what it serves. The mark decides the stream
 # names: a v3 carries a gimbal camera and a down camera, a v2 carries the gimbal

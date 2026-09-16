@@ -31,6 +31,7 @@
 set -eu
 
 UAS_FLEET=${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2}
+UAS_ACTIVE=${UAS_ACTIVE:-}
 QGC_PORT=${QGC_PORT:-14401}
 # The same port the MAVROS on the aircraft binds. The launch file binds the
 # other end of this: 5g_drone/launch/offboard.launch.py.
@@ -41,6 +42,7 @@ COUNT=0
 for airframe in ${UAS_FLEET}; do
 	COUNT=$((COUNT + 1))
 done
+if [ -z "$UAS_ACTIVE" ]; then UAS_ACTIVE=$(seq -s, 1 "$COUNT"); fi
 
 if [ "$COUNT" -lt 1 ] || [ "$COUNT" -gt 9 ]; then
 	echo "UAS_FLEET has $COUNT vehicles. The simulator numbers them 11 to 19." >&2
@@ -61,9 +63,10 @@ cat > "$CONF" <<-EOF
 	Port = ${QGC_PORT}
 EOF
 
-N=${UAS_BASE:-10}
-N=$((N + 1))
-while [ "$N" -le "$((${UAS_BASE:-10} + COUNT))" ]; do
+for SLOT in ${UAS_ACTIVE//,/ }; do
+	case "$SLOT" in ''|*[!0-9]*) echo "UAS_ACTIVE entry '$SLOT' is not a fleet slot." >&2; exit 1;; esac
+	[ "$SLOT" -ge 1 ] && [ "$SLOT" -le "$COUNT" ] || { echo "UAS_ACTIVE slot '$SLOT' is outside UAS_FLEET (1-$COUNT)." >&2; exit 1; }
+	N=$((${UAS_BASE:-10} + SLOT))
 	cat >> "$CONF" <<-EOF
 
 		# uas${N}: in from the vehicle router, out to the MAVROS for it.
@@ -79,7 +82,6 @@ while [ "$N" -le "$((${UAS_BASE:-10} + COUNT))" ]; do
 		Port = ${MAVROS_PORT}
 		AllowSrcSysIn = ${N},255
 	EOF
-	N=$((N + 1))
 done
 
 echo "=== mavlink-router config, ground station ==="

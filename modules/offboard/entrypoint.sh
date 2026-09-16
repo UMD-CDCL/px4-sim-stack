@@ -11,8 +11,8 @@ set -euo pipefail
 
 UAS_FLEET=${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2}
 # Keep the fleet identity intact even when only part of it is airborne.  The
-# number here is the real ROS/MAVLink number (for example "3"), not its
-# position in UAS_FLEET.  An empty value deliberately means the whole fleet.
+# number here is a one-based slot in UAS_FLEET (for example "3"), not a
+# contiguous vehicle number. An empty value deliberately means the whole fleet.
 UAS_ACTIVE=${UAS_ACTIVE:-}
 # The dash form keeps an empty value empty: SCENE= draws no terrain.
 SCENE=${SCENE-lorton}
@@ -25,11 +25,11 @@ index=0
 declare -A requested=()
 for number in ${UAS_ACTIVE//,/ }; do
 	if [[ ! "$number" =~ ^[0-9]+$ ]]; then
-		echo "UAS_ACTIVE entry '$number' is not a UAS number. Use a space-separated list such as: UAS_ACTIVE=3" >&2
+		echo "UAS_ACTIVE entry '$number' is not a fleet slot. Use a list such as: UAS_ACTIVE=1,3,4" >&2
 		exit 1
 	fi
 	if [[ -n "${requested[$number]:-}" ]]; then
-		echo "UAS_ACTIVE names uas$number more than once." >&2
+		echo "UAS_ACTIVE names slot $number more than once." >&2
 		exit 1
 	fi
 	requested[$number]=pending
@@ -48,11 +48,12 @@ for airframe in ${UAS_FLEET}; do
 	# station namespaces match the vehicles. Without the offset this launched
 	# /uas1 to /uas4 while the fleet published /uas11 to /uas14, and the two
 	# sides simply never met.
-	number=$((UAS_BASE + index))
-	if [ ${#requested[@]} -eq 0 ] || [[ -n "${requested[$number]:-}" ]]; then
+	slot=$index
+	number=$((UAS_BASE + slot))
+	if [ ${#requested[@]} -eq 0 ] || [[ -n "${requested[$slot]:-}" ]]; then
 		numbers="${numbers},${number}"
 		models="${models},${model}"
-		requested[$number]=found
+		requested[$slot]=found
 	fi
 done
 
@@ -63,7 +64,7 @@ fi
 
 for number in "${!requested[@]}"; do
 	if [ "${requested[$number]}" != found ]; then
-		echo "UAS_ACTIVE names uas$number, but UAS_FLEET covers uas$((UAS_BASE + 1)) through uas$((UAS_BASE + index))." >&2
+		echo "UAS_ACTIVE slot $number is outside UAS_FLEET (1-$index)." >&2
 		exit 1
 	fi
 done

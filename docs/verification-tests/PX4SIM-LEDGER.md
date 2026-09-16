@@ -18,7 +18,7 @@ with date, commit, Git status, and evidence; this inventory defaults to
 | `CURRENT` | Start/up/core lifecycle aliases | `px4sim` command dispatch | Aliases select intended profiles |
 | `CURRENT` | Stop/down/clean/nuke lifecycle | `px4sim`, cleanup scripts | Teardown removes owned resources safely |
 | `CURRENT` | Status and fleet facts | `px4sim status`, `scripts/fleet.sh` | Addresses, ports, models, streams are truthful |
-| `MISSING` | Dynamic fleet add/remove easily, including non monotonic (ie 1 3 4), should be keyed off the single source used in .env | `px4sim fleet`, `scripts/fleet.sh` | Fleet edits persist and recreate correct services |
+| `TESTED` | Dynamic fleet selection, including non-monotonic active slots (for example 1,3,4), keyed from the single source in `.env` | `UAS_ACTIVE`, `px4sim fleet`, `scripts/fleet.sh`, simulator/offboard/router entrypoints | Code-tested 2026-09-16 at the current checkpoint: slots preserve `uas11`, `uas13`, `uas14` and model mapping; invalid/duplicate slots reject. Live sparse launch remains to be exercised. Compose retains its declared service ceiling. |
 | `CURRENT` | Fleet numbering/sysid/domain allocation | `scripts/fleet.sh`, `compose.yaml` | UAS 11-19 remain collision-free |
 | `MISSING` | Scene/origin/scenario selection in `px4sim ui`; choose valid combinations, with scenarios constrained to parent scenes so the scenario determines scene, scenario, and origin | `.env`, `scripts/origin-env.sh`, scenegen | Selected scene and origin reach sim/runtime |
 | `CURRENT` | World/scenario generation | `modules/scenegen/*.py` | World, models, casualties, terrain are reproducible |
