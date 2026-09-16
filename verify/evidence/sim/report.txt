@@ -19,20 +19,23 @@ manifest=/home/user/px4-sim-stack/verify/evidence/sim/manifest.txt
   [32mok  [0mthe narrow framing publishes a calibration
   [32mok  [0mcasualties localize onto the terrain: 3 of them
   [32mok  [0ma click in region of interest mode holds a place
-  [32mok  [0mthe raw ROI coordinate is accepted
-  [32mok  [0mthe raw ROI topic holds the requested coordinate
-  [32mok  [0mthe gimbal holds the raw ROI coordinate as the aircraft moves
+  [31mFAIL[0m the raw ROI coordinate is accepted
+       [2mgave up after 15s[0m
+  [31mFAIL[0m the raw ROI topic holds the requested coordinate
+       [2mraw ROI 38.9869000,-76.9426000,39.9[0m
+  [31mFAIL[0m the gimbal holds the raw ROI coordinate as the aircraft moves
   [32mok  [0mthe overlay is drawn about ten times a second
   [32mok  [0mjudged frames publish image annotations
-       [2mverdicts 16, annotations 18 (including unjudged boxes), marks 77 in 8s[0m
+       [2mverdicts 24, annotations 24 (including unjudged boxes), marks 76 in 8s[0m
   [32mok  [0mthe marks come back when the camera does
   [32mok  [0ma capture asked for from the ground reaches the vehicle
-       [2mreceived=1, added_to_mosaic=1, dropped=0[0m
+       [2mreceived=2, added_to_mosaic=2, dropped=0[0m
   [32mok  [0mthe map is drawn into the terrain, one surface
-       [2mafter .75s[0m
-       [2mthe vehicle's map over 0.0% of it (138x106 px[0m
-  [32mok  [0ma survey of the marker recovers where it stands
-       [2mfiducial -> uas11_home_position	-6.03	9.04	-4.38 expected	-6.00	9.00[0m
+       [2mafter 1.00s[0m
+       [2mthe vehicle's map over 0.0% of it (509x1309 px[0m
+  [31mFAIL[0m a survey of the marker recovers where it stands
+       [2mwant True, got False[0m
+       [2mfiducial -> uas11_home_position	-0.29	0.69	0.52 expected	-6.00	9.00[0m
 
 [1m== captures ==[0m
        [2mskipped. VERIFY_FULL=1 includes it[0m
@@ -44,7 +47,7 @@ manifest=/home/user/px4-sim-stack/verify/evidence/sim/manifest.txt
   [32mok  [0mthe Image panel's live view carries frames
   [32mok  [0mthe live view is calibrated, so the boxes land on it
   [32mok  [0mthe satellite map is drawn north up over the terrain
-       [2mvertices	16641 bytes	1990232 height	+5.1	expected	+4.2 relief	31.9	31.9 image	yes span	600	600	600 texture	north v 0.00	south v 1.00	east u 1.00	west u 0.00 roo[0m
+       [2mvertices	16641 bytes	1990320 height	+5.1	expected	+4.2 relief	31.9	31.9 image	yes span	600	600	600 texture	north v 0.00	south v 1.00	east u 1.00	west u 0.00 roo[0m
   [32mok  [0mevery known target has a 2 m outline in the color of its verdict
        [2mcasualty_14	#9aa0a6	2.01 casualty_15	#9aa0a6	2.01 casualty_16	#9aa0a6	2.01 [0m
   [32mok  [0mevery pin on true_positives says its verdict, what it touched and its nearest target
@@ -59,4 +62,4 @@ manifest=/home/user/px4-sim-stack/verify/evidence/sim/manifest.txt
   [32mok  [0mscoring plot metric detection_precision reaches Foxglove
   [32mok  [0mscoring plot metric position_error reaches Foxglove
 
-[1m40 passed, 0 failed[0m
+[1m36 passed, 4 failed[0m
