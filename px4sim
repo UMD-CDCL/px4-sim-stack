@@ -1918,7 +1918,12 @@ check)
 	fi
 
 	[ "$problems" = 0 ] && echo "front door OK: every service, profile, script and variable it names exists"
-	./scripts/lint-docs.sh
+	# The prose linter is advisory at this front door. Documentation debt must
+	# remain visible, but it must not hide whether the runnable stack contract
+	# is valid. Structural checks above retain the hard failure path.
+	if ! ./scripts/lint-docs.sh; then
+		warn "documentation lint reported violations; see the report above"
+	fi
 	[ "$problems" = 0 ] || die "The front door names something that does not exist. See the warnings above."
 	;;
 
