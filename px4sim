@@ -1623,8 +1623,14 @@ capture)
 	say "asking uas$n for a $kind capture, through $reader"
 	docker exec -e ROS_DOMAIN_ID="$(reader_domain "$reader" "$n")" "$container" bash -lc '
 		. /usr/local/bin/ros-env.sh
-		exec timeout 10 ros2 topic pub --once -w 1 --qos-durability transient_local \
-			"$1" std_msgs/msg/Bool "{data: true}"' \
+		for attempt in 1 2 3; do
+			if timeout 10 ros2 topic pub --once -w 1 --qos-durability transient_local \
+				"$1" std_msgs/msg/Bool "{data: true}"; then
+				exit 0
+			fi
+			sleep 1
+		done
+		exit 1' \
 		_ "/uas$n/${kind}_capture_cmd" >/dev/null \
 		&& echo "  asked for $kind on /uas$n/${kind}_capture_cmd" \
 		|| die "nothing accepted the $kind capture command"
