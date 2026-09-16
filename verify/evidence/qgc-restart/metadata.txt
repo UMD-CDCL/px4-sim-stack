@@ -1,6 +1,11 @@
 stage=qgc-restart
 mode=live
-started_utc=2026-09-16T04:12:54Z
+started_utc=2026-09-16T06:17:30Z
 repo=/home/user/px4-sim-stack
-commit=f2bed82d23c0bdd665e64ff3c0502b3d0f01fafd
+commit=b23aa379700d52f4423fba2774463444309a527e
 branch=feature/px4sim-baseline-implementation
+git_state=dirty
+git_status= M verify/evidence/qgc-restart/metadata.txt
+?? verify/evidence/flight-debug/
+?? verify/evidence/flight/
+?? verify/evidence/survey/
