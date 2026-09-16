@@ -3,8 +3,8 @@
   "slug": "px4sim-feature-implementation-and-staged-verification",
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
-  "current_slice": "uas-state-inspection-partial",
-  "last_verified": "2026-09-16: root commit be3ad45; complete VERIFY_FULL sim gate 39/0 remains green. Live px4sim state output reports link health, MAVLink message rate, system IDs, position, altitude, heading, gimbal attitude, GPS fix, and satellites; stream readiness/bitrate and GPU encoder readings are also available in the state payload. Compact state still lacks dedicated detections and mission-phase fields; those remain implementation work. Sparse three-vehicle preview media remains resource-limited and open.",
+  "current_slice": "uas-state-mission-phase",
+  "last_verified": "2026-09-16: root commit cefc993; complete VERIFY_FULL sim gate 39/0 remains green. Live px4sim state output reports link health, MAVLink message rate, system IDs, position, altitude, heading, gimbal attitude, GPS fix, satellites, and explicit mission_phase from the heartbeat; stream readiness/bitrate and GPU encoder readings are also available. Dedicated detections remain absent from the compact state payload. Sparse three-vehicle preview media remains resource-limited and open.",
   "approval": {
     "required": null,
     "granted": null,
