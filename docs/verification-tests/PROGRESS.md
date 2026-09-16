@@ -32,7 +32,8 @@ intentionally excluded from commits. The next implementation item is paused:
 live-test the RTSP preflight deadline fix after rebuilding the onboard image.
 The cache-preserving rebuild and live startup passed (`rgb11 ready after 57s`,
 then `ds_node: pipelines PLAYING, services up`); deliberate deadline-expiry
-coverage remains pending. The transient RTSP source-loss observation remains
+coverage is now covered by a deterministic source-contract test, while a live
+timeout-expiration run remains pending. The transient RTSP source-loss observation remains
 documented in `SIM-TEST.md`. No deployment-only Chimera work was started.
 
 Verification is a critical-checkpoint activity, not a per-edit requirement.

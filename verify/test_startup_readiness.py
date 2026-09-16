@@ -24,6 +24,16 @@ def test_sim_entrypoint_has_bounded_direct_launch_readiness_gate():
     assert "video-router did not become ready" in text
 
 
+def test_onboard_rtsp_preflight_uses_one_elapsed_deadline():
+    text = (ROOT / "modules/onboard/entrypoint.sh").read_text()
+    assert "stream_deadline=$((stream_started + STREAM_WAIT_S))" in text
+    assert 'remaining=$((stream_deadline - now))' in text
+    assert 'probe_timeout=$((remaining < 15 ? remaining : 15))' in text
+    assert 'sleep_for=$((remaining < 5 ? remaining : 5))' in text
+    assert 'timeout "${probe_timeout}" gst-launch-1.0' in text
+    assert 'sleep "${sleep_for}"' in text
+
+
 def test_sim_layout_remains_the_single_simulation_layout_authority():
     text = (ROOT / "scripts/fleet.sh").read_text()
     assert "DEFAULT_LAYOUT=chimera_sim.json" in text
