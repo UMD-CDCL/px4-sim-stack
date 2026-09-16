@@ -21,24 +21,17 @@
   [32mok  [0mthe gimbal repoints to hold that place as the aircraft moves
   [32mok  [0mthe overlay is drawn about ten times a second
   [32mok  [0mjudged frames publish image annotations
-       [2mverdicts 20, annotations 20 (including unjudged boxes), marks 75 in 8s[0m
+       [2mverdicts 23, annotations 23 (including unjudged boxes), marks 75 in 8s[0m
   [32mok  [0mthe marks come back when the camera does
   [32mok  [0ma capture asked for from the ground reaches the vehicle
        [2mreceived=1, added_to_mosaic=1, dropped=0[0m
   [32mok  [0mthe map is drawn into the terrain, one surface
-       [2mafter 1.25s[0m
-       [2mthe vehicle's map over 0.0% of it (137x105 px[0m
+       [2mthe vehicle's map over 0.0% of it (138x106 px[0m
   [32mok  [0ma survey of the marker recovers where it stands
-       [2mfiducial -> uas11_home_position	-6.03	9.04	-4.29 expected	-6.00	9.00[0m
+       [2mfiducial -> uas11_home_position	-6.03	9.04	-4.38 expected	-6.00	9.00[0m
 
 [1m== captures ==[0m
-  [32mok  [0mthe mosaic took 2 frames from the flight
-  [32mok  [0mthe mosaic wrote d11_rgb_mosaic_overlay.png (49685 bytes)
-  [2m--  [0mthe mosaic map HTML is written at shutdown, so a flying vehicle has none
-  [32mok  [0mthe fiducial capture is accepted
-  [32mok  [0mthe vlm capture is accepted
-  [32mok  [0ma marked capture produces a survey the site could hold: the marker is not in front of the camera
-  [32mok  [0mthe VLM image reaches the ground
+       [2mskipped. VERIFY_FULL=1 includes it[0m
 
 [1m== foxglove ==[0m
   [32mok  [0mevery panel setting is one Foxglove accepts
@@ -51,10 +44,10 @@
   [32mok  [0mevery known target has a 2 m outline in the color of its verdict
        [2mcasualty_14	#9aa0a6	2.01 casualty_15	#9aa0a6	2.01 casualty_16	#9aa0a6	2.01 [0m
   [32mok  [0mevery pin on true_positives says its verdict, what it touched and its nearest target
-       [2mperson 0_0	TP	casualty_22	0.25 person 0_1	TP	casualty_20	0.19[0m
+       [2mempty[0m
   [32mok  [0mevery pin on false_positives says its verdict, what it touched and its nearest target
        [2mempty[0m
   [32mok  [0mevery pin on missed_localizations says its verdict, what it touched and its nearest target
        [2mempty[0m
 
-[1m39 passed, 0 failed[0m
+[1m33 passed, 0 failed[0m

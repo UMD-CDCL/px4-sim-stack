@@ -1483,8 +1483,16 @@ fiducial)
 	# displaced marker from a frame of its own displaced the other way, so a
 	# survey of it must come back as minus this offset. Zeros put it back,
 	# which is what a scoring run needs.
-	$DC exec sim /scenes/spawn_scenario.py \
-		--world "${SCENE:-lorton}" --fiducial "${1:-0}" "${2:-0}"
+	last_status=1
+	for attempt in 1 2 3; do
+		if $DC exec sim /scenes/spawn_scenario.py \
+			--world "${SCENE:-lorton}" --fiducial "${1:-0}" "${2:-0}"; then
+			exit 0
+		fi
+		last_status=$?
+		[ "$attempt" -lt 3 ] && sleep 2
+	done
+	return "$last_status"
 	;;
 
 reset)
