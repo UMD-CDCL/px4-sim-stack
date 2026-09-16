@@ -65,6 +65,10 @@ class TuiHelpers(unittest.TestCase):
         from scripts.tui import Rows
         rows = Rows({"detections": [{"number": 11, "state": "live", "boxes": 4}]})
         self.assertEqual(rows.detections[11]["boxes"], 4)
+
+    def test_detection_probe_timeout_stays_below_watch_period(self):
+        from scripts import state
+        self.assertLess(state.DETECTIONS_TIMEOUT_S, state.WATCH_PERIOD_S)
         for label in ("check the front door and the docs", "check the host",
                       "where the Foxglove layout lives"):
             action = next(action for action in ACTIONS if action.label == label)

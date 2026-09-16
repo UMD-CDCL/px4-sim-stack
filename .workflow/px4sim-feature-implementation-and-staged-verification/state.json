@@ -3,8 +3,8 @@
   "slug": "px4sim-feature-implementation-and-staged-verification",
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
-  "current_slice": "compact-detection-state-and-cache-boundary",
-  "last_verified": "2026-09-16: compact state remains live from root commit a09c669; focused UI/state checks passed 9/9. Offline cache matrix passed using the local Docker builder: unchanged build 1.9s, isolated package edits rebuilt only their owning stages, restored inputs rebuilt nothing, and offline ROS type support passed. Post-change live code gate passed 20/0 including 137 5G Drone functional tests; prior live bench/GPS/full-sim gates remain green at 21/0, 21/0, and 39/0. Canonical chimera_sim.json remains the default; sparse multi-vehicle preview media remains resource-limited.",
+  "current_slice": "bounded-compact-detection-state",
+  "last_verified": "2026-09-16: compact detection state remains live from root commit a09c669; its ROS probe timeout is now 1.5s, below the two-second watch period. Live state returned explicit unavailable status after timeout, and focused UI/state checks passed 10/10. Offline cache matrix passed using the local Docker builder; post-change live code/bench/GPS/full-sim gates remain green at 20/0, 21/0, 21/0, and 39/0. Canonical chimera_sim.json remains the default; sparse multi-vehicle preview media remains resource-limited.",
   "approval": {
     "required": null,
     "granted": null,
