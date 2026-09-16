@@ -14,7 +14,7 @@ repositories changed for this work remain on and pushed from
 | Code | 21/0 live | `verify/evidence/code/` |
 | Bench | 26/0 live | `verify/evidence/bench/` |
 | GPS | 21/0 live | `verify/evidence/gps/` |
-| Sim | 40/0 live | `verify/evidence/sim/` |
+| Sim | 39/2 live | `verify/evidence/sim/` |
 
 The earlier incomplete bench retry is retained in git history as a diagnostic
 checkpoint. The current rebuilt-image bench result supersedes it: **26/0**.
@@ -97,10 +97,12 @@ The ROS base Dockerfile now accepts explicit `DEPS_IMAGE` and
 This permits a prepared machine to reuse local-registry parents while keeping
 the normal defaults unchanged; the tested build used `localhost:5000`.
 
-The full sim stage completed **40 passed, 0 failed** on 2026-09-16 at
-17:34:42Z. It verified vehicle telemetry, flight controls, gimbal and zoom,
-terrain localization, raw ROI hold, overlays, capture and mosaic, fiducial
-survey, Foxglove data, and all five scoring metrics.
+The prior full sim stage completed **40 passed, 0 failed** on 2026-09-16 at
+17:34:42Z. The current rebuilt-image sim stage completed **39 passed, 2
+failed** at 18:50:05Z: narrow framing camera-info was silent and returning to
+mid framing did not complete. All other flight, localization, ROI, capture,
+survey, Foxglove, and scoring checks passed. The narrow-zoom regression is the
+next implementation target; no current sim pass is claimed.
 
 The recording slice is currently `PARTIAL`: `./px4sim record start|stop|status`
 now resolves the canonical ground container, persists output under
