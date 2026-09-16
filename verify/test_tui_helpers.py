@@ -1,6 +1,7 @@
 import unittest
 
 from scripts.tui import Action, complete_text, wrap_output
+from scripts.state import service_lifecycle
 
 
 class TuiHelpers(unittest.TestCase):
@@ -22,6 +23,15 @@ class TuiHelpers(unittest.TestCase):
         action = Action("stack", "", "stop the running command",
                         ("__cancel_running__",))
         self.assertEqual(action.command, ("__cancel_running__",))
+
+    def test_service_lifecycle_distinguishes_startup_and_failure(self):
+        self.assertEqual(service_lifecycle({"state": "absent"}), "not_started")
+        self.assertEqual(service_lifecycle({"state": "running", "health": "starting"}),
+                         "starting")
+        self.assertEqual(service_lifecycle({"state": "running", "health": "unhealthy"}),
+                         "failed")
+        self.assertEqual(service_lifecycle({"state": "exited", "exit_code": 0}),
+                         "stopped")
 
 
 if __name__ == "__main__":

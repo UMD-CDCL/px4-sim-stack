@@ -159,8 +159,26 @@ def service_rows(context: dict, found: dict[str, dict], error: str) -> list[dict
                                "state": "unknown" if error else "absent",
                                "status": "" if error else "not created"})
         row["wanted"] = name in expected
+        row["lifecycle"] = service_lifecycle(row, error)
         rows.append(row)
     return rows
+
+
+def service_lifecycle(row: dict, error: str = "") -> str:
+    """Normalize engine state into the lifecycle vocabulary used by UIs."""
+    if error:
+        return "unknown"
+    state = str(row.get("state", "")).lower()
+    health = str(row.get("health", "")).lower()
+    if state in ("absent", "created", "paused"):
+        return "not_started" if state == "absent" else "starting"
+    if state in ("restarting", "running") and health in ("starting", "unhealthy"):
+        return "starting" if health == "starting" else "failed"
+    if state == "running":
+        return "running"
+    if state == "exited":
+        return "stopped" if int(row.get("exit_code", 0) or 0) == 0 else "failed"
+    return "unknown"
 
 
 def graphics_card() -> dict:

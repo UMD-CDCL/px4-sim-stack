@@ -35,4 +35,7 @@ logs showed normal initialization and no second-instance error.
 
 The same code packet also covers the TUI stack-menu cancellation action, which
 uses the existing process-group cleanup path; the focused helper packet is
-four tests and the full code gate remains **19 passed, 0 failed**.
+five tests and the full code gate remains **19 passed, 0 failed**. Service
+rows now also expose one normalized `lifecycle` value (`not_started`,
+`starting`, `running`, `failed`, `stopped`, or `unknown`) so px4sim UI and
+other front-door consumers do not independently infer initialization state.

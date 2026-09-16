@@ -411,12 +411,19 @@ def kbits_words(kbits: float | None) -> str:
 
 
 def service_words(row: dict) -> tuple[str, str]:
+    lifecycle = row.get("lifecycle", "")
     state = row.get("state", "")
     health = str(row.get("health", "")).lower()
     status = row.get("status") or state
     # A running process can still be unusable. Compose reports the healthcheck
     # separately, so keep that signal visible instead of calling every running
     # container healthy.
+    if lifecycle == "failed":
+        return f"failed: {status}", "bad"
+    if lifecycle == "starting":
+        return f"starting: {status}", "watch"
+    if lifecycle == "stopped":
+        return f"stopped ({row.get('exit_code', 0)})", "faint"
     if state == "running" and health in ("unhealthy", "starting"):
         return f"{health}: {status}", "bad" if health == "unhealthy" else "watch"
     if state == "running":
