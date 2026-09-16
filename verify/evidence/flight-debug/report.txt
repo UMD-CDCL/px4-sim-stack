@@ -1,0 +1,27 @@
+
+[1m== flight ==[0m
+       [2muas11 ready after 10s[0m
+  [32mok  [0mthe gimbal points where it is told
+  [32mok  [0ma click on the boresight moves nothing
+  [32mok  [0man off-boresight click slews by the angle the lens says
+  [32mok  [0ma sideways click turns the camera by the angle the lens says
+  [32mok  [0ma sideways click spends its move on yaw, not on pitch
+  [32mok  [0mthe wide framing publishes a calibration
+  [32mok  [0mthe mid framing publishes a calibration
+  [32mok  [0mthe narrow framing publishes a calibration
+  [32mok  [0mcasualties localize onto the terrain: 3 of them
+  [32mok  [0ma click in region of interest mode holds a place
+  [32mok  [0mthe gimbal repoints to hold that place as the aircraft moves
+  [32mok  [0mthe overlay is drawn about ten times a second
+  [32mok  [0mthe boxes are published with the verdicts that judge them
+       [2mverdicts 22, boxes 22, marks 76 in 8s[0m
+  [32mok  [0mthe marks come back when the camera does
+  [32mok  [0ma capture asked for from the ground reaches the vehicle
+       [2mreceived=1, added_to_mosaic=1, dropped=0[0m
+  [32mok  [0mthe map is drawn into the terrain, one surface
+       [2mafter .50s[0m
+       [2mthe vehicle's map over 0.0% of it (137x106 px[0m
+  [31mFAIL[0m a survey of the marker recovers where it stands
+       [2mthe marker is not in front of the camera[0m
+
+[1m16 passed, 1 failed[0m

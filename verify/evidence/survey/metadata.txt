@@ -1,0 +1,14 @@
+stage=survey
+mode=live
+started_utc=2026-09-15T20:53:13Z
+repo=/home/user/px4-sim-stack
+commit=8c5a693f6edfcfb3d4a724bd570bf7f9fbbda451
+branch=feature/px4sim-baseline-implementation
+git_state=dirty
+git_status= M verify/evidence/bench/metadata.txt
+git_status_continued= M verify/evidence/bench/report.txt
+git_status_continued= M verify/evidence/sim/metadata.txt
+git_status_continued= M verify/evidence/sim/report.txt
+git_status_continued= M verify/evidence/sim/result.txt
+git_status_continued=?? verify/evidence/survey/
+selected_stages=vehicle flight

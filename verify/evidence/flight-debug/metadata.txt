@@ -1,0 +1,15 @@
+stage=flight-debug
+mode=live
+started_utc=2026-09-15T22:42:38Z
+repo=/home/user/px4-sim-stack
+commit=445a76c9facb9e392dda2ba5f2690c5af45cd240
+branch=feature/px4sim-baseline-implementation
+git_state=dirty
+git_status= M verify/evidence/bench/metadata.txt
+git_status_continued= M verify/evidence/bench/report.txt
+git_status_continued= M verify/evidence/sim/metadata.txt
+git_status_continued= M verify/evidence/sim/report.txt
+git_status_continued= M verify/evidence/sim/result.txt
+git_status_continued=?? verify/evidence/flight-debug/
+git_status_continued=?? verify/evidence/survey/
+selected_stages=flight
