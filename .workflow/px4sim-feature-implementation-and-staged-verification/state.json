@@ -3,8 +3,8 @@
   "slug": "px4sim-feature-implementation-and-staged-verification",
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
-  "current_slice": "capture-overlay-path-fix",
-  "last_verified": "2026-09-16: root commit 8f32427 plus capture verifier fix; verify/stages/80-captures.sh now checks the mounted producer path /logs/d<N>_rgb_mosaic_overlay.png. Direct VERIFY_FULL capture stage passed 6/0, including 49,185-byte overlay, fiducial/VLM acceptance, survey generation, and ground VLM delivery. Full sim attempt before the path fix failed 38/1; it must be rerun through the complete harness. Sparse three-vehicle preview media remains resource-limited and open.",
+  "current_slice": "async-flight-capture-handoff",
+  "last_verified": "2026-09-16: root commit 35113ed plus full VERIFY_FULL sim rerun; overlay path assertion now passes with producer output, but the complete run terminated FAIL (3 failed): annotation count lagged verdicts, ground capture request missed its consumer, and terrain mosaic publication timed out. Direct capture stage passed 6/0 earlier. These are live async handoff failures requiring source diagnosis. Sparse three-vehicle preview media remains resource-limited and open.",
   "approval": {
     "required": null,
     "granted": null,
