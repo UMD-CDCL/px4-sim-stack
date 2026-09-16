@@ -17,7 +17,7 @@ with date, commit, Git status, and evidence; this inventory defaults to
 | `CURRENT` | Scene textures/materials | `models/scene_texture.py` | Textures resolve without broken assets |
 | `CURRENT` | Ground/scene frame construction | `models/scene_ground.py`, `models/frame_utils.py` | Frame tree is connected and stable |
 | `CURRENT` | Vehicle model visualization | `models/vehicle.py`, `vehicles/*.yaml` | Vehicle marker/model follows telemetry |
-| `PLANNED` | Chimera visual mesh | `resource/chimera_v3_viz.stl`, `models/platforms.py` | Correct platform geometry renders |
+| `CURRENT` | Chimera visual mesh | `resource/chimera_v3_viz.stl`, `models/platforms.py`, `models/vehicle.py` | Source/code-tested 2026-09-16: the platform enum and vehicle model loader select the packaged Chimera mesh; live rendered geometry remains covered by the sim Foxglove gate |
 | `CURRENT` | Gimbal frame and orientation | `models/gimbal_frame.py`, `models/frame_member.py` | Gimbal axes agree with telemetry |
 | `CURRENT` | Sensor model representation | `models/sensor.py`, `models/sensor_types.py` | Sensor frusta/labels render |
 | `CURRENT` | Down-camera representation | `sensors/*down_camera.yaml` | Camera frame and field of view are correct |
@@ -32,7 +32,7 @@ with date, commit, Git status, and evidence; this inventory defaults to
 | `CURRENT` | Frame graph/member generation | `models/graph_member.py`, `frame_member.py` | All required TF-like relationships are emitted |
 | `CURRENT` | QoS profiles for visualization | `models/qos_profiles.py` | Visualization receives sensor and reliable data |
 | `CURRENT` | Global node configuration | `resource/global_node_config.yaml` | Defaults and namespaces are applied |
-| `ORPHANED` | Site launch: exists partially, but should come from scenes like those built from px4sim genscene as the single source | `launch/launch_site.launch.py` | Site-only launch starts expected nodes |
+| `PARTIAL` | Site launch: exists, but is not yet driven by scenes built from `px4sim genscene` as the single source | `launch/launch_site.launch.py`, site YAMLs | Source-reviewed 2026-09-16: site-only launch remains a supported code path, but its scene/origin ownership still needs consolidation with px4sim before live status can be claimed |
 | `CURRENT` | Simulation launch | `launch/launch_sim.launch.py`, `vehicles/sim_vehicle.yaml` | Sim launch consumes sim topics/config |
 | `CURRENT` | Visualization launch | `launch/launch_viz.launch.py` | Viz launch starts all declared publishers |
 | `CURRENT` | Real versus simulated sensor selection | launch arguments and sensor YAMLs | Correct variant is selected by mode |
