@@ -12,9 +12,9 @@ repositories changed for this work remain on and pushed from
 | Stage | Result | Evidence |
 |---|---:|---|
 | Code | 20/0 live | `verify/evidence/code/` |
-| Bench | 21/0 live | `verify/evidence/bench/` |
+| Bench | 26/0 live | `verify/evidence/bench/` |
 | GPS | 21/0 live | `verify/evidence/gps/` |
-| Sim | 46/0 live | `verify/evidence/sim/` |
+| Sim | 40/0 live | `verify/evidence/sim/` |
 
 The previously certified bench checkpoint remains **21/0**. A later live
 retry after the onboard image refresh passed ground camera, position, status,
@@ -102,6 +102,11 @@ The ROS base Dockerfile now accepts explicit `DEPS_IMAGE` and
 `YOLO_DEPS_IMAGE` build arguments, defaulting to the existing parent names.
 This permits a prepared machine to reuse local-registry parents while keeping
 the normal defaults unchanged; the tested build used `localhost:5000`.
+
+The full sim stage completed **40 passed, 0 failed** on 2026-09-16 at
+17:34:42Z. It verified vehicle telemetry, flight controls, gimbal and zoom,
+terrain localization, raw ROI hold, overlays, capture and mosaic, fiducial
+survey, Foxglove data, and all five scoring metrics.
 
 The GPS stage completed **21 passed, 0 failed** on 2026-09-16 at 17:18:25Z.
 It recorded 203 identical localization samples across vehicle and ground
