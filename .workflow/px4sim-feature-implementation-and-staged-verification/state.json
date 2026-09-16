@@ -4,7 +4,7 @@
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
   "current_slice": "front-door-lifecycle-and-verification-hardening",
-  "last_verified": "2026-09-16: code 20/0; isolated bench 21/0; GPS 21/0; sim 33/0; px4sim check passed; QGC exactly one process; rebuilt simulator runtime; video API and rgb11/rgbl11 front door online",
+  "last_verified": "2026-09-16: code 20/0; isolated bench 21/0; GPS 21/0; sim 33/0; px4sim check passed; QGC exactly one process; rebuilt simulator runtime; video API and rgb11/rgbl11 front door online; ordinary restart green",
   "approval": {
     "required": null,
     "granted": null,
@@ -18,6 +18,6 @@
   "verification": {
     "status": "baseline_stages_passed_with_runtime_front_doors_verified",
     "checks": ["px4sim check", "python compilation", "shell syntax", "stage dry runs", "workflow validation", "git diff --check", "code 20/0", "bench 21/0", "gps 21/0", "sim 33/0", "QGC singleton"],
-    "pending": ["exercise camera streamer child recovery after an intentional child restart", "advance remaining ledger CURRENT and PLANNED features"]
+    "pending": ["fix camera streamer child recovery: forced child termination retries but exits 139 and streams stay offline", "advance remaining ledger CURRENT and PLANNED features"]
   }
 }
