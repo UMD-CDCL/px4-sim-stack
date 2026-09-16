@@ -93,10 +93,10 @@ table should be reviewed as possible `ORPHANED` features.
 | `ORPHANED` | `N` switch scene: scenario should now determine scene | Prompts for scene, writes selection, refreshes | `scene`, simulator/ground |
 | `CURRENT` | `T` switch targets: renamed to switch scenario | Prompts from available scenarios and reloads | `scenario`, simulator/ground |
 | `CURRENT` | `F` move fiducial | Prompts east/north metres or lat/lon and changes marker | `fiducial`, simulator only |
-| `ORPHANED` | `V` verification | Replace the aggregate action with selectable verification levels. Start with lower-level components and require an explicit choice before slow simulator checks | `verify` |
-| `CURRENT` | `C` code/front-door check: shouldn't have a hotkey | Runs compose/layout/doc consistency checks | `check` |
-| `CURRENT` | `D` host check: shouldn't have a hotkey | Runs host/GPU/Docker/X11/preflight checks | `doctor` |
-| `CURRENT` | `L` layout location: shouldn't have a hotkey | Prints selected Foxglove layout path and loading instructions | `layout` |
+| `TESTED (code/static)` | Verification stage selector | The stack menu now selects `code`, `bench`, `gps`, or `sim` and invokes the existing named stage through `px4sim verify`; live interactive selection remains to be exercised | `scripts/tui.py`, `verify/run.sh` |
+| `CURRENT (menu-only)` | Code/front-door check | Runs compose/layout/doc consistency checks without consuming a hotkey | `check` |
+| `CURRENT (menu-only)` | Host check | Runs host/GPU/Docker/X11/preflight checks without consuming a hotkey | `doctor` |
+| `CURRENT (menu-only)` | Layout location | Prints selected Foxglove layout path and loading instructions without consuming a hotkey | `layout` |
 | `CURRENT` | `K` PX4 console | Opens foreground PX4 shell and supports detach sequence | `console`, simulator only |
 | `CURRENT` | Ground ROS graph action | Probes ground ROS nodes/topics | `probe ground`, only with ground |
 | `CURRENT` | Ground Foxglove action | Probes ground bridge channels/services | `foxglove ground`, only with ground |

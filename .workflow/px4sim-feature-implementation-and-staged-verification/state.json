@@ -3,8 +3,8 @@
   "slug": "px4sim-feature-implementation-and-staged-verification",
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
-  "current_slice": "sparse-active-fleet-front-door-support",
-  "last_verified": "2026-09-16: root commit b23aa37 plus sparse runtime checkpoint; code 20/0 including QGC exactly one process and 5G Drone suite 137; bench 21/0; GPS 21/0; sim 33/0 including gimbal, capture, terrain map, annotations, survey recovery, and Foxglove; px4sim check passed; video API and rgb11/rgbl11 online; supervised streamer recovery green. QGC sequential restart acceptance passed twice with exactly one process and no singleton error. Sparse fleet code tests 5/5 and live service/telemetry/QGC checks pass; three-vehicle preview media is resource-limited and remains open.",
+  "current_slice": "px4sim-ui-verification-stage-selector",
+  "last_verified": "2026-09-16: root commit a08cb93; UI action table now selects code/bench/gps/sim verification stages and informational check/doctor/layout actions are menu-only. Focused UI tests 7/7, Python/shell syntax, px4sim check, and diff validation pass. Prior QGC sequential restart acceptance passed twice with exactly one process and no singleton error. Sparse three-vehicle preview media remains resource-limited and open.",
   "approval": {
     "required": null,
     "granted": null,
