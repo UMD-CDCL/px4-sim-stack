@@ -375,8 +375,9 @@ prompt without sudo.
 container on the host network, beside the native lcam and mavlink-router. MAVROS
 on domain 60 reads uas1 as connected. The air bridges carry 16 topics on domain
 99 and 2 on domain 69. `./px4sim streams` lists all three lcam mounts.
-`./px4sim layout` selects the live `chimera_real.json` front door and renders
-it for uas1. The simulation world selects `chimera_sim.json` instead.
+`./px4sim layout` selects the canonical `chimera_sim.json` front door and
+renders it for the selected UAS. An alternate layout requires the explicit
+`FOXGLOVE_LAYOUT` override.
 `./px4sim verify` checks every topic and service the selected layout uses
 against the live bridge.
 

@@ -220,11 +220,9 @@ host_rtsp_base() {
 	fi
 }
 
-if [ "$FLEET_IS_SIMULATED" = true ]; then
-	DEFAULT_LAYOUT=chimera_sim.json
-else
-	DEFAULT_LAYOUT=chimera_real.json
-fi
+# The simulated layout is the canonical operator contract across worlds.  The
+# real layout remains available only through an explicit FOXGLOVE_LAYOUT.
+DEFAULT_LAYOUT=chimera_sim.json
 LAYOUT_TEMPLATE=${FOXGLOVE_LAYOUT:-${ROS2_WS_DIR:-../ros2_ws}/src/5g_drone/config/foxglove/$DEFAULT_LAYOUT}
 LAYOUT_RENDERED=${LAYOUT_RENDERED:-logs/foxglove/chimera_uas$FIRST_UAS.json}
 # Prints the file it wrote. Prints the template, and fails, where there is none.

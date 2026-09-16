@@ -144,9 +144,10 @@ cd /home/user/px4-sim-stack
 domain 60. `./px4sim foxglove 1` reaches the vehicle's own bridge at
 `ws://10.200.142.61:8765`, because a bridge belongs to a machine.
 
-`./px4sim layout` selects `chimera_real.json` in the ground and aircraft
-worlds. The live layout owns operator interaction; the simulator keeps the
-separate `chimera_sim.json` layout and its simulation-only controls.
+`./px4sim layout` selects the canonical `chimera_sim.json` operator contract
+in every world. `chimera_real.json` remains available only as an explicit
+compatibility override through `FOXGLOVE_LAYOUT`; it is not an alternate
+source of operator behavior.
 
 **To try this world on a simulator laptop**, copy `.env` first, flip the six
 keys, and put the file back at the end:
