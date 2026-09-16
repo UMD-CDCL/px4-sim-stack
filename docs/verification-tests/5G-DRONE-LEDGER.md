@@ -58,6 +58,14 @@ with date, commit, Git status, and evidence; this inventory defaults to
 | `CURRENT` | Calibration and model asset fetch | calibration files, model scripts | Deployment has deterministic required assets |
 | `CURRENT` | Parameter precedence | common/container/sim/vehicle YAMLs | Last-wins behavior is intentional and tested |
 
+## Tested checkpoint
+
+On 2026-09-16, 5G Drone commit `a03f9b1` on `feature/ubuntu24-compat`
+passed **133 functional tests, 1 skipped** in the onboard `7.1` runtime after
+sourcing its MAVROS overlay. Two legacy style-only tests were excluded because
+the suite reports pre-existing lint/docstring violations; behavior and package
+tests were exercised.
+
 ## Future additions to consider
 
 | Intent | Planned feature | Design concern |
