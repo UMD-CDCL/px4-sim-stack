@@ -66,7 +66,7 @@ camera contract is restored.
 
 ## Source checkpoints
 
-- Root: `ebb0429` (source checkpoint for this test run)
+- Root: `c9d6fa6` (source checkpoint for this test run)
 - 5G Drone: `496a825` on `feature/ubuntu24-compat`
 - MAVInsight: `0fb189b` on `feature/ubuntu24-compat`
 - PX4-Autopilot: `639154f` on `feature/ubuntu24-compat`
@@ -107,6 +107,11 @@ The full sim stage completed **40 passed, 0 failed** on 2026-09-16 at
 17:34:42Z. It verified vehicle telemetry, flight controls, gimbal and zoom,
 terrain localization, raw ROI hold, overlays, capture and mosaic, fiducial
 survey, Foxglove data, and all five scoring metrics.
+
+The code stage completed **20 passed, 0 failed** on 2026-09-16 at 17:35:44Z.
+It verified airframe expansion, service/address/MAVLink contracts, the
+px4sim UI helper, QGC singleton behavior, 43 terrain/frame checks, 137 5G
+Drone functional checks, and four map-axis/texture checks.
 
 The GPS stage completed **21 passed, 0 failed** on 2026-09-16 at 17:18:25Z.
 It recorded 203 identical localization samples across vehicle and ground
