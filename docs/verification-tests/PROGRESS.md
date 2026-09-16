@@ -34,10 +34,16 @@ commits. The current machine exposes a configuration mismatch: `.env` points
 to `/home/user/deepstream-work/models`, which has no manifest, while the
 canonical source manifest is present; the manifest now reports both facts.
 
+The 5G Drone scorer now publishes a zero `position_error` for a valid frame
+with no localization errors. Runtime certification is pending a clean full
+sim restart: an isolated offboard recreation left `/uas11/home_position/fix`
+without a sample, preventing ground-truth placement and making all scoring
+metrics correctly silent.
+
 ## Source checkpoints
 
 - Root: `fc3acf6` (code-stage evidence recorded at this source checkpoint)
-- 5G Drone: `0bb58e8` on `feature/ubuntu24-compat`
+- 5G Drone: `8296fe0` on `feature/ubuntu24-compat`
 - MAVInsight: `0fb189b` on `feature/ubuntu24-compat`
 - PX4-Autopilot: `639154f` on `feature/ubuntu24-compat`
 
