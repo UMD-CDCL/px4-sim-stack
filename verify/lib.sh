@@ -148,7 +148,8 @@ wait_mosaic_received() {
 	local deadline=${1:-30} before=${2:-0} window=${3:-20m} uas=${4:?uas number required}
 	local waited=0
 	while ! mosaic_received_since "$before" "$window" "$uas"; do
-		[ "$waited" -ge "$deadline" ] && return 1
+		awk -v waited="$waited" -v deadline="$deadline" \
+			'BEGIN { exit !(waited >= deadline) }' && return 1
 		sleep "$POLL_PERIOD_S"
 		waited=$(echo "$waited + $POLL_PERIOD_S" | bc)
 	done
