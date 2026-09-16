@@ -62,4 +62,16 @@ else
 	note "$(printf '%s' "$output" | tail -5 | tr '\n' ' ')"
 fi
 
+# QGroundControl owns a process-wide singleton lock. A second GUI instance is
+# not an independent service; it is a launch error that can leave a container
+# looking Up while the operator's original window owns the session.
+qgc_id=$(docker compose ps -q qgc 2>/dev/null)
+if [ -n "$qgc_id" ] && [ "$(docker inspect -f '{{.State.Status}}' "$qgc_id" 2>/dev/null)" = running ]; then
+	qgc_processes=$(docker exec "$qgc_id" sh -lc \
+		"pgrep -c -f '^/opt/qgc/usr/bin/QGroundControl$'" 2>/dev/null || printf 0)
+	expect_eq "QGroundControl has one active process" 1 "$qgc_processes"
+else
+	skip "QGroundControl is not running, so singleton process count is unavailable"
+fi
+
 rm -f "$cfg"

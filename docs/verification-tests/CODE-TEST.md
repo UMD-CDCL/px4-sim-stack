@@ -40,7 +40,8 @@ rows now also expose one normalized `lifecycle` value (`not_started`,
 `starting`, `running`, `failed`, `stopped`, or `unknown`) so px4sim UI and
 other front-door consumers do not independently infer initialization state.
 
-The live code gate was rerun at `09175a5` with the prepared images and again
-returned **19 passed, 0 failed**. The simulator Dockerfile and camera
+The live code gate was rerun at `386210b` with the prepared images and again
+returned **20 passed, 0 failed**, including an automatic assertion that the
+running QGC container has exactly one QGroundControl process. The simulator Dockerfile and camera
 supervisor changes are source-checked here; their rebuilt-image recovery test
 remains pending the BuildKit apt/DNS issue recorded in the bench ledger.

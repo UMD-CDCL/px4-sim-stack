@@ -18,10 +18,11 @@
   [32mok  [0muas11 router passes only system 11 and 255
   [32mok  [0muas11 router serves the companion on 14402
   [32mok  [0mpx4sim UI helper behavior
+  [32mok  [0mQGroundControl has one active process
 
 [1m== units ==[0m
   [32mok  [0mterrain and ground frame: 43 passed
   [32mok  [0m5G Drone functional suite: 133 passed
   [32mok  [0mthe drawn map's axes and texture: 4 passed
 
-[1m19 passed, 0 failed[0m
+[1m20 passed, 0 failed[0m
