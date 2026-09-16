@@ -22,7 +22,7 @@
 
 [1m== units ==[0m
   [32mok  [0mterrain and ground frame: 43 passed
-  [32mok  [0m5G Drone functional suite: 133 passed
+  [32mok  [0m5G Drone functional suite: 135 passed
   [32mok  [0mthe drawn map's axes and texture: 4 passed
 
 [1m20 passed, 0 failed[0m
