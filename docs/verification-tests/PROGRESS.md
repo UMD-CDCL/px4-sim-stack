@@ -64,7 +64,7 @@ camera contract is restored.
 ## Source checkpoints
 
 - Root: `956d05f` (source checkpoint for this test run)
-- 5G Drone: `496a825` on `feature/ubuntu24-compat`
+- 5G Drone: `b269aa0` on `feature/ubuntu24-compat`
 - MAVInsight: `0fb189b` on `feature/ubuntu24-compat`
 - PX4-Autopilot: `639154f` on `feature/ubuntu24-compat`
 
@@ -132,3 +132,10 @@ SQLite bags (`named_a` and `named_b`) were started, stopping `named_a` left
 `named_b` active, and the remaining bag was then stopped cleanly. This proves
 selective lifecycle control while the MCAP and synchronized-video limitations
 remain unchanged.
+
+The 5G Drone health wiring slice was source-verified and pushed as `b269aa0`
+on `feature/ubuntu24-compat`: the gimbal heartbeat default now agrees with
+the status consumer, invalid GPS clears GPS and RTK bits, and a non-RTK fix
+clears stale RTK state. Python syntax validation passed; package pytest and
+rebuilt-image bench verification remain pending because pytest is unavailable
+on the host.
