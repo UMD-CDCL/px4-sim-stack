@@ -16,6 +16,14 @@ repositories changed for this work remain on and pushed from
 | GPS | 21/0 live | `verify/evidence/gps/` |
 | Sim | 46/0 live | `verify/evidence/sim/` |
 
+The previously certified bench checkpoint remains **21/0**. A later live
+retry after the onboard image refresh passed ground camera, position, status,
+and heading readiness, but did not complete: the simulator takeoff/reposition
+command remained stuck and was stopped after its bounded diagnostic window.
+The ground stage now waits for all three telemetry topics before probing and
+wraps both reposition attempts in a timeout; a fresh full bench checkpoint is
+still required.
+
 The sim checkpoint covers QGC singleton behavior, PX4/MAVLink readiness,
 gimbal and zoom control, raw coordinate ROI, localization, capture/mosaic,
 fiducial correction, Foxglove contracts, and all five scoring metrics.
