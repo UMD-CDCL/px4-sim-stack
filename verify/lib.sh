@@ -134,6 +134,26 @@ mosaic_added() {
 	mosaic_summary "${1:-20m}" "$2" | sed -n 's/.*added_to_mosaic=\([0-9]*\).*/\1/p'
 }
 
+# A front-door capture is asynchronous: the command is accepted before
+# DeepStream emits the frame and img_processing forwards it to mosaic. Poll
+# the received counter without adding a second verification result of its own.
+mosaic_received_since() {
+	local before=${1:-0} window=${2:-20m} uas=${3:?uas number required}
+	local now
+	now=$(mosaic_summary "$window" "$uas" | sed -n 's/received=\([0-9]*\).*/\1/p')
+	[ -n "$now" ] && [ "$now" -gt "$before" ]
+}
+
+wait_mosaic_received() {
+	local deadline=${1:-30} before=${2:-0} window=${3:-20m} uas=${4:?uas number required}
+	local waited=0
+	while ! mosaic_received_since "$before" "$window" "$uas"; do
+		[ "$waited" -ge "$deadline" ] && return 1
+		sleep "$POLL_PERIOD_S"
+		waited=$(echo "$waited + $POLL_PERIOD_S" | bc)
+	done
+}
+
 # Whether it has drawn one since the count taken before the capture. A capture
 # command returns as soon as the Bool is published, and the map has to be built,
 # published and composited after that, so a reader that looks straight away sees

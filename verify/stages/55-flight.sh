@@ -238,8 +238,12 @@ seen_before=$(mosaic_summary 30m "$lead" | sed -n 's/received=\([0-9]*\).*/\1/p'
 drew_before=$(terrain_map_draws 30m)
 added_before=$(mosaic_added 30m "$lead")
 ./px4sim capture "$lead" mosaic >/dev/null 2>&1
+received_ok=false
+if wait_mosaic_received 30 "${seen_before:-0}" 30m "$lead"; then
+	received_ok=true
+fi
 seen_after=$(mosaic_summary 30m "$lead" | sed -n 's/received=\([0-9]*\).*/\1/p')
-if [ "${seen_after:-0}" -gt "${seen_before:-0}" ]; then
+if [ "$received_ok" = true ] && [ "${seen_after:-0}" -gt "${seen_before:-0}" ]; then
 	pass "a capture asked for from the ground reaches the vehicle"
 	note "$(mosaic_summary 30m "$lead")"
 else
