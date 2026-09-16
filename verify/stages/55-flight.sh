@@ -190,13 +190,22 @@ fi
 # product feature rather than waste. It fell to the scoring rate once and the
 # marks visibly trailed the picture.
 uas gimbal "-$depression" --yaw 0 >/dev/null
-counts=$(./px4sim probe "$lead" --count 8 \
-	"/viz/uas$lead/scoring/targets" \
-	"/uas$lead/scoring/verdicts" \
-	"/viz/uas$lead/scoring/annotations" 2>/dev/null)
+counts=""
+# Verdicts and annotations are independent ROS streams. A probe can finish on
+# the one frame where the scorer has published a verdict but scoring_viz has
+# not published its corresponding annotation yet, so sample again before
+# treating that transient skew as a product failure.
+for attempt in 1 2 3; do
+    counts=$(./px4sim probe "$lead" --count 8 \
+        "/viz/uas$lead/scoring/targets" \
+        "/uas$lead/scoring/verdicts" \
+        "/viz/uas$lead/scoring/annotations" 2>/dev/null)
+    judged=$(printf '%s' "$counts" | awk -F'\t' '/^\/uas[0-9]*\/scoring\/verdicts/{ print $3 }')
+    boxes=$(printf '%s' "$counts" | awk -F'\t' '/scoring\/annotations/  { print $3 }')
+    [ "${judged:-0}" -gt 0 ] && [ "${boxes:-0}" -ge "${judged:-0}" ] && break
+    sleep 2
+done
 marks=$(printf '%s' "$counts" | awk -F'\t' '/viz.*scoring\/targets/ { print $3 }')
-judged=$(printf '%s' "$counts" | awk -F'\t' '/^\/uas[0-9]*\/scoring\/verdicts/{ print $3 }')
-boxes=$(printf '%s' "$counts" | awk -F'\t' '/scoring\/annotations/  { print $3 }')
 expect_eq "the overlay is drawn about ten times a second" True \
 	"$(python3 -c "print(${marks:-0} >= 60)")"
 
