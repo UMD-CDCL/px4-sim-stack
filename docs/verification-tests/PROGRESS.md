@@ -28,7 +28,7 @@ canonical source manifest is present; the manifest now reports both facts.
 
 ## Source checkpoints
 
-- Root: `39c1581`
+- Root: `fc3acf6` (code-stage evidence recorded at this source checkpoint)
 - 5G Drone: `0bb58e8` on `feature/ubuntu24-compat`
 - MAVInsight: `0fb189b` on `feature/ubuntu24-compat`
 - PX4-Autopilot: `639154f` on `feature/ubuntu24-compat`
