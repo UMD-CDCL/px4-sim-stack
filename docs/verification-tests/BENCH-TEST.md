@@ -119,3 +119,13 @@ the shared scene placement or survey correction behavior.
 On 2026-09-15, the restarted stack at root commit `5d6a275` completed the live
 bench packet with **21 passed, 0 failed**. Evidence is in
 `verify/evidence/bench/`; its metadata records the tested worktree state.
+
+Follow-up diagnostic on 2026-09-16: a fresh bench run reached **19 passed, 2
+failed**. The image path was advertised but empty because `gz_video_streamer`
+had exited while the simulator container remained up; vehicle localization
+also had no samples. Commit `ca1c1c1` adds a camera-stream supervisor that
+retries a failed streamer. The simulator image rebuild and therefore runtime
+verification of that supervisor are pending: BuildKit cannot currently resolve
+Ubuntu/Debian apt archives, even though ordinary containers can resolve them.
+This is diagnostic evidence only and does not replace the green `5d6a275`
+checkpoint.
