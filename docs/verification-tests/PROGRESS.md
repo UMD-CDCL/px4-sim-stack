@@ -144,6 +144,13 @@ survey-position assertion (`fiducial -> uas11_home_position -0.29,0.69,0.52`
 versus expected `-6.00,9.00`); no code change is being claimed until those
 paths are reconciled against the current source and scenario.
 
+Source inspection found the raw-ROI failures were a QoS race: the verifier's
+latched publisher was paired with the gimbal's volatile subscription. The fix
+was committed and pushed to 5G Drone `feature/ubuntu24-compat` as `62c95a9`,
+rebuilt with cached root layers, and focused live verification passed after
+restart on 2026-09-16: the target was retained across discovery and exactly one
+QGC container was running. The survey-position assertion remains open.
+
 The 5G Drone ROI safety slice was implemented on `feature/ubuntu24-compat`
 as commit `db780ed`. The affected images rebuilt from local cached parents in
 about seconds of package compilation, and a restarted live stack rejected a
