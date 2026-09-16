@@ -135,7 +135,9 @@ def pitch_yaw_deg(w: float, x: float, y: float, z: float) -> tuple[float, float]
 
 def heartbeat(payload: bytes) -> dict:
     custom_mode, _type, _autopilot, base_mode, _status, _version = unpack("<IBBBBB", payload)
-    return {"mode": mode_name(custom_mode), "armed": bool(base_mode & ARMED_FLAG)}
+    phase = mode_name(custom_mode)
+    return {"mode": phase, "mission_phase": phase,
+            "armed": bool(base_mode & ARMED_FLAG)}
 
 
 def sys_status(payload: bytes) -> dict:
