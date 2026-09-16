@@ -133,9 +133,10 @@ SQLite bags (`named_a` and `named_b`) were started, stopping `named_a` left
 selective lifecycle control while the MCAP and synchronized-video limitations
 remain unchanged.
 
-The 5G Drone health wiring slice was source-verified and pushed as `b269aa0`
+The 5G Drone health wiring slice was source- and bench-verified and pushed as `b269aa0`
 on `feature/ubuntu24-compat`: the gimbal heartbeat default now agrees with
 the status consumer, invalid GPS clears GPS and RTK bits, and a non-RTK fix
-clears stale RTK state. Python syntax validation passed; package pytest and
-rebuilt-image bench verification remain pending because pytest is unavailable
-on the host.
+clears stale RTK state. Python syntax validation passed, and the rebuilt-image
+bench stage completed **26 passed, 0 failed** at 2026-09-16T18:16:33Z. Package
+pytest remains unavailable on the host; the live bench result is the runtime
+evidence for this slice.
