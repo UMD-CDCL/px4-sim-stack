@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 base=${UAS_BASE:-10}
-repo=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+repo=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
 if [ -z "${UAS_BASE+x}" ] && [ -f .env ]; then
 	base=$(sed -n 's/^UAS_BASE=//p' .env | tail -1)
 fi
