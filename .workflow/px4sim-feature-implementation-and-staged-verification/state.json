@@ -3,8 +3,8 @@
   "slug": "px4sim-feature-implementation-and-staged-verification",
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
-  "current_slice": "raw-roi-flight-checkpoint",
-  "last_verified": "2026-09-16: full staged sim completed 46/0 after bounded readiness retries. It verified vehicle telemetry, gimbal/camera behavior, raw ROI acceptance and exact target retention after movement, scoring metrics, flight annotations, mosaic, fiducial, VLM, map, and all canonical Foxglove topics/services. Manifest recorded root c245d77, 5G Drone 0bb58e8, MAVInsight 0fb189b, and PX4 feature/ubuntu24-compat commit 639154f. A recurring non-fatal raw ROI QoS warning remains visible in the report and should be investigated before hardware use. Canonical chimera_sim.json remains the default; sparse multi-vehicle preview media remains resource-limited.",
+  "current_slice": "raw-roi-qos-contract",
+  "last_verified": "2026-09-16: full staged sim completed 46/0 after bounded readiness retries, covering raw ROI acceptance and exact target retention after movement, scoring metrics, flight, captures, fiducial, VLM, map, and Foxglove. The verifier raw-ROI publisher now uses the canonical latched QoS and repeats four samples across discovery; a targeted live command test entered mode=roi with the exact coordinate and no delivery failure. Full-flight confirmation that the prior QoS warning is absent remains pending. Manifest baseline: root c245d77, 5G Drone 0bb58e8, MAVInsight 0fb189b, PX4 feature/ubuntu24-compat 639154f. Canonical chimera_sim.json remains the default; sparse multi-vehicle preview media remains resource-limited.",
   "approval": {
     "required": null,
     "granted": null,

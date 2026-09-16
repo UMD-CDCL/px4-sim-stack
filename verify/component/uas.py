@@ -195,7 +195,7 @@ class Uas(Node):
         self.click = self.create_publisher(
             PointStamped, f"{self.namespace}/camera/click", RELIABLE_QOS)
         self.raw_roi = self.create_publisher(
-            NavSatFix, f"{self.namespace}/raw_roi_point_cmd", RELIABLE_QOS)
+            NavSatFix, f"{self.namespace}/raw_roi_point_cmd", LATCHED_QOS)
         self.click_point = self.create_client(
             Trigger, f"{self.namespace}/gimbal/click_mode/point")
         self.click_off = self.create_client(
@@ -474,10 +474,14 @@ def command_gimbal(uas: Uas, args) -> int:
 
 def command_raw_roi(uas: Uas, args) -> int:
     """Hold a ground coordinate through the canonical raw-ROI topic."""
-    uas.raw_roi.publish(NavSatFix(latitude=args.latitude,
-                                  longitude=args.longitude,
-                                  altitude=args.altitude))
-    uas.pump(1.0)
+    message = NavSatFix(latitude=args.latitude,
+                        longitude=args.longitude,
+                        altitude=args.altitude)
+    # Discovery can lag the command process. Repeat briefly so the verifier
+    # tests the front door rather than whether one DDS sample won a race.
+    for _ in range(4):
+        uas.raw_roi.publish(message)
+        uas.pump(0.25)
     print(f"raw ROI {args.latitude:.7f},{args.longitude:.7f},{args.altitude:.1f}")
     return 0
 
