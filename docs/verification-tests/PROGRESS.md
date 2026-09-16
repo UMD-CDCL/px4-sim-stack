@@ -126,3 +126,9 @@ active-PID status, clean stop, and output inspection all passed. The 8-second
 `smoke6` bag contains 5,122 messages and a 23 MB SQLite database. This is
 recording-front-door evidence only; it does not promote the feature beyond
 `PARTIAL` because MCAP and synchronized video are still unavailable.
+
+Named recording selection was exercised live on 2026-09-16: two simultaneous
+SQLite bags (`named_a` and `named_b`) were started, stopping `named_a` left
+`named_b` active, and the remaining bag was then stopped cleanly. This proves
+selective lifecycle control while the MCAP and synchronized-video limitations
+remain unchanged.
