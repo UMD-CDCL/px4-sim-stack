@@ -42,6 +42,11 @@ fi
 . ./scripts/fleet.sh
 # shellcheck disable=SC1091
 . ./scripts/zoom.sh
+# Resolve the origin from the selected scene/scenario, exactly as the px4sim
+# front door does, so stages can publish coordinate-based commands without
+# duplicating values or relying on a caller's shell environment.
+eval "$(./scripts/origin-env.sh "${SCENARIO:-}" "${SCENE:-}")"
+export HOME_LAT HOME_LON HOME_ALT
 
 # What is FLYING wins over what is configured. A stage that reads .env while a
 # different world is loaded measures the wrong scene: it flies to coordinates

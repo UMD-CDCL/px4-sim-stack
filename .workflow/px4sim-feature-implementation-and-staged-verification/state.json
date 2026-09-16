@@ -4,7 +4,7 @@
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
   "current_slice": "raw-roi-front-door",
-  "last_verified": "2026-09-16: rebuilt the offboard/ros-base chain from 5G Drone commit 0bb58e8 with cached dependency layers and restarted through ./px4sim restart --no-build; all services reached running/ready and QGC remained singleton. Full staged sim then passed 44/0, including all five scoring plot metrics through the canonical Foxglove bridge, flight, capture, fiducial, VLM, map, and annotation checks. The earlier isolated Foxglove-only run remains recorded as invalid for scoring because it lacked flight/fiducial/scoring preconditions. Canonical chimera_sim.json remains the default; sparse multi-vehicle preview media remains resource-limited.",
+  "last_verified": "2026-09-16: rebuilt the offboard/ros-base chain from 5G Drone commit 0bb58e8 with cached dependency layers and restarted through ./px4sim restart --no-build; all services reached running/ready and QGC remained singleton. The raw-ROI full sim attempt reached the flight stage but exposed an origin export bug under set -u; that runner fix is now pending commit. A retry was then interrupted by an orphaned verifier child stuck in goto, so raw-ROI hold is not yet verified. Prior full staged sim passed 44/0, including all five scoring plot metrics through the canonical Foxglove bridge. The earlier isolated Foxglove-only run remains recorded as invalid for scoring because it lacked flight/fiducial/scoring preconditions. Canonical chimera_sim.json remains the default; sparse multi-vehicle preview media remains resource-limited.",
   "approval": {
     "required": null,
     "granted": null,
