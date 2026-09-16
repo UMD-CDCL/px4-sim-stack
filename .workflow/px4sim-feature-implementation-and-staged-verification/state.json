@@ -4,7 +4,7 @@
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
   "current_slice": "full-sim-capture-checkpoint",
-  "last_verified": "2026-09-16: root commit 03e69c7 plus live full VERIFY_FULL sim evidence; complete sim gate 39/0. Verified vehicle data, gimbal/lens control, detection and annotation synchronization, ROI tracking, ground capture handoff, mosaic terrain rendering, overlay export, fiducial/VLM captures, survey recovery, and Foxglove rendering. Sparse three-vehicle preview media remains resource-limited and open.",
+  "last_verified": "2026-09-16: root commit 8074c4b plus live full VERIFY_FULL sim evidence; complete sim gate 39/0. Verified vehicle data, gimbal/lens control, detection and annotation synchronization, ROI tracking, ground capture handoff, mosaic terrain rendering, overlay export, fiducial/VLM captures, survey recovery, and Foxglove rendering. Sparse three-vehicle preview media remains resource-limited and open.",
   "approval": {
     "required": null,
     "granted": null,
