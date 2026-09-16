@@ -1,14 +1,11 @@
 stage=code
 mode=live
-started_utc=2026-09-16T00:28:53Z
+started_utc=2026-09-16T00:46:47Z
 repo=/home/user/px4-sim-stack
-commit=ddcee11313b34f3713e225d830bb886237a20d36
+commit=09175a5bf8c62ed796ef42594789f2db4ad884b3
 branch=feature/px4sim-baseline-implementation
 git_state=dirty
-git_status= M scripts/state.py
-git_status_continued= M scripts/tui.py
-git_status_continued= M verify/evidence/code/metadata.txt
-git_status_continued= M verify/test_tui_helpers.py
+git_status= M verify/evidence/code/metadata.txt
 git_status_continued=?? verify/evidence/flight-debug/
 git_status_continued=?? verify/evidence/flight/
 git_status_continued=?? verify/evidence/survey/

@@ -24,7 +24,7 @@ is `verify/evidence/code/`; this does not certify runtime bench, GPS, or flight
 behavior.
 
 Latest tested checkpoint: **19 passed, 0 failed** on 2026-09-16 at commit
-`0be4ebd`, including the PX4SIM UI autocomplete/output-wrapping
+`09175a5`, including the PX4SIM UI autocomplete/output-wrapping
 regression checks, the complete functional 5G Drone suite (133 passed), and
 packaged terrain/MAVInsight tests. The test runner now quotes pytest arguments
 when invoking the onboard container. QGC is explicitly front-door owned and
@@ -39,3 +39,8 @@ five tests and the full code gate remains **19 passed, 0 failed**. Service
 rows now also expose one normalized `lifecycle` value (`not_started`,
 `starting`, `running`, `failed`, `stopped`, or `unknown`) so px4sim UI and
 other front-door consumers do not independently infer initialization state.
+
+The live code gate was rerun at `09175a5` with the prepared images and again
+returned **19 passed, 0 failed**. The simulator Dockerfile and camera
+supervisor changes are source-checked here; their rebuilt-image recovery test
+remains pending the BuildKit apt/DNS issue recorded in the bench ledger.
