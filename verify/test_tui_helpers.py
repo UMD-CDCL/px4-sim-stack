@@ -60,6 +60,11 @@ class TuiHelpers(unittest.TestCase):
         self.assertIn("uroc_casualties", candidates)
         self.assertIn("chimera_v3", candidates)
         self.assertIn("11", candidates)
+
+    def test_rows_retain_detection_summary_by_vehicle(self):
+        from scripts.tui import Rows
+        rows = Rows({"detections": [{"number": 11, "state": "live", "boxes": 4}]})
+        self.assertEqual(rows.detections[11]["boxes"], 4)
         for label in ("check the front door and the docs", "check the host",
                       "where the Foxglove layout lives"):
             action = next(action for action in ACTIONS if action.label == label)

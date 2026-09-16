@@ -61,6 +61,8 @@ STREAMS_RETRY_TICKS = 5
 # long period, and carry the last answer in between.
 STREAMS_PROBE_TIMEOUT_S = 30.0
 STREAMS_PROBE_TICKS = 15
+DETECTIONS_PERIOD_TICKS = 5
+DETECTIONS_TIMEOUT_S = 4.0
 DOCKER_TIMEOUT_S = 15.0
 UNITS_TIMEOUT_S = 5.0
 UNITS_PERIOD_TICKS = 5
@@ -193,6 +195,8 @@ def graphics_card() -> dict:
                               capture_output=True, text=True, timeout=GPU_TIMEOUT_S)
     except (OSError, subprocess.SubprocessError):
         return {}
+
+
     lines = done.stdout.strip().splitlines()
     if done.returncode != 0 or not lines:
         return {}
@@ -204,6 +208,58 @@ def graphics_card() -> dict:
                 "encoder_sessions": int(readings[3])}
     except (IndexError, ValueError):
         return {}
+
+
+def detection_count(output: str) -> int | None:
+    """Count the boxes in ros2's YAML field output, without parsing a message."""
+    if not output.strip():
+        return None
+    if output.strip() == "[]":
+        return 0
+    return output.count("detection_class:")
+
+
+class Detections:
+    """A slow, cached summary of each detector's latest TargetBoxArray."""
+
+    def __init__(self, context: dict):
+        self.context = context
+        self.rows: list[dict] = []
+
+    def read(self, tick: int) -> list[dict]:
+        if tick % DETECTIONS_PERIOD_TICKS != 0 and self.rows:
+            return self.rows
+        rows = []
+        compose = str(self.context.get("compose", "docker compose"))
+        for vehicle in self.context.get("fleet", []):
+            number = vehicle.get("n")
+            service = vehicle.get("companion")
+            domain = vehicle.get("domain")
+            if not isinstance(number, int) or not service or not isinstance(domain, int):
+                rows.append({"number": number, "state": "unavailable"})
+                continue
+            command = [*shlex.split(compose), "exec", "-T", "-e",
+                       f"ROS_DOMAIN_ID={domain}", str(service), "bash", "-lc",
+                       ". /usr/local/bin/ros-env.sh; "
+                       f"ros2 topic echo --once --field uav_target_boxes "
+                       f"/uas{number}/target_detections"]
+            try:
+                done = subprocess.run(command, cwd=Path(__file__).resolve().parents[1],
+                                      capture_output=True, text=True,
+                                      timeout=DETECTIONS_TIMEOUT_S)
+            except (OSError, subprocess.SubprocessError) as failure:
+                rows.append({"number": number, "state": "unavailable",
+                             "error": str(failure)})
+                continue
+            if done.returncode != 0:
+                rows.append({"number": number, "state": "unavailable",
+                             "error": done.stderr.strip().splitlines()[-1]
+                             if done.stderr.strip() else "topic read failed"})
+                continue
+            count = detection_count(done.stdout)
+            rows.append({"number": number, "state": "live", "boxes": count})
+        self.rows = rows
+        return self.rows
 
 
 class Streams:
@@ -622,7 +678,7 @@ def stream_owners(fleet: list[dict]) -> dict[str, int]:
 
 
 def snapshot(context: dict, project_dir: Path, streams: Streams, links: Links,
-             bridges: Bridges, units: Units, tick: int) -> dict:
+             bridges: Bridges, units: Units, detections: Detections, tick: int) -> dict:
     # The vehicles answer first. Reading the containers and the card takes
     # seconds on a busy host, and nothing reads a socket while it happens, so a
     # vehicle asked afterwards looks silent while its telemetry is arriving.
@@ -638,6 +694,7 @@ def snapshot(context: dict, project_dir: Path, streams: Streams, links: Links,
         "streams": streams.read(tick),
         "streams_error": streams.error,
         "vehicles": vehicles,
+        "detections": detections.read(tick),
         "bridges": bridges.read(tick),
         "units": units.read(tick),
         "gpu": graphics_card(),
@@ -668,10 +725,11 @@ def main() -> int:
     links = Links(context["fleet"])
     bridges = Bridges(context)
     units = Units(as_list(context.get("units", "")))
+    detections = Detections(context)
 
     def tell(tick: int) -> None:
         json.dump(snapshot(context, project_dir, streams, links, bridges, units,
-                           tick), sys.stdout)
+                           detections, tick), sys.stdout)
         sys.stdout.write("\n")
         sys.stdout.flush()
 

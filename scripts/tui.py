@@ -577,6 +577,8 @@ class Rows:
                       for vehicle in self.config.get("fleet") or []}
         self.services = report.get("services") or []
         self.vehicles = report.get("vehicles") or []
+        self.detections = {int(row.get("number", 0)): row
+                           for row in report.get("detections") or []}
         self.streams = report.get("streams") or []
         self.bridges = report.get("bridges") or []
         self.units = report.get("units") or []
@@ -812,10 +814,15 @@ class Console:
             return
         number = int(row.get("number", 0))
         vehicle = self.rows.fleet.get(number, {})
+        detection = self.rows.detections.get(number, {})
         self.put(top, column, f"UAS{number}", "faint", room)
-        self.put(top + 1, column + 2,
-                 vehicle_detail(row, str(vehicle.get("model", "")),
-                                str(vehicle.get("zoom", ""))), "plain", room - 2)
+        detail = vehicle_detail(row, str(vehicle.get("model", "")),
+                                str(vehicle.get("zoom", "")))
+        if detection.get("state") == "live":
+            detail += f"   detections {detection.get('boxes', 0)}"
+        elif detection:
+            detail += "   detections unavailable"
+        self.put(top + 1, column + 2, detail, "plain", room - 2)
         if top + 2 < end:
             self.put(top + 2, column + 2, vehicle_place(row, vehicle), "faint",
                      room - 2)
