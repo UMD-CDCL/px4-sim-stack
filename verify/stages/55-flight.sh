@@ -160,6 +160,23 @@ else
 	note "${state:-$held}"
 fi
 
+# The layout's direct NavSatFix publisher is a separate operator path from a
+# pixel click. Exercise that same topic through the verifier front door and
+# require the gimbal to retain the coordinate it received.
+raw_roi_state_ready() {
+	local expected
+	expected=$(printf 'target=%.7f,%.7f' "$HOME_LAT" "$HOME_LON")
+	PX4SIM_UAS_COMMAND_TIMEOUT_S=30 ./px4sim uas "$lead" topic gimbal/state 2>/dev/null \
+		| tail -1 | grep -q "mode=roi.*$expected"
+}
+raw_roi_output=$(uas raw-roi "$HOME_LAT" "$HOME_LON" "${HOME_ALT:-0}")
+if await 15 "the raw ROI coordinate is accepted" raw_roi_state_ready; then
+	pass "the raw ROI topic holds the requested coordinate"
+else
+	fail "the raw ROI topic holds the requested coordinate"
+	note "$raw_roi_output"
+fi
+
 # The one extra move. A held place is only proved by the aircraft leaving it.
 #
 # Twice the standoff, so the same targets are seen at half the elevation, and

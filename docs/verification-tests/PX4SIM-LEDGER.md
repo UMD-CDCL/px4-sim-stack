@@ -159,6 +159,7 @@ table should be reviewed as possible `ORPHANED` features.
 | `CURRENT` | UI key for `fleet remove` outside simulator menus | Vehicle actions expose `-`; source/code-tested 2026-09-16, live mutation remains unverified | `tui.py`, `fleet remove` |
 | `CURRENT` | UI key for `scene`/`scenario` outside menus | Stack actions expose `N`/`T`; source/code-tested 2026-09-16, live selection remains unverified | `tui.py`, `scene`, `scenario` |
 | `CURRENT` | UI key for `fiducial` | Stack action exposes `F`; source/code-tested 2026-09-16, live reposition and cleanup remain unverified | `tui.py`, `fiducial` |
+| `PARTIAL (live command 2026-09-16)` | Raw ROI front door | `px4sim uas N raw-roi`, canonical `chimera_sim.json`, `gimbal.py` | Live command published a coordinate and the gimbal reported `mode=roi` with the exact target. Flight-stage movement/hold assertion remains pending. | `verify/component/uas.py`, `verify/stages/55-flight.sh` |
 | `CURRENT` | UI router-log visibility | Vehicle action exposes router log follow; source/code-tested 2026-09-16, live interactive follow remains unverified | `tui.py`, `logs` |
 | `CURRENT` | UI `build`/`prepare` action | Front door supports build/prepare, but `ACTIONS` has no direct UI action; it should be usable from the UI | decide whether omission is intentional |
 | `CURRENT` | UI `setup`/`bootstrap` action | Front door supports setup, but UI has no setup action; it should be usable from the UI | decide whether omission is intentional |

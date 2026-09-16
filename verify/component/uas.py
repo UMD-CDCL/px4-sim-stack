@@ -194,6 +194,8 @@ class Uas(Node):
         # image, plus the two services that say whether clicks are live.
         self.click = self.create_publisher(
             PointStamped, f"{self.namespace}/camera/click", RELIABLE_QOS)
+        self.raw_roi = self.create_publisher(
+            NavSatFix, f"{self.namespace}/raw_roi_point_cmd", RELIABLE_QOS)
         self.click_point = self.create_client(
             Trigger, f"{self.namespace}/gimbal/click_mode/point")
         self.click_off = self.create_client(
@@ -467,6 +469,16 @@ def command_gimbal(uas: Uas, args) -> int:
     print(f"reported depression {reported:.2f} degrees below the horizon")
     print(f"reported azimuth {uas.boresight_azimuth_deg():.2f} degrees right of the nose")
     print(f"flags {uas.gimbal.flags}")
+    return 0
+
+
+def command_raw_roi(uas: Uas, args) -> int:
+    """Hold a ground coordinate through the canonical raw-ROI topic."""
+    uas.raw_roi.publish(NavSatFix(latitude=args.latitude,
+                                  longitude=args.longitude,
+                                  altitude=args.altitude))
+    uas.pump(1.0)
+    print(f"raw ROI {args.latitude:.7f},{args.longitude:.7f},{args.altitude:.1f}")
     return 0
 
 
@@ -1541,6 +1553,7 @@ COMMANDS = {
     "takeoff": command_takeoff,
     "land": command_land,
     "gimbal": command_gimbal,
+    "raw-roi": command_raw_roi,
     "goto": command_goto,
     "detect": command_detect,
     "capture": command_capture,
@@ -1583,6 +1596,10 @@ def main() -> int:
                         help="the node holds the newest command, so a few make "
                              "the first one land whatever the discovery timing")
     gimbal.add_argument("--settle", type=float, default=4.0)
+    raw_roi = sub.add_parser("raw-roi")
+    raw_roi.add_argument("latitude", type=float)
+    raw_roi.add_argument("longitude", type=float)
+    raw_roi.add_argument("altitude", type=float)
     goto = sub.add_parser("goto")
     goto.add_argument("east", type=float)
     goto.add_argument("north", type=float)
