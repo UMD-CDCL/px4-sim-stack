@@ -775,6 +775,7 @@ def test_scenario_metadata(scenes_dir: Path) -> None:
     print("home and fiducial ride in the scenario")
     data = yaml.safe_load(
         (scenes_dir / "scenarios" / "synthtest_casualties.yaml").read_text())
+    check("scenario names its parent scene", data["parent_scene"] == "synthtest")
     check("home matches the scene origin",
           abs(data["home_lat"] - CENTER_LAT) < 1e-6
           and abs(data["home_lon"] - CENTER_LON) < 1e-6

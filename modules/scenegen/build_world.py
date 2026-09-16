@@ -433,6 +433,7 @@ def build_target_scenario(scene: scene_model.SceneSpec,
         lines.append(f"{name:24s} ({target.east_m:8.1f}, {target.north_m:8.1f}, "
                      f"{z:6.2f})  {uri}")
     scenario = {"name": out_path.stem,
+                "parent_scene": scene.name,
                 "description": f"{len(entities)} ground-truth targets from "
                                f"scene {scene.name}.",
                 **geo_meta,
