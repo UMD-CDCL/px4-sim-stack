@@ -1202,12 +1202,16 @@ def command_topic(uas: Uas, args) -> int:
     the reader waits for a change that has already happened, and an empty
     answer reads as a broken node rather than as a missed message.
     """
-    uas.pump(3.0)
     name = args.topic if args.topic.startswith("/") else f"{uas.namespace}/{args.topic}"
-    known = dict(uas.get_topic_names_and_types())
-    if name not in known:
+    # Discovery is eventually consistent, especially just after a restart.
+    # Poll the graph inside the command deadline instead of taking one snapshot
+    # and then waiting forever for a topic that was never discovered locally.
+    if not uas.wait_until(
+            lambda: name in dict(uas.get_topic_names_and_types()),
+            args.deadline, f"discover {name}"):
         print(f"nothing publishes {name}", file=sys.stderr)
         return 1
+    known = dict(uas.get_topic_names_and_types())
     arrived = {}
     uas.create_subscription(get_message(known[name][0]), name,
                             lambda msg: arrived.setdefault("msg", msg), LATCHED_QOS)

@@ -122,6 +122,14 @@ was made for this diagnostic run. Generated evidence is retained as an
 incomplete checkpoint, and implementation is paused here pending the next
 work session.
 
+The next bounded fix updates the `uas topic` front door to poll DDS graph
+discovery inside its deadline before subscribing. This addresses the reproduced
+startup hang where `/uas11/gimbal/state` was absent from the first graph
+snapshot even though the gimbal was publishing it. Static/unit verification is
+green at **21 passed, 0 failed**, and a live probe now returns the latched ROI
+state. The full sim stage still needs a fresh end-to-end run at a later
+checkpoint.
+
 The recording slice is currently `PARTIAL`: `./px4sim record start|stop|status`
 now resolves the canonical ground container, persists output under
 `logs/recordings`, validates recording names, and preflights the MCAP storage

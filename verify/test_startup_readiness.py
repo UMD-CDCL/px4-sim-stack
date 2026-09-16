@@ -68,3 +68,10 @@ def test_canonical_layout_raw_roi_matches_gimbal_contract():
     gimbal = (ROOT.parent / "ros2_ws/src/5g_drone/umd_uas/gimbal.py").read_text()
     assert '"gimbal.topic.raw_roi_point_cmd": "raw_roi_point_cmd"' in gimbal
     assert "NavSatFix, self._raw_roi_topic" in gimbal
+
+
+def test_topic_front_door_retries_eventual_dds_discovery():
+    text = (ROOT / "verify/component/uas.py").read_text()
+    assert "Discovery is eventually consistent" in text
+    assert "name in dict(uas.get_topic_names_and_types())" in text
+    assert 'f"discover {name}"' in text
