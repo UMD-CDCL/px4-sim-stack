@@ -55,4 +55,11 @@ else
 	fail "$router_image is not built. Run ./px4sim restart"
 fi
 
+if output=$(python3 -m unittest verify.test_tui_helpers -q 2>&1); then
+	pass "px4sim UI helper behavior"
+else
+	fail "px4sim UI helper behavior"
+	note "$(printf '%s' "$output" | tail -5 | tr '\n' ' ')"
+fi
+
 rm -f "$cfg"
