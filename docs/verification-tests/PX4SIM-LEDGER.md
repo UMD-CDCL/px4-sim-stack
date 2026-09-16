@@ -43,7 +43,7 @@ with date, commit, Git status, and evidence; this inventory defaults to
 | `CURRENT` | Foxglove layout rendering | `verify/stages/90-foxglove.sh`, layout tools | Layout settings, topics, services, and frames pass |
 | `CURRENT` | Foxglove protocol probing | `foxglove_probe.py` | Advertised channels/services carry data |
 | `TESTED (2026-09-16, commit 8074c4b)` | Capture front door | `px4sim capture` now retries transient ROS discovery; live full sim coverage passed mosaic, fiducial, and VLM capture paths, including ground delivery and overlay export | `px4sim`, `verify/stages/80-captures.sh` |
-| `UNKNOWN` | PX4 command front door | `px4sim px4` | Commands are scoped to selected simulated UAS |
+| `TESTED (live 2026-09-16)` | PX4 command front door | `px4sim px4` | `./px4sim px4 1 commander status` reached the selected simulated UAS and returned commander state (`Armed`, navigation mode, failsafe, and cycle statistics). Non-mutating command path is verified; mutating command and cleanup remain unverified. | `px4sim`, PX4 shell |
 | `PARTIAL (live 2026-09-16)` | UAS topic/node inspection | `px4sim state`/UI live output reports link health, MAVLink message rate, system IDs, position, altitude, heading, gimbal attitude, GPS fix, satellites, and explicit `mission_phase` from the heartbeat. Dedicated `px4sim uas N detections` is live-tested and reports boxes plus terrain localization; detections are not yet embedded in the compact state payload. | `scripts/state.py`, `scripts/mavlink.py`, `scripts/tui.py`, `px4sim uas` |
 | `CURRENT` | Gimbal/zoom helper commands | `scripts/zoom.sh`, `sweep-gimbal.py` | Helpers exercise declared control paths |
 | `CURRENT` | X11/QGC setup | `scripts/x11-allow.sh`, QGC modules | QGC starts with display/auth and video |
