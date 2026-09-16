@@ -332,6 +332,10 @@ def test_world(scenes_dir: Path) -> None:
     if fiducial:
         radius = float(fiducial[0].find("link/visual/geometry/cylinder/radius").text)
         check("fiducial is a 0.5 m circle", abs(radius - 0.25) < 1e-6, str(radius))
+        check("fiducial is pose-controllable",
+              fiducial[0].findtext("static") == "false"
+              and fiducial[0].findtext("link/gravity") == "false"
+              and fiducial[0].findtext("link/kinematic") == "true")
 
 
 def test_terrain(scenes_dir: Path) -> None:

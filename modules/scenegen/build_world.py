@@ -606,9 +606,13 @@ def build_world_sdf(scene: scene_model.SceneSpec, placed: list[PlacedBuilding],
          rides in the scenario as fiducial_*; the drone measures it to
          align frames. -->
     <model name="fiducial_marker">
-      <static>true</static>
+      <!-- The px4sim fiducial front door relocates this model during survey
+           tests, so it must be pose-controllable rather than static. -->
+      <static>false</static>
       <pose>{fiducial_pose}</pose>
       <link name="link">
+        <gravity>false</gravity>
+        <kinematic>true</kinematic>
         <visual name="visual">
           <geometry>
             <cylinder>

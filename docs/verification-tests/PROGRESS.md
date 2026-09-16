@@ -204,3 +204,12 @@ restart. A clean retry completed **21 passed, 0 failed** at
 heading/TF, casualty truth, scoring, and click behavior. The failed attempt is
 retained in the stage evidence as a diagnostic run; the retry is the current
 GPS checkpoint.
+
+The survey fiducial relocation contract was source-reviewed and live-verified
+on 2026-09-16. The scenegen generator now emits a pose-controllable,
+gravity-free, kinematic fiducial because `px4sim fiducial` uses Gazebo
+`set_pose`; the generated campus world reported the requested `(+6, -9) m`
+offset. The associated scenegen test was extended. A full flight retry reached
+the gimbal/ROI checks but was stopped after a later ROI polling loop exceeded
+its useful test window; it remains incomplete evidence and does not promote
+the flight stage. One pre-existing gimbal-pointing assertion remains failing.
