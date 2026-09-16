@@ -67,7 +67,7 @@ camera contract is restored.
 ## Source checkpoints
 
 - Root: `9af9443` (current implementation checkpoint)
-- 5G Drone: `8296fe0` on `feature/ubuntu24-compat`
+- 5G Drone: `889c277` on `feature/ubuntu24-compat`
 - MAVInsight: `0fb189b` on `feature/ubuntu24-compat`
 - PX4-Autopilot: `639154f` on `feature/ubuntu24-compat`
 
@@ -81,3 +81,12 @@ timeout-expiration run remains pending. The transient RTSP source-loss observati
 documented in `SIM-TEST.md`. No deployment-only Chimera work was started.
 
 Verification is a critical-checkpoint activity, not a per-edit requirement.
+
+The 5G Drone launch fix at `889c277` was runtime-probed on the live stack by
+overlaying the checked-out launch file into the running onboard container.
+When the simulator lens emulator was initially late, `zoom` exited; its
+respawn then retried after the emulator became available. The retry reached
+`zoom node ready`, published camera info, and onboard gimbal plus target
+preprocessing logged successful camera-info consumption. This confirms the
+startup-race fix, but a rebuilt image is still required for persistent
+certification.
