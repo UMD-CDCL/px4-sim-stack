@@ -141,7 +141,10 @@ now resolves the canonical ground container, persists output under
 `logs/recordings`, validates recording names, and preflights the MCAP storage
 plugin. The installed image reports only `sqlite3` and a test plugin, so the
 front door correctly refuses to start and identifies the required rosbag2
-MCAP dependency. Video synchronization and MCAP image support remain planned.
+MCAP dependency. The lifecycle was additionally live-tested with
+`RECORD_STORAGE=sqlite3` at this checkpoint: named start, status, and named stop
+completed successfully, and startup now confirms the recorder survives before
+reporting success. Video synchronization and MCAP image support remain planned.
 
 The code stage completed **21 passed, 0 failed** on 2026-09-16 at 17:54:21Z.
 It verified airframe expansion, service/address/MAVLink contracts, the

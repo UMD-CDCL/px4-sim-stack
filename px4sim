@@ -1316,8 +1316,23 @@ record)
 		topics=$(recording_topics)
 		docker exec -d -e ROS_DOMAIN_ID="${GROUND_DOMAIN:-70}" "$container" bash -lc \
 			". /usr/local/bin/ros-env.sh; nohup ros2 bag record -s $storage --storage-preset-profile $preset -o /recordings/$name $topics </dev/null >/tmp/px4sim-record-$name.log 2>&1 &" >/dev/null
-		echo "recording started: $name ($storage)"
-		;;
+		# `docker exec -d` only means the launcher was accepted. The recorder can
+		# still fail immediately on a bad plugin, topic, or permissions error.
+		# Confirm the named process survives before presenting a successful front
+		# door result, and preserve its short diagnostic when it does not.
+		for _ in 1 2 3 4 5; do
+			if docker exec "$container" sh -lc \
+				"pgrep -af '[r]os2 bag record' | grep -Fq '/recordings/$name'" \
+				>/dev/null 2>&1; then
+				echo "recording started: $name ($storage)"
+				return 0
+			fi
+			sleep 1
+		done
+		echo "recording failed to start: $name ($storage)" >&2
+		docker exec "$container" sh -lc "tail -20 /tmp/px4sim-record-$name.log" >&2 || true
+		die "rosbag recorder exited before becoming active"
+	;;
 	stop)
 		name=${1:-}
 		case "$name" in *[!A-Za-z0-9_.-]*) die "recording name contains unsafe characters" ;; esac

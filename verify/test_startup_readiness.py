@@ -75,3 +75,10 @@ def test_topic_front_door_retries_eventual_dds_discovery():
     assert "Discovery is eventually consistent" in text
     assert "name in dict(uas.get_topic_names_and_types())" in text
     assert 'f"discover {name}"' in text
+
+
+def test_record_front_door_confirms_recorder_survives_launch():
+    text = (ROOT / "px4sim").read_text()
+    assert "recording failed to start" in text
+    assert "rosbag recorder exited before becoming active" in text
+    assert "pgrep -af '[r]os2 bag record'" in text
