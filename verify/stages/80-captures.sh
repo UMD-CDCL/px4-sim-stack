@@ -67,7 +67,9 @@ fi
 
 # The PNG and its bounds are what the running system produces, and what the
 # tileserver serves the live map from.
-path=/home/user/d${lead}_rgb_mosaic_overlay.png
+# onboard mounts the shared log directory at /logs; the producer's configured
+# overlay path is therefore visible there, not under the container user's HOME.
+path=/logs/d${lead}_rgb_mosaic_overlay.png
 size=$(./px4sim shell "onboard$lead" "stat -c %s '$path' 2>/dev/null || echo 0" 2>/dev/null | tr -d '\r')
 if [ "${size:-0}" -gt 1000 ]; then
 	pass "the mosaic wrote $(basename "$path") (${size} bytes)"
