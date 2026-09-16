@@ -1,4 +1,5 @@
 name: urban_casualties
+parent_scene: recon_field
 description: Six people around the blocks, two of them out of sight from above.
 
 # Each entity becomes one Gazebo model.

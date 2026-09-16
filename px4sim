@@ -15,6 +15,10 @@ cd "$(dirname "$(readlink -f "$0")")"
 
 DC="docker compose"
 
+# Scenario YAML is the single source for its parent scene.
+# shellcheck disable=SC1091
+. ./scripts/scenario-metadata.sh
+
 # Only prepare enables networking for build steps.
 export PX4SIM_BUILD_NETWORK=none
 
@@ -63,6 +67,7 @@ for name in $OVERRIDABLE; do
 		eval "override_$name=\$$name"
 	fi
 done
+
 # shellcheck disable=SC1091
 set -a; . ./.env; set +a
 for name in $OVERRIDABLE; do
@@ -71,6 +76,12 @@ for name in $OVERRIDABLE; do
 		export "$name=${!holder}"
 	fi
 done
+
+if [ -n "${SCENARIO:-}" ]; then
+	parent_scene=$(validate_scenario_selection "$SCENARIO") ||
+		die "Scenario '$SCENARIO' has no valid parent scene. Add parent_scene to its YAML and ensure that world exists."
+	export SCENE="$parent_scene"
+fi
 
 # Whether the fleet that is flying is the one the file holds. This script
 # exports what it reads, so a px4sim that this one runs -- the console, or
@@ -935,8 +946,8 @@ scenario_names() {
 # one, and the run then flies a world with no targets in it, which reads as a
 # detector that finds nothing rather than as a name that was mistyped.
 have_scenario() {
-	[ -f "modules/sim/scenes/scenarios/$1.yaml" ] \
-		|| die "No scenario named '$1'. Try: $(scenario_names | paste -sd' ' -)"
+	validate_scenario_selection "$1" >/dev/null \
+		|| die "Scenario '$1' has no valid parent scene. Try: $(scenario_names | paste -sd' ' -)"
 }
 
 # Put the fleet back into .env and leave every other line as it was.
@@ -1437,6 +1448,7 @@ scenario)
 		[ -n "${SCENARIO:-}" ] \
 			|| die "Give a scenario name, or set SCENARIO in .env. Try: $(scenario_names | paste -sd' ' -)"
 		have_scenario "$SCENARIO"
+		SCENE=$(scenario_parent_scene "$SCENARIO")
 		# Placing the targets is Gazebo's work. A real course already holds
 		# them, and the ground station scores against where they were
 		# surveyed to stand.
@@ -1448,9 +1460,11 @@ scenario)
 		exit 0
 	fi
 	have_scenario "$1"
+	parent_scene=$(scenario_parent_scene "$1")
 	was=${SCENARIO:-}
 	say "Switching to scenario '$1'"
 	export SCENARIO="$1"
+	export SCENE="$parent_scene"
 	resolve_origin "${SCENE:-}" "$SCENARIO"
 	reload_world
 	echo "  scenario $SCENARIO   origin ${HOME_LAT:-from the world file}"
