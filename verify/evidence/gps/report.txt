@@ -16,11 +16,11 @@
   [32mok  [0mthe ground receives position
   [32mok  [0mthe ground receives status
   [32mok  [0muas11 points uas11 the way it is flying
-       [2mcompass	360.0 airframe	360.0 camera	1.3 footprint	not compared: the camera is -32 degrees below the horizon[0m
+       [2mcompass	360.0 airframe	360.0 camera	357.6 footprint	357.4	15[0m
   [32mok  [0mthe ground station points uas11 the way it is flying
-       [2mcompass	0.0 airframe	0.0 camera	0.0 footprint	not compared: the camera is 0 degrees below the horizon[0m
+       [2mcompass	0.0 airframe	0.0 camera	357.7 footprint	357.6	15[0m
   [32mok  [0mthe ground holds the scene's casualty locations
-  [32mok  [0mevery localization reaches the ground unchanged: 29 boxes on both sides, 29 identical
+  [32mok  [0mevery localization reaches the ground unchanged: 196 boxes on both sides, 196 identical
   [32mok  [0muas11 scores the detections against the known targets
   [32mok  [0mthe ground station scores the detections against the known targets
   [32mok  [0ma click low in the image aims nearer than one high in it
