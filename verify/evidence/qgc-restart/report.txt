@@ -2,10 +2,10 @@
 == restart 1 ==
 [1m==> Reusing prepared images: offboard,sim,uas11,onboard11[0m
 [1m==> Stopping everything[0m
- Container px4simstack-qgc-1 Stopping 
  Container px4simstack-onboard11-1 Stopping 
- Container px4simstack-sim-1 Stopping 
+ Container px4simstack-qgc-1 Stopping 
  Container px4simstack-ground-router-1 Stopping 
+ Container px4simstack-sim-1 Stopping 
  Container px4simstack-ground-router-1 Stopped 
  Container px4simstack-ground-router-1 Removing 
  Container px4simstack-ground-router-1 Removed 
@@ -34,36 +34,36 @@
  Network px4simstack_default Removing 
  Network px4simstack_simnet Removed 
  Network px4simstack_default Removed 
-  released 1 shared memory segments
+  released 72 shared memory segments
 Wrote /home/user/px4-sim-stack/.xauth for DISPLAY=:0
 [1m==> Restarting: offboard,sim,uas11,onboard11[0m
   fleet chimera_v3
   scene campus, scenario campus_casualties, origin 38.9869, -76.9426
-time="2026-09-16T02:18:02-04:00" level=warning msg="volume \"px4simstack_sim-ccache\" already exists but was not created by Docker Compose. Use `external: true` to use an existing volume"
+time="2026-09-16T05:48:00-04:00" level=warning msg="volume \"px4simstack_sim-ccache\" already exists but was not created by Docker Compose. Use `external: true` to use an existing volume"
+ Network px4simstack_default Creating 
  Network px4simstack_default Creating 
  Network px4simstack_simnet Creating 
- Network px4simstack_default Creating 
  Network px4simstack_simnet Creating 
  Network px4simstack_simnet Created 
  Network px4simstack_simnet Created 
- Container px4simstack-video-router-1 Creating 
  Container px4simstack-uas11-1 Creating 
+ Container px4simstack-video-router-1 Creating 
  Network px4simstack_default Created 
  Network px4simstack_default Created 
- Container px4simstack-video-router-1 Created 
- Container px4simstack-qgc-1 Creating 
- Container px4simstack-sim-1 Creating 
- Container px4simstack-offboard-1 Creating 
  Container px4simstack-uas11-1 Created 
  Container px4simstack-onboard11-1 Creating 
+ Container px4simstack-video-router-1 Created 
+ Container px4simstack-sim-1 Creating 
+ Container px4simstack-qgc-1 Creating 
+ Container px4simstack-offboard-1 Creating 
  Container px4simstack-sim-1 Created 
  Container px4simstack-qgc-1 Created 
+ Container px4simstack-onboard11-1 Created 
  Container px4simstack-offboard-1 Created 
  Container px4simstack-ground-router-1 Creating 
- Container px4simstack-onboard11-1 Created 
  Container px4simstack-ground-router-1 Created 
- Container px4simstack-video-router-1 Starting 
  Container px4simstack-uas11-1 Starting 
+ Container px4simstack-video-router-1 Starting 
  Container px4simstack-video-router-1 Started 
  Container px4simstack-qgc-1 Starting 
  Container px4simstack-video-router-1 Waiting 
@@ -73,9 +73,9 @@ time="2026-09-16T02:18:02-04:00" level=warning msg="volume \"px4simstack_sim-cca
  Container px4simstack-qgc-1 Started 
  Container px4simstack-onboard11-1 Started 
  Container px4simstack-video-router-1 Healthy 
- Container px4simstack-offboard-1 Starting 
- Container px4simstack-video-router-1 Healthy 
  Container px4simstack-sim-1 Starting 
+ Container px4simstack-video-router-1 Healthy 
+ Container px4simstack-offboard-1 Starting 
  Container px4simstack-offboard-1 Started 
  Container px4simstack-ground-router-1 Starting 
  Container px4simstack-sim-1 Started 
@@ -113,10 +113,10 @@ PASS no QGC singleton error in recent logs
 == restart 2 ==
 [1m==> Reusing prepared images: offboard,sim,uas11,onboard11[0m
 [1m==> Stopping everything[0m
- Container px4simstack-sim-1 Stopping 
  Container px4simstack-ground-router-1 Stopping 
- Container px4simstack-qgc-1 Stopping 
+ Container px4simstack-sim-1 Stopping 
  Container px4simstack-onboard11-1 Stopping 
+ Container px4simstack-qgc-1 Stopping 
  Container px4simstack-ground-router-1 Stopped 
  Container px4simstack-ground-router-1 Removing 
  Container px4simstack-ground-router-1 Removed 
@@ -124,6 +124,9 @@ PASS no QGC singleton error in recent logs
  Container px4simstack-sim-1 Stopped 
  Container px4simstack-sim-1 Removing 
  Container px4simstack-sim-1 Removed 
+ Container px4simstack-offboard-1 Stopped 
+ Container px4simstack-offboard-1 Removing 
+ Container px4simstack-offboard-1 Removed 
  Container px4simstack-onboard11-1 Stopped 
  Container px4simstack-onboard11-1 Removing 
  Container px4simstack-onboard11-1 Removed 
@@ -131,9 +134,6 @@ PASS no QGC singleton error in recent logs
  Container px4simstack-uas11-1 Stopped 
  Container px4simstack-uas11-1 Removing 
  Container px4simstack-uas11-1 Removed 
- Container px4simstack-offboard-1 Stopped 
- Container px4simstack-offboard-1 Removing 
- Container px4simstack-offboard-1 Removed 
  Container px4simstack-qgc-1 Stopped 
  Container px4simstack-qgc-1 Removing 
  Container px4simstack-qgc-1 Removed 
@@ -141,44 +141,44 @@ PASS no QGC singleton error in recent logs
  Container px4simstack-video-router-1 Stopped 
  Container px4simstack-video-router-1 Removing 
  Container px4simstack-video-router-1 Removed 
- Network px4simstack_default Removing 
  Network px4simstack_simnet Removing 
+ Network px4simstack_default Removing 
  Network px4simstack_simnet Removed 
  Network px4simstack_default Removed 
-  released 8 shared memory segments
+  released 23 shared memory segments
 Wrote /home/user/px4-sim-stack/.xauth for DISPLAY=:0
 [1m==> Restarting: offboard,sim,uas11,onboard11[0m
   fleet chimera_v3
   scene campus, scenario campus_casualties, origin 38.9869, -76.9426
-time="2026-09-16T02:20:13-04:00" level=warning msg="volume \"px4simstack_sim-ccache\" already exists but was not created by Docker Compose. Use `external: true` to use an existing volume"
- Network px4simstack_simnet Creating 
- Network px4simstack_simnet Creating 
+time="2026-09-16T05:50:11-04:00" level=warning msg="volume \"px4simstack_sim-ccache\" already exists but was not created by Docker Compose. Use `external: true` to use an existing volume"
  Network px4simstack_default Creating 
  Network px4simstack_default Creating 
+ Network px4simstack_simnet Creating 
+ Network px4simstack_simnet Creating 
+ Network px4simstack_default Created 
+ Network px4simstack_default Created 
  Network px4simstack_simnet Created 
  Network px4simstack_simnet Created 
- Container px4simstack-uas11-1 Creating 
  Container px4simstack-video-router-1 Creating 
+ Container px4simstack-uas11-1 Creating 
  Container px4simstack-uas11-1 Created 
  Container px4simstack-onboard11-1 Creating 
- Network px4simstack_default Created 
- Network px4simstack_default Created 
  Container px4simstack-video-router-1 Created 
  Container px4simstack-sim-1 Creating 
- Container px4simstack-qgc-1 Creating 
  Container px4simstack-offboard-1 Creating 
+ Container px4simstack-qgc-1 Creating 
  Container px4simstack-sim-1 Created 
  Container px4simstack-qgc-1 Created 
  Container px4simstack-onboard11-1 Created 
  Container px4simstack-offboard-1 Created 
  Container px4simstack-ground-router-1 Creating 
  Container px4simstack-ground-router-1 Created 
- Container px4simstack-video-router-1 Starting 
  Container px4simstack-uas11-1 Starting 
+ Container px4simstack-video-router-1 Starting 
  Container px4simstack-video-router-1 Started 
  Container px4simstack-video-router-1 Waiting 
- Container px4simstack-video-router-1 Waiting 
  Container px4simstack-qgc-1 Starting 
+ Container px4simstack-video-router-1 Waiting 
  Container px4simstack-uas11-1 Started 
  Container px4simstack-onboard11-1 Starting 
  Container px4simstack-qgc-1 Started 
@@ -187,9 +187,9 @@ time="2026-09-16T02:20:13-04:00" level=warning msg="volume \"px4simstack_sim-cca
  Container px4simstack-offboard-1 Starting 
  Container px4simstack-video-router-1 Healthy 
  Container px4simstack-sim-1 Starting 
- Container px4simstack-sim-1 Started 
  Container px4simstack-offboard-1 Started 
  Container px4simstack-ground-router-1 Starting 
+ Container px4simstack-sim-1 Started 
  Container px4simstack-ground-router-1 Started 
 [1m==> simulator, cameras, video router, and QGC are ready[0m
 

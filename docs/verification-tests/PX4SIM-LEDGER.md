@@ -48,7 +48,7 @@ with date, commit, Git status, and evidence; this inventory defaults to
 | `CURRENT` | Gimbal/zoom helper commands | `scripts/zoom.sh`, `sweep-gimbal.py` | Helpers exercise declared control paths |
 | `CURRENT` | X11/QGC setup | `scripts/x11-allow.sh`, QGC modules | QGC starts with display/auth and video |
 | `CURRENT` | QGC configuration/autoconnect | `modules/qgc/entrypoint.sh`, Compose | QGC receives intended MAVLink/video endpoints |
-| `TESTED` | QGC singleton across repeated restarts | `verify/qgc-restart-test.sh`, QGC entrypoint lock | 2026-09-16, checkpoint `62ac538`: two consecutive `./px4sim restart --no-build` cycles, one process each, no singleton error |
+| `TESTED` | QGC singleton across repeated restarts | `verify/qgc-restart-test.sh`, QGC entrypoint lock | 2026-09-16, checkpoint `d6ba06d` and rerun evidence: two consecutive `./px4sim restart --no-build` cycles, one process each, no singleton error |
 | `CURRENT` | Documentation/front-door consistency | `docs/front-doors.md`, `px4sim check` | Named commands and variables exist |
 | `CURRENT` | Cache/layer reuse | Dockerfiles, ccache mounts, build scripts | Incremental source edit avoids unrelated rebuilds |
 | `CURRENT` | Branch portability contract | `.env`, build contexts, docs | Changed repos are on `feature/ubuntu24-compat` |
