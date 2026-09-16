@@ -1,6 +1,7 @@
 import unittest
 
-from scripts.tui import Action, complete_text, wrap_output
+from scripts.tui import (Action, FRONT_DOOR, complete_text, state_watch_command,
+                          wrap_output)
 from scripts.state import service_lifecycle
 
 
@@ -32,6 +33,11 @@ class TuiHelpers(unittest.TestCase):
                          "failed")
         self.assertEqual(service_lifecycle({"state": "exited", "exit_code": 0}),
                          "stopped")
+
+    def test_ui_requests_a_fresh_report_without_changing_the_watch_period(self):
+        self.assertEqual(state_watch_command(2.0), [
+            str(FRONT_DOOR),
+            "state", "--watch", "2.0", "--initial-delay", "0"])
 
 
 if __name__ == "__main__":

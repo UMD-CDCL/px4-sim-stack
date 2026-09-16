@@ -650,6 +650,9 @@ def main() -> int:
     parser.add_argument("--watch", nargs="?", type=float, const=WATCH_PERIOD_S,
                         default=None, metavar="SECONDS",
                         help="keep reporting, one JSON object for each period")
+    parser.add_argument("--initial-delay", type=float, default=FIRST_TICK_S,
+                        metavar="SECONDS",
+                        help="wait before the first watched report (default: 0.5)")
     parser.add_argument("--listen", type=float, default=LISTEN_S,
                         help="seconds to hear the vehicles before a single report")
     arguments = parser.parse_args()
@@ -678,7 +681,7 @@ def main() -> int:
             tell(0)
             return 0
         period = max(MINIMUM_PERIOD_S, arguments.watch)
-        deadline = time.monotonic() + FIRST_TICK_S
+        deadline = time.monotonic() + max(0.0, arguments.initial_delay)
         tick = 0
         while True:
             links.pump(deadline)

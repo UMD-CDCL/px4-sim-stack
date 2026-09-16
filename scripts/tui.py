@@ -49,6 +49,12 @@ ESCAPE_CODES = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b[=>]|[\x00-\x08\x0b\x0c\x
 
 FRONT_DOOR = Path(__file__).resolve().parents[1] / "px4sim"
 
+
+def state_watch_command(period: float) -> list[str]:
+    """Build the UI's fresh-on-open state command in one visible contract."""
+    return [str(FRONT_DOOR), "state", "--watch", str(period),
+            "--initial-delay", "0"]
+
 STACK, SERVICE, VEHICLE, STREAM = "stack", "service", "vehicle", "stream"
 PANES = (SERVICE, VEHICLE, STREAM)
 
@@ -262,7 +268,7 @@ class Feed:
         while not self.stopping.is_set():
             try:
                 self.process = subprocess.Popen(
-                    [str(FRONT_DOOR), "state", "--watch", str(self.period)],
+                    state_watch_command(self.period),
                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, text=True, errors="replace",
                     cwd=FRONT_DOOR.parent, start_new_session=True)
