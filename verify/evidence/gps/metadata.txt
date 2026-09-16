@@ -1,8 +1,8 @@
 stage=gps
 mode=live
-started_utc=2026-09-16T10:07:39Z
+started_utc=2026-09-16T17:11:04Z
 repo=/home/user/px4-sim-stack
-commit=8f91fab956bce237682c3115bd039d3ea63abe02
+commit=ebb0429b8e04983772a11246fa36e25a9de3edc3
 branch=feature/px4sim-baseline-implementation
 git_state=dirty
 git_status= M verify/evidence/gps/metadata.txt
@@ -10,3 +10,4 @@ git_status_continued=?? verify/evidence/flight-debug/
 git_status_continued=?? verify/evidence/flight/
 git_status_continued=?? verify/evidence/survey/
 selected_stages=localize ground
+manifest=/home/user/px4-sim-stack/verify/evidence/gps/manifest.txt

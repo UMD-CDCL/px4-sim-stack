@@ -66,7 +66,7 @@ camera contract is restored.
 
 ## Source checkpoints
 
-- Root: `61f41ba` (source checkpoint for this test run)
+- Root: `ebb0429` (source checkpoint for this test run)
 - 5G Drone: `496a825` on `feature/ubuntu24-compat`
 - MAVInsight: `0fb189b` on `feature/ubuntu24-compat`
 - PX4-Autopilot: `639154f` on `feature/ubuntu24-compat`
@@ -102,3 +102,8 @@ The ROS base Dockerfile now accepts explicit `DEPS_IMAGE` and
 `YOLO_DEPS_IMAGE` build arguments, defaulting to the existing parent names.
 This permits a prepared machine to reuse local-registry parents while keeping
 the normal defaults unchanged; the tested build used `localhost:5000`.
+
+The GPS stage completed **21 passed, 0 failed** on 2026-09-16 at 17:18:25Z.
+It recorded 203 identical localization samples across vehicle and ground
+front doors and passed terrain/roof geometry, multiple camera framings,
+horizon gating, heading/TF, casualty truth, scoring, and click behavior.
