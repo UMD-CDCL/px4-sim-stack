@@ -17,6 +17,7 @@ run_tests() {
 	output=$(docker run --rm --entrypoint bash \
 		-v "$workspace/src/$package:/src:ro" "$onboard_image" -c "
 			source /opt/ros/\$ROS_DISTRO/setup.bash
+			[ ! -f /opt/mavros/install/setup.bash ] || source /opt/mavros/install/setup.bash
 			source /home/user/ros2_ws/install/setup.bash
 			cd /src && python3 -m pytest $* -q 2>&1
 		" 2>&1)
