@@ -29,7 +29,8 @@ fiducial correction, Foxglove contracts, and all five scoring metrics.
 
 The working tree is clean apart from generated evidence directories that are
 intentionally excluded from commits. The next implementation item is paused:
-investigate whether the transient RTSP source-loss log merits a separate
-startup/readiness assertion. No deployment-only Chimera work was started.
+live-test the RTSP preflight deadline fix after rebuilding the onboard image.
+The static check is green; the transient RTSP source-loss observation remains
+documented in `SIM-TEST.md`. No deployment-only Chimera work was started.
 
 Verification is a critical-checkpoint activity, not a per-edit requirement.

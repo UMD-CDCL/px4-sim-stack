@@ -212,18 +212,33 @@ if [ "${SIM}" = true ]; then
 	# pulled from it, with the same GStreamer the detector opens it with.
 	GIMBAL_STREAM=${GIMBAL_STREAM:-$([ "${MODEL}" = v3 ] && echo "rgb${UAS_NUM}" || echo "pilot${UAS_NUM}")}
 	CAMERA_URI="${RTSP_BASE:-rtsp://video-router:8554}/${GIMBAL_STREAM}"
+	stream_started=$(date +%s)
+	stream_deadline=$((stream_started + STREAM_WAIT_S))
 	waited=0
-	until timeout 15 gst-launch-1.0 -q rtspsrc "location=${CAMERA_URI}" latency=100 \
-		! fakesink num-buffers=1 >/dev/null 2>&1; do
-		if [ "${waited}" -ge "${STREAM_WAIT_S}" ]; then
-			echo "uas${UAS_NUM}: ${CAMERA_URI} never appeared after ${STREAM_WAIT_S}s." >&2
-			echo "The detector will start anyway and fail to open its camera." >&2
+	stream_ready=0
+	while :; do
+		now=$(date +%s)
+		remaining=$((stream_deadline - now))
+		[ "${remaining}" -le 0 ] && break
+		probe_timeout=$((remaining < 15 ? remaining : 15))
+		if timeout "${probe_timeout}" gst-launch-1.0 -q rtspsrc "location=${CAMERA_URI}" latency=100 \
+		! fakesink num-buffers=1 >/dev/null 2>&1; then
+			[ "${waited}" = 0 ] && echo "waiting for ${GIMBAL_STREAM}"
+			now=$(date +%s)
+			remaining=$((stream_deadline - now))
+			[ "${remaining}" -le 0 ] && break
+			sleep_for=$((remaining < 5 ? remaining : 5))
+			sleep "${sleep_for}"
+			waited=$(( $(date +%s) - stream_started ))
+		else
+			stream_ready=1
 			break
 		fi
-		[ "${waited}" = 0 ] && echo "waiting for ${GIMBAL_STREAM}"
-		sleep 5
-		waited=$((waited + 5))
 	done
+	if [ "${stream_ready}" -ne 1 ]; then
+		echo "uas${UAS_NUM}: ${CAMERA_URI} never appeared after ${STREAM_WAIT_S}s." >&2
+		echo "The detector will start anyway and fail to open its camera." >&2
+	fi
 	# Said whether or not there was a wait. `./px4sim fly` blocks until this line
 	# appears in this container's log, so a camera that was ready on the first probe
 	# used to leave that wait with nothing to find: it timed out after its whole
