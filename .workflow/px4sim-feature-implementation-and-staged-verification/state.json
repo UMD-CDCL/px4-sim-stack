@@ -4,7 +4,7 @@
   "created_at": "2026-09-15T05:18:19+00:00",
   "status": "in_progress",
   "current_slice": "scoring-plot-runtime-verification",
-  "last_verified": "2026-09-16: added explicit Foxglove probes for the five scoring plot metrics. Live sim packet completed 32 passed / 6 failed: recall and detection_recall carried data, while precision, detection_precision, and position_error did not; earlier click, ground capture, and terrain-map checks also had transient failures in this run. Source topics exist on the offboard domain, so the remaining issue is conditional publication/subscriber discovery or runtime timing. This is recorded as PARTIAL, not complete. Prior code/bench/GPS/full-sim checkpoints remain green at 20/0, 21/0, 21/0, and 39/0. Root check exits 0 with advisory documentation lint warnings. Canonical chimera_sim.json remains the default; sparse multi-vehicle preview media remains resource-limited.",
+  "last_verified": "2026-09-16: added explicit Foxglove probes for the five scoring plot metrics. Live sim packet completed 32 passed / 6 failed: recall and detection_recall carried data, while precision, detection_precision, and position_error did not; earlier click, ground capture, and terrain-map checks also had transient failures in this run. Source topics exist on the offboard domain. 5G Drone commit 0bb58e8 now publishes explicit zero-valued rates for empty denominators; this is committed and pushed on feature/ubuntu24-compat but not rebuilt or rerun yet. Position error remains conditional on localized estimates. This is recorded as PARTIAL, not complete. Prior code/bench/GPS/full-sim checkpoints remain green at 20/0, 21/0, 21/0, and 39/0. Root check exits 0 with advisory documentation lint warnings. Canonical chimera_sim.json remains the default; sparse multi-vehicle preview media remains resource-limited.",
   "approval": {
     "required": null,
     "granted": null,
@@ -18,6 +18,6 @@
   "verification": {
     "status": "baseline_stages_passed_with_runtime_front_doors_verified",
     "checks": ["px4sim check 0 (lint advisory)", "python compilation", "shell syntax", "stage dry runs", "workflow validation", "git diff --check", "code 20/0 with manifest", "bench 21/0", "gps 21/0", "sim 33/0", "full sim 39/0", "QGC singleton", "QGC sequential restart twice"],
-    "pending": ["resolve scorer metric publication/subscriber behavior and repeat Foxglove metric verification", "repeat sparse multi-vehicle media with sufficient GPU/media capacity", "advance remaining ledger CURRENT and PLANNED features"]
+    "pending": ["rebuild the 5G Drone image from 0bb58e8 and repeat Foxglove metric verification, including a run with localized estimates for position_error", "repeat sparse multi-vehicle media with sufficient GPU/media capacity", "advance remaining ledger CURRENT and PLANNED features"]
   }
 }

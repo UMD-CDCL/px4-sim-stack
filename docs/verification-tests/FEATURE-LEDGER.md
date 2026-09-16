@@ -15,7 +15,7 @@ possible, observing the live Foxglove protocol. Add future capabilities with
 | `CURRENT` | `uas11_click_off` | Disable click mode | service/topic handler | Bench |
 | `CURRENT` | `uas11_reassert` | Reassert gimbal ownership | gimbal topic/service path | Bench/Sim |
 | `CURRENT` | `uas11_click_mode` | Inspect click mode messages | publisher/subscriber and schema | Bench |
-| `PARTIAL` | `uas11_scoring_rates` | Plot scoring rates | scoring publisher and plot fields; live Foxglove probe 2026-09-16 observed `recall` and `detection_recall`, but `precision` and `detection_precision` carried no data | GPS/Sim |
+| `PARTIAL` | `uas11_scoring_rates` | Plot scoring rates | scoring publisher and plot fields; live Foxglove probe 2026-09-16 observed `recall` and `detection_recall`, but `precision` and `detection_precision` carried no data. 5G Drone commit `0bb58e8` now publishes `0.0` for empty denominators; rebuild and repeat are pending | GPS/Sim |
 | `PARTIAL` | `uas11_position_error` | Plot position error | scoring publisher and layout field exist; live Foxglove probe 2026-09-16 observed no data, so subscriber/bridge behavior remains unresolved | GPS/Sim |
 | `CURRENT` | `uas11_click_roi` | Click ROI service | ROI service server and consumer | Bench/Sim |
 | `CURRENT` | `uas11_release` | Release target/ROI state | release publisher and consumer | Bench/Sim |
