@@ -33,6 +33,7 @@ import subprocess
 import sys
 import threading
 import time
+import textwrap
 from collections import deque
 from pathlib import Path
 from typing import NamedTuple
@@ -198,6 +199,16 @@ def fleet_words(count: int) -> str:
 
 def strip_codes(line: str) -> str:
     return ESCAPE_CODES.sub("", line).expandtabs(8).rstrip()
+
+
+def wrap_output(lines: list[str], width: int) -> list[str]:
+    """Wrap command output to screen width without losing long tokens."""
+    width = max(1, width)
+    wrapped: list[str] = []
+    for line in lines:
+        wrapped.extend(textwrap.wrap(line, width=width, replace_whitespace=False,
+                                     drop_whitespace=False) or [""])
+    return wrapped
 
 
 def cursor(shown: int) -> None:
@@ -808,7 +819,7 @@ class Console:
         if rows <= 0:
             return
         self.scrolled_back = min(self.scrolled_back, max(0, self.runner.held() - rows))
-        lines = self.runner.tail(rows, self.scrolled_back)
+        lines = wrap_output(self.runner.tail(rows, self.scrolled_back), width - 2)
         if not self.runner.command and self.feed.notices:
             lines = list(self.feed.notices)[-rows:]
         for index, line in enumerate(lines):
