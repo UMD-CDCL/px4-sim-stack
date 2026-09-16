@@ -16,20 +16,21 @@
   [32mok  [0mthe wide framing publishes a calibration
   [32mok  [0mthe mid framing publishes a calibration
   [32mok  [0mthe narrow framing publishes a calibration
-  [32mok  [0mcasualties localize onto the terrain: 4 of them
+  [32mok  [0mcasualties localize onto the terrain: 3 of them
   [32mok  [0ma click in region of interest mode holds a place
   [32mok  [0mthe gimbal repoints to hold that place as the aircraft moves
   [32mok  [0mthe overlay is drawn about ten times a second
-  [32mok  [0mthe boxes are published with the verdicts that judge them
-       [2mverdicts 16, boxes 19, marks 76 in 8s[0m
+  [31mFAIL[0m the boxes are published with the verdicts that judge them
+       [2mwant True, got False[0m
+       [2mverdicts 15, boxes 21, marks 79 in 8s[0m
   [32mok  [0mthe marks come back when the camera does
   [32mok  [0ma capture asked for from the ground reaches the vehicle
        [2mreceived=1, added_to_mosaic=1, dropped=0[0m
   [32mok  [0mthe map is drawn into the terrain, one surface
-       [2mafter .25s[0m
+       [2mafter .75s[0m
        [2mthe vehicle's map over 0.0% of it (137x106 px[0m
   [32mok  [0ma survey of the marker recovers where it stands
-       [2mfiducial -> uas11_home_position	-6.03	9.04	-4.31 expected	-6.00	9.00[0m
+       [2mfiducial -> uas11_home_position	-6.03	9.04	-4.27 expected	-6.00	9.00[0m
 
 [1m== captures ==[0m
        [2mskipped. VERIFY_FULL=1 includes it[0m
@@ -41,7 +42,7 @@
   [32mok  [0mthe Image panel's live view carries frames
   [32mok  [0mthe live view is calibrated, so the boxes land on it
   [32mok  [0mthe satellite map is drawn north up over the terrain
-       [2mvertices	16641 bytes	1990184 height	+5.1	expected	+4.2 relief	31.9	31.9 image	yes span	600	600	600 texture	north v 0.00	south v 1.00	east u 1.00	west u 0.00 roo[0m
+       [2mvertices	16641 bytes	1990256 height	+5.1	expected	+4.2 relief	31.9	31.9 image	yes span	600	600	600 texture	north v 0.00	south v 1.00	east u 1.00	west u 0.00 roo[0m
   [32mok  [0mevery known target has a 2 m outline in the color of its verdict
        [2mcasualty_14	#9aa0a6	2.01 casualty_15	#9aa0a6	2.01 casualty_16	#9aa0a6	2.01 [0m
   [32mok  [0mevery pin on true_positives says its verdict, what it touched and its nearest target
@@ -51,4 +52,4 @@
   [32mok  [0mevery pin on missed_localizations says its verdict, what it touched and its nearest target
        [2mempty[0m
 
-[1m33 passed, 0 failed[0m
+[1m32 passed, 1 failed[0m

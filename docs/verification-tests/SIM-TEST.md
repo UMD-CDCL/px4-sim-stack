@@ -26,3 +26,11 @@ outline, and verdict layer exercised by the packet. QGC remained a singleton.
 The evidence metadata records the worktree state at test start. Generated
 evidence is committed only when this packet is green; older failed evidence is
 historical and is not reclassified by this checkpoint.
+
+Follow-up live packet on 2026-09-16 at root commit `3a1135b`: **32 passed, 1
+failed**. Flight controls, gimbal/ROI behavior, capture delivery, map
+rendering, Foxglove topic/service contracts, and live image delivery passed.
+The remaining failure is verdict/box timing consistency (`15` verdicts,
+`21` boxes, `79` marks in 8 seconds). This is a targeted perception timing
+defect and does not replace the last green sim checkpoint. The camera
+supervisor source is also not present in the prepared image used by this run.
