@@ -1,0 +1,220 @@
+{
+ "name": "test",
+ "center_lat": 38.976336,
+ "center_lon": -76.925539,
+ "side_m": 100,
+ "origin_alt_m": 14.08,
+ "imagery": {
+  "source": "google",
+  "zoom": 19,
+  "file": "satellite.jpg",
+  "width_px": 431,
+  "height_px": 433,
+  "m_per_px": 0.2321,
+  "origin_px": 38428729,
+  "origin_py": 51306355
+ },
+ "elevation": {
+  "grid_n": 128,
+  "side_m": 100,
+  "zoom": 15,
+  "row0": "south",
+  "origin_alt_m": 14.08,
+  "min_m": 12.66,
+  "max_m": 15.94
+ },
+ "fiducial": {
+  "east_m": 3,
+  "north_m": 3.28,
+  "diameter_m": 0.5,
+  "placed_east_m": 0,
+  "placed_north_m": 0
+ },
+ "buildings": [
+  {
+   "id": "b_way_26688299",
+   "east_m": -59.74,
+   "north_m": 76.05,
+   "length_m": 154.51,
+   "width_m": 108.9,
+   "yaw_deg": 71.65,
+   "height_m": 12.8,
+   "height_source": "levels tag",
+   "map_height_m": 12.8,
+   "map_height_source": "levels tag",
+   "name": "FDA Center for Food Safety and Applied Nutrition",
+   "outline_m": [
+    [
+     -87.1,
+     166.51
+    ],
+    [
+     -96.74,
+     125.24
+    ],
+    [
+     -98.21,
+     119.49
+    ],
+    [
+     -101.27,
+     107.42
+    ],
+    [
+     -112.78,
+     71.27
+    ],
+    [
+     -94.2,
+     58.03
+    ],
+    [
+     -86.91,
+     82.63
+    ],
+    [
+     -29.56,
+     64.49
+    ],
+    [
+     -50.87,
+     -5.96
+    ],
+    [
+     -45.81,
+     -9.43
+    ],
+    [
+     -43.54,
+     -6.47
+    ],
+    [
+     -32.37,
+     -14.42
+    ],
+    [
+     4.81,
+     97.69
+    ],
+    [
+     -55.77,
+     136.85
+    ],
+    [
+     -87.1,
+     166.51
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": true
+  },
+  {
+   "id": "b_way_26688346",
+   "east_m": 53.84,
+   "north_m": 41.84,
+   "length_m": 66.98,
+   "width_m": 37.39,
+   "yaw_deg": -17.81,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "UM Patapsco Building",
+   "outline_m": [
+    [
+     27.76,
+     69.85
+    ],
+    [
+     20.62,
+     47.78
+    ],
+    [
+     16.24,
+     34.28
+    ],
+    [
+     79.93,
+     13.82
+    ],
+    [
+     91.45,
+     49.39
+    ],
+    [
+     27.76,
+     69.85
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": true
+  },
+  {
+   "id": "b_way_201585260",
+   "east_m": 17.36,
+   "north_m": -27.77,
+   "length_m": 43.22,
+   "width_m": 26.68,
+   "yaw_deg": 71.65,
+   "height_m": 3.2,
+   "height_source": "levels tag",
+   "map_height_m": 3.2,
+   "map_height_source": "levels tag",
+   "name": "University of Maryland Police Academy",
+   "outline_m": [
+    [
+     -2.1,
+     -44.08
+    ],
+    [
+     5.44,
+     -46.56
+    ],
+    [
+     9.52,
+     -34.26
+    ],
+    [
+     27.32,
+     -40.11
+    ],
+    [
+     36.82,
+     -11.45
+    ],
+    [
+     11.49,
+     -3.13
+    ],
+    [
+     11.11,
+     -4.24
+    ],
+    [
+     -2.1,
+     -44.08
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": true
+  }
+ ],
+ "vehicles": [],
+ "targets": [],
+ "trees": [],
+ "tree_areas": [],
+ "flatten_zones": [],
+ "format": "scenegen-scene/1"
+}
