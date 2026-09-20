@@ -21,7 +21,8 @@ export PX4SIM_BUILD_NETWORK=none
 # What a vehicle can be asked to capture. The console offers these, and the
 # `capture` arm below takes these, so one list answers both.
 CAPTURE_KINDS="mosaic vlm fiducial"
-RECORD_PID_FILE="${XDG_RUNTIME_DIR:-/tmp}/px4sim-record.pid"
+RECORD_PID_FILE="logs/.px4sim-record.pid"
+RECORD_LOG="logs/recording.log"
 
 BOLD=$'\033[1m'; DIM=$'\033[2m'; GRN=$'\033[32m'; RED=$'\033[31m'; YEL=$'\033[33m'; OFF=$'\033[0m'
 say()  { printf '%s==> %s%s\n' "$BOLD" "$*" "$OFF"; }
@@ -718,8 +719,8 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
 
   ${BOLD}Look at the data${OFF}
     streams             Which video streams are live right now
-    record [start|stop|status]
-                        Record ROS topics and raw video
+	record [bags|all|stop|status]
+	                        Record bags only, or bags plus raw video
     view [N|stream]     Play a stream. Default: uas${FIRST_UAS}'s $(default_stream "$FIRST_UAS")
     topics [N]          List a vehicle's ROS topics. Default: uas${FIRST_UAS}
     state [--watch]     Every reading the console draws, as JSON
@@ -872,7 +873,9 @@ fleet_facts() {
 }
 
 recording_status() {
-	if [ -r "$RECORD_PID_FILE" ] && kill -0 "$(cat "$RECORD_PID_FILE")" 2>/dev/null; then
+	local pid
+	pid=$(cat "$RECORD_PID_FILE" 2>/dev/null || true)
+	if [[ "$pid" =~ ^[0-9]+$ ]] && { kill -0 "$pid" 2>/dev/null || kill -0 -- -"$pid" 2>/dev/null; }; then
 		echo true
 	else
 		rm -f "$RECORD_PID_FILE"
@@ -1164,7 +1167,7 @@ status|ps)
 record)
 	action=${1:-start}
 	case "$action" in
-	start)
+	start|all|bags)
 		[ "$(recording_status)" = false ] || die "recording is already running"
 		case "$(world_of)" in
 			aircraft) recorder="$HOME/chimera-deploy/remote/remote_record_all.sh" ;;
@@ -1172,18 +1175,35 @@ record)
 			*) die "recording is supported on ground and aircraft machines" ;;
 		 esac
 		[ -x "$recorder" ] || die "recorder is not executable: $recorder"
-		"$recorder" &
+		mkdir -p "$(dirname "$RECORD_LOG")"
+		if [ "$action" = bags ]; then
+			RECORD_VIDEO=0 setsid "$recorder" </dev/null >"$RECORD_LOG" 2>&1 &
+		else
+			RECORD_VIDEO=1 setsid "$recorder" </dev/null >"$RECORD_LOG" 2>&1 &
+		fi
 		echo $! > "$RECORD_PID_FILE"
 		say "recording ROS topics and raw video"
 		;;
 	stop)
 		[ "$(recording_status)" = true ] || die "recording is not running"
-		kill -INT "$(cat "$RECORD_PID_FILE")"
-		rm -f "$RECORD_PID_FILE"
+		pid=$(cat "$RECORD_PID_FILE")
+		kill -INT -- -"$pid" 2>/dev/null || kill -INT "$pid" 2>/dev/null || true
+		for _ in {1..50}; do
+			[ "$(recording_status)" = false ] && break
+			sleep 0.1
+		done
+		if [ "$(recording_status)" = true ]; then
+			kill -TERM -- -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+			sleep 2
+		fi
+		if [ "$(recording_status)" = true ]; then
+			kill -KILL -- -"$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+			rm -f "$RECORD_PID_FILE"
+		fi
 		say "recording stopped"
 		;;
 	status) echo "recording=$(recording_status)" ;;
-	*) die "record takes start, stop, or status" ;;
+	*) die "record takes bags, all, stop, or status" ;;
 	esac
 	;;
 
