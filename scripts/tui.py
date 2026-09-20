@@ -638,8 +638,10 @@ class Console:
             self.rows.world, str(config.get("scene", "")),
             str(config.get("scenario", "")), origin,
             fleet_words(len(self.rows.fleet))) if word)
-        if str(config.get("recording", "false")).lower() == "true":
-            told = "● RECORDING   " + told
+        recording = str(config.get("recording", "false")).lower() == "true"
+        if recording:
+            mode = str(config.get("recording_mode", "all")).upper()
+            told = f"● RECORDING: {mode}   " + told
         self.put(0, 9, told, "bar", width - len(clock) - 12)
         self.put(0, max(9, width - len(clock) - 2), clock, "bar")
 

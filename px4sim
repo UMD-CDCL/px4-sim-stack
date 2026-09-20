@@ -22,6 +22,7 @@ export PX4SIM_BUILD_NETWORK=none
 # `capture` arm below takes these, so one list answers both.
 CAPTURE_KINDS="mosaic vlm fiducial"
 RECORD_PID_FILE="logs/.px4sim-record.pid"
+RECORD_MODE_FILE="logs/.px4sim-record.mode"
 RECORD_LOG="logs/recording.log"
 
 BOLD=$'\033[1m'; DIM=$'\033[2m'; GRN=$'\033[32m'; RED=$'\033[31m'; YEL=$'\033[33m'; OFF=$'\033[0m'
@@ -847,6 +848,7 @@ fleet_facts() {
 		world=$(world_of)
 		bench_mode=${BENCH_MODE:-false}
 		recording=$(recording_status)
+		recording_mode=$(recording_mode)
 		units=$(native_units | tr ' ' ',' | sed 's/,$//')
 		compose=$DC
 		ground_domain=$GROUND_DOMAIN
@@ -879,8 +881,14 @@ recording_status() {
 		echo true
 	else
 		rm -f "$RECORD_PID_FILE"
+		rm -f "$RECORD_MODE_FILE"
 		echo false
 	fi
+}
+
+recording_mode() {
+	[ "$(recording_status)" = true ] || { echo false; return; }
+	cat "$RECORD_MODE_FILE" 2>/dev/null || echo all
 }
 
 # Every airframe this simulator flies, from the model directories themselves.
@@ -1182,6 +1190,7 @@ record)
 			RECORD_VIDEO=1 setsid "$recorder" </dev/null >"$RECORD_LOG" 2>&1 &
 		fi
 		echo $! > "$RECORD_PID_FILE"
+		printf '%s\n' "$([ "$action" = bags ] && echo bags || echo all)" > "$RECORD_MODE_FILE"
 		say "recording ROS topics and raw video"
 		;;
 	stop)
@@ -1198,7 +1207,8 @@ record)
 		fi
 		if [ "$(recording_status)" = true ]; then
 			kill -KILL -- -"$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
-			rm -f "$RECORD_PID_FILE"
+		rm -f "$RECORD_PID_FILE"
+		rm -f "$RECORD_MODE_FILE"
 		fi
 		say "recording stopped"
 		;;
