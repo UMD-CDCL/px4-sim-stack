@@ -47,6 +47,8 @@ NAME_COLUMN = 15
 ESCAPE_CODES = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b[=>]|[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 FRONT_DOOR = Path(__file__).resolve().parents[1] / "px4sim"
+RECORD_PID_FILE = FRONT_DOOR.parent / "logs/.px4sim-record.pid"
+RECORD_MODE_FILE = FRONT_DOOR.parent / "logs/.px4sim-record.mode"
 
 STACK, SERVICE, VEHICLE, STREAM = "stack", "service", "vehicle", "stream"
 PANES = (SERVICE, VEHICLE, STREAM)
@@ -210,6 +212,19 @@ def cursor(shown: int) -> None:
         curses.curs_set(shown)
     except curses.error:
         pass
+
+
+def local_recording() -> tuple[bool, str]:
+    try:
+        pid = int(RECORD_PID_FILE.read_text().strip())
+        os.kill(pid, 0)
+    except (OSError, ValueError):
+        return False, ""
+    try:
+        mode = RECORD_MODE_FILE.read_text().strip() or "all"
+    except OSError:
+        mode = "all"
+    return True, mode
 
 
 def stop_process(process: subprocess.Popen | None) -> None:
@@ -638,8 +653,12 @@ class Console:
             self.rows.world, str(config.get("scene", "")),
             str(config.get("scenario", "")), origin,
             fleet_words(len(self.rows.fleet))) if word)
-        recording = str(config.get("recording", "false")).lower() == "true"
-        mode = str(config.get("recording_mode", "all")).upper()
+        local_recording_active, local_mode = local_recording()
+        recording = (str(config.get("recording", "false")).lower() == "true"
+                     or local_recording_active)
+        mode = str(config.get("recording_mode", local_mode or "all")).upper()
+        if local_recording_active:
+            mode = local_mode.upper()
         self.put(0, 9, told, "bar", width - len(clock) - 12)
         self.put(0, max(9, width - len(clock) - 2), clock, "bar")
 
