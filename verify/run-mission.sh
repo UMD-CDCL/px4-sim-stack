@@ -18,6 +18,5 @@ docker cp verify/component/udp-only.xml "$container:/tmp/udp-only.xml" >/dev/nul
 exec docker exec -e ROS_DOMAIN_ID=71 \
   -e FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/udp-only.xml "$container" bash -lc '
   set -e
-  . /opt/ros/$ROS_DISTRO/setup.bash
-  . /home/user/ros2_ws/install/setup.bash
+  . /usr/local/bin/ros-env.sh
   exec python3 /tmp/mission.py "$@"' _ "$@"
