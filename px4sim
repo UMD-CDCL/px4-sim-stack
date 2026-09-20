@@ -21,6 +21,7 @@ export PX4SIM_BUILD_NETWORK=none
 # What a vehicle can be asked to capture. The console offers these, and the
 # `capture` arm below takes these, so one list answers both.
 CAPTURE_KINDS="mosaic vlm fiducial"
+RECORD_PID_FILE="${XDG_RUNTIME_DIR:-/tmp}/px4sim-record.pid"
 
 BOLD=$'\033[1m'; DIM=$'\033[2m'; GRN=$'\033[32m'; RED=$'\033[31m'; YEL=$'\033[33m'; OFF=$'\033[0m'
 say()  { printf '%s==> %s%s\n' "$BOLD" "$*" "$OFF"; }
@@ -717,6 +718,8 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
 
   ${BOLD}Look at the data${OFF}
     streams             Which video streams are live right now
+    record [start|stop|status]
+                        Record ROS topics and raw video
     view [N|stream]     Play a stream. Default: uas${FIRST_UAS}'s $(default_stream "$FIRST_UAS")
     topics [N]          List a vehicle's ROS topics. Default: uas${FIRST_UAS}
     state [--watch]     Every reading the console draws, as JSON
@@ -842,6 +845,7 @@ fleet_facts() {
 		profiles=${COMPOSE_PROFILES:-}
 		world=$(world_of)
 		bench_mode=${BENCH_MODE:-false}
+		recording=$(recording_status)
 		units=$(native_units | tr ' ' ',' | sed 's/,$//')
 		compose=$DC
 		ground_domain=$GROUND_DOMAIN
@@ -865,6 +869,15 @@ fleet_facts() {
 			"$(vehicle_streams "$n" | tr ' ' ',' | sed 's/,$//')" \
 			"$(zoom_preset_of_slot $((n - UAS_BASE - 1)) || true)"
 	done
+}
+
+recording_status() {
+	if [ -r "$RECORD_PID_FILE" ] && kill -0 "$(cat "$RECORD_PID_FILE")" 2>/dev/null; then
+		echo true
+	else
+		rm -f "$RECORD_PID_FILE"
+		echo false
+	fi
 }
 
 # Every airframe this simulator flies, from the model directories themselves.
@@ -1146,6 +1159,32 @@ status|ps)
 		warn "  ./px4sim stop && ./px4sim restart"
 	fi
 	endpoints
+	;;
+
+record)
+	action=${1:-start}
+	case "$action" in
+	start)
+		[ "$(recording_status)" = false ] || die "recording is already running"
+		case "$(world_of)" in
+			aircraft) recorder="$HOME/chimera-deploy/remote/remote_record_all.sh" ;;
+			ground) recorder="$HOME/chimera-deploy/local/local_record_all.sh" ;;
+			*) die "recording is supported on ground and aircraft machines" ;;
+		 esac
+		[ -x "$recorder" ] || die "recorder is not executable: $recorder"
+		"$recorder" &
+		echo $! > "$RECORD_PID_FILE"
+		say "recording ROS topics and raw video"
+		;;
+	stop)
+		[ "$(recording_status)" = true ] || die "recording is not running"
+		kill -INT "$(cat "$RECORD_PID_FILE")"
+		rm -f "$RECORD_PID_FILE"
+		say "recording stopped"
+		;;
+	status) echo "recording=$(recording_status)" ;;
+	*) die "record takes start, stop, or status" ;;
+	esac
 	;;
 
 ui|tui)

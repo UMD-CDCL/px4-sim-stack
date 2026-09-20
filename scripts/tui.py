@@ -92,6 +92,8 @@ class Action(NamedTuple):
 # written down once.
 ACTIONS = (
     Action(STACK, "r", "rebuild and restart the stack", ("restart",)),
+    Action(STACK, "b", "start ROS and video recording", ("record", "start"),
+           worlds=(GROUND, AIRCRAFT)),
     Action(STACK, "s", "start the stack if it is stopped", ("start",)),
     Action(STACK, "", "enable GPS-free BENCH MODE (select this menu item)",
            ("bench", "enable", "{value}"),
@@ -630,6 +632,8 @@ class Console:
             self.rows.world, str(config.get("scene", "")),
             str(config.get("scenario", "")), origin,
             fleet_words(len(self.rows.fleet))) if word)
+        if str(config.get("recording", "false")).lower() == "true":
+            told = "● RECORDING   " + told
         self.put(0, 9, told, "bar", width - len(clock) - 12)
         self.put(0, max(9, width - len(clock) - 2), clock, "bar")
 
