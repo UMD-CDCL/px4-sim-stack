@@ -639,9 +639,7 @@ class Console:
             str(config.get("scenario", "")), origin,
             fleet_words(len(self.rows.fleet))) if word)
         recording = str(config.get("recording", "false")).lower() == "true"
-        if recording:
-            mode = str(config.get("recording_mode", "all")).upper()
-            told = f"● RECORDING: {mode}   " + told
+        mode = str(config.get("recording_mode", "all")).upper()
         self.put(0, 9, told, "bar", width - len(clock) - 12)
         self.put(0, max(9, width - len(clock) - 2), clock, "bar")
 
@@ -662,10 +660,15 @@ class Console:
                 self.put(2, max(1, width - len(card) - 2), card, "faint")
             self.rule(3)
             return
-        self.put(1, 1, f"{state}    {line}", "watch" if self.message else style,
-                 width - len(card) - 4)
+        if recording:
+            self.put(1, 1, f"● RECORDING: {mode}", "bad", width - 1)
+            self.put(2, 1, f"{state}    {line}", "watch" if self.message else style,
+                     width - len(card) - 4)
+        else:
+            self.put(1, 1, f"{state}    {line}", "watch" if self.message else style,
+                     width - len(card) - 4)
         if card:
-            self.put(1, max(1, width - len(card) - 2), card, "faint")
+            self.put(2 if recording else 1, max(1, width - len(card) - 2), card, "faint")
         self.rule(3)
 
     def draw_body(self, top: int, end: int, width: int) -> None:
