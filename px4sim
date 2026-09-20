@@ -551,6 +551,21 @@ build_stack() {
 	$DC build "${SERVICES[@]}"
 }
 
+build_local_stack() {
+	local services=() n
+	if [ "$FLEET_IS_SIMULATED" = true ]; then
+		for n in $(fleet_numbers); do services+=("onboard$n"); done
+		case ",${COMPOSE_PROFILES:-}," in
+		*,offboard,*) services+=(offboard) ;;
+		esac
+	elif aircraft_selected; then
+		services+=(onboard)
+	else
+		services+=(ground)
+	fi
+	build_stack "${services[@]}"
+}
+
 prepare_stack() {
 	[ $# -eq 0 ] || export COMPOSE_PROFILES="$1"
 	add_fleet_profiles
@@ -1080,12 +1095,8 @@ restart|start|up|core)
 		return 0
 	fi
 	if [ "$rebuild" = true ]; then
-		if [ "${PX4SIM_REUSE_PREPARED_IMAGES:-0}" = 1 ]; then
-			say "Using prepared pinned images: $COMPOSE_PROFILES"
-		else
-			say "Building offline: $COMPOSE_PROFILES"
-			build_stack
-		fi
+		say "Building offline: $COMPOSE_PROFILES"
+		build_local_stack
 	fi
 	# Missing images fail before stopping an otherwise usable stack.
 	local image required_images
