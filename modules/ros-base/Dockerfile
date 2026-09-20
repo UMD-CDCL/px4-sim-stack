@@ -17,7 +17,9 @@ RUN --network=none \
     --mount=type=bind,from=mavros_patch_src,target=/tmp/chimera-deploy/remote/mavros_patch \
     --mount=type=bind,from=mavros_src,target=/tmp/chimera-deploy/submodules/mavros \
     --mount=type=bind,from=angles_src,target=/tmp/chimera-deploy/submodules/angles \
-    --mount=type=bind,from=geographic_msgs_src,target=/tmp/chimera-deploy/submodules/geographic_msgs \
+    # mavros_patch/apply.sh copies geographic_msgs from the geographic_info
+    # submodule path, so mirror that layout in the isolated build mount.
+    --mount=type=bind,from=geographic_msgs_src,target=/tmp/chimera-deploy/submodules/geographic_info/geographic_msgs \
     set -eux; \
     mkdir -p /opt/mavros/install; \
     if [ "${MAVROS_PATCH}" = 1 ] && [ "${ROS_DISTRO}" = humble ]; then \
