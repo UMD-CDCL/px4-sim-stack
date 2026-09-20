@@ -92,9 +92,9 @@ class Action(NamedTuple):
 # written down once.
 ACTIONS = (
     Action(STACK, "r", "rebuild and restart the stack", ("restart",)),
-    Action(STACK, "a", "start ROS bag recording", ("record", "bags"),
+    Action(STACK, "a", "start ROS bag and video recording", ("record", "all"),
            worlds=(GROUND, AIRCRAFT)),
-    Action(STACK, "b", "start ROS bag and video recording", ("record", "all"),
+    Action(STACK, "b", "start ROS bag recording", ("record", "bags"),
            worlds=(GROUND, AIRCRAFT)),
     Action(STACK, "A", "stop ROS and video recording", ("record", "stop"),
            worlds=(GROUND, AIRCRAFT)),
