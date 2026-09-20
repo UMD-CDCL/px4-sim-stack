@@ -336,6 +336,7 @@ services:
         tracking_test_src: ./.build-contexts/tracking_test
         mavros_src: ./.build-contexts/mavros
         angles_src: ./.build-contexts/angles
+        geographic_msgs_src: ./.build-contexts/geographic_msgs
         mavros_patch_src: ./.build-contexts/mavros_patch
         yolo_src: ./.build-contexts/yolo
       args:

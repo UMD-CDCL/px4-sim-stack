@@ -10,6 +10,28 @@ root="$PWD/.build-contexts"
 [ ! -L "$root" ] || { echo "Unexpected symlink: $root" >&2; exit 1; }
 mkdir -p "$root"
 
+if [ "${PX4SIM_PINNED_DEPS:-0}" = 1 ]; then
+    pin_ref() {
+        local label=$1 repo=$2 expected=$3 actual
+        [ -n "$expected" ] || { echo "Missing pin for $label." >&2; exit 1; }
+        actual=$(git -C "$repo" rev-parse HEAD 2>/dev/null) || {
+            echo "Cannot read pinned $label checkout: $repo" >&2
+            exit 1
+        }
+        case "$actual" in
+            "$expected"*) ;;
+            *)
+                echo "$label is $actual, expected $expected." >&2
+                echo "Check out the known-good pinned source or disable PX4SIM_PINNED_DEPS." >&2
+                exit 1
+                ;;
+        esac
+    }
+    pin_ref "chimera-deploy" "$deploy" "${CHIMERA_DEPLOY_REF:-}"
+    pin_ref "MAVROS" "$deploy/submodules/mavros" "${MAVROS_REF:-}"
+    pin_ref "angles" "$deploy/submodules/angles" "${ANGLES_REF:-}"
+fi
+
 stage() {
     local name=$1 source=$2
     shift 2
@@ -32,6 +54,9 @@ stage umd_uas "$ws/src/5g_drone" \
     --include='/umd_uas/***' --include='/config/***' --include='/launch/***' \
     --include='/resource/***' --include='/setup.*' --include='/package.xml' \
     --include='/pyproject.toml' --include='/LICENSE*' --exclude='*'
+patch -p1 -d "$root/umd_uas" --forward --silent \
+    < patches/5g_drone/0001-scoring-import-time-fallback.patch \
+    || { echo "Could not apply the staged scoring compatibility patch." >&2; exit 1; }
 stage mavinsight "$ws/src/MAVInsight" \
     --include='/mavinsight/***' --include='/models/***' --include='/launch/***' \
     --include='/resource/***' --include='/vehicles/***' --include='/sensors/***' \
@@ -49,6 +74,19 @@ for package in px4_msgs cdcl_umd_msgs; do
 done
 stage mavros "$deploy/submodules/mavros"
 stage angles "$deploy/submodules/angles"
+geographic_source="$deploy/submodules/geographic_info/geographic_msgs"
+if [ ! -d "$geographic_source" ]; then
+    geographic_cache="$root/geographic_info"
+    if [ ! -d "$geographic_cache/geographic_msgs" ] && [ "${PX4SIM_BUILD_NETWORK:-none}" = host ]; then
+        geographic_ref=${GEOGRAPHIC_INFO_REF:-f70b81a438172cd7a066dc1b18314d70e0eb6389}
+        rm -rf "$geographic_cache"
+        git clone --filter=blob:none --no-checkout \
+            https://github.com/ros-geographic-info/geographic_info.git "$geographic_cache"
+        git -C "$geographic_cache" checkout --detach "$geographic_ref"
+    fi
+    geographic_source="$geographic_cache/geographic_msgs"
+fi
+stage geographic_msgs "$geographic_source"
 stage mavros_patch "$deploy/remote/mavros_patch"
 stage yolo "$ws/src/5g_drone/config/deepstream/nvdsinfer_custom_impl_Yolo"
 

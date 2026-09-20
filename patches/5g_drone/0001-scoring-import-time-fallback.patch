@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+Subject: [PATCH] scoring: import the builtin timestamp fallback
+
+The source-timestamp scoring change uses the ROS builtin Time message when
+there is no estimate stamp, but its import was omitted. Keep the source
+checkout untouched and apply this compatibility fix to the staged image input.
+
+---
+ umd_uas/scoring.py | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/umd_uas/scoring.py b/umd_uas/scoring.py
+--- a/umd_uas/scoring.py
++++ b/umd_uas/scoring.py
+@@ -66,3 +66,4 @@
+ # python imports
++from builtin_interfaces.msg import Time
+ import math
+ import time

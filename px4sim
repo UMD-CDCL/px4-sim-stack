@@ -72,6 +72,13 @@ for name in $OVERRIDABLE; do
 	fi
 done
 
+# The pinned dependency images are local-only by design. The default Docker
+# builder can consume them directly; a docker-container builder otherwise
+# treats the local tag as a registry reference and tries Docker Hub.
+if [ "${PX4SIM_PINNED_DEPS:-0}" = 1 ]; then
+	export BUILDX_BUILDER="${PX4SIM_BUILDER:-default}"
+fi
+
 # Whether the fleet that is flying is the one the file holds. This script
 # exports what it reads, so a px4sim that this one runs -- the console, or
 # `fly` calling `place` -- finds the file's own value in its environment and
@@ -555,7 +562,13 @@ prepare_stack() {
 	for parent in "$DS_IMAGE" ubuntu:24.04 debian:bookworm-slim; do
 		docker image inspect "$parent" >/dev/null 2>&1 || docker pull "$parent"
 	done
-	COMPOSE_PROFILES=deps $DC build ros-deps yolo-deps
+	if [ "${PX4SIM_PINNED_DEPS:-0}" = 1 ] \
+		&& docker image inspect "px4simstack/ros-deps:$DS_TAG" >/dev/null 2>&1 \
+		&& docker image inspect "px4simstack/yolo-deps:$DS_TAG" >/dev/null 2>&1; then
+		say "Reusing pinned local dependency images: $DS_TAG"
+	else
+		COMPOSE_PROFILES=deps $DC build ros-deps yolo-deps
+	fi
 	# Image-only services (for example video-router) must also be present before
 	# going offline. Downloading is confined to this explicit preparation step.
 	$DC pull --ignore-buildable
@@ -1067,8 +1080,12 @@ restart|start|up|core)
 		return 0
 	fi
 	if [ "$rebuild" = true ]; then
-		say "Building offline: $COMPOSE_PROFILES"
-		build_stack
+		if [ "${PX4SIM_REUSE_PREPARED_IMAGES:-0}" = 1 ]; then
+			say "Using prepared pinned images: $COMPOSE_PROFILES"
+		else
+			say "Building offline: $COMPOSE_PROFILES"
+			build_stack
+		fi
 	fi
 	# Missing images fail before stopping an otherwise usable stack.
 	local image required_images
