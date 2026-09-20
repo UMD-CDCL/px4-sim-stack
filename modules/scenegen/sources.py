@@ -21,6 +21,7 @@ from __future__ import annotations
 import io
 import json
 import math
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -43,17 +44,26 @@ ELEVATION_URL_TEMPLATE = "https://s3.amazonaws.com/elevation-tiles-prod/terrariu
 # Keep these independent public instances in order.  Scene queries cover at
 # most a few hundred metres, so a healthy instance answers in seconds; moving
 # on promptly is better than spending a minute waiting for one busy mirror.
-OVERPASS_URLS = [
+DEFAULT_OVERPASS_URLS = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
     "https://overpass.private.coffee/api/interpreter",
+    "https://overpass.nchc.org.tw/api/interpreter",
 ]
+# Allow a deployment or an offline mirror to override the public defaults.
+# A comma-separated value keeps this usable from the scenegen container.
+OVERPASS_URLS = tuple(
+    url.strip() for url in os.environ.get("OVERPASS_URLS", "").split(",")
+    if url.strip()
+) or tuple(DEFAULT_OVERPASS_URLS)
 USER_AGENT = "px4-sim-stack-scenegen/1.0"
 DOWNLOAD_WORKERS = 8
 DOWNLOAD_RETRIES = 3
 REQUEST_TIMEOUT_S = 30
-OVERPASS_QUERY_TIMEOUT_S = 15
-OVERPASS_REQUEST_TIMEOUT_S = 20
+OVERPASS_QUERY_TIMEOUT_S = 25
+OVERPASS_REQUEST_RETRIES = 2
+OVERPASS_CONNECT_TIMEOUT_S = 8
+OVERPASS_READ_TIMEOUT_S = 40
 # 2048 tiles is about 500 MB of imagery. Above that the zoom is wrong for
 # the requested side, so stop and say so instead of hammering the server.
 MAX_TILES_PER_LAYER = 2048
@@ -315,16 +325,24 @@ def _overpass_elements(frame: geo.GeoFrame, half_m: float, body: str) -> list:
              + body.format(bbox=f"{south},{west},{north},{east}")
              + "out tags geom;")
     session = _session()
-    last_error: Exception | None = None
+    errors = []
     for url in OVERPASS_URLS:
-        try:
-            reply = session.post(url, data={"data": query},
-                                 timeout=OVERPASS_REQUEST_TIMEOUT_S)
-            reply.raise_for_status()
-            return reply.json().get("elements", [])
-        except Exception as error:  # noqa: BLE001 - try the next mirror
-            last_error = error
-    raise RuntimeError(f"every Overpass mirror failed: {last_error}")
+        for attempt in range(OVERPASS_REQUEST_RETRIES):
+            try:
+                reply = session.post(
+                    url,
+                    data={"data": query},
+                    timeout=(OVERPASS_CONNECT_TIMEOUT_S,
+                             OVERPASS_READ_TIMEOUT_S),
+                )
+                reply.raise_for_status()
+                return reply.json().get("elements", [])
+            except Exception as error:  # noqa: BLE001 - try the next mirror
+                errors.append(f"{url} attempt {attempt + 1}: {error}")
+                if attempt + 1 < OVERPASS_REQUEST_RETRIES:
+                    time.sleep(1.0 + attempt)
+    details = "; ".join(errors)
+    raise RuntimeError(f"every Overpass mirror failed ({details})")
 
 
 def fetch_osm_buildings(frame: geo.GeoFrame, side_m: float) -> tuple[list[dict], dict]:
