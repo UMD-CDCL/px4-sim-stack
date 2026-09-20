@@ -47,6 +47,8 @@ NAME_COLUMN = 15
 ESCAPE_CODES = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b[=>]|[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 FRONT_DOOR = Path(__file__).resolve().parents[1] / "px4sim"
+RECORD_PID_FILE = FRONT_DOOR.parent / "logs/.px4sim-record.pid"
+RECORD_MODE_FILE = FRONT_DOOR.parent / "logs/.px4sim-record.mode"
 
 STACK, SERVICE, VEHICLE, STREAM = "stack", "service", "vehicle", "stream"
 PANES = (SERVICE, VEHICLE, STREAM)
@@ -92,6 +94,14 @@ class Action(NamedTuple):
 # written down once.
 ACTIONS = (
     Action(STACK, "r", "rebuild and restart the stack", ("restart",)),
+    Action(STACK, "a", "start ROS bag and video recording", ("record", "all"),
+           worlds=(GROUND, AIRCRAFT)),
+    Action(STACK, "b", "start ROS bag recording", ("record", "bags"),
+           worlds=(GROUND, AIRCRAFT)),
+    Action(STACK, "A", "stop ROS and video recording", ("record", "stop"),
+           worlds=(GROUND, AIRCRAFT)),
+    Action(STACK, "B", "stop ROS and video recording", ("record", "stop"),
+           worlds=(GROUND, AIRCRAFT)),
     Action(STACK, "s", "start the stack if it is stopped", ("start",)),
     Action(STACK, "", "enable GPS-free BENCH MODE (select this menu item)",
            ("bench", "enable", "{value}"),
@@ -202,6 +212,19 @@ def cursor(shown: int) -> None:
         curses.curs_set(shown)
     except curses.error:
         pass
+
+
+def local_recording() -> tuple[bool, str]:
+    try:
+        pid = int(RECORD_PID_FILE.read_text().strip())
+        os.kill(pid, 0)
+    except (OSError, ValueError):
+        return False, ""
+    try:
+        mode = RECORD_MODE_FILE.read_text().strip() or "all"
+    except OSError:
+        mode = "all"
+    return True, mode
 
 
 def stop_process(process: subprocess.Popen | None) -> None:
@@ -630,6 +653,12 @@ class Console:
             self.rows.world, str(config.get("scene", "")),
             str(config.get("scenario", "")), origin,
             fleet_words(len(self.rows.fleet))) if word)
+        local_recording_active, local_mode = local_recording()
+        recording = (str(config.get("recording", "false")).lower() == "true"
+                     or local_recording_active)
+        mode = str(config.get("recording_mode", local_mode or "all")).upper()
+        if local_recording_active:
+            mode = local_mode.upper()
         self.put(0, 9, told, "bar", width - len(clock) - 12)
         self.put(0, max(9, width - len(clock) - 2), clock, "bar")
 
@@ -650,10 +679,15 @@ class Console:
                 self.put(2, max(1, width - len(card) - 2), card, "faint")
             self.rule(3)
             return
-        self.put(1, 1, f"{state}    {line}", "watch" if self.message else style,
-                 width - len(card) - 4)
+        if recording:
+            self.put(1, 1, f"● RECORDING: {mode}", "bad", width - 1)
+            self.put(2, 1, f"{state}    {line}", "watch" if self.message else style,
+                     width - len(card) - 4)
+        else:
+            self.put(1, 1, f"{state}    {line}", "watch" if self.message else style,
+                     width - len(card) - 4)
         if card:
-            self.put(1, max(1, width - len(card) - 2), card, "faint")
+            self.put(2 if recording else 1, max(1, width - len(card) - 2), card, "faint")
         self.rule(3)
 
     def draw_body(self, top: int, end: int, width: int) -> None:
