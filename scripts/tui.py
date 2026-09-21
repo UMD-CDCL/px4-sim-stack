@@ -29,6 +29,7 @@ import json
 import os
 import re
 import signal
+import shlex
 import subprocess
 import sys
 import threading
@@ -206,6 +207,26 @@ def fleet_words(count: int) -> str:
 
 def strip_codes(line: str) -> str:
     return ESCAPE_CODES.sub("", line).expandtabs(8).rstrip()
+
+
+def read_env_value(path: Path, name: str) -> str | None:
+    """Read one simple .env assignment without executing the file."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    prefix = name + "="
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or not stripped.startswith(prefix):
+            continue
+        raw = stripped[len(prefix):].strip()
+        try:
+            parts = shlex.split(raw, comments=True, posix=True)
+        except ValueError:
+            return raw.strip("\"'")
+        return " ".join(parts)
+    return None
 
 
 def cursor(shown: int) -> None:
@@ -915,9 +936,16 @@ class Console:
         if not fleet:
             self.message = "the fleet is not known yet"
             return None
+        # The report is deliberately long-lived while the console is open.  A
+        # previous `active` value can therefore survive a restart (and is
+        # especially confusing when the command just rewrote .env).  Read the
+        # file when the selector opens; it is the source of truth for the next
+        # restart.  Fall back to the report for installations without .env.
+        configured = read_env_value(FRONT_DOOR.parent / ".env", "UAS_ACTIVE")
+        if configured is None:
+            configured = str(self.rows.config.get("active", ""))
         active = {int(word) for word in
-                  str(self.rows.config.get("active", "")).replace(",", " ").split()
-                  if word.isdigit()}
+                  configured.replace(",", " ").split() if word.isdigit()}
         chosen = 0
         try:
             while True:
