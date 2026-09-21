@@ -432,18 +432,28 @@ def stream_words(path: dict) -> list[tuple[str, str]]:
 
 def vehicle_words(vehicle: dict) -> list[tuple[str, str]]:
     link = vehicle.get("link", "down")
-    parts = [(f"link {link}", {"up": "good", "silent": "watch"}.get(link, "bad"))]
+    parts = [(f"{link}", {"up": "good", "silent": "watch"}.get(link, "bad"))]
     if link == "up":
-        parts.append((f"{vehicle.get('messages_per_s', 0):.0f}/s", "faint"))
+        parts.append((f"↓{vehicle.get('rx_kbits', 0):.0f}k", "faint"))
+        if vehicle.get("tx_kbits") is not None:
+            parts.append((f"↑{vehicle['tx_kbits']:.0f}k", "faint"))
         parts.append(("ARMED" if vehicle.get("armed") else "disarmed",
                       "watch" if vehicle.get("armed") else "faint"))
-        parts.append((str(vehicle.get("mode", "-")), "plain"))
+        parts.append((str(vehicle.get("vehicle_mode", vehicle.get("mode", "-"))), "plain"))
+        if vehicle.get("mission_status"):
+            parts.append((str(vehicle["mission_status"]), "plain"))
+        if vehicle.get("fiducial_correction_active"):
+            parts.append(("FID✓", "good"))
+        counts = " ".join(f"{key[:3]}:{vehicle.get(key, 0)}" for key in
+                          ("fiducial_count", "detection_count", "mosaic_count", "vlm_count"))
+        if counts.strip():
+            parts.append((counts, "faint"))
         height = vehicle.get("altitude_home")
         if height is not None:
             parts.append((f"{height:.1f} m", "plain"))
         pitch = vehicle.get("gimbal_pitch")
         if pitch is not None:
-            parts.append((f"gimbal {pitch:+.0f}", "plain"))
+            parts.append((f"gimbal {pitch:+.0f}°", "plain"))
     elif vehicle.get("error"):
         parts.append((vehicle["error"], "faint"))
     return parts

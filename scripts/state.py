@@ -373,6 +373,8 @@ class Link:
         self.fields: dict = {}
         self.systems: set[int] = set()
         self.frames = 0
+        self.bytes_received = 0
+        self.reported_bytes = 0
         self.reported_frames = 0
         self.reported_at = time.monotonic()
         self.heard_at = 0.0
@@ -437,6 +439,7 @@ class Link:
         self.take(arrived, now)
 
     def take(self, arrived: bytes, now: float) -> None:
+        self.bytes_received += len(arrived)
         found, self.buffer = mavlink.frames(self.buffer + arrived)
         for frame in found:
             self.systems.add(frame.system)
@@ -451,7 +454,9 @@ class Link:
     def report(self, now: float) -> dict:
         elapsed = max(now - self.reported_at, 1e-6)
         rate = (self.frames - self.reported_frames) / elapsed
+        rx_kbits = (self.bytes_received - self.reported_bytes) * 8 / 1000.0 / elapsed
         self.reported_frames, self.reported_at = self.frames, now
+        self.reported_bytes = self.bytes_received
         silent_for = now - self.heard_at if self.heard_at else None
         if not self.connected:
             link = "down"
@@ -462,6 +467,7 @@ class Link:
         told = {"number": self.number, "host": self.host, "port": self.port,
                 "link": link,
                 "silent_for": silent_for, "messages_per_s": rate,
+                "rx_kbits": rx_kbits, "tx_kbits": None,
                 "systems": sorted(self.systems), "error": self.error}
         told.update(self.fields)
         self.systems = set()
