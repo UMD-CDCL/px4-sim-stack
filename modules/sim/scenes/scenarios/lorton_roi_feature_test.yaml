@@ -1,0 +1,31 @@
+name: lorton_roi_feature_test
+description: Two nearby casualties from scene lorton. Used for known-location ROI and fiducial workflow testing.
+home_lat: 38.684615
+home_lon: -77.243195
+home_alt: 41.19
+fiducial_lat: 38.6847591
+fiducial_lon: -77.2433329
+fiducial_alt: 41.18
+fiducial_placed_east: 6.0
+fiducial_placed_north: -9.0
+entities:
+- name: roi_test_casualty_1
+  uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/Standing person
+  pose:
+  - -1.21
+  - 10.68
+  - -0.042
+  - 0
+  - 0
+  - 6.253
+  static: true
+- name: roi_test_casualty_2
+  uri: https://fuel.gazebosim.org/1.0/OpenRobotics/models/PatientFSit
+  pose:
+  - -3.72
+  - 7.69
+  - 0.007
+  - 0
+  - 0
+  - 3.966
+  static: true
