@@ -25,7 +25,7 @@ RECORD_PID_FILE="logs/.px4sim-record.pid"
 RECORD_MODE_FILE="logs/.px4sim-record.mode"
 RECORD_LOG="logs/recording.log"
 CONTAINER_LOG_PID_FILE="logs/.px4sim-container-log.pid"
-CONTAINER_LOG="logs/ground.log"
+CONTAINER_LOG_DIR="logs/containers"
 
 BOLD=$'\033[1m'; DIM=$'\033[2m'; GRN=$'\033[32m'; RED=$'\033[31m'; YEL=$'\033[33m'; OFF=$'\033[0m'
 say()  { printf '%s==> %s%s\n' "$BOLD" "$*" "$OFF"; }
@@ -640,11 +640,20 @@ stop_container_log() {
 
 start_container_log() {
 	stop_container_log
-	mkdir -p "$(dirname "$CONTAINER_LOG")"
-	# Start after compose is up. The file is intentionally truncated for each
-	# px4sim restart, while the follower itself is independent of the TUI.
-	COMPOSE_PROFILES="$ALL_PROFILES" setsid bash -c 'exec docker compose logs -f --tail=all' \
-		>"$CONTAINER_LOG" 2>&1 < /dev/null &
+	mkdir -p "$CONTAINER_LOG_DIR"
+	# Discover the containers that are actually running on this machine. Each
+	# gets its own file, so uas1 can never be mistaken for ground output. The
+	# files are truncated for each px4sim restart and the followers are
+	# independent of the TUI.
+	setsid bash -c '
+		set -u
+		log_dir=$1
+		while read -r id name; do
+			[ -n "$id" ] || continue
+			docker logs -f --timestamps "$id" >"$log_dir/$name.log" 2>&1 &
+		done < <(docker ps --format "{{.ID}} {{.Names}}")
+		wait
+	' bash "$CONTAINER_LOG_DIR" </dev/null >/dev/null 2>&1 &
 	echo $! > "$CONTAINER_LOG_PID_FILE"
 }
 

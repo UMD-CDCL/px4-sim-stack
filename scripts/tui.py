@@ -1329,7 +1329,6 @@ def main() -> int:
         return 2
     output_log = UiLog()
     feed = Feed()
-    container_log = ContainerLog(output_log)
     runner = Runner(output_log)
     try:
         curses.wrapper(lambda screen: Console(screen, feed, runner).loop())
@@ -1340,7 +1339,6 @@ def main() -> int:
         return 2
     finally:
         feed.close()
-        container_log.close()
         runner.cancel()
     return 0
 
