@@ -52,6 +52,7 @@ FIRST_TICK_S = 0.5
 LISTEN_S = 1.5
 LINK_RETRY_S = 3.0
 LINK_SILENT_S = 3.0
+TCP_INFO = getattr(socket, "TCP_INFO", 11)
 CONNECT_TIMEOUT_S = 2.0
 IDLE_SLEEP_S = 0.2
 PORT_PROBE_S = 0.4
@@ -410,8 +411,8 @@ class Link:
         self.fields: dict = {}
         self.systems: set[int] = set()
         self.frames = 0
-        self.bytes_received = 0
-        self.reported_bytes = 0
+        self.reported_rx_bytes = 0
+        self.reported_tx_bytes = 0
         self.reported_frames = 0
         self.reported_at = time.monotonic()
         self.heard_at = 0.0
@@ -476,7 +477,6 @@ class Link:
         self.take(arrived, now)
 
     def take(self, arrived: bytes, now: float) -> None:
-        self.bytes_received += len(arrived)
         found, self.buffer = mavlink.frames(self.buffer + arrived)
         for frame in found:
             self.systems.add(frame.system)
@@ -488,12 +488,33 @@ class Link:
                 continue
             self.fields.update(mavlink.fields(frame))
 
+    def socket_bytes(self) -> tuple[int | None, int | None]:
+        """Return kernel TCP byte counters: received and sent on this link."""
+        if self.socket is None or not self.connected:
+            return None, None
+        try:
+            info = self.socket.getsockopt(socket.IPPROTO_TCP, TCP_INFO, 256)
+            # Linux struct tcp_info: tcpi_bytes_received at 104 and
+            # tcpi_bytes_sent at 176 on kernels exposing RFC4898 counters.
+            if len(info) < 184:
+                return None, None
+            return struct.unpack_from("<Q", info, 104)[0], struct.unpack_from("<Q", info, 176)[0]
+        except (OSError, struct.error):
+            return None, None
+
     def report(self, now: float) -> dict:
         elapsed = max(now - self.reported_at, 1e-6)
         rate = (self.frames - self.reported_frames) / elapsed
-        rx_kbits = (self.bytes_received - self.reported_bytes) * 8 / 1000.0 / elapsed
+        rx_bytes, tx_bytes = self.socket_bytes()
+        rx_kbits = ((rx_bytes - self.reported_rx_bytes) * 8 / 1000.0 / elapsed
+                    if rx_bytes is not None and self.reported_rx_bytes else None)
+        tx_kbits = ((tx_bytes - self.reported_tx_bytes) * 8 / 1000.0 / elapsed
+                    if tx_bytes is not None and self.reported_tx_bytes else None)
         self.reported_frames, self.reported_at = self.frames, now
-        self.reported_bytes = self.bytes_received
+        if rx_bytes is not None:
+            self.reported_rx_bytes = rx_bytes
+        if tx_bytes is not None:
+            self.reported_tx_bytes = tx_bytes
         silent_for = now - self.heard_at if self.heard_at else None
         if not self.connected:
             link = "down"
@@ -504,7 +525,7 @@ class Link:
         told = {"number": self.number, "host": self.host, "port": self.port,
                 "link": link,
                 "silent_for": silent_for, "messages_per_s": rate,
-                "rx_kbits": rx_kbits, "tx_kbits": None,
+                "rx_kbits": rx_kbits, "tx_kbits": tx_kbits,
                 "systems": sorted(self.systems), "error": self.error}
         told.update(self.fields)
         self.systems = set()
