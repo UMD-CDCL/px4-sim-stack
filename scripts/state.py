@@ -35,6 +35,8 @@ import shlex
 import socket
 import struct
 import subprocess
+import threading
+import re
 import sys
 import threading
 import time
@@ -71,6 +73,7 @@ GPU_TIMEOUT_S = 5.0
 GPU_READINGS = "utilization.gpu,memory.used,memory.total,encoder.stats.sessionCount"
 LOOPBACK = "127.0.0.1"
 AUTOPILOT = 1  # MAV_COMP_ID_AUTOPILOT1, the component that holds the mode
+PACKET_RE = re.compile(r"IP6?\s+([^ ]+)\s+>\s+([^:]+):.*?length\s+(\d+)")
 
 
 def number_or_text(value: str):
@@ -598,6 +601,51 @@ class Links:
         self.watcher.close()
 
 
+class TrafficMonitor:
+    """Low-overhead all-protocol byte accounting for configured vehicle IPs."""
+
+    def __init__(self, fleet: list[dict]):
+        self.ip_to_number = {str(v.get("address")): int(v["n"])
+                             for v in fleet if v.get("address") and isinstance(v.get("n"), int)}
+        self.bytes = {n: [0, 0] for n in self.ip_to_number.values()}  # up, down
+        self.lock = threading.Lock()
+        self.process = None
+        if not self.ip_to_number:
+            return
+        expression = " or ".join(f"host {ip}" for ip in self.ip_to_number)
+        try:
+            self.process = subprocess.Popen(
+                ["sudo", "-n", "tcpdump", "-i", "any", "-n", "-q", "-l", expression],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                text=True, errors="replace")
+            threading.Thread(target=self._read, daemon=True).start()
+        except OSError:
+            pass
+
+    def _read(self) -> None:
+        if self.process is None or self.process.stdout is None:
+            return
+        for line in self.process.stdout:
+            match = PACKET_RE.search(line)
+            if not match:
+                continue
+            source, destination, size = match.groups()
+            source = source.rsplit(".", 1)[0]
+            destination = destination.rsplit(".", 1)[0]
+            number = self.ip_to_number.get(source) or self.ip_to_number.get(destination)
+            if number is None:
+                continue
+            with self.lock:
+                self.bytes[number][0 if source in self.ip_to_number else 1] += int(size)
+
+    def report(self, elapsed: float) -> dict[int, tuple[float, float]]:
+        with self.lock:
+            values = self.bytes
+            self.bytes = {n: [0, 0] for n in self.ip_to_number.values()}
+        return {n: (up * 8 / 1000 / elapsed, down * 8 / 1000 / elapsed)
+                for n, (up, down) in values.items()}
+
+
 def listening(targets: list[tuple[str, int]],
               timeout: float = PORT_PROBE_S) -> dict[tuple[str, int], bool]:
     """Which host and port pairs accept a connection right now, all at once."""
@@ -672,11 +720,17 @@ def stream_owners(fleet: list[dict]) -> dict[str, int]:
 
 
 def snapshot(context: dict, project_dir: Path, streams: Streams, links: Links,
-             bridges: Bridges, units: Units, tick: int) -> dict:
+             bridges: Bridges, units: Units, traffic: TrafficMonitor, tick: int) -> dict:
     # The vehicles answer first. Reading the containers and the card takes
     # seconds on a busy host, and nothing reads a socket while it happens, so a
     # vehicle asked afterwards looks silent while its telemetry is arriving.
-    vehicles = links.report(time.monotonic())
+    started = time.monotonic()
+    vehicles = links.report(started)
+    rates = traffic.report(max(started - snapshot.last_at, 1e-6))
+    snapshot.last_at = started
+    for vehicle in vehicles:
+        up, down = rates.get(vehicle["number"], (0.0, 0.0))
+        vehicle["tx_kbits"], vehicle["rx_kbits"] = up, down
     found, services_error = containers(project_dir, str(context.get("compose",
                                                                    "docker compose")))
     return {
@@ -692,6 +746,9 @@ def snapshot(context: dict, project_dir: Path, streams: Streams, links: Links,
         "units": units.read(tick),
         "gpu": graphics_card(),
     }
+
+
+snapshot.last_at = time.monotonic()
 
 
 def main() -> int:
@@ -716,10 +773,11 @@ def main() -> int:
     links = Links(context["fleet"])
     bridges = Bridges(context)
     units = Units(as_list(context.get("units", "")))
+    traffic = TrafficMonitor(context["fleet"])
 
     def tell(tick: int) -> None:
         json.dump(snapshot(context, project_dir, streams, links, bridges, units,
-                           tick), sys.stdout)
+                           traffic, tick), sys.stdout)
         sys.stdout.write("\n")
         sys.stdout.flush()
 
