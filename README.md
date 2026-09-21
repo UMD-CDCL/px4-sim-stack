@@ -113,6 +113,43 @@ need that group.
 Each machine builds its own architecture from its own checkout. No machine
 copies an image from another.
 
+### Optional PX4Sim traffic monitoring
+
+`./px4sim ui` can show one-second per-vehicle bandwidth for all traffic on the
+vehicle IPs, including MAVLink, ROS/DDS, video, and Foxglove. This is separate
+from the normal stack setup and is not required to run PX4Sim.
+
+Install the host packet-capture tool:
+
+```bash
+sudo apt install tcpdump
+```
+
+PX4Sim starts a filtered, read-only capture with `sudo -n`, so configure a
+narrow sudo rule for the operator running PX4Sim. Replace `user` with the
+actual login name:
+
+```bash
+sudo visudo -f /etc/sudoers.d/px4sim-tcpdump
+```
+
+Add:
+
+```text
+user ALL=(root) NOPASSWD: /usr/bin/tcpdump
+```
+
+Validate it before opening the UI:
+
+```bash
+sudo -n tcpdump -i any -n -q -c 1
+./px4sim ui
+```
+
+The capture is filtered to the configured vehicle addresses, uses one parser
+thread, and does not transmit packets. If permission is not configured, the
+UI still runs but bandwidth remains unavailable (`↓-` / `↑-`).
+
 To stop it:
 
 ```bash
