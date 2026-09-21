@@ -33,6 +33,7 @@ import os
 import selectors
 import shlex
 import socket
+import struct
 import subprocess
 import sys
 import threading
