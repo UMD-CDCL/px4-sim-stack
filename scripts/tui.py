@@ -435,9 +435,9 @@ def vehicle_words(vehicle: dict) -> list[tuple[str, str]]:
     parts = [(f"{link}", {"up": "good", "silent": "watch"}.get(link, "bad"))]
     if link == "up":
         rx = vehicle.get("rx_kbits")
-        parts.append((f"↓{rx:.0f}k" if isinstance(rx, (int, float)) else "↓-", "faint"))
+        parts.append((f"↓{rx / 1000:.1f}M" if isinstance(rx, (int, float)) else "↓-", "faint"))
         tx = vehicle.get("tx_kbits")
-        parts.append((f"↑{tx:.0f}k" if isinstance(tx, (int, float)) else "↑-", "faint"))
+        parts.append((f"↑{tx / 1000:.1f}M" if isinstance(tx, (int, float)) else "↑-", "faint"))
         parts.append(("ARMED" if vehicle.get("armed") else "disarmed",
                       "watch" if vehicle.get("armed") else "faint"))
         parts.append((str(vehicle.get("vehicle_mode", vehicle.get("mode", "-"))), "plain"))
