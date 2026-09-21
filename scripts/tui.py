@@ -432,18 +432,30 @@ def stream_words(path: dict) -> list[tuple[str, str]]:
 
 def vehicle_words(vehicle: dict) -> list[tuple[str, str]]:
     link = vehicle.get("link", "down")
-    parts = [(f"link {link}", {"up": "good", "silent": "watch"}.get(link, "bad"))]
+    parts = [(f"{link}", {"up": "good", "silent": "watch"}.get(link, "bad"))]
     if link == "up":
-        parts.append((f"{vehicle.get('messages_per_s', 0):.0f}/s", "faint"))
+        rx = vehicle.get("rx_kbits")
+        parts.append((f"↓{rx / 1000:.1f}M" if isinstance(rx, (int, float)) else "↓-", "faint"))
+        tx = vehicle.get("tx_kbits")
+        parts.append((f"↑{tx / 1000:.1f}M" if isinstance(tx, (int, float)) else "↑-", "faint"))
         parts.append(("ARMED" if vehicle.get("armed") else "disarmed",
                       "watch" if vehicle.get("armed") else "faint"))
-        parts.append((str(vehicle.get("mode", "-")), "plain"))
-        height = vehicle.get("altitude_home")
-        if height is not None:
-            parts.append((f"{height:.1f} m", "plain"))
+        parts.append((str(vehicle.get("vehicle_mode", vehicle.get("mode", "-"))), "plain"))
+        if vehicle.get("mission_status"):
+            parts.append((str(vehicle["mission_status"]), "plain"))
+        if vehicle.get("fiducial_correction_active"):
+            parts.append(("FID✓", "good"))
+        counts = "F{} D{} M{} V{}".format(
+            vehicle.get("fiducial_count", 0), vehicle.get("detection_count", 0),
+            vehicle.get("mosaic_count", 0), vehicle.get("vlm_count", 0))
+        parts.append((counts, "faint"))
         pitch = vehicle.get("gimbal_pitch")
         if pitch is not None:
-            parts.append((f"gimbal {pitch:+.0f}", "plain"))
+            height = vehicle.get("altitude_home")
+            altitude = f" {height:.1f}m" if height is not None else ""
+            parts.append((f"{pitch:+.0f}°{altitude}", "plain"))
+        elif vehicle.get("altitude_home") is not None:
+            parts.append((f"{vehicle['altitude_home']:.1f}m", "plain"))
     elif vehicle.get("error"):
         parts.append((vehicle["error"], "faint"))
     return parts
@@ -762,7 +774,8 @@ class Console:
         name = self.rows.name(pane, row)
         # One column for every name, so the readings line up. A narrow pane
         # gives the name less room, because the reading is the point of the row.
-        name_column = min(NAME_COLUMN, max(9, room - 12))
+        name_column = min(7 if pane == VEHICLE else NAME_COLUMN,
+                          max(7, room - 12))
         self.put(line, column + 2, name, "title" if chosen else "plain", name_column - 1)
         at = column + 2 + name_column
         for words, kind in self.row_words(pane, row):

@@ -33,8 +33,12 @@ import os
 import selectors
 import shlex
 import socket
+import struct
 import subprocess
+import threading
+import re
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -51,6 +55,7 @@ FIRST_TICK_S = 0.5
 LISTEN_S = 1.5
 LINK_RETRY_S = 3.0
 LINK_SILENT_S = 3.0
+TCP_INFO = getattr(socket, "TCP_INFO", 11)
 CONNECT_TIMEOUT_S = 2.0
 IDLE_SLEEP_S = 0.2
 PORT_PROBE_S = 0.4
@@ -68,6 +73,7 @@ GPU_TIMEOUT_S = 5.0
 GPU_READINGS = "utilization.gpu,memory.used,memory.total,encoder.stats.sessionCount"
 LOOPBACK = "127.0.0.1"
 AUTOPILOT = 1  # MAV_COMP_ID_AUTOPILOT1, the component that holds the mode
+PACKET_RE = re.compile(r"IP6?\s+([^ ]+)\s+>\s+([^:]+):.*?length\s+(\d+)")
 
 
 def number_or_text(value: str):
@@ -310,6 +316,42 @@ class ProbedStreams:
         return self.paths
 
 
+class AsyncStreams:
+    """Poll video independently so telemetry/container status never waits on RTSP."""
+
+    def __init__(self, source, period_s: float):
+        self.source = source
+        self.period_s = period_s
+        self.lock = threading.Lock()
+        self.paths: list[dict] = []
+        self.error = ""
+        self.stopping = threading.Event()
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self) -> None:
+        tick = 0
+        while not self.stopping.is_set():
+            paths = self.source.read(tick)
+            with self.lock:
+                self.paths = paths
+                self.error = self.source.error
+            tick += 1
+            self.stopping.wait(self.period_s)
+
+    def read(self, _tick: int) -> list[dict]:
+        with self.lock:
+            return list(self.paths)
+
+    @property
+    def error(self) -> str:
+        with self.lock:
+            return self._error
+
+    @error.setter
+    def error(self, value: str) -> None:
+        self._error = value
+
+
 class Units:
     """The native services a real machine boots beside the containers.
 
@@ -357,9 +399,12 @@ class Link:
     vehicle out and every link reads the same port.
     """
 
-    def __init__(self, number: int, port: int, system: int):
+    def __init__(self, number: int, host: str, port: int, system: int):
         self.number = number
-        self.host = LOOPBACK
+        # Use the vehicle's advertised address so the socket follows the real
+        # network path/interface. Loopback only measures the local published
+        # port and hides radio/LAN traffic from the operator.
+        self.host = host or LOOPBACK
         self.port = port
         self.system = system
         self.socket: socket.socket | None = None
@@ -373,6 +418,8 @@ class Link:
         self.fields: dict = {}
         self.systems: set[int] = set()
         self.frames = 0
+        self.reported_rx_bytes = 0
+        self.reported_tx_bytes = 0
         self.reported_frames = 0
         self.reported_at = time.monotonic()
         self.heard_at = 0.0
@@ -448,10 +495,33 @@ class Link:
                 continue
             self.fields.update(mavlink.fields(frame))
 
+    def socket_bytes(self) -> tuple[int | None, int | None]:
+        """Return kernel TCP byte counters: received and sent on this link."""
+        if self.socket is None or not self.connected:
+            return None, None
+        try:
+            info = self.socket.getsockopt(socket.IPPROTO_TCP, TCP_INFO, 256)
+            # Linux struct tcp_info: tcpi_bytes_received at 104 and
+            # tcpi_bytes_sent at 176 on kernels exposing RFC4898 counters.
+            if len(info) < 184:
+                return None, None
+            return struct.unpack_from("<Q", info, 104)[0], struct.unpack_from("<Q", info, 176)[0]
+        except (OSError, struct.error):
+            return None, None
+
     def report(self, now: float) -> dict:
         elapsed = max(now - self.reported_at, 1e-6)
         rate = (self.frames - self.reported_frames) / elapsed
+        rx_bytes, tx_bytes = self.socket_bytes()
+        rx_kbits = ((rx_bytes - self.reported_rx_bytes) * 8 / 1000.0 / elapsed
+                    if rx_bytes is not None and self.reported_rx_bytes else None)
+        tx_kbits = ((tx_bytes - self.reported_tx_bytes) * 8 / 1000.0 / elapsed
+                    if tx_bytes is not None and self.reported_tx_bytes else None)
         self.reported_frames, self.reported_at = self.frames, now
+        if rx_bytes is not None:
+            self.reported_rx_bytes = rx_bytes
+        if tx_bytes is not None:
+            self.reported_tx_bytes = tx_bytes
         silent_for = now - self.heard_at if self.heard_at else None
         if not self.connected:
             link = "down"
@@ -462,6 +532,7 @@ class Link:
         told = {"number": self.number, "host": self.host, "port": self.port,
                 "link": link,
                 "silent_for": silent_for, "messages_per_s": rate,
+                "rx_kbits": rx_kbits, "tx_kbits": tx_kbits,
                 "systems": sorted(self.systems), "error": self.error}
         told.update(self.fields)
         self.systems = set()
@@ -472,7 +543,7 @@ class Links:
     """One reader for each vehicle, kept open between reports."""
 
     def __init__(self, fleet: list[dict]):
-        self.links = [Link(vehicle["n"], vehicle["tcp"],
+        self.links = [Link(vehicle["n"], vehicle.get("address", LOOPBACK), vehicle["tcp"],
                            vehicle.get("sysid", vehicle["n"]))
                       for vehicle in fleet
                       if isinstance(vehicle.get("n"), int)
@@ -528,6 +599,51 @@ class Links:
             self.forget(link)
             link.close()
         self.watcher.close()
+
+
+class TrafficMonitor:
+    """Low-overhead all-protocol byte accounting for configured vehicle IPs."""
+
+    def __init__(self, fleet: list[dict]):
+        self.ip_to_number = {str(v.get("address")): int(v["n"])
+                             for v in fleet if v.get("address") and isinstance(v.get("n"), int)}
+        self.bytes = {n: [0, 0] for n in self.ip_to_number.values()}  # up, down
+        self.lock = threading.Lock()
+        self.process = None
+        if not self.ip_to_number:
+            return
+        expression = " or ".join(f"host {ip}" for ip in self.ip_to_number)
+        try:
+            self.process = subprocess.Popen(
+                ["sudo", "-n", "tcpdump", "-i", "any", "-n", "-q", "-l", expression],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                text=True, errors="replace")
+            threading.Thread(target=self._read, daemon=True).start()
+        except OSError:
+            pass
+
+    def _read(self) -> None:
+        if self.process is None or self.process.stdout is None:
+            return
+        for line in self.process.stdout:
+            match = PACKET_RE.search(line)
+            if not match:
+                continue
+            source, destination, size = match.groups()
+            source = source.rsplit(".", 1)[0]
+            destination = destination.rsplit(".", 1)[0]
+            number = self.ip_to_number.get(source) or self.ip_to_number.get(destination)
+            if number is None:
+                continue
+            with self.lock:
+                self.bytes[number][0 if source in self.ip_to_number else 1] += int(size)
+
+    def report(self, elapsed: float) -> dict[int, tuple[float, float]]:
+        with self.lock:
+            values = self.bytes
+            self.bytes = {n: [0, 0] for n in self.ip_to_number.values()}
+        return {n: (up * 8 / 1000 / elapsed, down * 8 / 1000 / elapsed)
+                for n, (up, down) in values.items()}
 
 
 def listening(targets: list[tuple[str, int]],
@@ -604,11 +720,17 @@ def stream_owners(fleet: list[dict]) -> dict[str, int]:
 
 
 def snapshot(context: dict, project_dir: Path, streams: Streams, links: Links,
-             bridges: Bridges, units: Units, tick: int) -> dict:
+             bridges: Bridges, units: Units, traffic: TrafficMonitor, tick: int) -> dict:
     # The vehicles answer first. Reading the containers and the card takes
     # seconds on a busy host, and nothing reads a socket while it happens, so a
     # vehicle asked afterwards looks silent while its telemetry is arriving.
-    vehicles = links.report(time.monotonic())
+    started = time.monotonic()
+    vehicles = links.report(started)
+    rates = traffic.report(max(started - snapshot.last_at, 1e-6))
+    snapshot.last_at = started
+    for vehicle in vehicles:
+        up, down = rates.get(vehicle["number"], (0.0, 0.0))
+        vehicle["tx_kbits"], vehicle["rx_kbits"] = up, down
     found, services_error = containers(project_dir, str(context.get("compose",
                                                                    "docker compose")))
     return {
@@ -624,6 +746,9 @@ def snapshot(context: dict, project_dir: Path, streams: Streams, links: Links,
         "units": units.read(tick),
         "gpu": graphics_card(),
     }
+
+
+snapshot.last_at = time.monotonic()
 
 
 def main() -> int:
@@ -642,15 +767,17 @@ def main() -> int:
     # to ask. See the `rtsp` fact in fleet_facts.
     owners = stream_owners(context["fleet"])
     base = str(context.get("rtsp", ""))
-    streams = (ProbedStreams(base, owners, project_dir) if base else
-               Streams(str(context.get("mediamtx", "http://localhost:9997")), owners))
+    stream_source = (ProbedStreams(base, owners, project_dir) if base else
+                     Streams(str(context.get("mediamtx", "http://localhost:9997")), owners))
+    streams = AsyncStreams(stream_source, STREAMS_PROBE_TIMEOUT_S if base else 2.0)
     links = Links(context["fleet"])
     bridges = Bridges(context)
     units = Units(as_list(context.get("units", "")))
+    traffic = TrafficMonitor(context["fleet"])
 
     def tell(tick: int) -> None:
         json.dump(snapshot(context, project_dir, streams, links, bridges, units,
-                           tick), sys.stdout)
+                           traffic, tick), sys.stdout)
         sys.stdout.write("\n")
         sys.stdout.flush()
 

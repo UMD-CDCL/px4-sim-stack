@@ -706,6 +706,8 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     status              What is running, and the addresses to use
     endpoints           The addresses alone
     ui                  The same in a console, with a key for every command
+                        UI bandwidth uses filtered tcpdump; see README's
+                        Optional PX4Sim traffic monitoring setup
     bench enable PHRASE Enable GPS-free bench reference (requires exact phrase)
     bench disable       Stop the stack, then disable bench reference before flight
     fleet               Every vehicle: model, address, ports, domain, streams
