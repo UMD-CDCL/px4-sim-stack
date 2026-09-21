@@ -866,10 +866,13 @@ services:
     # to 1, joystick input.
     device_cgroup_rules:
       - "c 13:* rmw"
+      # Allow QGC and future peripherals to open every USB device on the host.
+      - "c 189:* rmw"
     group_add:
       - "${INPUT_GID:-107}"
     volumes:
       - /dev/input:/dev/input
+      - /dev/bus/usb:/dev/bus/usb
       - qgc-config:/home/dev/.config
       - ./logs/qgc:/home/dev/Documents/QGroundControl
       - /tmp/.X11-unix:/tmp/.X11-unix
