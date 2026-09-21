@@ -35,6 +35,7 @@ import shlex
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -308,6 +309,42 @@ class ProbedStreams:
         self.error = why
         self.paths = []
         return self.paths
+
+
+class AsyncStreams:
+    """Poll video independently so telemetry/container status never waits on RTSP."""
+
+    def __init__(self, source, period_s: float):
+        self.source = source
+        self.period_s = period_s
+        self.lock = threading.Lock()
+        self.paths: list[dict] = []
+        self.error = ""
+        self.stopping = threading.Event()
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self) -> None:
+        tick = 0
+        while not self.stopping.is_set():
+            paths = self.source.read(tick)
+            with self.lock:
+                self.paths = paths
+                self.error = self.source.error
+            tick += 1
+            self.stopping.wait(self.period_s)
+
+    def read(self, _tick: int) -> list[dict]:
+        with self.lock:
+            return list(self.paths)
+
+    @property
+    def error(self) -> str:
+        with self.lock:
+            return self._error
+
+    @error.setter
+    def error(self, value: str) -> None:
+        self._error = value
 
 
 class Units:
@@ -648,8 +685,9 @@ def main() -> int:
     # to ask. See the `rtsp` fact in fleet_facts.
     owners = stream_owners(context["fleet"])
     base = str(context.get("rtsp", ""))
-    streams = (ProbedStreams(base, owners, project_dir) if base else
-               Streams(str(context.get("mediamtx", "http://localhost:9997")), owners))
+    stream_source = (ProbedStreams(base, owners, project_dir) if base else
+                     Streams(str(context.get("mediamtx", "http://localhost:9997")), owners))
+    streams = AsyncStreams(stream_source, STREAMS_PROBE_TIMEOUT_S if base else 2.0)
     links = Links(context["fleet"])
     bridges = Bridges(context)
     units = Units(as_list(context.get("units", "")))

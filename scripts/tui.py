@@ -444,10 +444,10 @@ def vehicle_words(vehicle: dict) -> list[tuple[str, str]]:
             parts.append((str(vehicle["mission_status"]), "plain"))
         if vehicle.get("fiducial_correction_active"):
             parts.append(("FID✓", "good"))
-        counts = " ".join(f"{key[:3]}:{vehicle.get(key, 0)}" for key in
-                          ("fiducial_count", "detection_count", "mosaic_count", "vlm_count"))
-        if counts.strip():
-            parts.append((counts, "faint"))
+        counts = "F{} D{} M{} V{}".format(
+            vehicle.get("fiducial_count", 0), vehicle.get("detection_count", 0),
+            vehicle.get("mosaic_count", 0), vehicle.get("vlm_count", 0))
+        parts.append((counts, "faint"))
         height = vehicle.get("altitude_home")
         if height is not None:
             parts.append((f"{height:.1f} m", "plain"))
