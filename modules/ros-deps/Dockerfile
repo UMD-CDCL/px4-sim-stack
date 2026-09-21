@@ -74,6 +74,12 @@ ARG DS_VERSION
 # not match the image that actually arrived.
 ARG ROS_DISTRO=humble
 ARG DS_CODENAME=jammy
+# Pin the ROS archive used by this image. The live Humble index can remove a
+# binary while a release is being rebuilt (in September 2026 both mavros and
+# mavros-extras disappeared, making otherwise unchanged cold builds fail).
+# This snapshot contains the MAVROS 2.14 release used by the simulator and
+# keeps every ROS dependency in the image mutually reproducible.
+ARG ROS_SNAPSHOT_DATE=2026-08-07
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV ROS_DISTRO=${ROS_DISTRO}
@@ -135,10 +141,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       gnupg2 \
       locales \
     && locale-gen en_US.UTF-8 \
-    && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
-         -o /usr/share/keyrings/ros-archive-keyring.gpg \
+    && curl -fsSL 'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xAD19BAB3CBF125EA' \
+         -o /tmp/ros-snapshot.asc \
+    && test "$(gpg --show-keys --with-colons /tmp/ros-snapshot.asc | awk -F: '$1 == "fpr" { print $10; exit }')" \
+         = 4B63CF8FDE49746E98FA01DDAD19BAB3CBF125EA \
+    && gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg \
+         /tmp/ros-snapshot.asc \
+    && rm /tmp/ros-snapshot.asc \
     && . /etc/os-release \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $VERSION_CODENAME main" \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://snapshots.ros.org/${ROS_DISTRO}/${ROS_SNAPSHOT_DATE}/ubuntu $VERSION_CODENAME main" \
          > /etc/apt/sources.list.d/ros2.list \
     && apt-get update && apt-get install -y --no-install-recommends \
       build-essential \

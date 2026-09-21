@@ -34,6 +34,7 @@ for number in ${UAS_ACTIVE//,/ }; do
 	fi
 	requested[$number]=pending
 done
+filter_requested=${#requested[@]}
 for airframe in ${UAS_FLEET}; do
 	index=$((index + 1))
 	case "${airframe}" in
@@ -49,7 +50,7 @@ for airframe in ${UAS_FLEET}; do
 	# /uas1 to /uas4 while the fleet published /uas11 to /uas14, and the two
 	# sides simply never met.
 	number=$((UAS_BASE + index))
-	if [ ${#requested[@]} -eq 0 ] || [[ -n "${requested[$number]:-}" ]]; then
+	if [ "$filter_requested" -eq 0 ] || [[ -n "${requested[$number]:-}" ]]; then
 		numbers="${numbers},${number}"
 		models="${models},${model}"
 		requested[$number]=found
