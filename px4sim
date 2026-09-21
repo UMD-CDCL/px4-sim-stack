@@ -861,6 +861,7 @@ fleet_facts() {
 		capture_kinds=$(echo "$CAPTURE_KINDS" | tr ' ' ',')
 		models=$(fleet_models | paste -sd, -)
 		scenarios=$(scenario_names | paste -sd, -)
+		active=${UAS_ACTIVE:-}
 		declared=$(printf '%s\n' "$COMPOSE_SERVICES" | paste -sd, -)
 		expected=$($DC config --services 2>/dev/null | paste -sd, -)
 	EOF
@@ -971,17 +972,63 @@ env_write_selection() {
 }
 
 push_selection_to_drones() {
-	local host
+	local scenario=$1 scene=$2 host host_number index restart_status=0
+	local hosts=() labels=() pids=() updated=() updated_labels=()
+	local restart_pids=() restarted_labels=() successful=()
 	# The radio addresses are fixed: fleet number 1 is .61, number 11 is .611.
 	# A missing aircraft is normal, so each best-effort update is quiet and
-	# independent of the others.
+	# independent of the others. Edit .env directly: a drone need not already
+	# have this version of px4sim before it can receive a selection.
 	for host_number in $(fleet_numbers); do
-		host="10.200.142.6${host_number}"
-		ssh -o BatchMode=yes -o ConnectTimeout=3 "${PX4SIM_SSH_USER:-$USER}@$host" \
-			"cd ~/px4-sim-stack && ./px4sim scenario-select $1 --no-push" \
-			>/dev/null 2>&1 &
+		hosts+=("10.200.142.6${host_number}")
+		labels+=("uas${host_number}")
 	done
-	wait || true
+	say "Changing .env in parallel on machines: ground ${labels[*]}"
+	for host in "${hosts[@]}"; do
+		ssh -o BatchMode=yes -o ConnectTimeout=3 "${PX4SIM_SSH_USER:-$USER}@$host" \
+			"cd ~/px4-sim-stack && \
+			 if grep -q '^SCENE=' .env; then sed -i 's|^SCENE=.*|SCENE=$scene|' .env; \
+			 else printf '\nSCENE=$scene\n' >> .env; fi && \
+			 if grep -q '^SCENARIO=' .env; then sed -i 's|^SCENARIO=.*|SCENARIO=$scenario|' .env; \
+			 else printf 'SCENARIO=$scenario\n' >> .env; fi" \
+			>/dev/null 2>&1 &
+		pids+=("$!")
+	done
+	for index in "${!pids[@]}"; do
+		if wait "${pids[$index]}"; then
+			updated+=("${hosts[$index]}")
+			updated_labels+=("${labels[$index]}")
+		fi
+	done
+	if [ ${#updated_labels[@]} -gt 0 ]; then
+		say "Machines with .env updated: ground ${updated_labels[*]}"
+	else
+		say "Machines with .env updated: ground"
+	fi
+	say "Restarting px4sim in parallel on machines: ground ${updated_labels[*]}"
+	for index in "${!updated[@]}"; do
+		host=${updated[$index]}
+		ssh -o BatchMode=yes -o ConnectTimeout=3 "${PX4SIM_SSH_USER:-$USER}@$host" \
+			"cd ~/px4-sim-stack && ./px4sim restart" >/dev/null 2>&1 &
+		restart_pids+=("$!")
+	done
+	# This process exported the old selection when it read .env. Do not let that
+	# inherited value override the file we just changed in the restart process.
+	env -u SCENE -u SCENARIO "$0" restart >/dev/null 2>&1 || restart_status=$?
+	for index in "${!restart_pids[@]}"; do
+		if wait "${restart_pids[$index]}"; then
+			restarted_labels+=("${updated_labels[$index]}")
+		fi
+	done
+	[ "$restart_status" -ne 0 ] || successful+=(ground)
+	successful+=("${restarted_labels[@]}")
+	if [ ${#successful[@]} -gt 0 ]; then
+		say "Machines updated and restarted successfully: ${successful[*]}"
+	else
+		say "No machines were updated and restarted"
+	fi
+	[ "$restart_status" -eq 0 ] || warn "Ground px4sim restart failed"
+	return "$restart_status"
 }
 
 # Put the fleet back into .env and leave every other line as it was.
@@ -1516,8 +1563,20 @@ scenario-select)
 	env_write_selection SCENARIO "$1"
 	say "Selected scenario '$1' (scene '$selected_scene')"
 	if [ "${2:-}" != --no-push ]; then
-		push_selection_to_drones "$1"
+		push_selection_to_drones "$1" "$selected_scene"
+	else
+		exec env -u SCENE -u SCENARIO "$0" restart
 	fi
+	;;
+
+active)
+	value=${1:-}
+	case "$value" in
+		*[^0-9\ ,]*) die "UAS_ACTIVE must contain vehicle numbers separated by spaces" ;;
+	esac
+	env_write_selection UAS_ACTIVE "${value// /,}"
+	say "Restarting with active vehicles: ${value:-all}"
+	exec env -u UAS_ACTIVE "$0" restart
 	;;
 
 scenario)

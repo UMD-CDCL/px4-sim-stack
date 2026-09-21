@@ -88,6 +88,7 @@ class Action(NamedTuple):
     refresh: bool = False
     worlds: tuple[str, ...] = EVERY_WORLD
     push_scenario: bool = False
+    active_select: bool = False
 
 
 # Every action this console offers, and the px4sim command it runs. This table
@@ -121,17 +122,19 @@ ACTIONS = (
     Action(STACK, "P", "put the fleet back at its start", ("place",),
            confirm="Reload the world and respawn every vehicle?", worlds=SIM_ONLY),
     Action(STACK, "A", "place the targets again", ("scenario",), worlds=SIM_ONLY),
+    Action(STACK, "f", "select active vehicles", ("active", "{value}"),
+           worlds=EVERY_WORLD, active_select=True),
     Action(STACK, "c", "select a scenario", ("scenario-select", "{value}"),
            ask=Ask("scenario", "{scenario}", choices_from="scenarios"),
            refresh=True, worlds=WITH_SCENE, push_scenario=True),
-    Action(STACK, "F", "stand the survey marker off its survey",
+    Action(STACK, "", "stand the survey marker off its survey",
            ("fiducial", "{value}"), ask=Ask("east north, in metres", "0 0", split=True),
            worlds=SIM_ONLY),
-    Action(STACK, "V", "run the verification", ("verify",)),
-    Action(STACK, "C", "check the front door and the docs", ("check",)),
-    Action(STACK, "D", "check the host", ("doctor",)),
-    Action(STACK, "L", "where the Foxglove layout lives", ("layout",)),
-    Action(STACK, "K", "the PX4 console. Detach with Ctrl-P Ctrl-Q", ("console",),
+    Action(STACK, "", "run the verification", ("verify",)),
+    Action(STACK, "", "check the front door and the docs", ("check",)),
+    Action(STACK, "", "check the host", ("doctor",)),
+    Action(STACK, "", "where the Foxglove layout lives", ("layout",)),
+    Action(STACK, "", "the PX4 console. Detach with Ctrl-P Ctrl-Q", ("console",),
            foreground=True, worlds=SIM_ONLY),
     Action(STACK, "", "what the ground station's ROS graph carries",
            ("probe", "ground"), worlds=WITH_GROUND),
@@ -164,9 +167,9 @@ ACTIONS = (
            ask=Ask("framing", choices_from="zoom_presets")),
     Action(VEHICLE, "d", "continuous detection", ("uas", "{n}", "detect", "{value}"),
            ask=Ask("detection", choices=("on", "off"))),
-    Action(VEHICLE, "c", "ask for a capture", ("capture", "{n}", "{value}"),
+    Action(VEHICLE, "p", "take a photo", ("capture", "{n}", "{value}"),
            ask=Ask("capture", choices_from="capture_kinds")),
-    Action(VEHICLE, "p", "what its ROS graph carries", ("probe", "{n}")),
+    Action(VEHICLE, "P", "what its ROS graph carries", ("probe", "{n}")),
     Action(VEHICLE, "v", "play its gimbal camera", ("view", "{n}"), foreground=True),
     Action(VEHICLE, "w", "save one frame", ("snap", "{gimbal}"), worlds=SIM_ONLY),
     Action(VEHICLE, "-", "retire this vehicle",
@@ -185,7 +188,7 @@ ACTIONS = (
     Action(VEHICLE, "", "go to a place over home", ("uas", "{n}", "goto", "{value}"),
            ask=Ask("east north up, in metres", "0 0 20", split=True),
            worlds=SIM_ONLY),
-    Action(VEHICLE, "", "its ROS topics", ("topics", "{n}")),
+    Action(VEHICLE, "t", "its ROS topics", ("topics", "{n}")),
     Action(VEHICLE, "", "what Foxglove is offered", ("foxglove", "{n}")),
     Action(VEHICLE, "", "one PX4 command", ("px4", "{n}", "{value}"),
            ask=Ask("PX4 command", "commander status", split=True), worlds=SIM_ONLY),
@@ -907,6 +910,40 @@ class Console:
         except KeyboardInterrupt:
             return -1
 
+    def select_active(self) -> str | None:
+        fleet = sorted(self.rows.fleet)
+        if not fleet:
+            self.message = "the fleet is not known yet"
+            return None
+        active = {int(word) for word in
+                  str(self.rows.config.get("active", "")).replace(",", " ").split()
+                  if word.isdigit()}
+        chosen = 0
+        try:
+            while True:
+                labels = [f"[{'x' if number in active else ' '}] uas{number}"
+                          for number in fleet]
+                self.draw()
+                self.overlay("active vehicles (space toggles, enter applies)", labels, chosen)
+                curses.doupdate()
+                key = self.screen.getch()
+                if key in (curses.KEY_UP, ord("k")):
+                    chosen = (chosen - 1) % len(fleet)
+                elif key in (curses.KEY_DOWN, ord("j")):
+                    chosen = (chosen + 1) % len(fleet)
+                elif key == ord(" "):
+                    number = fleet[chosen]
+                    if number in active:
+                        active.remove(number)
+                    else:
+                        active.add(number)
+                elif key in (curses.KEY_ENTER, 10, 13):
+                    return " ".join(str(number) for number in fleet if number in active)
+                elif key in (27, ord("q")):
+                    return None
+        except KeyboardInterrupt:
+            return None
+
     def ask_text(self, prompt: str, default: str = "") -> str | None:
         answer = default
         cursor(1)
@@ -934,9 +971,6 @@ class Console:
 
     def confirm(self, question: str) -> bool:
         return self.choose(question, ["no", "yes"]) == 1
-
-    def confirm_default_yes(self, question: str) -> bool:
-        return self.choose(question, ["yes", "no"]) == 0
 
     # ---------------------------------------------------------------- acting
 
@@ -975,13 +1009,14 @@ class Console:
             return
         value = ""
         arguments: list[str] = []
+        if action.active_select:
+            value = self.select_active()
+            if value is None:
+                return
         if action.ask is not None:
             value = self.answer(action.ask)
             if value is None:
                 return
-        if action.push_scenario and not self.confirm_default_yes(
-                "Push SCENE and SCENARIO to the drones? (default: yes)"):
-            arguments = [*arguments, "--no-push"]
         if action.confirm and not self.confirm(self.fill(action.confirm, filling, value)):
             return
         for token in action.command:
