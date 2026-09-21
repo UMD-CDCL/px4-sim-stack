@@ -87,6 +87,7 @@ class Action(NamedTuple):
     foreground: bool = False
     refresh: bool = False
     worlds: tuple[str, ...] = EVERY_WORLD
+    push_scenario: bool = False
 
 
 # Every action this console offers, and the px4sim command it runs. This table
@@ -120,11 +121,9 @@ ACTIONS = (
     Action(STACK, "P", "put the fleet back at its start", ("place",),
            confirm="Reload the world and respawn every vehicle?", worlds=SIM_ONLY),
     Action(STACK, "A", "place the targets again", ("scenario",), worlds=SIM_ONLY),
-    Action(STACK, "N", "switch the scene", ("scene", "{value}"),
-           ask=Ask("scene name", "{scene}"), refresh=True, worlds=WITH_SCENE),
-    Action(STACK, "T", "switch the targets", ("scenario", "{value}"),
+    Action(STACK, "c", "select a scenario", ("scenario-select", "{value}"),
            ask=Ask("scenario", "{scenario}", choices_from="scenarios"),
-           refresh=True, worlds=WITH_SCENE),
+           refresh=True, worlds=WITH_SCENE, push_scenario=True),
     Action(STACK, "F", "stand the survey marker off its survey",
            ("fiducial", "{value}"), ask=Ask("east north, in metres", "0 0", split=True),
            worlds=SIM_ONLY),
@@ -936,6 +935,9 @@ class Console:
     def confirm(self, question: str) -> bool:
         return self.choose(question, ["no", "yes"]) == 1
 
+    def confirm_default_yes(self, question: str) -> bool:
+        return self.choose(question, ["yes", "no"]) == 0
+
     # ---------------------------------------------------------------- acting
 
     def actions_for(self, pane: str) -> list[Action]:
@@ -972,13 +974,16 @@ class Console:
             self.message = f"no {action.scope} is selected"
             return
         value = ""
+        arguments: list[str] = []
         if action.ask is not None:
             value = self.answer(action.ask)
             if value is None:
                 return
+        if action.push_scenario and not self.confirm_default_yes(
+                "Push SCENE and SCENARIO to the drones? (default: yes)"):
+            arguments = [*arguments, "--no-push"]
         if action.confirm and not self.confirm(self.fill(action.confirm, filling, value)):
             return
-        arguments: list[str] = []
         for token in action.command:
             filled = self.fill(token, filling, value)
             if token.startswith("{") and token != "{value}" and not filled:

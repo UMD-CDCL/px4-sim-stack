@@ -946,6 +946,44 @@ have_scenario() {
 		|| die "No scenario named '$1'. Try: $(scenario_names | paste -sd' ' -)"
 }
 
+# Select a complete scenario locally, and optionally copy its two selectors to
+# the real aircraft. Scenario descriptions carry the scene name, keeping the
+# UI's one choice authoritative for both values.
+scenario_scene() {
+	local description
+	description=$(sed -n 's/^description:.*scene \([^ .]*\)\..*/\1/p' \
+		"modules/sim/scenes/scenarios/$1.yaml" | head -1)
+	if [ -z "$description" ]; then
+		description=${1%_casualties}
+	fi
+	have_scene "$description"
+	[ -n "$description" ] || die "Scenario '$1' does not name a scene in description"
+	echo "$description"
+}
+
+env_write_selection() {
+	local key=$1 value=$2
+	if grep -q "^[[:space:]]*$key=" .env; then
+		sed -i "s|^[[:space:]]*$key=.*|$key=$value|" .env
+	else
+		printf '%s=%s\n' "$key" "$value" >> .env
+	fi
+}
+
+push_selection_to_drones() {
+	local host
+	# The radio addresses are fixed: fleet number 1 is .61, number 11 is .611.
+	# A missing aircraft is normal, so each best-effort update is quiet and
+	# independent of the others.
+	for host_number in $(fleet_numbers); do
+		host="10.200.142.6${host_number}"
+		ssh -o BatchMode=yes -o ConnectTimeout=3 "${PX4SIM_SSH_USER:-$USER}@$host" \
+			"cd ~/px4-sim-stack && ./px4sim scenario-select $1 --no-push" \
+			>/dev/null 2>&1 &
+	done
+	wait || true
+}
+
 # Put the fleet back into .env and leave every other line as it was.
 fleet_write() {
 	if grep -q '^[[:space:]]*UAS_FLEET=' .env; then
@@ -1468,6 +1506,18 @@ ${DIM}  Video is $video
   The ground station holds every vehicle at once: ws://localhost:8765, ROS
   domain $GROUND_DOMAIN, MAVLink in on $(uas_gcs_port "$FIRST_UAS") upwards.${OFF}
 EOF
+	;;
+
+scenario-select)
+	[ $# -ge 1 ] || die "Give a scenario name. Try: $(scenario_names | paste -sd' ' -)"
+	have_scenario "$1"
+	selected_scene=$(scenario_scene "$1")
+	env_write_selection SCENE "$selected_scene"
+	env_write_selection SCENARIO "$1"
+	say "Selected scenario '$1' (scene '$selected_scene')"
+	if [ "${2:-}" != --no-push ]; then
+		push_selection_to_drones "$1"
+	fi
 	;;
 
 scenario)
