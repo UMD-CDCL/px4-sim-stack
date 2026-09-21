@@ -396,9 +396,12 @@ class Link:
     vehicle out and every link reads the same port.
     """
 
-    def __init__(self, number: int, port: int, system: int):
+    def __init__(self, number: int, host: str, port: int, system: int):
         self.number = number
-        self.host = LOOPBACK
+        # Use the vehicle's advertised address so the socket follows the real
+        # network path/interface. Loopback only measures the local published
+        # port and hides radio/LAN traffic from the operator.
+        self.host = host or LOOPBACK
         self.port = port
         self.system = system
         self.socket: socket.socket | None = None
@@ -537,7 +540,7 @@ class Links:
     """One reader for each vehicle, kept open between reports."""
 
     def __init__(self, fleet: list[dict]):
-        self.links = [Link(vehicle["n"], vehicle["tcp"],
+        self.links = [Link(vehicle["n"], vehicle.get("address", LOOPBACK), vehicle["tcp"],
                            vehicle.get("sysid", vehicle["n"]))
                       for vehicle in fleet
                       if isinstance(vehicle.get("n"), int)
