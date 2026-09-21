@@ -24,6 +24,8 @@ CAPTURE_KINDS="mosaic vlm fiducial"
 RECORD_PID_FILE="logs/.px4sim-record.pid"
 RECORD_MODE_FILE="logs/.px4sim-record.mode"
 RECORD_LOG="logs/recording.log"
+CONTAINER_LOG_PID_FILE="logs/.px4sim-container-log.pid"
+CONTAINER_LOG="logs/ground.log"
 
 BOLD=$'\033[1m'; DIM=$'\033[2m'; GRN=$'\033[32m'; RED=$'\033[31m'; YEL=$'\033[33m'; OFF=$'\033[0m'
 say()  { printf '%s==> %s%s\n' "$BOLD" "$*" "$OFF"; }
@@ -598,6 +600,7 @@ prepare_stack() {
 }
 
 stop_stack() {
+	stop_container_log
 	if unit_owns_stack; then
 		warn "onboard.service stays active with no container. It starts the stack again"
 		warn "at the next boot, or now with: sudo systemctl restart onboard"
@@ -620,6 +623,29 @@ stop_stack() {
 	# returns false; make that benign case successful so `set -e` callers such
 	# as `start` proceed to build and bring the stack back up.
 	return 0
+}
+
+stop_container_log() {
+	local pid
+	pid=$(cat "$CONTAINER_LOG_PID_FILE" 2>/dev/null || true)
+	if [[ "$pid" =~ ^[0-9]+$ ]]; then
+		kill "$pid" 2>/dev/null || true
+		for _ in {1..20}; do
+			kill -0 "$pid" 2>/dev/null || break
+			sleep 0.1
+		done
+	fi
+	rm -f "$CONTAINER_LOG_PID_FILE"
+}
+
+start_container_log() {
+	stop_container_log
+	mkdir -p "$(dirname "$CONTAINER_LOG")"
+	# Start after compose is up. The file is intentionally truncated for each
+	# px4sim restart, while the follower itself is independent of the TUI.
+	COMPOSE_PROFILES="$ALL_PROFILES" setsid bash -c 'exec docker compose logs -f --tail=all' \
+		>"$CONTAINER_LOG" 2>&1 < /dev/null &
+	echo $! > "$CONTAINER_LOG_PID_FILE"
 }
 
 # The same names for a command that takes a list: `logs ground` and `shell onboard`.
@@ -1201,6 +1227,7 @@ restart|start|up|core)
 	add_fleet_profiles
 	[ "$FLEET_IS_SIMULATED" = true ] && need_sources
 	if [ "$cmd" = start ] && [ -n "$(COMPOSE_PROFILES="$ALL_PROFILES" $DC ps --status running -q 2>/dev/null)" ]; then
+		start_container_log
 		say "Already running; start does nothing"
 		echo "  Use ./px4sim restart to stop, rebuild, and recreate the stack."
 		return 0
@@ -1234,6 +1261,7 @@ restart|start|up|core)
 		fi
 	fi
 	$DC up -d --no-build --pull never
+	start_container_log
 	echo
 	$DC ps --format 'table {{.Service}}\t{{.Status}}'
 	endpoints

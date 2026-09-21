@@ -50,6 +50,7 @@ ESCAPE_CODES = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b[=>]|[\x00-\x08\x0b\x0c\x
 FRONT_DOOR = Path(__file__).resolve().parents[1] / "px4sim"
 RECORD_PID_FILE = FRONT_DOOR.parent / "logs/.px4sim-record.pid"
 RECORD_MODE_FILE = FRONT_DOOR.parent / "logs/.px4sim-record.mode"
+UI_LOG_FILE = FRONT_DOOR.parent / "logs/px4sim-ui.log"
 
 STACK, SERVICE, VEHICLE, STREAM = "stack", "service", "vehicle", "stream"
 PANES = (SERVICE, VEHICLE, STREAM)
@@ -338,10 +339,87 @@ class Feed:
         stop_process(self.process)
 
 
+class UiLog:
+    """Crash-tolerant log for everything printed by UI commands."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.fallback = UI_LOG_FILE
+        self.fallback.parent.mkdir(parents=True, exist_ok=True)
+        # A new UI session is a new px4sim run. Truncate only this fallback;
+        # bag-side logs belong to their already-existing bag.
+        self._truncate(self.fallback)
+
+    @staticmethod
+    def _truncate(path: Path) -> None:
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+            os.close(fd)
+        except OSError:
+            pass
+
+    def _bag_log(self) -> Path | None:
+        """Return a log beside the newest rosbag, once recording creates it."""
+        try:
+            active = local_recording()[0]
+            if not active:
+                return None
+            bags = [p.parent for p in FRONT_DOOR.parent.glob("logs/**/metadata.yaml")]
+            return max(bags, key=lambda p: p.stat().st_mtime) / "px4sim-ui.log" if bags else None
+        except OSError:
+            return None
+
+    def write(self, line: str) -> None:
+        path = self._bag_log() or self.fallback
+        data = line.encode("utf-8", "replace")
+        with self.lock:
+            try:
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+                try:
+                    written = 0
+                    while written < len(data):
+                        written += os.write(fd, data[written:])
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+            except OSError:
+                # Logging must never stop the UI command runner.
+                pass
+
+
+class ContainerLog:
+    """Follow every compose service so container output is never UI-only."""
+
+    def __init__(self, output_log: UiLog):
+        self.output_log = output_log
+        self.process: subprocess.Popen | None = None
+        try:
+            self.process = subprocess.Popen(
+                # The front door defaults to --tail=100 for interactive use.
+                # The recorder must retain the complete Docker log history,
+                # then continue following every new line.
+                [str(FRONT_DOOR), "logs", "-f", "--tail=all"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                cwd=FRONT_DOOR.parent, start_new_session=True)
+        except OSError:
+            return
+        threading.Thread(target=self.collect, daemon=True).start()
+
+    def collect(self) -> None:
+        if self.process is None or self.process.stdout is None:
+            return
+        for line in self.process.stdout:
+            self.output_log.write(line.decode("utf-8", "replace"))
+
+    def close(self) -> None:
+        stop_process(self.process)
+
+
 class Runner:
     """One px4sim command at a time, with its output kept for the pane."""
 
-    def __init__(self):
+    def __init__(self, output_log: "UiLog"):
         self.lines: deque[str] = deque(maxlen=OUTPUT_LINES)
         self.command = ""
         self.started_at = 0.0
@@ -349,6 +427,7 @@ class Runner:
         self.returncode: int | None = None
         self.process: subprocess.Popen | None = None
         self.lock = threading.Lock()
+        self.output_log = output_log
 
     @property
     def busy(self) -> bool:
@@ -382,6 +461,10 @@ class Runner:
         not be given the older lines, or the older exit status.
         """
         for line in process.stdout:
+            # Write the unmodified line before presenting it in the pane. The
+            # logger uses one append/write per line and fsyncs it, so a killed
+            # UI can leave at most the line currently being written.
+            self.output_log.write(line)
             clean = strip_codes(line)
             with self.lock:
                 if self.process is not process:
@@ -1244,8 +1327,10 @@ def main() -> int:
         print("The console draws on a terminal. To read the same picture from a"
               " script, run ./px4sim state.", file=sys.stderr)
         return 2
+    output_log = UiLog()
     feed = Feed()
-    runner = Runner()
+    container_log = ContainerLog(output_log)
+    runner = Runner(output_log)
     try:
         curses.wrapper(lambda screen: Console(screen, feed, runner).loop())
     except curses.error as failure:
@@ -1255,6 +1340,7 @@ def main() -> int:
         return 2
     finally:
         feed.close()
+        container_log.close()
         runner.cancel()
     return 0
 
