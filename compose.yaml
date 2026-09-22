@@ -615,6 +615,15 @@ services:
   # -------------------------------------------------------------------------
   onboard11:
     <<: *onboard
+    user: root
+    entrypoint: ["/usr/local/bin/sim-entrypoint.sh"]
+    volumes:
+      - ${ONBOARD_MODEL_DIR:-./modules/onboard/models}:/models
+      - ./logs/onboard:/logs
+      - ./missions:/missions:ro
+      - ./scripts:/px4sim-scripts:ro
+      - ./modules/sim/scenes:/scenes:ro
+      - ./modules/onboard/sim-entrypoint.sh:/usr/local/bin/sim-entrypoint.sh:ro
     profiles: [onboard11]
     environment:
       <<: *onboard-env
@@ -630,6 +639,15 @@ services:
 
   onboard12:
     <<: *onboard
+    user: root
+    entrypoint: ["/usr/local/bin/sim-entrypoint.sh"]
+    volumes:
+      - ${ONBOARD_MODEL_DIR:-./modules/onboard/models}:/models
+      - ./logs/onboard:/logs
+      - ./missions:/missions:ro
+      - ./scripts:/px4sim-scripts:ro
+      - ./modules/sim/scenes:/scenes:ro
+      - ./modules/onboard/sim-entrypoint.sh:/usr/local/bin/sim-entrypoint.sh:ro
     profiles: [onboard12]
     environment:
       <<: *onboard-env
@@ -643,6 +661,15 @@ services:
 
   onboard13:
     <<: *onboard
+    user: root
+    entrypoint: ["/usr/local/bin/sim-entrypoint.sh"]
+    volumes:
+      - ${ONBOARD_MODEL_DIR:-./modules/onboard/models}:/models
+      - ./logs/onboard:/logs
+      - ./missions:/missions:ro
+      - ./scripts:/px4sim-scripts:ro
+      - ./modules/sim/scenes:/scenes:ro
+      - ./modules/onboard/sim-entrypoint.sh:/usr/local/bin/sim-entrypoint.sh:ro
     profiles: [onboard13]
     environment:
       <<: *onboard-env
@@ -656,6 +683,15 @@ services:
 
   onboard14:
     <<: *onboard
+    user: root
+    entrypoint: ["/usr/local/bin/sim-entrypoint.sh"]
+    volumes:
+      - ${ONBOARD_MODEL_DIR:-./modules/onboard/models}:/models
+      - ./logs/onboard:/logs
+      - ./missions:/missions:ro
+      - ./scripts:/px4sim-scripts:ro
+      - ./modules/sim/scenes:/scenes:ro
+      - ./modules/onboard/sim-entrypoint.sh:/usr/local/bin/sim-entrypoint.sh:ro
     profiles: [onboard14]
     environment:
       <<: *onboard-env
