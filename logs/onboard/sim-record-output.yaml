@@ -1,0 +1,4 @@
+output_bags:
+  - uri: /logs/lorton-search-assess.mcap
+    storage_id: mcap
+    all_topics: true
