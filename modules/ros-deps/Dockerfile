@@ -183,6 +183,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-${ROS_DISTRO}-message-filters \
       ros-${ROS_DISTRO}-nav-msgs \
       ros-${ROS_DISTRO}-rosbag2-py \
+      ros-${ROS_DISTRO}-rosbag2-storage-mcap \
       ros-${ROS_DISTRO}-rqt-gui \
       ros-${ROS_DISTRO}-rqt-gui-py \
       ros-${ROS_DISTRO}-rosidl-runtime-py \
