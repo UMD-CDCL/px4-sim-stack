@@ -20,7 +20,7 @@ UAS_FLEET='chimera_v2 chimera_v3' SCENE=lorton SCENARIO=lorton_roi_feature_test 
 ./px4sim fly 12 20
 ```
 
-Upload `missions/lorton-search-v2.plan` to uas11 and `missions/lorton-assess-v3.plan` to uas12 through QGroundControl. The v2 plan has a zero-second delay immediately before the lawnmower legs, a -70 degree gimbal command, 20 m altitude, 1 m/s mission speed, and wide camera selection. The v3 plan uses `NAV_DELAY=-1` as its stationary vantage marker.
+Take both vehicles airborne with `./px4sim uas <N> takeoff 20` before uploading the plans. The plans begin with a hold waypoint rather than another takeoff command, so PX4 does not re-execute a second takeoff while entering mission mode. Upload `missions/lorton-search-v2.plan` to uas11 and `missions/lorton-assess-v3.plan` to uas12 through PX4Sim. The v2 plan has a zero-second delay immediately before the lawnmower legs, a -70 degree gimbal command, 20 m altitude, 1 m/s mission speed, and wide camera selection. The v3 plan uses 30 m for its stationary vantage marker and `NAV_DELAY=-1` to remain there.
 
 PX4Sim has a repeatable upload helper, which also sets the vehicle DDS domain and pushes directly through MAVROS without changing Chimera mission behavior:
 
