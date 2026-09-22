@@ -31,7 +31,7 @@ PX4Sim has a repeatable upload helper, which also sets the vehicle DDS domain an
 ./px4sim px4 12 commander mode auto:mission
 ```
 
-The v2 mission publishes stationary target reports. Ground tracking merges accepted stationary fixes by the configured horizontal distance (`dedup_horizontal_m`), forwards the resulting ROI array, and the v3 mission transforms and queues it. If no ROI report arrives, the known casualty-location topic populates the same queue once. The v3 vehicle stays at its -1-second vantage while the queue is drained.
+The v2 mission publishes stationary target reports. Ground tracking merges accepted stationary fixes by the configured horizontal distance (`dedup_horizontal_m`), forwards the resulting ROI array, and the v3 mission transforms and queues it. If no ROI report arrives, the known casualty-location topic populates the same queue once. The v3 vehicle stays at its -1-second vantage while the queue is drained. Each plan ends with an unlimited `DO_JUMP` back to the waypoint immediately preceding its delay marker, so the search and assessment loops continue instead of landing.
 
 Verify with `./px4sim state`, the mission cursor, gimbal status, and the ROI topic before recording. Record the verified run with:
 
