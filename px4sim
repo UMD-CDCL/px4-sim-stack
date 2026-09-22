@@ -759,6 +759,8 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     streams             Which video streams are live right now
 	record [bags|all|stop|status]
 	                        Record bags only, or bags plus raw video
+	mission upload <N> <plan>
+	                        Validate and upload a plan through the vehicle mission node
     view [N|stream]     Play a stream. Default: uas${FIRST_UAS}'s $(default_stream "$FIRST_UAS")
     topics [N]          List a vehicle's ROS topics. Default: uas${FIRST_UAS}
     state [--watch]     Every reading the console draws, as JSON
@@ -1474,6 +1476,32 @@ topics)
 	COMPOSE_PROFILES="$ALL_PROFILES" $DC exec -e ROS_DOMAIN_ID="$(reader_domain "$reader" "$n")" "$reader" bash -lc \
 		'. /usr/local/bin/ros-env.sh; ros2 topic list' \
 		|| die "$reader did not answer. Is it running?  ./px4sim status"
+	;;
+
+mission)
+	action=${1:-}
+	case "$action" in
+	upload)
+		n=$(vehicle_arg "${2:-}")
+		plan=${3:-}
+		[ -n "$plan" ] || die "Usage: ./px4sim mission upload <N> <plan-file>"
+		[ -f "$plan" ] || die "Plan file does not exist: $plan"
+		plan=$(readlink -f "$plan")
+		case "$plan" in
+			"$PWD/missions/"*) plan_name=${plan#"$PWD/missions/"} ;;
+			*) die "Plan must be inside $PWD/missions so the companion can read it." ;;
+		esac
+		python3 -m json.tool "$plan" >/dev/null || die "Plan is not valid JSON: $plan"
+		[ "$(world_of)" = simulator ] || die "mission upload currently targets simulated companions"
+		reader=$(companion_service "$n")
+		domain=$(reader_domain "$reader" "$n")
+		has_service "$reader" || die "compose.yaml defines no $reader"
+		say "Uploading $plan_name to uas$n on ROS domain $domain"
+		COMPOSE_PROFILES="$ALL_PROFILES" $DC exec -T -e ROS_DOMAIN_ID="$domain" "$reader" \
+			bash -lc '. /usr/local/bin/ros-env.sh; python3 /px4sim-scripts/mission-upload.py '"$n"' /missions/'"$(printf '%q' "$plan_name")"''
+		;;
+	*) die "Usage: ./px4sim mission upload <N> <plan-file>" ;;
+	esac
 	;;
 
 layout)

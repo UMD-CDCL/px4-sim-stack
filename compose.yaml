@@ -96,6 +96,8 @@ x-mavlink-router-env: &mavlink-router-env
 x-onboard-volumes:
   models: &models-volume ${ONBOARD_MODEL_DIR:-./modules/onboard/models}:/models
   logs: &logs-volume ./logs/onboard:/logs
+  missions: &missions-volume ./missions:/missions:ro
+  tools: &tools-volume ./scripts:/px4sim-scripts:ro
 
 # The onboard computer, for each simulated vehicle and for the aircraft. One
 # container for each, because each binds MAVLink port 14402 and runs its own
@@ -145,6 +147,8 @@ x-onboard: &onboard
     # symlink fetch_models.py points at this machine's engine group.
     - *models-volume
     - *logs-volume
+    - *missions-volume
+    - *tools-volume
     # Terrain surfaces from `px4sim genscene`. The entry point links the one
     # for SCENE into /terrain. The aircraft names this again by alias.
     - ./modules/sim/scenes:/scenes:ro
