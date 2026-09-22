@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import rclpy
-from mavros_msgs.srv import WaypointPush
+from mavros_msgs.srv import WaypointPush, WaypointSetCurrent
 from umd_uas.umd_uas_mission import UASMissionNode
 from rclpy.node import Node
 
@@ -13,6 +13,9 @@ class MissionUploader(Node):
     def __init__(self, vehicle: int):
         super().__init__("px4sim_mission_uploader")
         self.client = self.create_client(WaypointPush, f"/uas{vehicle}/mission/push")
+        self.current_client = self.create_client(
+            WaypointSetCurrent, f"/uas{vehicle}/mission/set_current"
+        )
 
     def upload(self, plan: Path):
         waypoints = UASMissionNode.load_plan_waypoints(str(plan))
@@ -29,11 +32,27 @@ class MissionUploader(Node):
             raise RuntimeError(
                 f"FCU rejected mission ({result.wp_transfered}/{len(waypoints)} items)"
             )
-        return len(waypoints), result.wp_transfered
+        transferred = result.wp_transfered
+        if not self._wait_for_client(self.current_client):
+            raise RuntimeError(
+                f"MAVROS mission/set_current did not appear: {self.current_client.srv_name}"
+            )
+        current = WaypointSetCurrent.Request()
+        current.wp_seq = 0
+        future = self.current_client.call_async(current)
+        while not future.done():
+            rclpy.spin_once(self, timeout_sec=0.1)
+        result = future.result()
+        if not result.success:
+            raise RuntimeError("FCU rejected mission cursor reset")
+        return len(waypoints), transferred
 
     def _wait_for_service(self):
+        return self._wait_for_client(self.client)
+
+    def _wait_for_client(self, client):
         for _ in range(30):
-            if self.client.service_is_ready():
+            if client.service_is_ready():
                 return True
             rclpy.spin_once(self, timeout_sec=1.0)
         return False
