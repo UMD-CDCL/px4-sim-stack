@@ -1341,7 +1341,7 @@ record)
 				kill -0 "$p11" 2>/dev/null || break
 				sleep 0.1
 			done
-			docker exec px4simstack-onboard11-1 bash -lc '. /opt/ros/humble/setup.sh; ros2 bag convert -i /logs/lorton-search-assess-uas11 -i /logs/lorton-search-assess-uas12 -o /logs/sim-record-output.yaml' >>"$RECORD_LOG" 2>&1 || true
+			docker exec px4simstack-onboard11-1 bash -lc '. /opt/ros/humble/setup.sh; . /home/user/ros2_ws/install/setup.bash; ros2 bag convert -i /logs/lorton-search-assess-uas11/lorton-search-assess-uas11_0.mcap mcap -i /logs/lorton-search-assess-uas12/lorton-search-assess-uas12_0.mcap mcap -o /logs/sim-record-output.yaml' >>"$RECORD_LOG" 2>&1 || true
 			rm -f "$RECORD_PID_FILE" "$RECORD_MODE_FILE"
 			say "recording stopped; merged MCAP: logs/onboard/lorton-search-assess.mcap"
 			exit 0
