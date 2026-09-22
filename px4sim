@@ -23,6 +23,8 @@ export PX4SIM_BUILD_NETWORK=none
 CAPTURE_KINDS="mosaic vlm fiducial"
 RECORD_PID_FILE="logs/.px4sim-record.pid"
 RECORD_MODE_FILE="logs/.px4sim-record.mode"
+RECORD_BAG_FILE="logs/.px4sim-record.bag"
+RECORD_SIM_FILE="logs/.px4sim-sim-record.tsv"
 RECORD_LOG="logs/recording.log"
 CONTAINER_LOG_PID_FILE="logs/.px4sim-container-log.pid"
 CONTAINER_LOG_DIR="logs/containers"
@@ -758,7 +760,9 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
   ${BOLD}Look at the data${OFF}
     streams             Which video streams are live right now
 	record [bags|all|stop|status]
-	                        Record bags only, or bags plus raw video
+	                        Record bags only, or bags plus raw video;
+	                        simulator bags cover every configured drone and
+	                        finalize separately under logs/onboard/
 	mission upload <N> <plan>
 	                        Validate and upload a plan through the vehicle mission node
     view [N|stream]     Play a stream. Default: uas${FIRST_UAS}'s $(default_stream "$FIRST_UAS")
@@ -915,13 +919,37 @@ fleet_facts() {
 }
 
 recording_status() {
-	local pid
-	pid=$(awk '{print $1}' "$RECORD_PID_FILE" 2>/dev/null || true)
-	if [[ "$pid" =~ ^[0-9]+$ ]] && { kill -0 "$pid" 2>/dev/null || kill -0 -- -"$pid" 2>/dev/null; }; then
+	local pid active=false
+	# Each simulator recorder has a unique output path. Tracking a container PID
+	# is unsafe: ROS processes can reuse it after rosbag2 has already exited.
+	if [ -f "$RECORD_SIM_FILE" ]; then
+		local label service bag_dir container
+		while IFS=$'\t' read -r label service bag_dir; do
+			container=$(docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+				--filter "label=com.docker.compose.service=$service" -q | head -1)
+			if [ -n "$container" ] && docker exec "$container" \
+				pgrep -f "ros2 bag record.*${bag_dir}" >/dev/null 2>&1; then
+				echo true
+				return
+			fi
+		done < "$RECORD_SIM_FILE"
+		echo false
+		return
+	fi
+	if [ -f "$RECORD_PID_FILE" ]; then
+		while read -r pid; do
+			if [[ "$pid" =~ ^[0-9]+$ ]] && {
+				kill -0 "$pid" 2>/dev/null || kill -0 -- -"$pid" 2>/dev/null
+			}; then
+				active=true
+				break
+			fi
+		done < "$RECORD_PID_FILE"
+	fi
+	if [ "$active" = true ]; then
 		echo true
 	else
-		rm -f "$RECORD_PID_FILE"
-		rm -f "$RECORD_MODE_FILE"
+		rm -f "$RECORD_PID_FILE" "$RECORD_MODE_FILE" "$RECORD_BAG_FILE"
 		echo false
 	fi
 }
@@ -1305,15 +1333,51 @@ record)
 		[ "$(recording_status)" = false ] || die "recording is already running"
 		if [ "$(world_of)" = simulator ]; then
 			[ "$action" = bags ] || die "simulator recording supports bags only"
+			[ ! -e "$RECORD_SIM_FILE" ] || die "a previous simulator recording needs record stop before another can start"
 			mkdir -p logs/onboard
-			rm -rf logs/onboard/lorton-search-assess-uas11 logs/onboard/lorton-search-assess-uas12 logs/onboard/lorton-search-assess.mcap
-			setsid docker exec px4simstack-onboard11-1 bash -lc ". /opt/ros/humble/setup.sh; ROS_DOMAIN_ID=71 ros2 bag record -s mcap -a -o /logs/lorton-search-assess-uas11" </dev/null >"$RECORD_LOG" 2>&1 &
-			p11=$!
-			setsid docker exec px4simstack-onboard12-1 bash -lc ". /opt/ros/humble/setup.sh; ROS_DOMAIN_ID=72 ros2 bag record -s mcap -a -o /logs/lorton-search-assess-uas12" </dev/null >>"$RECORD_LOG" 2>&1 &
-			p12=$!
-			printf '%s %s\n' "$p11" "$p12" > "$RECORD_PID_FILE"
+			local bag_base="sim-rosbag-$(date -u +%Y%m%dT%H%M%SZ)"
+			local run_dir="logs/onboard/${bag_base}"
+			local numbers=() containers=() domains=()
+			local n service container domain bag_dir index ground_container
+			# Resolve every companion before starting any recorder. A partial fleet
+			# is not a useful flight record.
+			for n in $(fleet_numbers); do
+				service=$(companion_service "$n")
+				container=$(docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+					--filter "label=com.docker.compose.service=$service" -q | head -1)
+				[ -n "$container" ] || die "$service is not running; start the simulator before recording"
+				numbers+=("$n")
+				containers+=("$container")
+				domains+=("$(uas_domain "$n")")
+			done
+			ground_container=$(docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+				--filter "label=com.docker.compose.service=offboard" -q | head -1)
+			[ -n "$ground_container" ] || die "offboard is not running; start the simulator with its ground station before recording"
+			mkdir -p "$run_dir"
+			: > "$RECORD_LOG"
+			for index in "${!numbers[@]}"; do
+				n=${numbers[$index]}
+				container=${containers[$index]}
+				domain=${domains[$index]}
+				bag_dir="/logs/${bag_base}/uas${n}"
+				# Detached docker exec runs one foreground rosbag process. There is no
+				# shell child or host PID to leak or reuse during stop.
+				docker exec -d -u user "$container" bash -lc \
+					". /usr/local/bin/ros-env.sh; export ROS_DOMAIN_ID=$domain; exec ros2 bag record -s mcap -a -o $bag_dir > ${bag_dir}.record.log 2>&1" \
+					|| die "could not start rosbag2 for uas${n}; see $RECORD_LOG"
+			done
+			bag_dir="/logs/${bag_base}/ground"
+			docker exec -d -u user "$ground_container" bash -lc \
+				". /usr/local/bin/ros-env.sh; exec ros2 bag record -s mcap -a -o $bag_dir > ${bag_dir}.record.log 2>&1" \
+				|| die "could not start rosbag2 for ground; see $RECORD_LOG"
+			: > "$RECORD_SIM_FILE"
+			for index in "${!numbers[@]}"; do
+				printf 'uas%s\tonboard%s\t/logs/%s/uas%s\n' \
+					"${numbers[$index]}" "${numbers[$index]}" "$bag_base" "${numbers[$index]}" >> "$RECORD_SIM_FILE"
+			done
+			printf 'ground\toffboard\t/logs/%s/ground\n' "$bag_base" >> "$RECORD_SIM_FILE"
 			printf '%s\n' bags > "$RECORD_MODE_FILE"
-			say "recording simulated fleet to per-domain MCAP inputs"
+			say "recording ${#numbers[@]} simulated drones and ground to $run_dir"
 			exit 0
 		fi
 		case "$(world_of)" in
@@ -1333,19 +1397,44 @@ record)
 		say "recording ROS topics and raw video"
 		;;
 	stop)
-		[ "$(recording_status)" = true ] || die "recording is not running"
-		read -r p11 p12 < "$RECORD_PID_FILE"
 		if [ "$(world_of)" = simulator ]; then
-			kill -INT "$p11" "$p12" 2>/dev/null || true
-			for _ in {1..50}; do
-				kill -0 "$p11" 2>/dev/null || break
+			[ -s "$RECORD_SIM_FILE" ] || die "no simulator recording state exists"
+			local label service bag_dir container active=false incomplete=()
+			while IFS=$'\t' read -r label service bag_dir; do
+				container=$(docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+					--filter "label=com.docker.compose.service=$service" -q | head -1)
+				[ -n "$container" ] || { incomplete+=("$label"); continue; }
+				docker exec "$container" pkill -INT -f "ros2 bag record.*${bag_dir}" 2>/dev/null || true
+			done < "$RECORD_SIM_FILE"
+			# A SIGKILL can corrupt an MCAP. Give rosbag2 a short, bounded window to
+			# flush; if it is still running, leave the state intact for a retry.
+			for _ in {1..100}; do
+				active=false
+				while IFS=$'\t' read -r label service bag_dir; do
+					container=$(docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+						--filter "label=com.docker.compose.service=$service" -q | head -1)
+					if [ -n "$container" ] && docker exec "$container" \
+						pgrep -f "ros2 bag record.*${bag_dir}" >/dev/null 2>&1; then
+						active=true
+						break
+					fi
+				done < "$RECORD_SIM_FILE"
+				[ "$active" = false ] && break
 				sleep 0.1
 			done
-			docker exec px4simstack-onboard11-1 bash -lc '. /opt/ros/humble/setup.sh; . /home/user/ros2_ws/install/setup.bash; ros2 bag convert -i /logs/lorton-search-assess-uas11/lorton-search-assess-uas11_0.mcap mcap -i /logs/lorton-search-assess-uas12/lorton-search-assess-uas12_0.mcap mcap -o /logs/sim-record-output.yaml' >>"$RECORD_LOG" 2>&1 || true
-			rm -f "$RECORD_PID_FILE" "$RECORD_MODE_FILE"
-			say "recording stopped; merged MCAP: logs/onboard/lorton-search-assess.mcap"
+			[ "$active" = false ] || die "rosbag2 is still finalizing; run ./px4sim record stop again"
+			while IFS=$'\t' read -r label service bag_dir; do
+				[ -s "logs/onboard${bag_dir#/logs}/metadata.yaml" ] || incomplete+=("$label")
+			done < "$RECORD_SIM_FILE"
+			[ ${#incomplete[@]} -eq 0 ] || die "${incomplete[*]} did not finalize an MCAP; see $RECORD_LOG"
+			local run_dir
+			run_dir=$(dirname "$(awk -F '\t' 'NR == 1 { print $3 }' "$RECORD_SIM_FILE")")
+			rm -f "$RECORD_SIM_FILE" "$RECORD_MODE_FILE" "$RECORD_BAG_FILE"
+			say "recording stopped; complete per-drone and ground MCAPs: logs/onboard${run_dir#/logs}"
 			exit 0
 		fi
+		[ "$(recording_status)" = true ] || die "recording is not running"
+		read -r p11 < "$RECORD_PID_FILE"
 		pid=$p11
 		kill -INT -- -"$pid" 2>/dev/null || kill -INT "$pid" 2>/dev/null || true
 		for _ in {1..50}; do
@@ -1358,8 +1447,7 @@ record)
 		fi
 		if [ "$(recording_status)" = true ]; then
 			kill -KILL -- -"$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
-		rm -f "$RECORD_PID_FILE"
-		rm -f "$RECORD_MODE_FILE"
+		rm -f "$RECORD_PID_FILE" "$RECORD_MODE_FILE" "$RECORD_BAG_FILE"
 		fi
 		say "recording stopped"
 		;;

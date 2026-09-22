@@ -50,6 +50,7 @@ ESCAPE_CODES = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b[=>]|[\x00-\x08\x0b\x0c\x
 FRONT_DOOR = Path(__file__).resolve().parents[1] / "px4sim"
 RECORD_PID_FILE = FRONT_DOOR.parent / "logs/.px4sim-record.pid"
 RECORD_MODE_FILE = FRONT_DOOR.parent / "logs/.px4sim-record.mode"
+RECORD_SIM_FILE = FRONT_DOOR.parent / "logs/.px4sim-sim-record.tsv"
 UI_LOG_FILE = FRONT_DOOR.parent / "logs/px4sim-ui.log"
 
 STACK, SERVICE, VEHICLE, STREAM = "stack", "service", "vehicle", "stream"
@@ -101,11 +102,11 @@ ACTIONS = (
     Action(STACK, "a", "start ROS bag and video recording", ("record", "all"),
            worlds=(GROUND, AIRCRAFT)),
     Action(STACK, "b", "start ROS bag recording", ("record", "bags"),
-           worlds=(GROUND, AIRCRAFT)),
+           worlds=(SIMULATOR, GROUND, AIRCRAFT)),
     Action(STACK, "A", "stop ROS and video recording", ("record", "stop"),
            worlds=(GROUND, AIRCRAFT)),
     Action(STACK, "B", "stop ROS and video recording", ("record", "stop"),
-           worlds=(GROUND, AIRCRAFT)),
+           worlds=(SIMULATOR, GROUND, AIRCRAFT)),
     Action(STACK, "s", "start the stack if it is stopped", ("start",)),
     Action(STACK, "", "enable GPS-free BENCH MODE (select this menu item)",
            ("bench", "enable", "{value}"),
@@ -239,6 +240,10 @@ def cursor(shown: int) -> None:
 
 
 def local_recording() -> tuple[bool, str]:
+    # Simulator recorders are detached processes inside the onboard containers,
+    # so their host-side state is a manifest rather than one local PID.
+    if RECORD_SIM_FILE.exists():
+        return True, "bags"
     try:
         pid = int(RECORD_PID_FILE.read_text().strip())
         os.kill(pid, 0)
