@@ -2,19 +2,17 @@
 
 This run uses the PX4Sim front door with a v2 search aircraft and a v3 assess aircraft.
 
-For a known-state run, stop and start the selected simulator profiles, then place the
-fleet before taking off. Mission upload resets PX4's current mission item to zero, so
-an old cursor cannot skip the plan after a restart:
+For a known-state run, use the PX4Sim restart front door. It rebuilds the selected
+containers, recreates the network, and starts the fleet from a clean PX4 state:
 
 ```bash
-./px4sim stop
-./px4sim start sim,offboard,uas11,onboard11,uas12,onboard12
+./px4sim restart
 ./px4sim place
 ```
 
 ```bash
 cd /home/user/px4-sim-stack
-UAS_FLEET='chimera_v2 chimera_v3' SCENE=lorton SCENARIO=lorton_roi_feature_test COMPOSE_PROFILES=sim,offboard UAS_BASE=10 ./px4sim restart
+UAS_FLEET='chimera_v2 chimera_v3' SCENE=lorton SCENARIO=lorton_casualties COMPOSE_PROFILES=sim,offboard UAS_BASE=10 ./px4sim restart
 ./px4sim place
 ./px4sim fly 11 20
 ./px4sim fly 12 20
@@ -41,4 +39,4 @@ Verify with `./px4sim state`, the mission cursor, gimbal status, and the ROI top
 
 Stop recording with `./px4sim record stop`; the bag is under `logs/` and should be copied to the run archive with both plan files.
 
-During the 2026-09-22 attempt, plan upload passed (8/8 and 4/4), but execution was not accepted as verified: the search companion's `img_processing` process exited because its configured ReID model was absent, so continuous detection and mosaic did not start and no stationary ROI was forwarded to the assess vehicle. Do not record or claim a successful mission until `img_processing` is healthy and logs show static-target publication followed by assess ROI/gimbal activity.
+The standard `lorton_casualties` scenario is the source of truth for the scene and casualty locations. Do not substitute the feature-test scenario for a mission run.
