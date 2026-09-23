@@ -243,6 +243,19 @@ def local_recording() -> tuple[bool, str]:
     # Simulator recorders are detached processes inside the onboard containers,
     # so their host-side state is a manifest rather than one local PID.
     if RECORD_SIM_FILE.exists():
+        try:
+            status = subprocess.run(
+                [str(FRONT_DOOR), "record", "status"],
+                cwd=FRONT_DOOR.parent,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            if "recording=true" not in status.stdout:
+                return False, ""
+        except (OSError, subprocess.SubprocessError):
+            return False, ""
         return True, "bags"
     try:
         pid = int(RECORD_PID_FILE.read_text().strip())

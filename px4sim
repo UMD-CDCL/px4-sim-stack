@@ -933,6 +933,10 @@ recording_status() {
 				return
 			fi
 		done < "$RECORD_SIM_FILE"
+		# A recorder can exit without going through `record stop` (for example
+		# after a container restart). Do not leave the manifest making the UI
+		# report a recording that no longer exists.
+		rm -f "$RECORD_SIM_FILE" "$RECORD_PID_FILE" "$RECORD_MODE_FILE" "$RECORD_BAG_FILE"
 		echo false
 		return
 	fi
