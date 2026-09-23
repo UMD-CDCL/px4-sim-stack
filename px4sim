@@ -561,11 +561,12 @@ build_stack() {
 build_local_stack() {
 	local services=() n
 	if [ "$FLEET_IS_SIMULATED" = true ]; then
-		# The simulator owns PX4/Gazebo vehicle spawning. Include it in the
-		# local rebuild whenever the simulated fleet is restarted; otherwise
-		# changes to modules/sim/entrypoint.sh remain trapped in the old image
-		# and UAS_ACTIVE reaches the container but is ignored by its code.
-		services+=(sim)
+		# Keep sim in the lightweight restart build set so Compose recreates it
+		# with a changed UAS_ACTIVE. Its heavy/networked layers are populated by
+		# prepare; sim has no ros-base, PX4-msgs, or CDCL-msgs dependency.
+		# Use prepare's network mode for cache identity; a prepared sim build is
+		# fully cached and performs no network access during restart.
+		PX4SIM_BUILD_NETWORK=host $DC build sim
 		for n in $(active_uas); do services+=("onboard$n"); done
 		case ",${COMPOSE_PROFILES:-}," in
 		*,offboard,*) services+=(offboard) ;;
