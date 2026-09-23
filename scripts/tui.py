@@ -44,6 +44,7 @@ INPUT_PERIOD_MS = 200
 OUTPUT_LINES = 500
 OUTPUT_ROWS_SHARE = 0.34
 STALE_REPORT_S = 8.0
+REPORT_WATCHDOG_S = 30.0
 NAME_COLUMN = 15
 ESCAPE_CODES = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b[=>]|[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
@@ -295,6 +296,7 @@ class Feed:
         self.lock = threading.Lock()
         self.stopping = threading.Event()
         self.restarting = False
+        self.watchdog_at = 0.0
         self.process: subprocess.Popen | None = None
         threading.Thread(target=self.run, daemon=True).start()
 
@@ -355,6 +357,17 @@ class Feed:
     def close(self) -> None:
         self.stopping.set()
         stop_process(self.process)
+
+    def watchdog(self, age: float) -> None:
+        """Recover a wedged state reader without requiring a second UI."""
+        now = time.monotonic()
+        if age < REPORT_WATCHDOG_S or self.restarting:
+            return
+        if now - self.watchdog_at < REPORT_WATCHDOG_S:
+            return
+        self.watchdog_at = now
+        self.note("state reports stalled; restarting the state reader")
+        self.restart()
 
 
 class UiLog:
@@ -1310,6 +1323,7 @@ class Console:
             self.refresh_when_done = False
             self.feed.restart()
         report, age = self.feed.latest()
+        self.feed.watchdog(age)
         if report is not None:
             self.rows = Rows(report)
             self.age = age
