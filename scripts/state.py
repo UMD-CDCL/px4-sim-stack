@@ -549,8 +549,21 @@ class Links:
                       if isinstance(vehicle.get("n"), int)
                       and isinstance(vehicle.get("tcp"), int)]
         self.watcher = selectors.DefaultSelector()
+        self.available: set[str] | None = None
+
+    def set_available(self, services: set[str]) -> None:
+        """Avoid dialing endpoints whose owning compose service is down."""
+        self.available = services
+        for link in self.links:
+            owner = f"uas{link.number}"
+            if owner not in services and link.socket is not None:
+                self.forget(link)
+                link.close()
 
     def pump(self, deadline: float) -> None:
+        if self.available is not None and not any(
+                f"uas{link.number}" in self.available for link in self.links):
+            return
         while True:
             now = time.monotonic()
             if now >= deadline:
@@ -564,6 +577,8 @@ class Links:
 
     def refresh(self, now: float) -> None:
         for link in self.links:
+            if self.available is not None and f"uas{link.number}" not in self.available:
+                continue
             if link.timed_out(now):
                 link.lost = "no answer on the port"
             if link.lost:
@@ -721,18 +736,17 @@ def stream_owners(fleet: list[dict]) -> dict[str, int]:
 
 def snapshot(context: dict, project_dir: Path, streams: Streams, links: Links,
              bridges: Bridges, units: Units, traffic: TrafficMonitor, tick: int) -> dict:
-    # The vehicles answer first. Reading the containers and the card takes
-    # seconds on a busy host, and nothing reads a socket while it happens, so a
-    # vehicle asked afterwards looks silent while its telemetry is arriving.
     started = time.monotonic()
+    found, services_error = containers(project_dir, str(context.get("compose",
+                                                                   "docker compose")))
+    running = {name for name, row in found.items() if row.get("state") == "running"}
+    links.set_available(running)
     vehicles = links.report(started)
     rates = traffic.report(max(started - snapshot.last_at, 1e-6))
     snapshot.last_at = started
     for vehicle in vehicles:
         up, down = rates.get(vehicle["number"], (0.0, 0.0))
         vehicle["tx_kbits"], vehicle["rx_kbits"] = up, down
-    found, services_error = containers(project_dir, str(context.get("compose",
-                                                                   "docker compose")))
     return {
         "at": time.time(),
         "tick": tick,
@@ -771,6 +785,13 @@ def main() -> int:
                      Streams(str(context.get("mediamtx", "http://localhost:9997")), owners))
     streams = AsyncStreams(stream_source, STREAMS_PROBE_TIMEOUT_S if base else 2.0)
     links = Links(context["fleet"])
+    # Establish service ownership before the first MAVLink pump.  This keeps a
+    # stopped stack from paying connection timeouts merely to render its first
+    # UI frame; snapshot() refreshes the set on every report thereafter.
+    initial_found, _ = containers(project_dir, str(context.get("compose",
+                                                            "docker compose")))
+    links.set_available({name for name, row in initial_found.items()
+                         if row.get("state") == "running"})
     bridges = Bridges(context)
     units = Units(as_list(context.get("units", "")))
     traffic = TrafficMonitor(context["fleet"])

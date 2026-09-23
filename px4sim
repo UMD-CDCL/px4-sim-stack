@@ -615,6 +615,14 @@ stop_stack() {
 	fi
 	say "Stopping everything"
 	COMPOSE_PROFILES="$ALL_PROFILES" $DC down --remove-orphans
+	# A reboot or SIGKILL can leave the simulator recording manifest behind
+	# after its recorder containers are gone.  At this point there is no live
+	# rosbag process left to finalize, so reconcile the lock instead of making
+	# the next UI report wait on a recording that cannot exist.
+	if [ -f "$RECORD_SIM_FILE" ] && [ -z "$(docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" --filter "status=running" -q)" ]; then
+		rm -f "$RECORD_SIM_FILE" "$RECORD_MODE_FILE" "$RECORD_BAG_FILE"
+		say "cleared stale simulator recording state"
+	fi
 
 	local leaked=0 segment
 	# Host IPC intentionally lets the container talk to native ROS processes,
