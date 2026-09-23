@@ -392,7 +392,7 @@ fi
 fleet_profiles() {
 	[ "$FLEET_IS_SIMULATED" = true ] || return 0
 	local list="sim" n
-	for n in $(fleet_numbers); do
+	for n in $(active_uas); do
 		if has_service "uas$n";     then list="$list,uas$n"; fi
 		if has_service "onboard$n"; then list="$list,onboard$n"; fi
 	done
@@ -561,7 +561,12 @@ build_stack() {
 build_local_stack() {
 	local services=() n
 	if [ "$FLEET_IS_SIMULATED" = true ]; then
-		for n in $(fleet_numbers); do services+=("onboard$n"); done
+		# The simulator owns PX4/Gazebo vehicle spawning. Include it in the
+		# local rebuild whenever the simulated fleet is restarted; otherwise
+		# changes to modules/sim/entrypoint.sh remain trapped in the old image
+		# and UAS_ACTIVE reaches the container but is ignored by its code.
+		services+=(sim)
+		for n in $(active_uas); do services+=("onboard$n"); done
 		case ",${COMPOSE_PROFILES:-}," in
 		*,offboard,*) services+=(offboard) ;;
 		esac
@@ -761,8 +766,8 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     streams             Which video streams are live right now
 	record [bags|all|stop|status]
 	                        Record bags only, or bags plus raw video;
-	                        simulator bags cover every configured drone and
-	                        finalize separately under logs/onboard/
+	                        simulator bags cover active drones and offboard;
+	                        all MCAPs finalize together under logs/recordings/
 	mission upload <N> <plan>
 	                        Validate and upload a plan through the vehicle mission node
     view [N|stream]     Play a stream. Default: uas${FIRST_UAS}'s $(default_stream "$FIRST_UAS")
@@ -906,13 +911,14 @@ fleet_facts() {
 		declared=$(printf '%s\n' "$COMPOSE_SERVICES" | paste -sd, -)
 		expected=$($DC config --services 2>/dev/null | paste -sd, -)
 	EOF
-	for n in $(fleet_numbers); do
+	for n in $(active_uas); do
 		companion=$(has_service "$(companion_service "$n")" && companion_service "$n" || true)
+		link_host=$([ "$FLEET_IS_SIMULATED" = true ] && echo 127.0.0.1 || uas_address "$n")
 		printf 'vehicle n=%s sysid=%s model=%s mark=%s domain=%s tcp=%s gcs=%s foxglove=%s foxglove_url=%s address=%s router=uas%s companion=%s gimbal=%s streams=%s zoom=%s\n' \
 			"$n" "$n" "$(model_of "$n")" "$(mark_of "$n")" "$(uas_domain "$n")" \
 			"$(uas_tcp_port "$n")" "$(uas_gcs_port "$n")" "$(uas_foxglove_port "$n")" \
 			"$(uas_foxglove_url "$n")" \
-			"$(uas_address "$n")" "$n" "$companion" "$(gimbal_stream "$n")" \
+			"$link_host" "$n" "$companion" "$(gimbal_stream "$n")" \
 			"$(vehicle_streams "$n" | tr ' ' ',' | sed 's/,$//')" \
 			"$(zoom_preset_of_slot $((n - UAS_BASE - 1)) || true)"
 	done
@@ -923,21 +929,11 @@ recording_status() {
 	# Each simulator recorder has a unique output path. Tracking a container PID
 	# is unsafe: ROS processes can reuse it after rosbag2 has already exited.
 	if [ -f "$RECORD_SIM_FILE" ]; then
-		local label service bag_dir container
-		while IFS=$'\t' read -r label service bag_dir; do
-			container=$(docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
-				--filter "label=com.docker.compose.service=$service" -q | head -1)
-			if [ -n "$container" ] && docker exec "$container" \
-				pgrep -f "ros2 bag record.*${bag_dir}" >/dev/null 2>&1; then
-				echo true
-				return
-			fi
-		done < "$RECORD_SIM_FILE"
-		# A recorder can exit without going through `record stop` (for example
-		# after a container restart). Do not leave the manifest making the UI
-		# report a recording that no longer exists.
-		rm -f "$RECORD_SIM_FILE" "$RECORD_PID_FILE" "$RECORD_MODE_FILE" "$RECORD_BAG_FILE"
-		echo false
+		# The manifest is the simulator recording lock. Do not infer state from
+		# pgrep: rosbag2 can briefly change its process command while starting or
+		# finalizing, and that used to delete the manifest before `record stop`
+		# could flush the ground bag.
+		echo true
 		return
 	fi
 	if [ -f "$RECORD_PID_FILE" ]; then
@@ -1289,7 +1285,7 @@ restart|start|up|core)
 	stop_stack
 	./scripts/x11-allow.sh
 	# The log volumes bind here. scripts/fleet.sh says why, and who owns them.
-	make_bind_dirs logs logs/onboard logs/offboard logs/px4 logs/qgc
+	make_bind_dirs logs logs/onboard logs/offboard logs/recordings logs/px4 logs/qgc
 	if [ "$FLEET_IS_SIMULATED" = false ] && unit_owns_stack; then
 		warn "onboard.service already runs this stack. This restart reuses its container."
 	fi
@@ -1338,14 +1334,14 @@ record)
 		if [ "$(world_of)" = simulator ]; then
 			[ "$action" = bags ] || die "simulator recording supports bags only"
 			[ ! -e "$RECORD_SIM_FILE" ] || die "a previous simulator recording needs record stop before another can start"
-			mkdir -p logs/onboard
+			mkdir -p logs/recordings
 			local bag_base="sim-rosbag-$(date -u +%Y%m%dT%H%M%SZ)"
-			local run_dir="logs/onboard/${bag_base}"
+			local run_dir="logs/recordings/${bag_base}"
 			local numbers=() containers=() domains=()
 			local n service container domain bag_dir index ground_container
 			# Resolve every companion before starting any recorder. A partial fleet
 			# is not a useful flight record.
-			for n in $(fleet_numbers); do
+			for n in $(active_uas); do
 				service=$(companion_service "$n")
 				container=$(docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
 					--filter "label=com.docker.compose.service=$service" -q | head -1)
@@ -1363,23 +1359,27 @@ record)
 				n=${numbers[$index]}
 				container=${containers[$index]}
 				domain=${domains[$index]}
-				bag_dir="/logs/${bag_base}/uas${n}"
+				bag_dir="/recordings/${bag_base}/uas${n}"
 				# Detached docker exec runs one foreground rosbag process. There is no
 				# shell child or host PID to leak or reuse during stop.
 				docker exec -d -u user "$container" bash -lc \
 					". /usr/local/bin/ros-env.sh; export ROS_DOMAIN_ID=$domain; exec ros2 bag record -s mcap -a -o $bag_dir > ${bag_dir}.record.log 2>&1" \
 					|| die "could not start rosbag2 for uas${n}; see $RECORD_LOG"
 			done
-			bag_dir="/logs/${bag_base}/ground"
+			bag_dir="/recordings/${bag_base}/ground"
+			# The ground container has its own /recordings bind mount, so the
+			# host-side mkdir alone does not create this parent inside offboard.
+			docker exec "$ground_container" mkdir -p "/recordings/${bag_base}" \
+				|| die "could not create the offboard recording directory; see $RECORD_LOG"
 			docker exec -d -u user "$ground_container" bash -lc \
 				". /usr/local/bin/ros-env.sh; exec ros2 bag record -s mcap -a -o $bag_dir > ${bag_dir}.record.log 2>&1" \
 				|| die "could not start rosbag2 for ground; see $RECORD_LOG"
 			: > "$RECORD_SIM_FILE"
 			for index in "${!numbers[@]}"; do
-				printf 'uas%s\tonboard%s\t/logs/%s/uas%s\n' \
+				printf 'uas%s\tonboard%s\t/recordings/%s/uas%s\n' \
 					"${numbers[$index]}" "${numbers[$index]}" "$bag_base" "${numbers[$index]}" >> "$RECORD_SIM_FILE"
 			done
-			printf 'ground\toffboard\t/logs/%s/ground\n' "$bag_base" >> "$RECORD_SIM_FILE"
+			printf 'ground\toffboard\t/recordings/%s/ground\n' "$bag_base" >> "$RECORD_SIM_FILE"
 			printf '%s\n' bags > "$RECORD_MODE_FILE"
 			say "recording ${#numbers[@]} simulated drones and ground to $run_dir"
 			exit 0
@@ -1428,13 +1428,17 @@ record)
 			done
 			[ "$active" = false ] || die "rosbag2 is still finalizing; run ./px4sim record stop again"
 			while IFS=$'\t' read -r label service bag_dir; do
-				[ -s "logs/onboard${bag_dir#/logs}/metadata.yaml" ] || incomplete+=("$label")
+				# Each container has its own /logs bind mount. Companion bags land
+				# under logs/onboard; the simulated ground station lands under
+				# logs/offboard. Checking all bags under onboard made the ground
+				# recording appear missing even when it finalized correctly.
+				[ -s "logs/recordings${bag_dir#/recordings}/metadata.yaml" ] || incomplete+=("$label")
 			done < "$RECORD_SIM_FILE"
 			[ ${#incomplete[@]} -eq 0 ] || die "${incomplete[*]} did not finalize an MCAP; see $RECORD_LOG"
 			local run_dir
 			run_dir=$(dirname "$(awk -F '\t' 'NR == 1 { print $3 }' "$RECORD_SIM_FILE")")
 			rm -f "$RECORD_SIM_FILE" "$RECORD_MODE_FILE" "$RECORD_BAG_FILE"
-			say "recording stopped; complete per-drone and ground MCAPs: logs/onboard${run_dir#/logs}"
+			say "recording stopped; all MCAPs: logs/recordings${run_dir#/recordings}"
 			exit 0
 		fi
 		[ "$(recording_status)" = true ] || die "recording is not running"
