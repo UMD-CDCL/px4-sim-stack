@@ -1,0 +1,61 @@
+{
+ "name": "linthicum1",
+ "center_lat": 39.21422113,
+ "center_lon": -76.6390494,
+ "side_m": 300,
+ "origin_alt_m": 46.93,
+ "imagery": {
+  "source": "google",
+  "zoom": 19,
+  "file": "satellite.jpg",
+  "width_px": 1296,
+  "height_px": 1302,
+  "m_per_px": 0.2313,
+  "origin_px": 38535107,
+  "origin_py": 51191643
+ },
+ "elevation": {
+  "grid_n": 128,
+  "side_m": 300,
+  "zoom": 15,
+  "row0": "south",
+  "origin_alt_m": 46.93,
+  "min_m": 26.05,
+  "max_m": 51.63
+ },
+ "fiducial": {
+  "east_m": 0,
+  "north_m": 0,
+  "diameter_m": 0.5,
+  "placed_east_m": 0,
+  "placed_north_m": 0
+ },
+ "buildings": [
+  {
+   "length_m": 10.8,
+   "width_m": 7.26,
+   "yaw_deg": 76.6,
+   "height_m": 3,
+   "height_source": "manual",
+   "name": "",
+   "map_height_m": null,
+   "map_height_source": "",
+   "outline_m": [],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "manual",
+   "model_uri": null,
+   "enabled": true,
+   "id": "b_manual_1",
+   "east_m": 76.35,
+   "north_m": -39.92
+  }
+ ],
+ "vehicles": [],
+ "targets": [],
+ "trees": [],
+ "tree_areas": [],
+ "flatten_zones": [],
+ "format": "scenegen-scene/1"
+}
