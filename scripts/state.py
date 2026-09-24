@@ -67,6 +67,7 @@ STREAMS_RETRY_TICKS = 5
 STREAMS_PROBE_TIMEOUT_S = 30.0
 STREAMS_PROBE_TICKS = 15
 DOCKER_TIMEOUT_S = 15.0
+CONTAINER_POLL_S = 2.0
 UNITS_TIMEOUT_S = 5.0
 UNITS_PERIOD_TICKS = 5
 GPU_TIMEOUT_S = 5.0
@@ -146,6 +147,34 @@ def containers(project_dir: Path, compose: str) -> tuple[dict[str, dict], str]:
             "exit_code": record.get("ExitCode", 0),
         }
     return found, ""
+
+
+class AsyncContainers:
+    """Poll Compose independently so a Docker restart cannot pause reports."""
+
+    def __init__(self, project_dir: Path, compose: str):
+        self.project_dir = project_dir
+        self.compose = compose
+        self.lock = threading.Lock()
+        self.found: dict[str, dict] = {}
+        self.error = ""
+        self.stopping = threading.Event()
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self) -> None:
+        while not self.stopping.is_set():
+            found, error = containers(self.project_dir, self.compose)
+            with self.lock:
+                self.found = found
+                self.error = error
+            self.stopping.wait(CONTAINER_POLL_S)
+
+    def read(self) -> tuple[dict[str, dict], str]:
+        with self.lock:
+            return dict(self.found), self.error
+
+    def close(self) -> None:
+        self.stopping.set()
 
 
 def service_rows(context: dict, found: dict[str, dict], error: str) -> list[dict]:
@@ -549,8 +578,22 @@ class Links:
                       if isinstance(vehicle.get("n"), int)
                       and isinstance(vehicle.get("tcp"), int)]
         self.watcher = selectors.DefaultSelector()
+        self.available: set[str] | None = None
+
+    def set_available(self, services: set[str]) -> None:
+        """Avoid dialing endpoints whose owning compose service is down."""
+        self.available = services
+        for link in self.links:
+            owner = f"uas{link.number}"
+            if owner not in services and link.socket is not None:
+                self.forget(link)
+                link.close()
 
     def pump(self, deadline: float) -> None:
+        if self.available is not None and not any(
+                f"uas{link.number}" in self.available for link in self.links):
+            time.sleep(max(0.0, deadline - time.monotonic()))
+            return
         while True:
             now = time.monotonic()
             if now >= deadline:
@@ -564,6 +607,8 @@ class Links:
 
     def refresh(self, now: float) -> None:
         for link in self.links:
+            if self.available is not None and f"uas{link.number}" not in self.available:
+                continue
             if link.timed_out(now):
                 link.lost = "no answer on the port"
             if link.lost:
@@ -719,20 +764,19 @@ def stream_owners(fleet: list[dict]) -> dict[str, int]:
             for name in as_list(vehicle.get("streams", ""))}
 
 
-def snapshot(context: dict, project_dir: Path, streams: Streams, links: Links,
-             bridges: Bridges, units: Units, traffic: TrafficMonitor, tick: int) -> dict:
-    # The vehicles answer first. Reading the containers and the card takes
-    # seconds on a busy host, and nothing reads a socket while it happens, so a
-    # vehicle asked afterwards looks silent while its telemetry is arriving.
+def snapshot(context: dict, containers_reader: AsyncContainers, streams: Streams,
+             links: Links, bridges: Bridges, units: Units,
+             traffic: TrafficMonitor, tick: int) -> dict:
     started = time.monotonic()
+    found, services_error = containers_reader.read()
+    running = {name for name, row in found.items() if row.get("state") == "running"}
+    links.set_available(running)
     vehicles = links.report(started)
     rates = traffic.report(max(started - snapshot.last_at, 1e-6))
     snapshot.last_at = started
     for vehicle in vehicles:
         up, down = rates.get(vehicle["number"], (0.0, 0.0))
         vehicle["tx_kbits"], vehicle["rx_kbits"] = up, down
-    found, services_error = containers(project_dir, str(context.get("compose",
-                                                                   "docker compose")))
     return {
         "at": time.time(),
         "tick": tick,
@@ -771,12 +815,14 @@ def main() -> int:
                      Streams(str(context.get("mediamtx", "http://localhost:9997")), owners))
     streams = AsyncStreams(stream_source, STREAMS_PROBE_TIMEOUT_S if base else 2.0)
     links = Links(context["fleet"])
+    container_reader = AsyncContainers(project_dir, str(context.get("compose",
+                                                                      "docker compose")))
     bridges = Bridges(context)
     units = Units(as_list(context.get("units", "")))
     traffic = TrafficMonitor(context["fleet"])
 
     def tell(tick: int) -> None:
-        json.dump(snapshot(context, project_dir, streams, links, bridges, units,
+        json.dump(snapshot(context, container_reader, streams, links, bridges, units,
                            traffic, tick), sys.stdout)
         sys.stdout.write("\n")
         sys.stdout.flush()
@@ -803,6 +849,7 @@ def main() -> int:
         return 0
     finally:
         links.close()
+        container_reader.close()
 
 
 if __name__ == "__main__":

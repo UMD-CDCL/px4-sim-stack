@@ -96,6 +96,9 @@ x-mavlink-router-env: &mavlink-router-env
 x-onboard-volumes:
   models: &models-volume ${ONBOARD_MODEL_DIR:-./modules/onboard/models}:/models
   logs: &logs-volume ./logs/onboard:/logs
+  recordings: &recordings-volume ./logs/recordings:/recordings
+  missions: &missions-volume ./missions:/missions:ro
+  tools: &tools-volume ./scripts:/px4sim-scripts:ro
 
 # The onboard computer, for each simulated vehicle and for the aircraft. One
 # container for each, because each binds MAVLink port 14402 and runs its own
@@ -145,6 +148,8 @@ x-onboard: &onboard
     # symlink fetch_models.py points at this machine's engine group.
     - *models-volume
     - *logs-volume
+    - *missions-volume
+    - *tools-volume
     # Terrain surfaces from `px4sim genscene`. The entry point links the one
     # for SCENE into /terrain. The aircraft names this again by alias.
     - ./modules/sim/scenes:/scenes:ro
@@ -253,6 +258,7 @@ x-offboard: &offboard
     # Read only, and only the ground truth node and the terrain link read it.
     - ./modules/sim/scenes:/scenes:ro
     - ./logs/offboard:/logs
+    - *recordings-volume
     - /tmp/.X11-unix:/tmp/.X11-unix
     - ${XAUTH_FILE:-./.xauth}:/tmp/.docker.xauth
 
@@ -386,6 +392,7 @@ services:
       # The fields of view are degrees and belong to the vehicle: uas13 and uas14
       # are both v2 and carry different lenses. See .env.example.
       UAS_FLEET: ${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2}
+      UAS_ACTIVE: ${UAS_ACTIVE:-}
       # The first simulated vehicle is UAS_BASE + 1. Every entry point derives
       # its identifiers from it, so the host and the container have to read the
       # same number: scripts/fleet.sh holds the same default.
@@ -444,6 +451,9 @@ services:
     volumes:
       - ./src/PX4-Autopilot:/px4
       - ./modules/sim/scenes:/scenes
+      # Keep fleet-selection behavior synchronized with the front door even
+      # when the simulator image cannot be rebuilt offline.
+      - ./modules/sim/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./logs/px4:/px4-logs
       - sim-ccache:/home/dev/.ccache
       - sim-fuel:/home/dev/.gz
@@ -611,6 +621,16 @@ services:
   # -------------------------------------------------------------------------
   onboard11:
     <<: *onboard
+    user: root
+    entrypoint: ["/usr/local/bin/sim-entrypoint.sh"]
+    volumes:
+      - ${ONBOARD_MODEL_DIR:-./modules/onboard/models}:/models
+      - ./logs/onboard:/logs
+      - *recordings-volume
+      - ./missions:/missions:ro
+      - ./scripts:/px4sim-scripts:ro
+      - ./modules/sim/scenes:/scenes:ro
+      - ./modules/onboard/sim-entrypoint.sh:/usr/local/bin/sim-entrypoint.sh:ro
     profiles: [onboard11]
     environment:
       <<: *onboard-env
@@ -626,6 +646,16 @@ services:
 
   onboard12:
     <<: *onboard
+    user: root
+    entrypoint: ["/usr/local/bin/sim-entrypoint.sh"]
+    volumes:
+      - ${ONBOARD_MODEL_DIR:-./modules/onboard/models}:/models
+      - ./logs/onboard:/logs
+      - *recordings-volume
+      - ./missions:/missions:ro
+      - ./scripts:/px4sim-scripts:ro
+      - ./modules/sim/scenes:/scenes:ro
+      - ./modules/onboard/sim-entrypoint.sh:/usr/local/bin/sim-entrypoint.sh:ro
     profiles: [onboard12]
     environment:
       <<: *onboard-env
@@ -639,6 +669,16 @@ services:
 
   onboard13:
     <<: *onboard
+    user: root
+    entrypoint: ["/usr/local/bin/sim-entrypoint.sh"]
+    volumes:
+      - ${ONBOARD_MODEL_DIR:-./modules/onboard/models}:/models
+      - ./logs/onboard:/logs
+      - *recordings-volume
+      - ./missions:/missions:ro
+      - ./scripts:/px4sim-scripts:ro
+      - ./modules/sim/scenes:/scenes:ro
+      - ./modules/onboard/sim-entrypoint.sh:/usr/local/bin/sim-entrypoint.sh:ro
     profiles: [onboard13]
     environment:
       <<: *onboard-env
@@ -652,6 +692,16 @@ services:
 
   onboard14:
     <<: *onboard
+    user: root
+    entrypoint: ["/usr/local/bin/sim-entrypoint.sh"]
+    volumes:
+      - ${ONBOARD_MODEL_DIR:-./modules/onboard/models}:/models
+      - ./logs/onboard:/logs
+      - *recordings-volume
+      - ./missions:/missions:ro
+      - ./scripts:/px4sim-scripts:ro
+      - ./modules/sim/scenes:/scenes:ro
+      - ./modules/onboard/sim-entrypoint.sh:/usr/local/bin/sim-entrypoint.sh:ro
     profiles: [onboard14]
     environment:
       <<: *onboard-env

@@ -1,0 +1,10 @@
+Raise the simulated gimbal work loop from 50 Hz to 200 Hz.
+
+--- a/src/modules/simulation/gz_bridge/GZGimbal.cpp
++++ b/src/modules/simulation/gz_bridge/GZGimbal.cpp
+@@ -52,7 +52,7 @@
+ 
+ 	updateParameters();
+ 
+-	ScheduleOnInterval(20_ms); // @50Hz
++	ScheduleOnInterval(5_ms); // @200Hz

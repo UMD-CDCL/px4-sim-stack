@@ -1,4 +1,4 @@
-Raise the simulated gimbal's cycle rate from 5 Hz to 50 Hz.
+Raise the simulated gimbal's cycle rate from 5 Hz to 200 Hz.
 
 GZGimbal runs one work item that polls the setpoint, moves the joints, and
 publishes GIMBAL_DEVICE_ATTITUDE_STATUS:
@@ -12,7 +12,7 @@ attitude report is up to 200 ms of joint motion stale. Every consumer that
 projects through the camera frame inherits that lag: image overlays swim
 against the video while the gimbal stabilizes.
 
-At 50 Hz the joints follow a streamed setpoint within 20 ms, which is
+At 200 Hz the joints receive stabilization corrections every 5 ms, which is
 below one video frame, and the report keeps the TF tree honest at the
 same cadence. The work item does little per cycle (a few uORB reads and
 gz topic publishes; the device info publish is request-gated), so the
@@ -21,7 +21,7 @@ extra rate costs nothing measurable.
 Pair this with a mavlink stream rate for the report, or mavros still
 receives it at the profile default:
 
-    mavlink stream -r 50 -s GIMBAL_DEVICE_ATTITUDE_STATUS -u <mavros udp port>
+    mavlink stream -r 200 -s GIMBAL_DEVICE_ATTITUDE_STATUS -u <mavros udp port>
 
 px4-sim-stack applies this patch and sets that stream in px4-rcS.
 

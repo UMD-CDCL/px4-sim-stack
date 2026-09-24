@@ -74,12 +74,6 @@ ARG DS_VERSION
 # not match the image that actually arrived.
 ARG ROS_DISTRO=humble
 ARG DS_CODENAME=jammy
-# Pin the ROS archive used by this image. The live Humble index can remove a
-# binary while a release is being rebuilt (in September 2026 both mavros and
-# mavros-extras disappeared, making otherwise unchanged cold builds fail).
-# This snapshot contains the MAVROS 2.14 release used by the simulator and
-# keeps every ROS dependency in the image mutually reproducible.
-ARG ROS_SNAPSHOT_DATE=2026-08-07
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV ROS_DISTRO=${ROS_DISTRO}
@@ -99,6 +93,10 @@ ARG USERNAME=user
 ARG HOST_UID=1000
 ARG HOST_GID=1000
 ARG WORKSPACE_DIR=/home/user/ros2_ws
+# Pinned upstream ROS 2 storage plugin. The ROS Humble apt index ships the
+# SQLite plugin but not MCAP, so this is built once in the prepared dependency
+# image and inherited by ros-base, onboard, and offboard.
+ARG MCAP_STORAGE_REF=c1c2159679921a4f4392f370172c28e7b3b01452
 
 
 # ---------------------------------------------------------------------------
@@ -141,21 +139,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       gnupg2 \
       locales \
     && locale-gen en_US.UTF-8 \
-    && curl -fsSL 'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xAD19BAB3CBF125EA' \
-         -o /tmp/ros-snapshot.asc \
-    && test "$(gpg --show-keys --with-colons /tmp/ros-snapshot.asc | awk -F: '$1 == "fpr" { print $10; exit }')" \
-         = 4B63CF8FDE49746E98FA01DDAD19BAB3CBF125EA \
-    && gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg \
-         /tmp/ros-snapshot.asc \
-    && rm /tmp/ros-snapshot.asc \
+    && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+         -o /usr/share/keyrings/ros-archive-keyring.gpg \
     && . /etc/os-release \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://snapshots.ros.org/${ROS_DISTRO}/${ROS_SNAPSHOT_DATE}/ubuntu $VERSION_CODENAME main" \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $VERSION_CODENAME main" \
          > /etc/apt/sources.list.d/ros2.list \
     && apt-get update && apt-get install -y --no-install-recommends \
       build-essential \
       cmake \
       geographiclib-tools \
+      libgeographic-dev \
       git \
+      libasio-dev \
       iproute2 \
       iputils-ping \
       nano \
@@ -173,16 +168,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3-yaml \
       ros-${ROS_DISTRO}-cv-bridge \
       ros-${ROS_DISTRO}-diagnostic-msgs \
+      ros-${ROS_DISTRO}-diagnostic-updater \
       ros-${ROS_DISTRO}-domain-bridge \
       ros-${ROS_DISTRO}-foxglove-bridge \
       ros-${ROS_DISTRO}-foxglove-msgs \
+      ros-${ROS_DISTRO}-eigen-stl-containers \
       ros-${ROS_DISTRO}-image-geometry \
       ros-${ROS_DISTRO}-image-transport \
-      ros-${ROS_DISTRO}-mavros \
-      ros-${ROS_DISTRO}-mavros-extras \
+      ros-${ROS_DISTRO}-mavlink \
       ros-${ROS_DISTRO}-message-filters \
       ros-${ROS_DISTRO}-nav-msgs \
       ros-${ROS_DISTRO}-rosbag2-py \
+      ros-${ROS_DISTRO}-zstd-vendor \
       ros-${ROS_DISTRO}-rqt-gui \
       ros-${ROS_DISTRO}-rqt-gui-py \
       ros-${ROS_DISTRO}-rosidl-runtime-py \
@@ -191,7 +188,38 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-${ROS_DISTRO}-tf2-ros \
       ros-${ROS_DISTRO}-vision-msgs \
       ros-${ROS_DISTRO}-visualization-msgs \
+    && geographiclib-get-geoids egm96-5 \
     && rm -rf /var/lib/apt/lists/*
+
+# ROS Humble has no binary rosbag2 MCAP plugin in the configured repository.
+# Build the pinned upstream plugin here, where network access is already part
+# of the explicit `px4sim prepare` operation; all derived runtime images stay
+# offline and reuse the installed result.
+RUN set -eux; \
+    mkdir -p /tmp/rosbag2_storage_mcap; \
+    git clone --depth 1 https://github.com/ros-tooling/rosbag2_storage_mcap.git \
+      /tmp/rosbag2_storage_mcap; \
+    git -C /tmp/rosbag2_storage_mcap fetch --depth 1 origin "${MCAP_STORAGE_REF}"; \
+    git -C /tmp/rosbag2_storage_mcap checkout --detach "${MCAP_STORAGE_REF}"; \
+    # Humble's setup scripts read optional variables under nounset. Source the
+    # environment with nounset briefly disabled, then restore strict mode for
+    # the actual build and cleanup.
+    set +u; . /opt/ros/${ROS_DISTRO}/setup.sh; set -u; \
+    colcon build --merge-install \
+      --base-paths /tmp/rosbag2_storage_mcap \
+      --install-base /opt/ros/${ROS_DISTRO} \
+      --build-base /tmp/rosbag2_storage_mcap-build \
+      --packages-select mcap_vendor rosbag2_storage_mcap_testdata \
+      --cmake-args -DCMAKE_BUILD_TYPE=Release; \
+    set +u; . /opt/ros/${ROS_DISTRO}/setup.sh; set -u; \
+    colcon build --merge-install \
+      --base-paths /tmp/rosbag2_storage_mcap \
+      --install-base /opt/ros/${ROS_DISTRO} \
+      --build-base /tmp/rosbag2_storage_mcap-build \
+      --packages-select rosbag2_storage_mcap \
+      --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF; \
+    rm -rf /tmp/rosbag2_storage_mcap /tmp/rosbag2_storage_mcap-build \
+      /root/.colcon
 
 ENV LANG=en_US.UTF-8
 
@@ -300,9 +328,6 @@ RUN if python3 -m pip install --help 2>/dev/null | grep -q -- --break-system-pac
         printf '[install]\nbreak-system-packages = true\n' > /etc/pip.conf; \
     fi
 
-# MAVROS refuses to convert between AMSL and ellipsoid height without these.
-RUN /opt/ros/${ROS_DISTRO}/lib/mavros/install_geographiclib_datasets.sh
-
 # ---------------------------------------------------------------------------
 
 # pymap3d is what tf_loc and MAVInsight convert LLA with. folium is the mosaic
@@ -316,7 +341,9 @@ RUN python3 -m pip install --no-cache-dir \
       "$([ "${ROS_DISTRO}" = humble ] && echo 'numpy==1.24.4' || echo 'numpy<2')" \
       "pymap3d" \
       "folium" \
-      "utm"
+      "utm" \
+      "onnxruntime==1.18.1" \
+      "tensorrt==10.3.0"
 
 # The bindings from the first stage. Installing the wheel, rather than copying
 # pyds*.so into site-packages, makes a wrong artifact fail here instead of at

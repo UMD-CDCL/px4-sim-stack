@@ -44,12 +44,14 @@ INPUT_PERIOD_MS = 200
 OUTPUT_LINES = 500
 OUTPUT_ROWS_SHARE = 0.34
 STALE_REPORT_S = 8.0
+REPORT_WATCHDOG_S = 30.0
 NAME_COLUMN = 15
 ESCAPE_CODES = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b[=>]|[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 FRONT_DOOR = Path(__file__).resolve().parents[1] / "px4sim"
 RECORD_PID_FILE = FRONT_DOOR.parent / "logs/.px4sim-record.pid"
 RECORD_MODE_FILE = FRONT_DOOR.parent / "logs/.px4sim-record.mode"
+RECORD_SIM_FILE = FRONT_DOOR.parent / "logs/.px4sim-sim-record.tsv"
 UI_LOG_FILE = FRONT_DOOR.parent / "logs/px4sim-ui.log"
 
 STACK, SERVICE, VEHICLE, STREAM = "stack", "service", "vehicle", "stream"
@@ -101,11 +103,11 @@ ACTIONS = (
     Action(STACK, "a", "start ROS bag and video recording", ("record", "all"),
            worlds=(GROUND, AIRCRAFT)),
     Action(STACK, "b", "start ROS bag recording", ("record", "bags"),
-           worlds=(GROUND, AIRCRAFT)),
+           worlds=(SIMULATOR, GROUND, AIRCRAFT)),
     Action(STACK, "A", "stop ROS and video recording", ("record", "stop"),
            worlds=(GROUND, AIRCRAFT)),
     Action(STACK, "B", "stop ROS and video recording", ("record", "stop"),
-           worlds=(GROUND, AIRCRAFT)),
+           worlds=(SIMULATOR, GROUND, AIRCRAFT)),
     Action(STACK, "s", "start the stack if it is stopped", ("start",)),
     Action(STACK, "", "enable GPS-free BENCH MODE (select this menu item)",
            ("bench", "enable", "{value}"),
@@ -156,24 +158,24 @@ ACTIONS = (
     Action(SERVICE, "e", "open a shell in it", ("shell", "{service}"), foreground=True),
 
     Action(VEHICLE, "i", "what it says about itself", ("uas", "{n}", "status")),
-    Action(VEHICLE, "t", "take off", ("uas", "{n}", "takeoff", "{value}"),
+    Action(VEHICLE, "", "take off", ("uas", "{n}", "takeoff", "{value}"),
            ask=Ask("height in metres", "40"), worlds=SIM_ONLY),
-    Action(VEHICLE, "l", "land", ("uas", "{n}", "land"), worlds=SIM_ONLY),
-    Action(VEHICLE, "f", "respawn, then climb", ("fly", "{n}", "{value}"),
+    Action(VEHICLE, "", "land", ("uas", "{n}", "land"), worlds=SIM_ONLY),
+    Action(VEHICLE, "", "respawn, then climb", ("fly", "{n}", "{value}"),
            ask=Ask("height in metres", "20"),
            confirm="Reload the world, then fly uas{n}?", worlds=SIM_ONLY),
-    Action(VEHICLE, "m", "arm", ("uas", "{n}", "arm"), worlds=SIM_ONLY),
-    Action(VEHICLE, "g", "point the gimbal", ("uas", "{n}", "gimbal", "{value}"),
+    Action(VEHICLE, "", "arm", ("uas", "{n}", "arm"), worlds=SIM_ONLY),
+    Action(VEHICLE, "", "point the gimbal", ("uas", "{n}", "gimbal", "{value}"),
            ask=Ask("pitch in degrees, below the horizon is negative", "-30")),
-    Action(VEHICLE, "z", "set the framing", ("zoom", "{n}", "{value}"),
+    Action(VEHICLE, "", "set the framing", ("zoom", "{n}", "{value}"),
            ask=Ask("framing", choices_from="zoom_presets")),
-    Action(VEHICLE, "d", "continuous detection", ("uas", "{n}", "detect", "{value}"),
+    Action(VEHICLE, "", "continuous detection", ("uas", "{n}", "detect", "{value}"),
            ask=Ask("detection", choices=("on", "off"))),
-    Action(VEHICLE, "p", "take a photo", ("capture", "{n}", "{value}"),
+    Action(VEHICLE, "", "take a photo", ("capture", "{n}", "{value}"),
            ask=Ask("capture", choices_from="capture_kinds")),
     Action(VEHICLE, "P", "what its ROS graph carries", ("probe", "{n}")),
     Action(VEHICLE, "v", "play its gimbal camera", ("view", "{n}"), foreground=True),
-    Action(VEHICLE, "w", "save one frame", ("snap", "{gimbal}"), worlds=SIM_ONLY),
+    Action(VEHICLE, "", "save one frame", ("snap", "{gimbal}"), worlds=SIM_ONLY),
     Action(VEHICLE, "-", "retire this vehicle",
            ("fleet", "remove", "{n}", "--renumber"),
            confirm="Retire uas{n}? The world reloads. A vehicle before the last"
@@ -239,6 +241,23 @@ def cursor(shown: int) -> None:
 
 
 def local_recording() -> tuple[bool, str]:
+    # Simulator recorders are detached processes inside the onboard containers,
+    # so their host-side state is a manifest rather than one local PID.
+    if RECORD_SIM_FILE.exists():
+        try:
+            status = subprocess.run(
+                [str(FRONT_DOOR), "record", "status"],
+                cwd=FRONT_DOOR.parent,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            if "recording=true" not in status.stdout:
+                return False, ""
+        except (OSError, subprocess.SubprocessError):
+            return False, ""
+        return True, "bags"
     try:
         pid = int(RECORD_PID_FILE.read_text().strip())
         os.kill(pid, 0)
@@ -277,6 +296,7 @@ class Feed:
         self.lock = threading.Lock()
         self.stopping = threading.Event()
         self.restarting = False
+        self.watchdog_at = 0.0
         self.process: subprocess.Popen | None = None
         threading.Thread(target=self.run, daemon=True).start()
 
@@ -337,6 +357,17 @@ class Feed:
     def close(self) -> None:
         self.stopping.set()
         stop_process(self.process)
+
+    def watchdog(self, age: float) -> None:
+        """Recover a wedged state reader without requiring a second UI."""
+        now = time.monotonic()
+        if age < REPORT_WATCHDOG_S or self.restarting:
+            return
+        if now - self.watchdog_at < REPORT_WATCHDOG_S:
+            return
+        self.watchdog_at = now
+        self.note("state reports stalled; restarting the state reader")
+        self.restart()
 
 
 class UiLog:
@@ -1292,6 +1323,7 @@ class Console:
             self.refresh_when_done = False
             self.feed.restart()
         report, age = self.feed.latest()
+        self.feed.watchdog(age)
         if report is not None:
             self.rows = Rows(report)
             self.age = age

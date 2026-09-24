@@ -397,6 +397,21 @@ def command_takeoff(uas: Uas, args) -> int:
                 return 1
             uas.wait_until(lambda: uas.state.armed, 15.0, "an armed vehicle")
 
+        mode = uas.call(
+            uas.set_mode,
+            SetMode.Request(base_mode=0, custom_mode="AUTO.TAKEOFF"),
+            "takeoff mode",
+        )
+        if not (mode and mode.mode_sent):
+            print("takeoff mode refused", file=sys.stderr)
+            return 1
+        if not uas.wait_until(
+            lambda: uas.state.mode == "AUTO.TAKEOFF",
+            15.0,
+            "AUTO.TAKEOFF mode",
+        ):
+            return 1
+
         # NAV_TAKEOFF takes an altitude above mean sea level and an operator
         # means a height over home.
         request = CommandTOL.Request(min_pitch=0.0, yaw=float("nan"),

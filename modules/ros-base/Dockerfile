@@ -101,12 +101,12 @@ ARG USERNAME=user
 # Each prefix is isolated. The root colcon setup utilities discover the union
 # of installed package markers and order runtime dependencies when sourced.
 COPY --link --from=px4_msgs /home/user/ros2_ws/install/ /home/user/ros2_ws/install/
-COPY --link --from=cdcl_umd_msgs /home/user/ros2_ws/install/ /home/user/ros2_ws/install/
-COPY --link --from=mavinsight /home/user/ros2_ws/install/ /home/user/ros2_ws/install/
-COPY --link --from=umd_uas /home/user/ros2_ws/install/ /home/user/ros2_ws/install/
-COPY --link --from=tracking_test /home/user/ros2_ws/install/ /home/user/ros2_ws/install/
 COPY --link --from=mavros /opt/mavros/install/ /opt/mavros/install/
 COPY --link --from=parser /out/libnvdsinfer_custom_impl_Yolo.so /opt/ds-yolo/libnvdsinfer_custom_impl_Yolo.so
+COPY --link --from=cdcl_umd_msgs /home/user/ros2_ws/install/ /home/user/ros2_ws/install/
+COPY --link --from=mavinsight /home/user/ros2_ws/install/ /home/user/ros2_ws/install/
+COPY --link --from=tracking_test /home/user/ros2_ws/install/ /home/user/ros2_ws/install/
+COPY --link --from=umd_uas /home/user/ros2_ws/install/ /home/user/ros2_ws/install/
 COPY --link site-params.sh ros-env.sh /usr/local/bin/
 
 # COPY --link can recreate destination path components as root. Restore the

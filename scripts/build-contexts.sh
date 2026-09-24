@@ -43,13 +43,13 @@ stage() {
         --exclude='.git' --exclude='.git*' --exclude='.vscode' \
         --exclude='__pycache__' --exclude='*.pyc' --exclude='.pytest_cache' \
         --exclude='build' --exclude='install' --exclude='log' --exclude='logs' \
-        --exclude='*.egg-info' --exclude='*.engine' --exclude='*.onnx' \
+        --exclude='*.egg-info' --exclude='*.engine' \
         --exclude='*.pt' --exclude='*.o' --exclude='*.so' \
         "$@" "$source/" "$root/$name/"
 }
 
 # Python package inputs follow setup.py. MAVInsight's models/ is Python code;
-# 5g_drone's models/ and perception_models/ are runtime data, not package inputs.
+# ReID model artifacts are package inputs for tracking_test.
 stage umd_uas "$ws/src/5g_drone" \
     --include='/umd_uas/***' --include='/config/***' --include='/launch/***' \
     --include='/resource/***' --include='/setup.*' --include='/package.xml' \
@@ -64,6 +64,7 @@ stage mavinsight "$ws/src/MAVInsight" \
     --include='/pyproject.toml' --include='/LICENSE*' --exclude='*'
 stage tracking_test "$ws/src/tracking_test_5g" \
     --include='/tracking_test/***' --include='/launch/***' --include='/config/***' \
+    --include='/models/***' \
     --include='/resource/***' --include='/setup.*' --include='/package.xml' \
     --include='/pyproject.toml' --include='/LICENSE*' --exclude='*'
 for package in px4_msgs cdcl_umd_msgs; do

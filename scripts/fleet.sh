@@ -71,6 +71,13 @@ SIMNET_PREFIX=${SIMNET_PREFIX:-10.200.142}
 GROUND_DOMAIN=${GROUND_DOMAIN:-$((60 + UAS_BASE))}
 
 fleet_numbers() { seq "$FIRST_UAS" "$LAST_UAS"; }
+active_uas() {
+	local n active=${UAS_ACTIVE:-}
+	for n in $(fleet_numbers); do
+		[ -z "$active" ] && { echo "$n"; continue; }
+		case ",${active// /,}," in *",$n,"*) echo "$n" ;; esac
+	done
+}
 
 # The airframe of one vehicle, and what it serves. The mark decides the stream
 # names: a v3 carries a gimbal camera and a down camera, a v2 carries the gimbal

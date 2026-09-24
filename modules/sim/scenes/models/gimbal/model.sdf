@@ -101,18 +101,18 @@
           <lower>-3.141593</lower>
           <upper>3.141593</upper>
           <effort>100</effort>
-          <velocity>-1</velocity>
+          <velocity>5.0</velocity>
         </limit>
         <dynamics>
-          <damping>0.1</damping>
+          <damping>0.01</damping>
         </dynamics>
       </axis>
       <physics>
         <ode>
           <implicit_spring_damper>1</implicit_spring_damper>
           <limit>
-            <cfm>0.1</cfm>
-            <erp>0.2</erp>
+            <cfm>0.0001</cfm>
+            <erp>0.9</erp>
           </limit>
         </ode>
       </physics>
@@ -159,18 +159,18 @@
           <lower>-0.785398</lower>
           <upper>0.785398</upper>
           <effort>100</effort>
-          <velocity>-1</velocity>
+          <velocity>6.0</velocity>
         </limit>
         <dynamics>
-          <damping>0.1</damping>
+          <damping>0.01</damping>
         </dynamics>
       </axis>
       <physics>
         <ode>
           <implicit_spring_damper>1</implicit_spring_damper>
           <limit>
-            <cfm>0.1</cfm>
-            <erp>0.2</erp>
+            <cfm>0.0001</cfm>
+            <erp>0.9</erp>
           </limit>
         </ode>
       </physics>
@@ -304,18 +304,18 @@
           <lower>-1.570796</lower>
           <upper>0</upper>
           <effort>100</effort>
-          <velocity>-1</velocity>
+          <velocity>8.0</velocity>
         </limit>
         <dynamics>
-          <damping>0.1</damping>
+          <damping>0.01</damping>
         </dynamics>
       </axis>
       <physics>
         <ode>
           <implicit_spring_damper>1</implicit_spring_damper>
           <limit>
-            <cfm>0.1</cfm>
-            <erp>0.2</erp>
+            <cfm>0.0001</cfm>
+            <erp>0.9</erp>
           </limit>
         </ode>
       </physics>
@@ -327,13 +327,13 @@
       name="gz::sim::systems::JointPositionController">
       <joint_name>cgo3_horizontal_arm_joint</joint_name>
       <sub_topic>command/gimbal_roll</sub_topic>
-      <p_gain>0.8</p_gain>
-      <i_gain>0.035</i_gain>
-      <d_gain>0.02</d_gain>
+      <p_gain>8.0</p_gain>
+      <i_gain>0.0</i_gain>
+      <d_gain>0.35</d_gain>
       <i_max>0</i_max>
       <i_min>0</i_min>
-      <cmd_max>0.3</cmd_max>
-      <cmd_min>-0.3</cmd_min>
+      <cmd_max>5.0</cmd_max>
+      <cmd_min>-5.0</cmd_min>
     </plugin>
 
     <plugin
@@ -341,13 +341,13 @@
       name="gz::sim::systems::JointPositionController">
       <joint_name>cgo3_camera_joint</joint_name>
       <sub_topic>command/gimbal_pitch</sub_topic>
-      <p_gain>0.8</p_gain>
-      <i_gain>0.01245</i_gain>
-      <d_gain>0.015</d_gain>
+      <p_gain>8.0</p_gain>
+      <i_gain>0.0</i_gain>
+      <d_gain>0.35</d_gain>
       <i_max>0</i_max>
       <i_min>0</i_min>
-      <cmd_max>0.3</cmd_max>
-      <cmd_min>-0.3</cmd_min>
+      <cmd_max>5.0</cmd_max>
+      <cmd_min>-5.0</cmd_min>
     </plugin>
 
     <plugin
@@ -355,13 +355,13 @@
       name="gz::sim::systems::JointPositionController">
       <joint_name>cgo3_vertical_arm_joint</joint_name>
       <sub_topic>command/gimbal_yaw</sub_topic>
-      <p_gain>0.3</p_gain>
-      <i_gain>0.01245</i_gain>
-      <d_gain>0.015</d_gain>
+      <p_gain>6.0</p_gain>
+      <i_gain>0.0</i_gain>
+      <d_gain>0.30</d_gain>
       <i_max>0</i_max>
       <i_min>0</i_min>
-      <cmd_max>0.3</cmd_max>
-      <cmd_min>-0.3</cmd_min>
+      <cmd_max>5.0</cmd_max>
+      <cmd_min>-5.0</cmd_min>
     </plugin>
 
   </model>

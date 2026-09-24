@@ -16,6 +16,7 @@ SCENE=${SCENE:-lorton}
 # than to the mark: uas13 and uas14 are both v2 and carry different lenses.
 # .env.example says where each number came from.
 UAS_FLEET=${UAS_FLEET:-"chimera_v3 chimera_v3 chimera_v2 chimera_v2"}
+UAS_ACTIVE=${UAS_ACTIVE:-}
 # Simulated vehicles are numbered from 11, so they never take a system id, a
 # port, a DDS domain or an address from a real one. Do not set this to 0: PX4
 # instance 0 puts our rangefinder link on 14590, which its own offboard link
@@ -45,6 +46,11 @@ read -r -a GIMBAL_HFOV <<< "$UAS_GIMBAL_HFOV_DEG"
 read -r -a THERMAL_HFOV <<< "$UAS_THERMAL_HFOV_DEG"
 read -r -a DOWN_HFOV <<< "$UAS_DOWN_HFOV_DEG"
 read -r -a STREAM_CHOICE <<< "${UAS_STREAMS:-gimbal}"
+is_active() {
+	[ -z "$UAS_ACTIVE" ] && return 0
+	case ",${UAS_ACTIVE// /,}," in *",$1,"*) return 0 ;; esac
+	return 1
+}
 # shellcheck disable=SC1091
 . /opt/sim/zoom.sh
 [ ${#FLEET[@]} -ge 1 ] || die "UAS_FLEET is empty. Give one model name for each vehicle."
@@ -266,6 +272,7 @@ for index in "${!FLEET[@]}"; do
 	# fleet without taking a system id from it. PX4 gives MAV_SYS_ID =
 	# instance + 1, so the instance is UAS_NUM - 1.
 	export UAS_NUM=$((UAS_BASE + index + 1))
+	is_active "$UAS_NUM" || continue
 	export GZ_MODEL="uas${UAS_NUM}_$((UAS_NUM - 1))"
 
 	template="$SCENES_DIR/models/$model/streams.conf"
@@ -379,6 +386,7 @@ unset UAS_NUM GZ_MODEL
 for index in "${!FLEET[@]}"; do
 	[ "$(mark_of_model "${FLEET[$index]}")" = v3 ] || continue
 	uas_num=$((UAS_BASE + index + 1))
+	is_active "$uas_num" || continue
 	port=$(zoom_port "$uas_num")
 	mkdir -p "$LOG_DIR/uas$uas_num"
 	log "Starting the uas$uas_num lens: an SCF4 on port $port"
@@ -413,6 +421,7 @@ fi
 # pxh> prompt. Every other vehicle runs with -d and logs to a file.
 start_vehicle() {
 	local index=$1 uas_num=$2 model=$3
+	is_active "$uas_num" || return 0
 	# PX4 sets MAV_SYS_ID to the instance plus one, so the instance is the
 	# vehicle number minus one. With UAS_BASE at 10 that is 10 upwards, and the
 	# fleet's own instances 0 to 8 stay free.
