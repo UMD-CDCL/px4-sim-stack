@@ -49,6 +49,10 @@ modules/onboard/models/*
 # carried to the containers. The scene and the scenario are the source.
 .origin.env
 
+# Local environment backups; these may contain machine-specific settings.
+.env.big.backup
+.env.small.backup
+
 # Session scoped agent workspace. It holds paths that live as long as one
 # session, so a checkout elsewhere would read files that are not there.
 .claude/

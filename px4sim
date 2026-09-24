@@ -964,7 +964,14 @@ fleet_facts() {
 	EOF
 	for n in $(active_uas); do
 		companion=$(has_service "$(companion_service "$n")" && companion_service "$n" || true)
-		link_host=$([ "$FLEET_IS_SIMULATED" = true ] && echo 127.0.0.1 || uas_address "$n")
+	# On a real ground station all vehicles share this host's native
+	# mavlink-router TCP server. Their advertised radio addresses are useful
+	# for Foxglove and UDP, but are not TCP endpoints for the local UI reader.
+	if [ "$FLEET_IS_SIMULATED" = true ] || [ "$(world_of)" != "aircraft" ]; then
+		link_host=127.0.0.1
+	else
+		link_host=$(uas_address "$n")
+	fi
 		printf 'vehicle n=%s sysid=%s model=%s mark=%s domain=%s tcp=%s gcs=%s foxglove=%s foxglove_url=%s address=%s router=uas%s companion=%s gimbal=%s streams=%s zoom=%s\n' \
 			"$n" "$n" "$(model_of "$n")" "$(mark_of "$n")" "$(uas_domain "$n")" \
 			"$(uas_tcp_port "$n")" "$(uas_gcs_port "$n")" "$(uas_foxglove_port "$n")" \

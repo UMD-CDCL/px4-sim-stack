@@ -452,6 +452,9 @@ class Link:
         self.reported_frames = 0
         self.reported_at = time.monotonic()
         self.heard_at = 0.0
+        # Keep the last telemetry timestamp across a short TCP reconnect. The
+        # native ground router may recycle a dynamic TCP client after feeding
+        # its buffered MAVLink data; that is not the same as losing the UAS.
 
     def wanted_events(self) -> int:
         return selectors.EVENT_READ if self.connected else selectors.EVENT_WRITE
@@ -482,7 +485,6 @@ class Link:
         self.registered = None
         self.buffer = b""
         self.fields = {}
-        self.heard_at = 0.0
 
     def timed_out(self, now: float) -> bool:
         return (self.socket is not None and not self.connected
@@ -552,7 +554,8 @@ class Link:
         if tx_bytes is not None:
             self.reported_tx_bytes = tx_bytes
         silent_for = now - self.heard_at if self.heard_at else None
-        if not self.connected:
+        if not self.connected and (self.heard_at == 0.0 or
+                                   now - self.heard_at > LINK_SILENT_S):
             link = "down"
         elif silent_for is None or silent_for > LINK_SILENT_S:
             link = "silent"
