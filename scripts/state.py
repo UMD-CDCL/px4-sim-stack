@@ -449,6 +449,7 @@ class Link:
         self.frames = 0
         self.reported_rx_bytes = 0
         self.reported_tx_bytes = 0
+        self.udp_rx_bytes = 0
         self.reported_frames = 0
         self.reported_at = time.monotonic()
         self.heard_at = 0.0
@@ -526,6 +527,10 @@ class Link:
                 continue
             self.fields.update(mavlink.fields(frame))
 
+    def note_udp_bytes(self, count: int) -> None:
+        """Account for a datagram carrying this vehicle's MAVLink frames."""
+        self.udp_rx_bytes += count
+
     def socket_bytes(self) -> tuple[int | None, int | None]:
         """Return kernel TCP byte counters: received and sent on this link."""
         if self.socket is None or not self.connected:
@@ -544,6 +549,9 @@ class Link:
         elapsed = max(now - self.reported_at, 1e-6)
         rate = (self.frames - self.reported_frames) / elapsed
         rx_bytes, tx_bytes = self.socket_bytes()
+        if rx_bytes is None and self.udp_rx_bytes:
+            rx_bytes = self.udp_rx_bytes
+            tx_bytes = 0
         rx_kbits = ((rx_bytes - self.reported_rx_bytes) * 8 / 1000.0 / elapsed
                     if rx_bytes is not None and self.reported_rx_bytes else None)
         tx_kbits = ((tx_bytes - self.reported_tx_bytes) * 8 / 1000.0 / elapsed
@@ -615,6 +623,7 @@ class Links:
                     link.take(arrived, now)
                     if link.frames > before:
                         link.connected = True
+                        link.note_udp_bytes(len(arrived))
             return
         if self.available is not None and not any(
                 f"uas{link.number}" in self.available for link in self.links):

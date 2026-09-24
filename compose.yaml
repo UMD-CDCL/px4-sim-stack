@@ -900,6 +900,9 @@ services:
     image: px4simstack/qgc:${QGC_REF:-v5.0.8}
     hostname: qgc
     runtime: nvidia
+    # Keep the legacy runtime for older Compose/NVIDIA setups, and explicitly
+    # request all GPUs for newer Docker Compose implementations.
+    gpus: all
     ipc: host
     environment:
       <<: [*gpu-env, *x11-env]
@@ -948,6 +951,9 @@ services:
     image: px4simstack/qgc-dev:${QT_VERSION:-6.8.3}
     hostname: qgc-dev
     runtime: nvidia
+    # See qgc: retain runtime compatibility while making the device request
+    # explicit for current Compose/NVIDIA Container Toolkit versions.
+    gpus: all
     ipc: host
     stdin_open: true
     tty: true
