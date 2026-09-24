@@ -609,13 +609,12 @@ class Links:
                 except BlockingIOError:
                     time.sleep(0.02)
                     continue
-                found, _ = mavlink.frames(arrived)
                 now = time.monotonic()
-                for frame in found:
-                    for link in self.links:
-                        if frame.system == link.system:
-                            link.connected = True
-                            link.take(arrived, now)
+                for link in self.links:
+                    before = link.frames
+                    link.take(arrived, now)
+                    if link.frames > before:
+                        link.connected = True
             return
         if self.available is not None and not any(
                 f"uas{link.number}" in self.available for link in self.links):
