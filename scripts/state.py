@@ -575,6 +575,9 @@ class Links:
     """One reader for each vehicle, kept open between reports."""
 
     def __init__(self, fleet: list[dict]):
+        self.ground_udp = all(v.get("address") == LOOPBACK and
+                              v.get("tcp") == 5760 for v in fleet)
+        self.udp_socket = None
         self.links = [Link(vehicle["n"], vehicle.get("address", LOOPBACK), vehicle["tcp"],
                            vehicle.get("sysid", vehicle["n"]))
                       for vehicle in fleet
@@ -582,6 +585,12 @@ class Links:
                       and isinstance(vehicle.get("tcp"), int)]
         self.watcher = selectors.DefaultSelector()
         self.available: set[str] | None = None
+        if self.ground_udp:
+            self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.udp_socket.bind((LOOPBACK, 14403))
+            self.udp_socket.setblocking(False)
+            self.watcher.register(self.udp_socket, selectors.EVENT_READ, self)
 
     def set_available(self, services: set[str]) -> None:
         """Avoid dialing endpoints whose owning compose service is down."""
@@ -593,6 +602,21 @@ class Links:
                 link.close()
 
     def pump(self, deadline: float) -> None:
+        if self.ground_udp:
+            while time.monotonic() < deadline:
+                try:
+                    arrived = self.udp_socket.recv(65536)
+                except BlockingIOError:
+                    time.sleep(0.02)
+                    continue
+                found, _ = mavlink.frames(arrived)
+                now = time.monotonic()
+                for frame in found:
+                    for link in self.links:
+                        if frame.system == link.system:
+                            link.connected = True
+                            link.take(arrived, now)
+            return
         if self.available is not None and not any(
                 f"uas{link.number}" in self.available for link in self.links):
             time.sleep(max(0.0, deadline - time.monotonic()))
@@ -647,6 +671,8 @@ class Links:
             self.forget(link)
             link.close()
         self.watcher.close()
+        if self.udp_socket is not None:
+            self.udp_socket.close()
 
 
 class TrafficMonitor:
