@@ -972,11 +972,10 @@ fleet_facts() {
 	else
 		link_host=$(uas_address "$n")
 	fi
-		printf 'vehicle n=%s sysid=%s model=%s mark=%s domain=%s tcp=%s gcs=%s foxglove=%s foxglove_url=%s address=%s router=uas%s companion=%s gimbal=%s streams=%s zoom=%s\n' \
+	printf 'vehicle n=%s sysid=%s model=%s mark=%s domain=%s tcp=%s gcs=%s foxglove=%s foxglove_url=%s address=%s link_host=%s router=uas%s companion=%s gimbal=%s streams=%s zoom=%s\n' \
 			"$n" "$n" "$(model_of "$n")" "$(mark_of "$n")" "$(uas_domain "$n")" \
 			"$(uas_tcp_port "$n")" "$(uas_gcs_port "$n")" "$(uas_foxglove_port "$n")" \
-			"$(uas_foxglove_url "$n")" \
-			"$link_host" "$n" "$companion" "$(gimbal_stream "$n")" \
+			"$(uas_foxglove_url "$n")" "$(uas_address "$n")" "$link_host" "$n" "$companion" "$(gimbal_stream "$n")" \
 			"$(vehicle_streams "$n" | tr ' ' ',' | sed 's/,$//')" \
 			"$(zoom_preset_of_slot $((n - UAS_BASE - 1)) || true)"
 	done

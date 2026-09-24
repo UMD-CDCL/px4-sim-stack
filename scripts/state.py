@@ -450,6 +450,7 @@ class Link:
         self.reported_rx_bytes = 0
         self.reported_tx_bytes = 0
         self.udp_rx_bytes = 0
+        self.udp_mode = False
         self.reported_frames = 0
         self.reported_at = time.monotonic()
         self.heard_at = 0.0
@@ -549,13 +550,13 @@ class Link:
         elapsed = max(now - self.reported_at, 1e-6)
         rate = (self.frames - self.reported_frames) / elapsed
         rx_bytes, tx_bytes = self.socket_bytes()
-        if rx_bytes is None and self.udp_rx_bytes:
+        if self.udp_mode:
             rx_bytes = self.udp_rx_bytes
             tx_bytes = 0
         rx_kbits = ((rx_bytes - self.reported_rx_bytes) * 8 / 1000.0 / elapsed
-                    if rx_bytes is not None and self.reported_rx_bytes else None)
+                    if rx_bytes is not None else None)
         tx_kbits = ((tx_bytes - self.reported_tx_bytes) * 8 / 1000.0 / elapsed
-                    if tx_bytes is not None and self.reported_tx_bytes else None)
+                    if tx_bytes is not None else None)
         self.reported_frames, self.reported_at = self.frames, now
         if rx_bytes is not None:
             self.reported_rx_bytes = rx_bytes
@@ -583,10 +584,10 @@ class Links:
     """One reader for each vehicle, kept open between reports."""
 
     def __init__(self, fleet: list[dict]):
-        self.ground_udp = all(v.get("address") == LOOPBACK and
+        self.ground_udp = all(v.get("link_host") == LOOPBACK and
                               v.get("tcp") == 5760 for v in fleet)
         self.udp_socket = None
-        self.links = [Link(vehicle["n"], vehicle.get("address", LOOPBACK), vehicle["tcp"],
+        self.links = [Link(vehicle["n"], vehicle.get("link_host", vehicle.get("address", LOOPBACK)), vehicle["tcp"],
                            vehicle.get("sysid", vehicle["n"]))
                       for vehicle in fleet
                       if isinstance(vehicle.get("n"), int)
@@ -594,6 +595,8 @@ class Links:
         self.watcher = selectors.DefaultSelector()
         self.available: set[str] | None = None
         if self.ground_udp:
+            for link in self.links:
+                link.udp_mode = True
             self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.udp_socket.bind((LOOPBACK, 14403))
@@ -697,7 +700,11 @@ class TrafficMonitor:
         expression = " or ".join(f"host {ip}" for ip in self.ip_to_number)
         try:
             self.process = subprocess.Popen(
-                ["sudo", "-n", "tcpdump", "-i", "any", "-n", "-q", "-l", expression],
+                # Match the operator's `bandwidth` alias: sudo may prompt for
+                # the same authorization that permits tcpdump on the host.
+                # Keep `-i any` so this also works when the active uplink is
+                # not the wired interface (and in simulator mode).
+                ["sudo", "tcpdump", "-i", "any", "-n", "-q", "-l", expression],
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                 text=True, errors="replace")
             threading.Thread(target=self._read, daemon=True).start()
