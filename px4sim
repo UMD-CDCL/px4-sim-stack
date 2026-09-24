@@ -265,6 +265,37 @@ bench_mode() {
 	fi
 }
 
+mode_switch() {
+	case "${1:-}" in
+		sim)
+			[ "$FLEET_IS_SIMULATED" = false ] || die "Already in simulator mode"
+			;;
+		real)
+			[ "$FLEET_IS_SIMULATED" = true ] || die "Already in real ground-station mode"
+			;;
+		*) die "Use: ./px4sim mode sim|real" ;;
+	esac
+
+	local mode=$1
+	local profiles base scene scenario active
+	if [ "$mode" = sim ]; then
+		profiles=sim,offboard base=10 scene=lorton scenario=lorton_casualties active="11 13"
+	else
+		profiles=ground base=0 scene=uroc scenario=uroc_casualties active="1 3"
+	fi
+	if [ -n "$(COMPOSE_PROFILES="$ALL_PROFILES" $DC ps --status running -q 2>/dev/null)" ]; then
+		die "Stop the stack before changing mode: ./px4sim stop"
+	fi
+	sed -i \
+		-e "s/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=$profiles/" \
+		-e "s/^UAS_BASE=.*/UAS_BASE=$base/" \
+		-e "s/^SCENE=.*/SCENE=$scene/" \
+		-e "s/^SCENARIO=.*/SCENARIO=$scenario/" \
+		-e "s/^UAS_ACTIVE=.*/UAS_ACTIVE=\"$active\"/" .env
+	say "Switched to $mode mode"
+	say "Configuration: COMPOSE_PROFILES=$profiles UAS_BASE=$base"
+}
+
 # The ROS domain a reader answers on. The ground station joins every vehicle's
 # domain with its domain bridge and carries all of them on $GROUND_DOMAIN. A
 # companion holds its own vehicle's domain alone.
@@ -771,6 +802,7 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
                         Optional PX4Sim traffic monitoring setup
     bench enable PHRASE Enable GPS-free bench reference (requires exact phrase)
     bench disable       Stop the stack, then disable bench reference before flight
+    mode sim|real       Switch this machine between simulator and real ground station
     fleet               Every vehicle: model, address, ports, domain, streams
     logs [opts] [svc]   Follow the logs. \`logs --since 5m $sample\` reads back.
 
@@ -1259,6 +1291,7 @@ case "$cmd" in
 # running stack and requires an explicit confirmation phrase; disabling stops
 # a running stack before clearing the flight-unsafe configuration.
 bench)  bench_mode "$@" ;;
+mode)   mode_switch "$@" ;;
 
 # The fleet profiles carry a router and a companion for each vehicle, and
 # so the ports those publish. Without them preflight checks the ports of a
