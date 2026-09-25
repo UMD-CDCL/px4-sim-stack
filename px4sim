@@ -1468,7 +1468,7 @@ record)
 		echo $! > "$RECORD_PID_FILE"
 		printf '%s\n' "$([ "$action" = bags ] && echo bags || echo all)" > "$RECORD_MODE_FILE"
 		if [ "$action" = bags ]; then
-			say "recording ROS bags only"
+			say "recording ROS bags only; bag location: $bag_root/$bag_name"
 		else
 			say "recording ROS bags and raw video; bag and video location: $bag_root/$bag_name"
 		fi
