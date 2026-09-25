@@ -1467,7 +1467,11 @@ record)
 		fi
 		echo $! > "$RECORD_PID_FILE"
 		printf '%s\n' "$([ "$action" = bags ] && echo bags || echo all)" > "$RECORD_MODE_FILE"
-		say "recording ROS topics and raw video"
+		if [ "$action" = bags ]; then
+			say "recording ROS bags only"
+		else
+			say "recording ROS bags and raw video"
+		fi
 		;;
 	stop)
 		if [ "$(world_of)" = simulator ]; then
