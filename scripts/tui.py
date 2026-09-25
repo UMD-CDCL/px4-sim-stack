@@ -275,6 +275,23 @@ def local_recording() -> tuple[bool, str]:
     return True, mode
 
 
+def local_recording_path() -> str:
+    """Return the host-visible bag directory while a recording is active."""
+    try:
+        if RECORD_SIM_FILE.exists():
+            first = RECORD_SIM_FILE.read_text().splitlines()[0]
+            bag_path = first.split("\t", 2)[2]
+            return str(FRONT_DOOR.parent / "logs/recordings" /
+                       bag_path.removeprefix("/recordings/").split("/", 1)[0])
+        if RECORD_PID_FILE.exists():
+            # Ground/air recorders own the exact naming, but expose the host
+            # recording root rather than leaving the operator guessing.
+            return str(FRONT_DOOR.parent / "logs/recordings")
+    except (OSError, IndexError):
+        pass
+    return ""
+
+
 def stop_process(process: subprocess.Popen | None) -> None:
     """Stop a command and everything it started.
 
@@ -855,7 +872,11 @@ class Console:
             self.rule(3)
             return
         if recording:
-            self.put(1, 1, f"● RECORDING: {mode}", "bad", width - 1)
+            location = local_recording_path()
+            label = f"● RECORDING: {mode}"
+            if location:
+                label += f"  -> {location}"
+            self.put(1, 1, label, "bad", width - 1)
             self.put(2, 1, f"{state}    {line}", "watch" if self.message else style,
                      width - len(card) - 4)
         else:
