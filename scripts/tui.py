@@ -275,23 +275,6 @@ def local_recording() -> tuple[bool, str]:
     return True, mode
 
 
-def local_recording_path() -> str:
-    """Return the host-visible bag directory while a recording is active."""
-    try:
-        if RECORD_SIM_FILE.exists():
-            first = RECORD_SIM_FILE.read_text().splitlines()[0]
-            bag_path = first.split("\t", 2)[2]
-            return str(FRONT_DOOR.parent / "logs/recordings" /
-                       bag_path.removeprefix("/recordings/").split("/", 1)[0])
-        if RECORD_PID_FILE.exists():
-            # Ground/air recorders own the exact naming, but expose the host
-            # recording root rather than leaving the operator guessing.
-            return str(FRONT_DOOR.parent / "logs/recordings")
-    except (OSError, IndexError):
-        pass
-    return ""
-
-
 def stop_process(process: subprocess.Popen | None) -> None:
     """Stop a command and everything it started.
 
@@ -483,7 +466,6 @@ class Runner:
         self.output_log = output_log
         self.generation = 0
         self.cancelled_generation = 0
-        self.last_bag_location = ""
 
     @property
     def busy(self) -> bool:
@@ -493,7 +475,6 @@ class Runner:
         if self.busy:
             return False
         self.lines.clear()
-        self.last_bag_location = ""
         self.generation += 1
         self.command = "./px4sim " + " ".join(arguments)
         self.started_at = time.monotonic()
@@ -529,9 +510,6 @@ class Runner:
                     return
                 if clean:
                     self.lines.append(clean)
-                    match = re.search(r"all MCAPs:\s*(\S+)", clean)
-                    if match:
-                        self.last_bag_location = match.group(1)
         process.wait()
         with self.lock:
             if self.process is process:
@@ -872,11 +850,7 @@ class Console:
             self.rule(3)
             return
         if recording:
-            location = local_recording_path()
-            label = f"● RECORDING: {mode}"
-            if location:
-                label += f"  -> {location}"
-            self.put(1, 1, label, "bad", width - 1)
+            self.put(1, 1, f"● RECORDING: {mode}", "bad", width - 1)
             self.put(2, 1, f"{state}    {line}", "watch" if self.message else style,
                      width - len(card) - 4)
         else:
@@ -1022,8 +996,6 @@ class Console:
 
     def draw_output(self, top: int, end: int, width: int) -> None:
         title = self.runner.command or "nothing has been run yet"
-        if self.runner.last_bag_location:
-            title = f"bag location: {self.runner.last_bag_location}"
         self.put(top, 1, title[:max(10, width - 24)], "title")
         state = self.runner.display_state()
         self.put(top, max(1, width - len(state) - 2), state,
