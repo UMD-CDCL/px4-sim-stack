@@ -1470,7 +1470,7 @@ record)
 		if [ "$action" = bags ]; then
 			say "recording ROS bags only"
 		else
-			say "recording ROS bags and raw video; bags and video: $bag_root/$bag_name"
+			say "recording ROS bags and raw video; bag and video location: $bag_root/$bag_name"
 		fi
 		;;
 	stop)
@@ -1536,7 +1536,7 @@ record)
 		fi
 		if [ -n "$bag_location" ]; then
 			if [ "$record_mode" = all ]; then
-				say "recording stopped; bag location: $bag_location; video location: $bag_location"
+				say "recording stopped; bag and video location: $bag_location"
 			else
 				say "recording stopped; bag location: $bag_location"
 			fi
