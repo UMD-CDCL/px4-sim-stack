@@ -1455,10 +1455,15 @@ record)
 		 esac
 		[ -x "$recorder" ] || die "recorder is not executable: $recorder"
 		mkdir -p "$(dirname "$RECORD_LOG")"
+		# Pin the recorder's generated directory so stop can report the exact
+		# location. record_all_common.sh uses these same two variables.
+		local bag_root=${BAG_ROOT:-$HOME/ros2_ws}
+		local bag_name=${BAG_NAME:-rosbag2_$(date +%Y_%m_%d-%H_%M_%S)}
+		printf '%s\n' "$bag_root/$bag_name" > "$RECORD_BAG_FILE"
 		if [ "$action" = bags ]; then
-			RECORD_VIDEO=0 setsid "$recorder" </dev/null >"$RECORD_LOG" 2>&1 &
+			BAG_ROOT="$bag_root" BAG_NAME="$bag_name" RECORD_VIDEO=0 setsid "$recorder" </dev/null >"$RECORD_LOG" 2>&1 &
 		else
-			RECORD_VIDEO=1 setsid "$recorder" </dev/null >"$RECORD_LOG" 2>&1 &
+			BAG_ROOT="$bag_root" BAG_NAME="$bag_name" RECORD_VIDEO=1 setsid "$recorder" </dev/null >"$RECORD_LOG" 2>&1 &
 		fi
 		echo $! > "$RECORD_PID_FILE"
 		printf '%s\n' "$([ "$action" = bags ] && echo bags || echo all)" > "$RECORD_MODE_FILE"
@@ -1517,11 +1522,18 @@ record)
 			kill -TERM -- -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
 			sleep 2
 		fi
+		local bag_location=""
+		[ -s "$RECORD_BAG_FILE" ] && bag_location=$(cat "$RECORD_BAG_FILE")
 		if [ "$(recording_status)" = true ]; then
 			kill -KILL -- -"$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
 		rm -f "$RECORD_PID_FILE" "$RECORD_MODE_FILE" "$RECORD_BAG_FILE"
 		fi
-		say "recording stopped"
+		if [ -n "$bag_location" ]; then
+			say "recording stopped; bag location: $bag_location"
+		else
+			say "recording stopped"
+		fi
+		rm -f "$RECORD_BAG_FILE"
 		;;
 	status) echo "recording=$(recording_status)" ;;
 	*) die "record takes bags, all, stop, or status" ;;
