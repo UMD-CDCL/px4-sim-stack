@@ -110,9 +110,10 @@ COPY --link --from=umd_uas /home/user/ros2_ws/install/ /home/user/ros2_ws/instal
 COPY --link site-params.sh ros-env.sh /usr/local/bin/
 
 # COPY --link can recreate destination path components as root. Restore the
-# runtime user's ownership of its home so ROS and other tools can create
-# per-user state such as ~/.ros, ~/.cache, and ~/.config.
-RUN chown "${HOST_UID}:${HOST_GID}" /home/user
+# runtime user's ownership of its home and working directory so ROS and nodes
+# can create per-run state and relative diagnostic outputs. Keep install/owned
+# by root: it contains the image's immutable built artifacts.
+RUN chown "${HOST_UID}:${HOST_GID}" /home/user /home/user/ros2_ws
 
 USER ${USERNAME}
 WORKDIR /home/user/ros2_ws
