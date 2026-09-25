@@ -1008,7 +1008,7 @@ recording_status() {
 	if [ "$active" = true ]; then
 		echo true
 	else
-		rm -f "$RECORD_PID_FILE" "$RECORD_MODE_FILE" "$RECORD_BAG_FILE"
+		rm -f "$RECORD_PID_FILE" "$RECORD_MODE_FILE"
 		echo false
 	fi
 }

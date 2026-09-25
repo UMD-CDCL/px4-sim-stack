@@ -101,13 +101,13 @@ class Action(NamedTuple):
 # written down once.
 ACTIONS = (
     Action(STACK, "r", "rebuild and restart the stack", ("restart",)),
-    Action(STACK, "a", "start ROS bag and video recording", ("record", "all"),
+    Action(STACK, "a", "start ROS bag + video recording", ("record", "all"),
            worlds=(GROUND, AIRCRAFT)),
-    Action(STACK, "b", "start ROS bag recording", ("record", "bags"),
+    Action(STACK, "b", "start ROS bag recording only", ("record", "bags"),
            worlds=(SIMULATOR, GROUND, AIRCRAFT)),
-    Action(STACK, "A", "stop ROS and video recording", ("record", "stop"),
+    Action(STACK, "A", "stop ROS bag + video recording", ("record", "stop"),
            worlds=(GROUND, AIRCRAFT)),
-    Action(STACK, "B", "stop ROS and video recording", ("record", "stop"),
+    Action(STACK, "B", "stop ROS bag recording", ("record", "stop"),
            worlds=(SIMULATOR, GROUND, AIRCRAFT)),
     Action(STACK, "s", "start the stack if it is stopped", ("start",)),
     Action(STACK, "", "switch between simulator and real ground mode",
