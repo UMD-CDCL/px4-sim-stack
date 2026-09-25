@@ -436,6 +436,15 @@ start_vehicle() {
 	export PX4_GZ_MODEL_POSE="0,$(echo "$index * $UAS_SPACING_M" | bc),0,0,0,0"
 	export MAVLINK_ROUTER_IP="${MAVLINK_ROUTER_IP_BASE}${uas_num}"
 	export MAVLINK_ROUTER_PORT
+	# Carry the real D1 gimbal contract into the simulated v3 aircraft. The
+	# system id is per vehicle; hardware calibration and battery parameters are
+	# deliberately not imported into SITL.
+	if [ "${model}" = chimera_v3 ] && [ -f /opt/sim/params/linthicum-v3.env ]; then
+		set -a
+		. /opt/sim/params/linthicum-v3.env
+		set +a
+		export PX4_PARAM_MNT_MAV_SYSID="$uas_num"
+	fi
 
 	# PX4 needs the trailing rootfs path when you give it -s. PX4 links etc/
 	# into the working directory from that path. It falls back to its own build

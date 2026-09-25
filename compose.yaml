@@ -451,6 +451,9 @@ services:
     volumes:
       - ./src/PX4-Autopilot:/px4
       - ./modules/sim/scenes:/scenes
+      # Real-aircraft parity overlays are mounted so changing them does not
+      # rebuild the simulator or the PX4 toolchain image.
+      - ./modules/sim/params:/opt/sim/params:ro
       # Keep fleet-selection behavior synchronized with the front door even
       # when the simulator image cannot be rebuilt offline.
       - ./modules/sim/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
