@@ -890,8 +890,12 @@ class Console:
         A short terminal keeps the vehicles and the streams. What is left over
         goes to the detail of the selected vehicle and to the Foxglove ports.
         """
+        # Vehicle identity and health are the primary ground/aircraft view.
+        # Streams remain visible, but their rows are deliberately compact:
+        # status, readers and rate are enough to identify a broken feed, and a
+        # long camera list must not push the vehicle pane off the screen.
         wanted = {VEHICLE: max(2, len(self.rows.vehicles) + 1),
-                  STREAM: max(2, len(self.rows.streams) + 1),
+                  STREAM: min(4, max(2, len(self.rows.streams) + 1)),
                   "detail": 3, "bridges": 2,
                   "units": 2 if self.rows.units else 0}
         given = {}
