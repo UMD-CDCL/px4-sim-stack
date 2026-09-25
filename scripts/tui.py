@@ -464,6 +464,8 @@ class Runner:
         self.process: subprocess.Popen | None = None
         self.lock = threading.Lock()
         self.output_log = output_log
+        self.generation = 0
+        self.cancelled_generation = 0
 
     @property
     def busy(self) -> bool:
@@ -473,6 +475,7 @@ class Runner:
         if self.busy:
             return False
         self.lines.clear()
+        self.generation += 1
         self.command = "./px4sim " + " ".join(arguments)
         self.started_at = time.monotonic()
         self.finished_at = 0.0
@@ -516,6 +519,7 @@ class Runner:
     def cancel(self) -> None:
         if not self.busy:
             return
+        self.cancelled_generation = self.generation
         stop_process(self.process)
         with self.lock:
             self.lines.append("-- stopped --")
@@ -537,6 +541,9 @@ class Runner:
             return ""
         took = self.finished_at - self.started_at
         return f"{'done' if self.returncode == 0 else f'failed {self.returncode}'}  {took:.0f}s"
+
+    def display_state(self) -> str:
+        return "cancelled" if self.cancelled_generation == self.generation else self.state()
 
 
 def kbits_words(kbits: float | None) -> str:
@@ -803,9 +810,14 @@ class Console:
         origin = ""
         if config.get("home_lat") not in (None, ""):
             origin = f"{config.get('home_lat')}, {config.get('home_lon')}"
+        identity = ""
+        if config.get("world") == AIRCRAFT:
+            identity = f"uas{config.get('uas_num', '?')} domain {config.get('ground_domain', '?')}"
+        elif config.get("world") == GROUND:
+            identity = f"ground domain {config.get('ground_domain', '?')}"
         told = "   ".join(word for word in (
             self.rows.world, str(config.get("scene", "")),
-            str(config.get("scenario", "")), origin,
+            str(config.get("scenario", "")), identity, origin,
             fleet_words(len(self.rows.fleet))) if word)
         local_recording_active, local_mode = local_recording()
         recording = (str(config.get("recording", "false")).lower() == "true"
@@ -818,8 +830,12 @@ class Console:
 
         state, style = "waiting for the first report", "faint"
         if self.rows.config:
-            state = f"reported {self.age:.0f}s ago"
-            style = "faint" if self.age < STALE_REPORT_S else "bad"
+            if self.age >= REPORT_WATCHDOG_S:
+                state, style = f"STALE — last report {self.age:.0f}s ago", "bad"
+            elif self.age >= STALE_REPORT_S:
+                state, style = f"degraded — reported {self.age:.0f}s ago", "watch"
+            else:
+                state = f"reported {self.age:.0f}s ago"
         faults = [fault for fault in self.rows.errors if fault]
         line = self.message or (faults[0] if faults
                                 else f"profiles {config.get('profiles', '-')}")
@@ -977,7 +993,7 @@ class Console:
     def draw_output(self, top: int, end: int, width: int) -> None:
         title = self.runner.command or "nothing has been run yet"
         self.put(top, 1, title[:max(10, width - 24)], "title")
-        state = self.runner.state()
+        state = self.runner.display_state()
         self.put(top, max(1, width - len(state) - 2), state,
                  "watch" if self.runner.busy else "faint")
         rows = end - top - 1

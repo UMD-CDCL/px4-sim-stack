@@ -944,6 +944,8 @@ fleet_facts() {
 		fiducial_lon=${FIDUCIAL_SURVEYED_LON:-}
 		fiducial_alt=${FIDUCIAL_SURVEYED_ALT:-}
 		profiles=${COMPOSE_PROFILES:-}
+		uas_base=${UAS_BASE:-}
+		uas_num=${UAS_NUM:-}
 		world=$(world_of)
 		bench_mode=${BENCH_MODE:-false}
 		recording=$(recording_status)
