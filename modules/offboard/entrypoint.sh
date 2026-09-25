@@ -127,11 +127,15 @@ source /usr/local/bin/site-params.sh
 
 if [ "${1:-launch}" = "launch" ]; then
 	shift || true
+	mosaic_args=()
+	if [ -n "${MOSAIC_UAS}" ]; then
+		mosaic_args+=("mosaic_uas:=${MOSAIC_UAS}")
+	fi
 	exec ros2 launch umd_uas offboard.launch.py \
 		uas:="${numbers#,}" \
 		models:="${models#,}" \
 		truth:="${TRUTH}" \
-		mosaic_uas:="${MOSAIC_UAS}" \
+		"${mosaic_args[@]}" \
 		bench:="${BENCH_MODE:-false}" \
 		params:="${SITE_PARAMS}" \
 		"$@"
