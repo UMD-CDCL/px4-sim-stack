@@ -1470,7 +1470,7 @@ record)
 		if [ "$action" = bags ]; then
 			say "recording ROS bags only"
 		else
-			say "recording ROS bags and raw video"
+			say "recording ROS bags and raw video; bags and video: $bag_root/$bag_name"
 		fi
 		;;
 	stop)
@@ -1517,6 +1517,8 @@ record)
 		[ "$(recording_status)" = true ] || die "recording is not running"
 		read -r p11 < "$RECORD_PID_FILE"
 		pid=$p11
+		local record_mode=""
+		[ -s "$RECORD_MODE_FILE" ] && record_mode=$(cat "$RECORD_MODE_FILE")
 		kill -INT -- -"$pid" 2>/dev/null || kill -INT "$pid" 2>/dev/null || true
 		for _ in {1..50}; do
 			[ "$(recording_status)" = false ] && break
@@ -1533,7 +1535,11 @@ record)
 		rm -f "$RECORD_PID_FILE" "$RECORD_MODE_FILE" "$RECORD_BAG_FILE"
 		fi
 		if [ -n "$bag_location" ]; then
-			say "recording stopped; bag location: $bag_location"
+			if [ "$record_mode" = all ]; then
+				say "recording stopped; bag location: $bag_location; video location: $bag_location"
+			else
+				say "recording stopped; bag location: $bag_location"
+			fi
 		else
 			say "recording stopped"
 		fi
