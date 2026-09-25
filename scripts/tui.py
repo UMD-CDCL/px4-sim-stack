@@ -466,6 +466,7 @@ class Runner:
         self.output_log = output_log
         self.generation = 0
         self.cancelled_generation = 0
+        self.last_bag_location = ""
 
     @property
     def busy(self) -> bool:
@@ -475,6 +476,7 @@ class Runner:
         if self.busy:
             return False
         self.lines.clear()
+        self.last_bag_location = ""
         self.generation += 1
         self.command = "./px4sim " + " ".join(arguments)
         self.started_at = time.monotonic()
@@ -510,6 +512,9 @@ class Runner:
                     return
                 if clean:
                     self.lines.append(clean)
+                    match = re.search(r"all MCAPs:\s*(\S+)", clean)
+                    if match:
+                        self.last_bag_location = match.group(1)
         process.wait()
         with self.lock:
             if self.process is process:
@@ -996,6 +1001,8 @@ class Console:
 
     def draw_output(self, top: int, end: int, width: int) -> None:
         title = self.runner.command or "nothing has been run yet"
+        if self.runner.last_bag_location:
+            title = f"bag location: {self.runner.last_bag_location}"
         self.put(top, 1, title[:max(10, width - 24)], "title")
         state = self.runner.display_state()
         self.put(top, max(1, width - len(state) - 2), state,
