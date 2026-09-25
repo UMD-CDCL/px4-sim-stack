@@ -69,9 +69,9 @@ else
 fi
 
 # The bounding box parser nvinfer loads to turn the detector's output tensor
-# into boxes. onboard_sim_params.yaml points model.custom_lib_path at the model
-# volume, and ds_node compiles one there when it finds none -- which needs a
-# CUDA compiler that no DeepStream base ships any more. modules/ros-base built
+# into boxes. onboard_container_params.yaml points model.custom_lib_path at the
+# model volume, and ds_node compiles one there when it finds none -- which
+# needs a CUDA compiler that no DeepStream base ships any more. ros-base built
 # it against this release instead, so put it where ds_node looks.
 #
 # A parser belongs to the release it was compiled against, and the model volume
@@ -219,6 +219,7 @@ if [ "${1:-launch}" = "launch" ]; then
 		uas:="${UAS_NUM}" \
 		model:="${MODEL}" \
 		sim:=true \
+		container:=true \
 		params:="${SITE_PARAMS}${LENS_PARAMS:+,${LENS_PARAMS}}${ONBOARD_PARAMS_FILE:+,${ONBOARD_PARAMS_FILE}}" \
 		"$@"
 fi
