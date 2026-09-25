@@ -500,3 +500,10 @@ below the release minimum, where the choice brings ROS 2 Jazzy, and where the
 GPU is past the TensorRT it can offer.
 
 `./px4sim doctor` prints what this machine chose and why.
+
+The tracked starter files are intentionally small: `.env.sim.example` for a
+simulator plus simulated ground station, `.env.real.example` for the real
+ground station, and `.env.onboard.example` for one aircraft. Copy the matching
+file to `.env` before `preflight`; host-specific values may then be added by
+`preflight` or `chimera-deploy`. The existing `.env` remains authoritative and
+is never replaced by these templates.

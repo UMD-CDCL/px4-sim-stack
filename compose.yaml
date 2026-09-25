@@ -186,7 +186,7 @@ x-onboard-env: &onboard-env
   # The same list the simulator renders with. cam_info needs the calibration of
   # the camera that really produced the picture, and a simulated camera's is its
   # field of view. See modules/onboard/sim_calibration.py.
-  UAS_GIMBAL_HFOV_DEG: ${UAS_GIMBAL_HFOV_DEG:-27.45 27.45 85.25 25.98}
+  UAS_GIMBAL_HFOV_DEG: ${UAS_GIMBAL_HFOV_DEG:-56.06 56.06 85.25 25.98}
   # The framing table. scripts/zoom.sh holds the same values as its own
   # defaults, so leaving these out is not an error: it is the host and the
   # container quietly reading two different tables. They were absent, and
@@ -397,7 +397,7 @@ services:
       # its identifiers from it, so the host and the container have to read the
       # same number: scripts/fleet.sh holds the same default.
       UAS_BASE: ${UAS_BASE:-10}
-      UAS_GIMBAL_HFOV_DEG: ${UAS_GIMBAL_HFOV_DEG:-27.45 27.45 85.25 25.98}
+      UAS_GIMBAL_HFOV_DEG: ${UAS_GIMBAL_HFOV_DEG:-56.06 56.06 85.25 25.98}
       # The framing table. scripts/zoom.sh holds the same values as its own
       # defaults, so leaving these out is not an error: it is the host and the
       # container quietly reading two different tables. They were absent, and
