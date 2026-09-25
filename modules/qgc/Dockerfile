@@ -56,6 +56,7 @@ RUN if getent passwd ${HOST_UID} >/dev/null; then \
     && chown -R ${HOST_UID}:${HOST_GID} /home/dev
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY QGroundControl.ini /opt/qgc/QGroundControl.ini
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 USER dev

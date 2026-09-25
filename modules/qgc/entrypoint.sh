@@ -12,7 +12,9 @@ seed_settings() {
 	local ini=$1
 	[ -f "$ini" ] && return 0   # Never overwrite what the user changed.
 	mkdir -p "$(dirname "$ini")"
-	cat > "$ini" <<EOF
+	if [ -f /opt/qgc/QGroundControl.ini ]; then
+		sed -e "s|@HOME@|$HOME|g" /opt/qgc/QGroundControl.ini > "$ini"
+		cat >> "$ini" <<EOF
 [AutoConnect]
 autoConnectUDP=true
 udpListenPort=$LISTEN_PORT
@@ -29,6 +31,25 @@ rtspTimeout=10
 streamEnabled=true
 disableWhenDisarmed=false
 EOF
+	else
+		cat > "$ini" <<EOF
+[AutoConnect]
+autoConnectUDP=true
+udpListenPort=$LISTEN_PORT
+autoConnectPixhawk=false
+autoConnectSiKRadio=false
+autoConnectRTKGPS=false
+autoConnectLibrePilot=false
+
+[Video]
+videoSource=RTSP Video Stream
+rtspUrl=$VIDEO_URL
+lowLatencyMode=true
+rtspTimeout=10
+streamEnabled=true
+disableWhenDisarmed=false
+EOF
+	fi
 	echo "seeded $ini"
 }
 
