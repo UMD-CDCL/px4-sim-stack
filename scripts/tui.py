@@ -63,6 +63,7 @@ PANES = (SERVICE, VEHICLE, STREAM)
 SIMULATOR, GROUND, AIRCRAFT = "simulator", "ground", "aircraft"
 EVERY_WORLD = (SIMULATOR, GROUND, AIRCRAFT)
 SIM_ONLY = (SIMULATOR,)
+REAL_UAS = (1, 2, 3, 4)
 # A scene is map data. The simulator and the ground station both build and
 # select one. An aircraft reads the scene it is given.
 WITH_SCENE = (SIMULATOR, GROUND)
@@ -109,6 +110,10 @@ ACTIONS = (
     Action(STACK, "B", "stop ROS and video recording", ("record", "stop"),
            worlds=(SIMULATOR, GROUND, AIRCRAFT)),
     Action(STACK, "s", "start the stack if it is stopped", ("start",)),
+    Action(STACK, "m", "switch between simulator and real ground mode",
+           ("mode", "{value}"),
+           ask=Ask("mode", choices=("real", "sim")),
+           confirm="The stack must be stopped before changing mode."),
     Action(STACK, "", "enable GPS-free BENCH MODE (select this menu item)",
            ("bench", "enable", "{value}"),
            ask=Ask("type ENABLE BENCH MODE", "ENABLE BENCH MODE"),
@@ -1046,7 +1051,14 @@ class Console:
             return -1
 
     def select_active(self) -> str | None:
-        fleet = sorted(self.rows.fleet)
+        # A real ground station knows the radio fleet even when a vehicle is
+        # inactive, disconnected, or omitted from the latest state report.
+        # Keep those choices available so selecting UAS_ACTIVE is how a drone
+        # is brought back; simulator and aircraft choices remain report-based.
+        if self.rows.world == GROUND:
+            fleet = list(REAL_UAS)
+        else:
+            fleet = sorted(self.rows.fleet)
         if not fleet:
             self.message = "the fleet is not known yet"
             return None
