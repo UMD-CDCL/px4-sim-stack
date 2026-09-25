@@ -207,6 +207,10 @@ ARG DS_VERSION
 # both. scripts/ds-select.sh decides; the check below refuses a pair that does
 # not match the image that actually arrived.
 ARG ROS_DISTRO=humble
+# The live ROS 2 Humble repo lost ros-humble-mavros and -extras after this
+# date: only mavros-msgs advanced to 2.15.1. This snapshot carries all three
+# at 2.14.0, the versions the aircraft runs.
+ARG ROS_SNAPSHOT=2026-08-07
 ARG DS_CODENAME=jammy
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -266,6 +270,10 @@ RUN set -eu; \
 # rosdep is not used: umd_uas declares roboscout_uas_extras, which is not in
 # this workspace, and rosdep stops on the unknown key.
 # ---------------------------------------------------------------------------
+# snapshots.ros.org is signed by "ROS Snapshot builder <rosbuild@ros.org>"
+# (AD19BAB3CBF125EA), which rosdistro's ros.key does not carry. Vendored so
+# the build does not depend on a keyserver.
+COPY ros-snapshot.key /tmp/ros-snapshot.key
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
@@ -274,8 +282,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && locale-gen en_US.UTF-8 \
     && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
          -o /usr/share/keyrings/ros-archive-keyring.gpg \
+    && gpg --dearmor < /tmp/ros-snapshot.key \
+         >> /usr/share/keyrings/ros-archive-keyring.gpg \
     && . /etc/os-release \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $VERSION_CODENAME main" \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://snapshots.ros.org/humble/${ROS_SNAPSHOT}/ubuntu $VERSION_CODENAME main" \
          > /etc/apt/sources.list.d/ros2.list \
     && apt-get update && apt-get install -y --no-install-recommends \
       build-essential \
