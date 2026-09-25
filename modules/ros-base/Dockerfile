@@ -402,7 +402,9 @@ RUN /opt/ros/${ROS_DISTRO}/lib/mavros/install_geographiclib_datasets.sh
 RUN python3 -m pip install --no-cache-dir \
       "$([ "${ROS_DISTRO}" = humble ] && echo 'numpy==1.24.4' || echo 'numpy<2')" \
       "pymap3d" \
-      "folium"
+      "folium" \
+      "onnxruntime" \
+      "utm"
 
 # The bindings from the first stage. Installing the wheel, rather than copying
 # pyds*.so into site-packages, makes a wrong artifact fail here instead of at
@@ -480,6 +482,10 @@ RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
 USER root
 COPY --from=ros2_ws --chown=${HOST_UID}:${HOST_GID} src/5g_drone ${WORKSPACE_DIR}/src/5g_drone
 COPY --from=ros2_ws --chown=${HOST_UID}:${HOST_GID} src/MAVInsight ${WORKSPACE_DIR}/src/MAVInsight
+# onboard.launch.py includes tracking_test's dtc_single_uav.launch.py whenever
+# enable_tracking is true, which is its default, so the companion needs this
+# package to launch at all.
+COPY --from=ros2_ws --chown=${HOST_UID}:${HOST_GID} src/tracking_test ${WORKSPACE_DIR}/src/tracking_test
 USER ${USERNAME}
 RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
     && colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
