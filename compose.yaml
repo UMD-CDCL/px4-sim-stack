@@ -274,6 +274,9 @@ x-offboard-env: &offboard-env
   # A ground station can represent one active member of a configured fleet
   # without changing that fleet's model mapping. Empty means every member.
   UAS_ACTIVE: ${UAS_ACTIVE:-}
+  # UAS number whose mosaic is painted on the shared ground scene. Empty
+  # preserves the launch file's lowest-numbered-fleet default.
+  MOSAIC_UAS: ${MOSAIC_UAS:-}
   # The first vehicle is UAS_BASE + 1. Every entry point derives its
   # identifiers from it, so the host and the container have to read the
   # same number: scripts/fleet.sh holds the same default.

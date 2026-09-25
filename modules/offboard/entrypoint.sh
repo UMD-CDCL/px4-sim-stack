@@ -14,6 +14,8 @@ UAS_FLEET=${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2}
 # number here is the real ROS/MAVLink number (for example "3"), not its
 # position in UAS_FLEET.  An empty value deliberately means the whole fleet.
 UAS_ACTIVE=${UAS_ACTIVE:-}
+# Empty lets offboard.launch.py select the lowest-numbered fleet member.
+MOSAIC_UAS=${MOSAIC_UAS:-}
 # The dash form keeps an empty value empty: SCENE= draws no terrain.
 SCENE=${SCENE-lorton}
 TERRAIN_DIR=${TERRAIN_DIR:-/terrain}
@@ -129,6 +131,7 @@ if [ "${1:-launch}" = "launch" ]; then
 		uas:="${numbers#,}" \
 		models:="${models#,}" \
 		truth:="${TRUTH}" \
+		mosaic_uas:="${MOSAIC_UAS}" \
 		bench:="${BENCH_MODE:-false}" \
 		params:="${SITE_PARAMS}" \
 		"$@"
