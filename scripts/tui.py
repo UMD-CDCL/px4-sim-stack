@@ -1186,12 +1186,8 @@ class Console:
             self.hand_over(arguments)
             if action.refresh:
                 self.feed.restart()
-        elif self.runner.start(arguments):
-            self.scrolled_back = 0
-            self.refresh_when_done = action.refresh
-            self.message = ""
         else:
-            self.message = "one command runs at a time. Press esc to stop it."
+            self.start_command(arguments, action.refresh)
 
     def answer(self, ask: Ask) -> str | None:
         choices = list(ask.choices)
@@ -1273,8 +1269,26 @@ class Console:
 
     def typed(self) -> None:
         typed = self.ask_text("px4sim", "")
-        if typed and not self.runner.start(typed.split()):
-            self.message = "one command runs at a time. Press esc to stop it."
+        if typed:
+            self.start_command(typed.split(), False)
+
+    def start_command(self, arguments: list[str], refresh: bool) -> None:
+        if self.runner.busy:
+            if not self.confirm("A command is running. Stop it and start this command?"):
+                return
+            self.runner.cancel()
+            deadline = time.monotonic() + 1.5
+            while self.runner.busy and time.monotonic() < deadline:
+                time.sleep(0.05)
+            if self.runner.busy:
+                self.message = "the current command did not stop; new command not started"
+                return
+        if self.runner.start(arguments):
+            self.scrolled_back = 0
+            self.refresh_when_done = refresh
+            self.message = ""
+        else:
+            self.message = "could not start the command"
 
     def hotkey(self, key: str) -> bool:
         for scope in (self.pane, STACK):
