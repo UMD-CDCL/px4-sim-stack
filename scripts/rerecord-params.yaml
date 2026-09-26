@@ -1,0 +1,23 @@
+/**:
+  ros__parameters:
+    use_sim_time: true
+
+/**/*:
+  ds_pipeline:
+    ros__parameters:
+      model.dir: "/models/orin"
+      model.detector: "yolo26l-zach-960"
+      model.precision: "fp16"
+      continuous.stride: 1
+      source.loop: false
+
+uas4:
+  cam_info:
+    ros__parameters:
+      calibration_file: "/home/user/ros2_ws/install/umd_uas/share/umd_uas/config/28deg-cil142-1920x1080-d4-scaled.yaml"
+      frame_id: "d4_rgb_offset"
+
+  img_processing:
+    ros__parameters:
+      replay.publish_localizations: true
+      replay.topic.localizations: "target_locations"

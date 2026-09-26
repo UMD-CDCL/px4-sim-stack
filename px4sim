@@ -819,6 +819,8 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
 	                        Record bags only, or bags plus raw video;
 	                        simulator bags cover active drones and offboard;
 	                        all MCAPs finalize together under logs/recordings/
+	rerecord <dir> [uas]    Replay a raw MAVLink MCAP and timestamped video
+	                        through the selected onboard container.
 	mission upload <N> <plan>
 	                        Validate and upload a plan through the vehicle mission node
     view [N|stream]     Play a stream. Default: uas${FIRST_UAS}'s $(default_stream "$FIRST_UAS")
@@ -1388,6 +1390,10 @@ status|ps)
 		warn "  ./px4sim stop && ./px4sim restart"
 	fi
 	endpoints
+	;;
+
+rerecord)
+	./scripts/rerecord-bag.sh "$@"
 	;;
 
 record)
