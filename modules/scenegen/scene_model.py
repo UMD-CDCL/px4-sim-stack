@@ -149,6 +149,15 @@ class FlattenZone:
 
 
 @dataclass
+class DisplayZone:
+    """A display-only polygon imported from a mission description."""
+    id: str
+    polygon_m: list
+    enabled: bool = True
+    source: str = "import"
+
+
+@dataclass
 class Target:
     """A ground-truth casualty. The scene is the source of truth for these:
     a lat/lon file only imports into this list, the editor places and moves
@@ -192,6 +201,8 @@ class SceneSpec:
     trees: list[Tree] = field(default_factory=list)
     tree_areas: list[TreeArea] = field(default_factory=list)
     flatten_zones: list[FlattenZone] = field(default_factory=list)
+    geofences: list[DisplayZone] = field(default_factory=list)
+    exclusion_zones: list[DisplayZone] = field(default_factory=list)
     format: str = SCENE_FORMAT
 
     def to_json(self) -> str:
@@ -217,6 +228,8 @@ class SceneSpec:
         data["trees"] = [Tree(**t) for t in data.get("trees", [])]
         data["tree_areas"] = [TreeArea(**a) for a in data.get("tree_areas", [])]
         data["flatten_zones"] = [FlattenZone(**z) for z in data.get("flatten_zones", [])]
+        data["geofences"] = [DisplayZone(**z) for z in data.get("geofences", [])]
+        data["exclusion_zones"] = [DisplayZone(**z) for z in data.get("exclusion_zones", [])]
         return SceneSpec(**data)
 
 
@@ -340,9 +353,35 @@ def import_casualty_file(scene: SceneSpec, path: Path) -> tuple[int, int]:
             if casualty_id is not None:
                 entry["name"] = f"casualty_{casualty_id}"
             entries.append(entry)
+
+    # HMT mission files carry these in WGS84. They are intentionally kept as
+    # scene annotations for now: no routing, flight, or collision behavior is
+    # derived from them.
+    frame = geo.GeoFrame(scene.center_lat, scene.center_lon, scene.origin_alt_m)
+
+    def imported_polygon(points, label, index):
+        if not isinstance(points, list) or len(points) < 3:
+            raise ValueError(f"{label} {index} in {path} is not a polygon")
+        converted = []
+        for point in points:
+            if not isinstance(point, dict) or "lat" not in point or "lon" not in point:
+                raise ValueError(f"{label} {index} in {path} has an invalid point")
+            east, north, _ = frame.latlon_to_enu(point["lat"], point["lon"])
+            converted.append([round(east, 2), round(north, 2)])
+        return converted
+
+    raw_fence = data.get("geo_fence") if isinstance(data, dict) else None
+    if raw_fence is not None:
+        scene.geofences = [DisplayZone("gf_import_1",
+                                       imported_polygon(raw_fence, "geo_fence", 1))]
+    raw_exclusions = data.get("exclusion_zones", []) if isinstance(data, dict) else []
+    if not isinstance(raw_exclusions, list):
+        raise ValueError(f"{path} has an invalid exclusion_zones list")
+    scene.exclusion_zones = [DisplayZone(f"ez_import_{i}",
+                                         imported_polygon(points, "exclusion zone", i))
+                             for i, points in enumerate(raw_exclusions, 1)]
     if not isinstance(entries, list):
         raise ValueError(f"{path} holds no casualty list")
-    frame = geo.GeoFrame(scene.center_lat, scene.center_lon, scene.origin_alt_m)
     imported: list[Target] = []
     for index, entry in enumerate(entries, start=1):
         if "lat" not in entry or "lon" not in entry:

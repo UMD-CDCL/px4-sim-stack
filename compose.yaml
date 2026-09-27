@@ -1002,6 +1002,10 @@ services:
       - ./modules/scenegen:/app
       - ./modules/scenegen/data:/data
       - ./modules/sim/scenes:/scenes
+      # Casualty/HMT files are commonly kept in the ROS workspace. Keep the
+      # configured host workspace at the same absolute path in the container
+      # so `--casualties /home/user/ros2_ws/...` works through the front door.
+      - ${ROS2_WS_DIR:-../ros2_ws}:/home/user/ros2_ws:ro
     # The editor, published to this host, which is how `genscene edit` reaches
     # it. No simnet: the generator downloads map data and writes files, and it
     # runs on a real ground station too, where creating the fleet network

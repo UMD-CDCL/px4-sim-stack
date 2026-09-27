@@ -315,13 +315,23 @@ const KINDS = {
     blank: () => ({ polygon_m: [], mode: "min", height_m: null }),
     draw: drawZone, hit: hitPolygon, panel: zonePanel,
   },
+  geofence: {
+    key: "geofences", prefix: "gf_", shape: "polygon", heading: null,
+    copy: [], blank: () => ({ polygon_m: [], enabled: true, source: "manual" }),
+    draw: drawGeoFence, hit: hitPolygon, panel: displayZonePanel,
+  },
+  exclusion: {
+    key: "exclusion_zones", prefix: "ez_", shape: "polygon", heading: null,
+    copy: [], blank: () => ({ polygon_m: [], enabled: true, source: "manual" }),
+    draw: drawExclusion, hit: hitPolygon, panel: displayZonePanel,
+  },
 };
 
 // Draw order: later kinds land on top. Hit order is smallest first, so a
 // tree inside a tree area and a building inside a flatten zone both stay
 // reachable; the big polygons come last and never swallow a click.
-const DRAW_ORDER = ["building", "zone", "treearea", "tree", "vehicle", "target"];
-const HIT_ORDER = ["target", "tree", "vehicle", "zone", "building", "treearea"];
+const DRAW_ORDER = ["geofence", "exclusion", "building", "zone", "treearea", "tree", "vehicle", "target"];
+const HIT_ORDER = ["target", "tree", "vehicle", "zone", "building", "treearea", "exclusion", "geofence"];
 
 function listOf(kind) { return scene[KINDS[kind].key]; }
 function objectOf(ref) { return listOf(ref.kind)[ref.index]; }
@@ -460,6 +470,28 @@ function drawZone(z, ref, selected) {
   ctx.lineWidth = lw(selected ? 2.4 : 1.3);
   polyPath(z.polygon_m); ctx.fill(); ctx.stroke();
   if (selected) drawVertices(z.polygon_m, "#ff5ce1");
+}
+
+function drawGeoFence(z, ref, selected) {
+  ctx.fillStyle = "rgba(55,160,255,0.10)";
+  ctx.strokeStyle = "#36a7ff";
+  ctx.lineWidth = lw(selected ? 2.4 : 1.5);
+  polyPath(z.polygon_m); ctx.fill(); ctx.stroke();
+  if (selected) drawVertices(z.polygon_m, ctx.strokeStyle);
+}
+
+function drawExclusion(z, ref, selected) {
+  ctx.fillStyle = "rgba(255,170,40,0.14)";
+  ctx.strokeStyle = "#ffad32";
+  ctx.setLineDash([lw(6), lw(4)]);
+  ctx.lineWidth = lw(selected ? 2.4 : 1.5);
+  polyPath(z.polygon_m); ctx.fill(); ctx.stroke(); ctx.setLineDash([]);
+  if (selected) drawVertices(z.polygon_m, ctx.strokeStyle);
+}
+
+function displayZonePanel(z, ref) {
+  return note(ref.kind === "geofence" ? "Geo-fence (display only)." :
+              "Exclusion zone (display only).") + deleteButton(ref, "Delete zone");
 }
 
 function drawTreeArea(a, ref, selected) {
