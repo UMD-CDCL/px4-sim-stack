@@ -213,12 +213,14 @@ if [ "${SIM}" = true ]; then
 	GIMBAL_STREAM=${GIMBAL_STREAM:-$([ "${MODEL}" = v3 ] && echo "rgb${UAS_NUM}" || echo "pilot${UAS_NUM}")}
 	CAMERA_URI="${RTSP_BASE:-rtsp://video-router:8554}/${GIMBAL_STREAM}"
 	waited=0
+	warned=false
 	until timeout 15 gst-launch-1.0 -q rtspsrc "location=${CAMERA_URI}" latency=100 \
 		! fakesink num-buffers=1 >/dev/null 2>&1; do
 		if [ "${waited}" -ge "${STREAM_WAIT_S}" ]; then
-			echo "uas${UAS_NUM}: ${CAMERA_URI} never appeared after ${STREAM_WAIT_S}s." >&2
-			echo "The detector will start anyway and fail to open its camera." >&2
-			break
+			if [ "${warned}" = false ]; then
+				echo "uas${UAS_NUM}: ${CAMERA_URI} has not appeared after ${STREAM_WAIT_S}s; continuing to wait before launching the detector." >&2
+				warned=true
+			fi
 		fi
 		[ "${waited}" = 0 ] && echo "waiting for ${GIMBAL_STREAM}"
 		sleep 5
@@ -229,7 +231,10 @@ if [ "${SIM}" = true ]; then
 	# used to leave that wait with nothing to find: it timed out after its whole
 	# budget and reported a vehicle that never reached the air, on a stack where
 	# every part of it was working. A warm video router makes the no-wait case the
-	# usual one, which is why a fleet started earlier hits it every time.
+	# usual one, which is why a fleet started earlier hits it every time. The
+	# simulated companion never launches ds_node against an absent RTSP mount;
+	# the wait is deliberately unbounded after STREAM_WAIT_S so a slow simulator
+	# cannot turn a transient stream race into repeated detector deaths.
 	if [ "${waited}" -gt 0 ]; then
 		echo "camera: ${GIMBAL_STREAM} ready after ${waited}s"
 	else
