@@ -133,6 +133,11 @@ ACTIONS = (
     Action(STACK, "A", "place the targets again", ("scenario",), worlds=SIM_ONLY),
     Action(STACK, "f", "select active vehicles", ("active", "{value}"),
            worlds=EVERY_WORLD, active_select=True),
+    Action(STACK, "m", "select mission conops and restart",
+           ("conops", "{value}"),
+           ask=Ask("mission conops", "{conops}", choices=("option1", "option2")),
+           confirm="Change the mission conops to {value} and restart the stack?",
+           refresh=True, worlds=EVERY_WORLD),
     Action(STACK, "c", "select a scenario", ("scenario-select", "{value}"),
            ask=Ask("scenario", "{scenario}", choices_from="scenarios"),
            refresh=True, worlds=WITH_SCENE, push_scenario=True),
@@ -817,7 +822,9 @@ class Console:
             identity = f"ground domain {config.get('ground_domain', '?')}"
         told = "   ".join(word for word in (
             self.rows.world, str(config.get("scene", "")),
-            str(config.get("scenario", "")), identity, origin,
+            str(config.get("scenario", "")),
+            f"conops {config.get('conops')}" if config.get("conops") else "",
+            identity, origin,
             fleet_words(len(self.rows.fleet))) if word)
         local_recording_active, local_mode = local_recording()
         recording = (str(config.get("recording", "false")).lower() == "true"
@@ -1049,10 +1056,10 @@ class Console:
                      f" {first + 1} to {first + room} of {len(lines)} ", "faint")
         self.screen.noutrefresh()
 
-    def choose(self, title: str, labels: list[str]) -> int:
+    def choose(self, title: str, labels: list[str], chosen: int = 0) -> int:
         if not labels:
             return -1
-        chosen = 0
+        chosen = min(max(chosen, 0), len(labels) - 1)
         try:
             while True:
                 self.draw()
@@ -1215,7 +1222,9 @@ class Console:
             choices = [word for word in
                        str(self.rows.config.get(ask.choices_from, "")).split(",") if word]
         if choices:
-            picked = self.choose(ask.prompt, choices)
+            default = self.fill_config(ask.default)
+            initial = choices.index(default) if default in choices else 0
+            picked = self.choose(ask.prompt, choices, initial)
             return None if picked < 0 else choices[picked]
         return self.ask_text(ask.prompt, self.fill_config(ask.default))
 

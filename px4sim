@@ -818,6 +818,7 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     bench enable PHRASE Enable GPS-free bench reference (requires exact phrase)
     bench disable       Stop the stack, then disable bench reference before flight
     mode sim|real       Switch this machine between simulator and real ground station
+    conops <option>     Select option1 or option2 and restart the onboard stack
     fleet               Every vehicle: model, address, ports, domain, streams
     logs [opts] [svc]   Follow the logs. \`logs --since 5m $sample\` reads back.
 
@@ -976,6 +977,7 @@ fleet_facts() {
 		models=$(fleet_models | paste -sd, -)
 		scenarios=$(scenario_names | paste -sd, -)
 		active=${UAS_ACTIVE:-}
+		conops=${CONOPS:-option1}
 		declared=$(printf '%s\n' "$COMPOSE_SERVICES" | paste -sd, -)
 		expected=$($DC config --services 2>/dev/null | paste -sd, -)
 	EOF
@@ -1110,14 +1112,40 @@ env_write_selection() {
 	fi
 }
 
-push_selection_to_drones() {
-	local scenario=$1 scene=$2 host host_number index restart_status=0
+push_env_selection_to_drones() {
+	[ $# -gt 0 ] && [ $(( $# % 2 )) -eq 0 ] \
+		|| die "push_env_selection_to_drones needs KEY VALUE pairs"
+	local host host_number index restart_status=0 key value remote_edit
+	local keys=() values=() clean_env=(env)
 	local hosts=() labels=() pids=() updated=() updated_labels=()
 	local restart_pids=() restarted_labels=() successful=()
+	while [ $# -gt 0 ]; do
+		key=$1 value=$2; shift 2
+		case "$key" in *[!A-Z0-9_]*) die "Invalid .env key '$key'" ;; esac
+		case "$value" in *[!A-Za-z0-9._-]*) die "Invalid $key value '$value'" ;; esac
+		keys+=("$key")
+		values+=("$value")
+		clean_env+=(-u "$key")
+	done
+
+	# A simulator has no remote aircraft to update, and an aircraft changes
+	# only itself. The real ground station distributes the same selection to
+	# every fleet machine before all successfully updated stacks restart.
+	if [ "$FLEET_IS_SIMULATED" = true ] || aircraft_selected; then
+		exec "${clean_env[@]}" "$0" restart
+	fi
+
+	remote_edit='cd ~/px4-sim-stack && set_env_key() { key=$1; value=$2; if grep -q "^[[:space:]]*$key=" .env; then sed -i "s|^[[:space:]]*$key=.*|$key=$value|" .env; else printf "\n%s=%s\n" "$key" "$value" >> .env; fi; };'
+	for index in "${!keys[@]}"; do
+		printf -v key '%q' "${keys[$index]}"
+		printf -v value '%q' "${values[$index]}"
+		remote_edit+=" set_env_key $key $value;"
+	done
+
 	# The radio addresses are fixed: fleet number 1 is .61, number 11 is .611.
 	# A missing aircraft is normal, so each best-effort update is quiet and
-	# independent of the others. Edit .env directly: a drone need not already
-	# have this version of px4sim before it can receive a selection.
+	# independent of the others. Edit .env directly so a drone need not already
+	# have the frontend command that initiated the selection.
 	for host_number in $(fleet_numbers); do
 		hosts+=("10.200.142.6${host_number}")
 		labels+=("uas${host_number}")
@@ -1125,11 +1153,7 @@ push_selection_to_drones() {
 	say "Changing .env in parallel on machines: ground ${labels[*]}"
 	for host in "${hosts[@]}"; do
 		ssh -o BatchMode=yes -o ConnectTimeout=3 "${PX4SIM_SSH_USER:-$USER}@$host" \
-			"cd ~/px4-sim-stack && \
-			 if grep -q '^SCENE=' .env; then sed -i 's|^SCENE=.*|SCENE=$scene|' .env; \
-			 else printf '\nSCENE=$scene\n' >> .env; fi && \
-			 if grep -q '^SCENARIO=' .env; then sed -i 's|^SCENARIO=.*|SCENARIO=$scenario|' .env; \
-			 else printf 'SCENARIO=$scenario\n' >> .env; fi" \
+			"$remote_edit" \
 			>/dev/null 2>&1 &
 		pids+=("$!")
 	done
@@ -1151,9 +1175,9 @@ push_selection_to_drones() {
 			"cd ~/px4-sim-stack && ./px4sim restart" >/dev/null 2>&1 &
 		restart_pids+=("$!")
 	done
-	# This process exported the old selection when it read .env. Do not let that
-	# inherited value override the file we just changed in the restart process.
-	env -u SCENE -u SCENARIO "$0" restart >/dev/null 2>&1 || restart_status=$?
+	# This process exported the old selections when it read .env. Do not let
+	# inherited values override the file we just changed in the restart process.
+	"${clean_env[@]}" "$0" restart >/dev/null 2>&1 || restart_status=$?
 	for index in "${!restart_pids[@]}"; do
 		if wait "${restart_pids[$index]}"; then
 			restarted_labels+=("${updated_labels[$index]}")
@@ -1286,7 +1310,7 @@ cmd=${1:-help}
 # takes every profile down whatever .env says.
 case "$cmd" in
 
-help | -h | --help | doctor | check | x11 | setup | stop | down | clean | clean-src | nuke) ;;
+help | -h | --help | doctor | check | x11 | setup | stop | down | clean | clean-src | nuke | conops) ;;
 *) check_mode ;;
 esac
 
@@ -1851,7 +1875,7 @@ scenario-select)
 	env_write_selection SCENARIO "$1"
 	say "Selected scenario '$1' (scene '$selected_scene')"
 	if [ "${2:-}" != --no-push ]; then
-		push_selection_to_drones "$1" "$selected_scene"
+		push_env_selection_to_drones SCENE "$selected_scene" SCENARIO "$1"
 	else
 		exec env -u SCENE -u SCENARIO "$0" restart
 	fi
@@ -1865,6 +1889,17 @@ active)
 	env_write_selection UAS_ACTIVE "${value// /,}"
 	say "Restarting with active vehicles: ${value:-all}"
 	exec env -u UAS_ACTIVE "$0" restart
+	;;
+
+conops)
+	[ $# -eq 1 ] || die "Use: ./px4sim conops option1|option2"
+	case "$1" in
+	option1|option2) ;;
+	*) die "CONOPS must be option1 or option2, not '$1'." ;;
+	esac
+	env_write_selection CONOPS "$1"
+	say "Selected mission conops '$1'"
+	push_env_selection_to_drones CONOPS "$1"
 	;;
 
 scenario)

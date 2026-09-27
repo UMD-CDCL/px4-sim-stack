@@ -47,6 +47,13 @@ on uas1. The same script, the same commands, three worlds.
 `UAS_BASE` is not in the override list, so a world is changed in `.env` and not
 on the command line.
 
+`./px4sim conops option1|option2` writes the choice to `.env` and restarts the
+stack. The terminal UI exposes the same operation under the stack menu (`.`)
+with hotkey `m`. On the real ground station it uses the scenario selector's
+distribution path: reachable drones receive the same `.env` change and restart
+in parallel with the ground stack. In simulation it applies to the simulated
+fleet, and directly on an aircraft it applies to that machine's onboard stack.
+
 **What it refuses.**
 
 1. A `.env` where `COMPOSE_PROFILES` and `UAS_BASE` describe different worlds.
