@@ -26,6 +26,10 @@ UAS_GIMBAL_HFOV_DEG=${UAS_GIMBAL_HFOV_DEG:-"27.45 27.45 85.25 25.98"}
 UAS_THERMAL_HFOV_DEG=${UAS_THERMAL_HFOV_DEG:-"29.75 29.75 31.03 29.75"}
 UAS_DOWN_HFOV_DEG=${UAS_DOWN_HFOV_DEG:-"25.98 25.98 25.98 25.98"}
 UAS_SPACING_M=${UAS_SPACING_M:-1}
+# Optional offset from the sampled terrain surface. Keep this at zero: PX4's
+# vehicle model pose is already defined for a ground start, and any positive
+# value makes the vehicle fall before its estimator can initialize.
+UAS_GROUND_CLEARANCE_M=${UAS_GROUND_CLEARANCE_M:-0}
 SCENARIO=${SCENARIO:-}
 GZ_GUI=${GZ_GUI:-0}
 BUILD_JOBS=${BUILD_JOBS:-$(nproc)}
@@ -40,6 +44,35 @@ STREAM_CONF_DIR=/tmp/streams
 log()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[33m    %s\033[0m\n' "$*"; }
 die()  { printf '\033[31m!!! %s\033[0m\n' "$*" >&2; exit 1; }
+
+# The terrain mesh is authored in the scene's local ENU frame, with its Z
+# values stored in <scene>_surface.json. PX4's model pose is in that same
+# frame, so sample the exact surface rather than assuming a flat z=0 plane.
+# Return zero if an older/flat scene has no surface sidecar.
+terrain_z_at() {
+	local east=$1 north=$2 surface="$SCENES_DIR/worlds/${SCENE}_surface.json"
+	[ -f "$surface" ] || { echo 0; return; }
+	python3 - "$surface" "$east" "$north" <<'PY'
+import json
+import sys
+
+path, east, north = sys.argv[1], float(sys.argv[2]), float(sys.argv[3])
+try:
+    data = json.load(open(path))
+    grid, n, side = data["terrain_z"], int(data["grid_n"]), float(data["side_m"])
+    x = min(max((east + side / 2.0) / (side / n), 0.0), n - 1e-9)
+    y = min(max((north + side / 2.0) / (side / n), 0.0), n - 1e-9)
+    i, j = int(x), int(y)
+    fx, fy = x - i, y - j
+    z = (grid[j][i] * (1 - fx) * (1 - fy)
+         + grid[j][i + 1] * fx * (1 - fy)
+         + grid[j + 1][i] * (1 - fx) * fy
+         + grid[j + 1][i + 1] * fx * fy)
+    print(f"{z:.6f}")
+except (OSError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
+    print("0")
+PY
+}
 
 read -r -a FLEET <<< "$UAS_FLEET"
 read -r -a GIMBAL_HFOV <<< "$UAS_GIMBAL_HFOV_DEG"
@@ -433,7 +466,14 @@ start_vehicle() {
 
 	export PX4_SIM_MODEL="gz_uas$uas_num"
 	export PX4_GZ_STANDALONE=1
-	export PX4_GZ_MODEL_POSE="0,$(echo "$index * $UAS_SPACING_M" | bc),0,0,0,0"
+	local north
+	north=$(awk -v i="$index" -v spacing="$UAS_SPACING_M" 'BEGIN { printf "%.6f", i * spacing }')
+	local terrain_z
+	terrain_z=$(terrain_z_at 0 "$north")
+	local spawn_z
+	spawn_z=$(awk -v terrain="$terrain_z" -v clearance="$UAS_GROUND_CLEARANCE_M" \
+		'BEGIN { printf "%.6f", terrain + clearance }')
+	export PX4_GZ_MODEL_POSE="0,$north,$spawn_z,0,0,0"
 	export MAVLINK_ROUTER_IP="${MAVLINK_ROUTER_IP_BASE}${uas_num}"
 	export MAVLINK_ROUTER_PORT
 	# Carry the real D1 gimbal contract into the simulated v3 aircraft. The

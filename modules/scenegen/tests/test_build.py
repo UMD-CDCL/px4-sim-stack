@@ -332,6 +332,8 @@ def test_world(scenes_dir: Path) -> None:
     if fiducial:
         radius = float(fiducial[0].find("link/visual/geometry/cylinder/radius").text)
         check("fiducial is a 0.5 m circle", abs(radius - 0.25) < 1e-6, str(radius))
+        check("fiducial is collision free",
+              fiducial[0].find(".//collision") is None)
 
 
 def test_terrain(scenes_dir: Path) -> None:

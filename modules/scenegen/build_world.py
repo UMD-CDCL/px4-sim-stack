@@ -603,7 +603,8 @@ def build_world_sdf(scene: scene_model.SceneSpec, placed: list[PlacedBuilding],
 {buildings_model}{"".join(building_includes)}{"".join(vehicle_includes)}{"".join(tree_includes)}
     <!-- The survey fiducial: a flat orange 0.5 m disk. Its coordinate
          rides in the scenario as fiducial_*; the drone measures it to
-         align frames. -->
+         align frames. It intentionally has no collision geometry so it
+         cannot interfere with a vehicle or the terrain physics. -->
     <model name="fiducial_marker">
       <static>true</static>
       <pose>{fiducial_pose}</pose>
