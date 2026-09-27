@@ -880,6 +880,8 @@ block of `.env.example` carries all of them:
 |---|---|---|---|
 | `COMPOSE_PROFILES` | `sim,offboard` | `ground` | `aircraft` |
 | `UAS_BASE` | `10` | `0` | `0` |
+| `UAS_ROLES` | one `search`/`assess` entry per vehicle | the same fleet list | the same fleet list |
+| `CONOPS` | `option1` or `option2` | the same selection | the same selection |
 | `GROUND_DOMAIN` | unset (70) | `60` | not read |
 | `RTSP_BASE` | unset | `rtsp://127.0.0.1:8554`, lcam | not read |
 | `SCENE` | `lorton` | empty on a bench, `lorton` at the field | empty |

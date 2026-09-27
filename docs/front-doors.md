@@ -39,7 +39,7 @@ on uas1. The same script, the same commands, three worlds.
 | Source | What it takes |
 |---|---|
 | `./.env` | every key. `COMPOSE_PROFILES` and `UAS_BASE` name the world |
-| the environment | `SCENE`, `SCENARIO`, `UAS_FLEET`, `UAS_ACTIVE`, `UAS_STREAMS`, `AIRFRAME`, `COMPOSE_PROFILES`, `GZ_GUI`, `SIM_SPEED_FACTOR` and `VIDEO_SCALED_ENCODER` beat `.env` for one run |
+| the environment | `SCENE`, `SCENARIO`, `UAS_FLEET`, `UAS_ROLES`, `CONOPS`, `UAS_ACTIVE`, `UAS_STREAMS`, `AIRFRAME`, `COMPOSE_PROFILES`, `GZ_GUI`, `SIM_SPEED_FACTOR` and `VIDEO_SCALED_ENCODER` beat `.env` for one run |
 | `/etc/environment` | `UAS_NUM` on the aircraft, through compose. `.env` never carries it |
 | `scripts/ds-select.sh` | the DeepStream release, the image, the tag and the TensorRT, resolved on every run |
 | `.origin.env` | the coordinates of the scene and the scenario, in the simulator |
@@ -52,17 +52,19 @@ on the command line.
 1. A `.env` where `COMPOSE_PROFILES` and `UAS_BASE` describe different worlds.
    Every command stops, except `help`, `doctor`, `check`, `x11`, `setup`,
    `stop`, `clean`, `clean-src` and `nuke`.
-2. On a real machine, the commands that fly the simulator: `core`, `fly`,
+2. A `CONOPS` other than `option1` or `option2`, or a `UAS_ROLES` list that
+   does not give every vehicle either `search` or `assess`.
+3. On a real machine, the commands that fly the simulator: `core`, `fly`,
    `place`, `fiducial`, `reset`, `px4`, `console`, `snap`, and `uas <N> arm`,
    `takeoff`, `land` and `goto`. Each one exits 1 and prints `Nothing was
    sent.`
-2b. On an aircraft, the commands that work on a scene: `scene`, `scenario` and
+4. On an aircraft, the commands that work on a scene: `scene`, `scenario` and
    `genscene`. A scene is map data, so the ground station builds and selects
    one the way the simulator does. The aircraft reads the scene it is given.
-3. On a real machine, the commands that maintain the simulator: `setup`,
+5. On a real machine, the commands that maintain the simulator: `setup`,
    `clean-src`, `nuke`, `fleet add` and `fleet remove`. Each one exits 1 and
    prints `Nothing was changed.`
-4. `router` on a real machine. The real router is native:
+6. `router` on a real machine. The real router is native:
    `systemctl status mavlink-router`.
 
 `verify` is not refused. It runs the stages this machine's world can answer and

@@ -18,12 +18,12 @@ cd "$(dirname "$(readlink -f "$0")")/.."
 # this a stage measures the built-in defaults and reports on a fleet that is
 # not flying.
 if [ -f .env ]; then
-	for name in SCENE SCENARIO UAS_FLEET UAS_STREAMS UAS_ZOOM; do
+	for name in SCENE SCENARIO UAS_FLEET UAS_ROLES CONOPS UAS_STREAMS UAS_ZOOM; do
 		if [ -n "${!name+set}" ]; then eval "override_$name=\$$name"; fi
 	done
 	# shellcheck disable=SC1091
 	set -a; . ./.env; set +a
-	for name in SCENE SCENARIO UAS_FLEET UAS_STREAMS UAS_ZOOM; do
+	for name in SCENE SCENARIO UAS_FLEET UAS_ROLES CONOPS UAS_STREAMS UAS_ZOOM; do
 		holder="override_$name"
 		if [ -n "${!holder+set}" ]; then export "$name=${!holder}"; fi
 	done

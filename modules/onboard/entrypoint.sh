@@ -41,6 +41,32 @@ if [ "${SIM}" = true ]; then
 	esac
 fi
 
+# Mission configuration comes from the frontend for both simulated and real
+# vehicles. UAS_ROLES follows UAS_FLEET's slot order; ROLE is an escape hatch
+# for one machine, matching MODEL/UAS_MODEL above.
+if [ -z "${UAS_BASE:-}" ]; then
+	if [ "${SIM}" = true ]; then UAS_BASE=10; else UAS_BASE=0; fi
+fi
+UAS_ROLES=${UAS_ROLES:-"assess assess search search"}
+read -r -a _roles <<< "${UAS_ROLES}"
+SLOT=$((UAS_NUM - UAS_BASE - 1))
+[ "${SLOT}" -ge 0 ] || {
+	echo "uas${UAS_NUM} is before UAS_BASE=${UAS_BASE}; cannot select its mission role." >&2
+	exit 1
+}
+ROLE=${ROLE:-${_roles[$SLOT]:-}}
+case "${ROLE}" in
+search|assess) ;;
+"") echo "uas${UAS_NUM} has no entry in UAS_ROLES ('${UAS_ROLES}')." >&2; exit 1 ;;
+*) echo "uas${UAS_NUM} has invalid role '${ROLE}'; use search or assess." >&2; exit 1 ;;
+esac
+
+CONOPS=${CONOPS:-option1}
+case "${CONOPS}" in
+option1|option2) ;;
+*) echo "CONOPS must be option1 or option2, not '${CONOPS}'." >&2; exit 1 ;;
+esac
+
 expected_ros_domain=$((60 + UAS_NUM))
 # Compose receives the declared value from the aircraft's .env so `docker
 # inspect` and PID 1 agree.  Do not silently correct a stale deployment: ROS
@@ -287,6 +313,8 @@ if [ "${1:-launch}" = "launch" ]; then
 	launch=(ros2 launch umd_uas onboard.launch.py
 		uas:="${UAS_NUM}"
 		${MODEL:+model:="${MODEL}"}
+		role:="${ROLE}"
+		conops:="${CONOPS}"
 		sim:="${SIM}"
 		truth:="${TRUTH}"
 		bench:="${BENCH_MODE:-false}"

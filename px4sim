@@ -63,7 +63,7 @@ ALL_PROFILES=$(sed -n 's/^[[:space:]]*profiles:[[:space:]]*\[\(.*\)\][[:space:]]
 # select one run, so `SCENE=forest ./px4sim restart` flies another world once
 # and changes no file. The list is short on purpose: a shell that already
 # exports SCENE must not quietly change what everything else does.
-OVERRIDABLE="SCENE SCENARIO UAS_FLEET UAS_ACTIVE UAS_STREAMS AIRFRAME COMPOSE_PROFILES
+OVERRIDABLE="SCENE SCENARIO UAS_FLEET UAS_ROLES CONOPS UAS_ACTIVE UAS_STREAMS AIRFRAME COMPOSE_PROFILES
              GZ_GUI SIM_SPEED_FACTOR VIDEO_SCALED_ENCODER"
 for name in $OVERRIDABLE; do
 	if [ -n "${!name+set}" ]; then
@@ -199,6 +199,19 @@ unit_owns_stack() { [ -z "${INVOCATION_ID:-}" ] && systemctl is-active --quiet o
 # and the real fleet through the sim profiles would number a vehicle 11.
 # `start` runs this again after a profile list on the command line.
 check_mode() {
+	case "${CONOPS:-option1}" in
+	option1|option2) ;;
+	*) die "CONOPS must be option1 or option2, not '${CONOPS}'." ;;
+	esac
+	local n role
+	for n in $(fleet_numbers); do
+		role=$(role_of "$n")
+		case "$role" in
+		search|assess) ;;
+		"") die "UAS_ROLES has no entry for uas$n. Give one role per UAS_FLEET entry." ;;
+		*) die "uas$n has invalid role '$role' in UAS_ROLES; use search or assess." ;;
+		esac
+	done
 	if real_profiles_selected && [ "$FLEET_IS_SIMULATED" = true ]; then
 		die "COMPOSE_PROFILES ('${COMPOSE_PROFILES:-}') selects the real ground or the aircraft,
     and UAS_BASE=$UAS_BASE numbers a simulated fleet. Set UAS_BASE=0 in .env. See .env.example."
@@ -777,6 +790,8 @@ usage() {
 		footer="  Current: fleet ${UAS_FLEET:-?}, uas$FIRST_UAS at $(uas_address "$FIRST_UAS")
            this ground station is $(ground_address), on ROS domain $GROUND_DOMAIN" ;;
 	esac
+	footer="$footer
+           roles ${UAS_ROLES:-?}, conops ${CONOPS:-option1}"
 	cat <<EOF
 ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
 
@@ -1355,6 +1370,7 @@ restart|start|up|core)
 	fi
 	say "Restarting: $COMPOSE_PROFILES"
 	echo "  fleet ${UAS_FLEET:-?}"
+	echo "  roles ${UAS_ROLES:-?}, conops ${CONOPS:-option1}"
 	if [ "$FLEET_IS_SIMULATED" = true ]; then
 		if [ -n "${HOME_LAT:-}" ]; then
 			echo "  scene ${SCENE:-?}, scenario ${SCENARIO:-?}, origin $HOME_LAT, $HOME_LON"

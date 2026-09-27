@@ -183,6 +183,9 @@ x-onboard-env: &onboard-env
   UAS_BASE: ${UAS_BASE:-10}
   # One source of truth for the airframe of each vehicle. See modules/onboard/entrypoint.sh.
   UAS_FLEET: ${UAS_FLEET:-chimera_v3 chimera_v3 chimera_v2 chimera_v2}
+  # Mission configuration follows the same fleet-slot contract as UAS_FLEET.
+  UAS_ROLES: ${UAS_ROLES:-assess assess search search}
+  CONOPS: ${CONOPS:-option1}
   # The same list the simulator renders with. cam_info needs the calibration of
   # the camera that really produced the picture, and a simulated camera's is its
   # field of view. See modules/onboard/sim_calibration.py.
@@ -745,6 +748,9 @@ services:
       # A real deployment has one airframe. Pass its declared model through
       # to onboard.launch.py instead of inferring it from a fleet slot.
       MODEL: ${UAS_MODEL:-}
+      # Optional per-aircraft override. Otherwise entrypoint.sh selects this
+      # UAS_NUM's entry from UAS_ROLES, just as it does for the simulated fleet.
+      ROLE: ${UAS_ROLE:-}
       # The scene the ground station draws, so the vehicle casts at the
       # surface the ground casts at. The dash form keeps an empty value
       # empty, the way `ground` reads it: SCENE= on a bench leaves both

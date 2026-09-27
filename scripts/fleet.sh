@@ -94,6 +94,16 @@ mark_of() {
 	*_v2) echo v2 ;;
 	esac
 }
+# Mission roles use the same positional contract as UAS_FLEET. Unlike the
+# airframe model, a role controls mission behavior rather than simulation
+# geometry, so both simulated and real vehicles consume this list.
+# shellcheck disable=SC2206
+ROLE_CHOICE=(${UAS_ROLES:-assess assess search search})
+role_of() {
+	local slot=$(( ${1:-0} - UAS_BASE - 1 ))
+	[ "$slot" -ge 0 ] && echo "${ROLE_CHOICE[$slot]:-}"
+	return 0
+}
 # The full rate gimbal stream, which the detector reads on the vehicle.
 gimbal_stream() {
 	case "$(mark_of "$1")" in
