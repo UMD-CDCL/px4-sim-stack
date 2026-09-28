@@ -203,9 +203,11 @@ x-onboard-env: &onboard-env
   UAS_THERMAL_HFOV_DEG: ${UAS_THERMAL_HFOV_DEG:-29.75 29.75 31.03 29.75}
   <<: *gpu-env
   RTSP_BASE: rtsp://video-router:8554
-  # Contract section 2. MAVROS binds 14402 and answers whoever reaches it, so
-  # the router pushes and MAVROS never dials out.
-  FCU_URL: ${FCU_URL:-udp://:14402@:14550}
+  # Contract section 2. MAVROS binds 14402; the companion router's PX4-facing
+  # UDP listener is 14545. 14550 is QGroundControl's listener and must not be
+  # used as MAVROS' FCU destination: MAVROS sends mission pull/ack traffic to
+  # the FCU, while the router separately forwards vehicle traffic to QGC.
+  FCU_URL: ${FCU_URL:-udp://:14402@:14545}
   CUDA_CACHE_PATH: /models/.nv-compute
   SCENE: ${SCENE:-lorton}
   # What sim_ground_truth scores against, the same pair the ground station
