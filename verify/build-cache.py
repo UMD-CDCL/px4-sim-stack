@@ -15,7 +15,7 @@ import time
 
 
 ROOT = Path(__file__).resolve().parents[1]
-STAGES = {"px4_msgs", "cdcl_umd_msgs", "mavinsight", "umd_uas", "mavros", "parser"}
+STAGES = {"cdcl_umd_msgs", "mavinsight", "umd_uas", "mavros", "parser"}
 
 
 def main():
@@ -39,7 +39,7 @@ def main():
             "image": image,
             "build": {"additional_contexts": {
                 f"{name}_src": str(contexts / name)
-                for name in ("px4_msgs", "cdcl_umd_msgs", "mavinsight", "umd_uas",
+                for name in ("cdcl_umd_msgs", "mavinsight", "umd_uas",
                              "mavros", "angles", "mavros_patch", "yolo")
             }},
         }}}))
@@ -88,10 +88,10 @@ def main():
             subprocess.run([
                 "docker", "run", "--rm", "--network", "none", "--entrypoint", "bash", image,
                 "-ec", ". /usr/local/bin/ros-env.sh; "
-                "for p in px4_msgs cdcl_umd_msgs mavinsight umd_uas mavros; do ros2 pkg prefix $p; done; "
+                "for p in cdcl_umd_msgs mavinsight umd_uas mavros; do ros2 pkg prefix $p; done; "
                 "python3 -c 'import umd_uas, mavinsight, models; "
                 "from rosidl_generator_py import import_type_support; "
-                "import_type_support(\"px4_msgs\"); import_type_support(\"cdcl_umd_msgs\")'"
+                "import_type_support(\"cdcl_umd_msgs\")'"
             ], check=True)
             print("PASS assembled ROS environment and native message type support offline", flush=True)
         finally:

@@ -537,7 +537,7 @@ to, so this floor belongs to the simulator alone.
 
 ## The flight code
 
-5g_drone, MAVInsight, px4_msgs and cdcl_umd_msgs are local checkouts under
+5g_drone, MAVInsight and cdcl_umd_msgs are local checkouts under
 `ROS2_WS_DIR/src`. Run `./px4sim prepare` once online to prepare dependency
 images. Each ROS package then builds independently without network access.
 `restart` builds successfully before stopping the current containers:

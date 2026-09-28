@@ -7,12 +7,10 @@ external parent images locally and prepares scenegen on non-aircraft machines.
 It does not start or stop containers. It also stages local sources; install `rsync` on
 the host and populate these checkouts first:
 
-- `ROS2_WS_DIR/src/{5g_drone,MAVInsight,px4_msgs,cdcl_umd_msgs}`
+- `ROS2_WS_DIR/src/{5g_drone,MAVInsight,cdcl_umd_msgs}`
 - `CHIMERA_DEPLOY_DIR/remote/mavros_patch`
 - `CHIMERA_DEPLOY_DIR/submodules/{mavros,angles}`
 
-`px4_msgs` now comes from your local checkout, including local edits, rather
-than a network clone of `main`. Select the intended revision there explicitly.
 
 ## Daily commands
 
@@ -35,7 +33,6 @@ preparation instruction instead of an automatic pull.
 |---|---|
 | 5g_drone Python/config/launch | `umd_uas` packaging and image assembly |
 | MAVInsight Python/resources | `mavinsight` packaging and image assembly |
-| px4_msgs | That message package and image assembly |
 | cdcl_umd_msgs | That message package and image assembly |
 | MAVROS/angles/patch | Patched MAVROS overlay and image assembly |
 | YOLO parser source | Parser, owning `umd_uas` package, and image assembly |

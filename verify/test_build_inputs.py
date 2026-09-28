@@ -33,8 +33,6 @@ class BuildInputs(unittest.TestCase):
                 "5g_drone/config/deepstream/nvdsinfer_custom_impl_Yolo/Makefile": "all:\n",
                 "MAVInsight/models/vehicle.py": "# actual Python code\n",
                 "MAVInsight/resource/mesh.stl": "installed mesh",
-                "px4_msgs/msg/Example.msg": "float32 x\n",
-                "px4_msgs/README.md": "message documentation",
                 "cdcl_umd_msgs/msg/Example.msg": "float32 y\n",
             }
             for name, content in sources.items():
@@ -58,7 +56,6 @@ class BuildInputs(unittest.TestCase):
             self.assertFalse(any("perception_models" in p or ".git" in p or "/build/" in p for p in before))
             (ws / "src/5g_drone/perception_models/a.onnx").write_text("new weights")
             (ws / "src/5g_drone/.git/index").write_text("new git state")
-            (ws / "src/px4_msgs/README.md").write_text("updated message documentation")
             self.assertEqual(stage(), before)
             # General inference edits cannot change the extracted CUDA input.
             config = ws / "src/5g_drone/umd_uas/ds_ros_pipeline/infer_configs.py"

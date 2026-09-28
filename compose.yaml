@@ -341,7 +341,6 @@ services:
       network: none
       additional_contexts:
         # scripts/build-contexts.sh stages these small, filtered inputs.
-        px4_msgs_src: ./.build-contexts/px4_msgs
         cdcl_umd_msgs_src: ./.build-contexts/cdcl_umd_msgs
         mavinsight_src: ./.build-contexts/mavinsight
         umd_uas_src: ./.build-contexts/umd_uas
