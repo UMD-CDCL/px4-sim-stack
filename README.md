@@ -160,10 +160,10 @@ The first `./px4sim restart` builds PX4 inside the sim container. That takes 10 
 20 minutes and happens once, because the build output lands in
 `./src/PX4-Autopilot` on the host. Watch it with `./px4sim logs sim`.
 
-The onboard and offboard images build 5g_drone, MAVInsight, cdcl_umd_msgs and
-px4_msgs from local checkouts under `ROS2_WS_DIR/src`. Each package builds in
-its own stage, so a Python edit does not rebuild messages or the other Python
-package. `./px4sim restart` builds source changes with networking disabled
+The onboard and offboard images build 5g_drone, MAVInsight and cdcl_umd_msgs
+from local checkouts under `ROS2_WS_DIR/src`. Each package builds in its own
+stage, so a Python edit does not rebuild messages or the other Python package.
+`./px4sim restart` builds source changes with networking disabled
 before stopping the existing containers. `./px4sim build` builds without
 restarting; `./px4sim restart --no-build` restarts existing images only.
 

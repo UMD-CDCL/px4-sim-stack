@@ -453,7 +453,7 @@ else
 	note "$ws/src/5g_drone missing. The onboard and offboard images build it.
         Check it out, or set ROS2_WS_DIR in .env."
 fi
-for package in MAVInsight px4_msgs cdcl_umd_msgs; do
+for package in MAVInsight cdcl_umd_msgs; do
 	[ -f "$ws/src/$package/package.xml" ] \
 		|| note "$ws/src/$package/package.xml missing. Offline builds use this local checkout."
 done

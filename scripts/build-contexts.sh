@@ -67,7 +67,7 @@ stage tracking_test "$ws/src/tracking_test_5g" \
     --include='/models/***' \
     --include='/resource/***' --include='/setup.*' --include='/package.xml' \
     --include='/pyproject.toml' --include='/LICENSE*' --exclude='*'
-for package in px4_msgs cdcl_umd_msgs; do
+for package in cdcl_umd_msgs; do
     stage "$package" "$ws/src/$package" \
         --include='/msg/***' --include='/srv/***' --include='/action/***' \
         --include='/cmake/***' --include='/CMakeLists.txt' --include='/package.xml' \

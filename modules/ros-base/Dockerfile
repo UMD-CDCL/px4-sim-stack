@@ -27,20 +27,6 @@ RUN --network=none \
             bash /tmp/chimera-deploy/remote/mavros_patch/apply.sh; \
     fi
 
-FROM deps AS px4_msgs
-ARG TARGETARCH
-ARG DS_TAG
-ARG ROS_BUILD_JOBS=4
-WORKDIR /home/user/ros2_ws
-COPY --from=px4_msgs_src / src/px4_msgs/
-RUN --network=none \
-    --mount=type=cache,id=ros-ccache-px4-msgs-${DS_TAG}-${TARGETARCH},target=/root/.cache/ccache,sharing=locked \
-    . /opt/ros/${ROS_DISTRO}/setup.sh \
-    && MAKEFLAGS="-j${ROS_BUILD_JOBS}" colcon build --executor sequential \
-       --packages-select px4_msgs \
-       --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
-                    -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-
 FROM deps AS cdcl_umd_msgs
 ARG TARGETARCH
 ARG DS_TAG
@@ -100,7 +86,6 @@ ARG HOST_GID=1000
 ARG USERNAME=user
 # Each prefix is isolated. The root colcon setup utilities discover the union
 # of installed package markers and order runtime dependencies when sourced.
-COPY --link --from=px4_msgs /home/user/ros2_ws/install/ /home/user/ros2_ws/install/
 COPY --link --from=mavros /opt/mavros/install/ /opt/mavros/install/
 COPY --link --from=parser /out/libnvdsinfer_custom_impl_Yolo.so /opt/ds-yolo/libnvdsinfer_custom_impl_Yolo.so
 COPY --link --from=cdcl_umd_msgs /home/user/ros2_ws/install/ /home/user/ros2_ws/install/
