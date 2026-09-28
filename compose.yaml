@@ -1011,6 +1011,9 @@ services:
       # configured host workspace at the same absolute path in the container
       # so `--casualties /home/user/ros2_ws/...` works through the front door.
       - ${ROS2_WS_DIR:-../ros2_ws}:/home/user/ros2_ws:ro
+      # Keep the conventional download location visible too; this lets the
+      # front door accept exported files such as /home/user/Downloads/*.json.
+      - ${CASUALTY_DIR:-/home/user/Downloads}:/home/user/Downloads:ro
     # The editor, published to this host, which is how `genscene edit` reaches
     # it. No simnet: the generator downloads map data and writes files, and it
     # runs on a real ground station too, where creating the fleet network

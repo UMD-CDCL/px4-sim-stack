@@ -336,7 +336,14 @@ def import_casualty_file(scene: SceneSpec, path: Path) -> tuple[int, int]:
     ``gt_casualty_locations`` entries hold coordinates under ``position``
     and an optional ``casualty_id`` used for the target name.
     """
-    data = yaml.safe_load(path.read_text())
+    # Ground-truth exports are JSON, while the small hand-authored import
+    # files are usually YAML.  JSON is valid YAML too, but using the JSON
+    # decoder for .json files gives clearer errors and makes this importer
+    # intentionally compatible with the simulator's exported file format.
+    if path.suffix.lower() == ".json":
+        data = json.loads(path.read_text())
+    else:
+        data = yaml.safe_load(path.read_text())
     entries = data.get("casualties", data) if isinstance(data, dict) else data
     gt_locations = (data.get("gt_casualty_locations")
                     if isinstance(data, dict) else None)
