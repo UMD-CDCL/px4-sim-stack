@@ -211,8 +211,8 @@ RUN set -eux; \
       --base-paths /tmp/rosbag2_storage_mcap \
       --install-base /opt/ros/${ROS_DISTRO} \
       --build-base /tmp/rosbag2_storage_mcap-build \
-      --packages-select mcap_vendor rosbag2_storage_mcap_testdata \
-      --cmake-args -DCMAKE_BUILD_TYPE=Release; \
+      --packages-select mcap_vendor rosbag2_storage_mcap_testdata rosbag2_test_common \
+      --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF; \
     set +u; . /opt/ros/${ROS_DISTRO}/setup.sh; set -u; \
     colcon build --merge-install \
       --base-paths /tmp/rosbag2_storage_mcap \
