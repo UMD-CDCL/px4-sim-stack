@@ -67,16 +67,77 @@ FLEET_PREFIX=${FLEET_PREFIX:-10.200.142}
 SIMNET_PREFIX=${SIMNET_PREFIX:-10.200.142}
 # The ground station's domain follows the fleet: 70 beside a simulated fleet,
 # 60 beside the real one, so a simulator and the fleet never discover each
-# other. modules/offboard/entrypoint.sh derives the same number.
-GROUND_DOMAIN=${GROUND_DOMAIN:-$((60 + UAS_BASE))}
+# other. modules/offboard/entrypoint.sh derives the same number, and compose
+# pins the real ground to 60. It is derived, never read from .env: a value
+# pinned there for the real ground would put a simulated ground station on
+# the real fleet's domain after `./px4sim mode sim`. px4sim warns about one.
+GROUND_DOMAIN_IGNORED=
+if [ -n "${GROUND_DOMAIN:-}" ] && [ "$GROUND_DOMAIN" != "$((60 + UAS_BASE))" ]; then
+	GROUND_DOMAIN_IGNORED=$GROUND_DOMAIN
+fi
+GROUND_DOMAIN=$((60 + UAS_BASE))
 
 fleet_numbers() { seq "$FIRST_UAS" "$LAST_UAS"; }
+
+# The real fleet is the reference. A setting that names vehicles (UAS_ACTIVE,
+# MOSAIC_UAS) names them by their real numbers, 1 to 9, and means the same
+# vehicle in either world: 3 is uas3 on the real ground and uas13 in the
+# simulator. A simulator number (11 to 19) is accepted in either world too,
+# so a file written by an older front door keeps working. Prints this
+# world's number, or fails for a word that names no vehicle of this fleet.
+fleet_number() { # <word>
+	local n=$1
+	case "$n" in '' | *[!0-9]*) return 1 ;; esac
+	n=$((10#$n))
+	if [ "$n" -ge 1 ] && [ "$n" -le "$UAS_COUNT" ]; then
+		echo $((UAS_BASE + n))
+	elif [ "$n" -ge 11 ] && [ "$n" -le $((10 + UAS_COUNT)) ]; then
+		echo $((UAS_BASE + n - 10))
+	else
+		return 1
+	fi
+}
+# The number the real fleet gives the same vehicle: what a setting stores.
+real_number() { echo $(( $1 - UAS_BASE )); }
+
+# The vehicles UAS_ACTIVE selects, in this world's numbers and fleet order.
+# Empty selects the whole fleet.
 active_uas() {
-	local n active=${UAS_ACTIVE:-}
-	for n in $(fleet_numbers); do
-		[ -z "$active" ] && { echo "$n"; continue; }
-		case ",${active// /,}," in *",$n,"*) echo "$n" ;; esac
+	local n word wanted=" "
+	if [ -z "${UAS_ACTIVE:-}" ]; then fleet_numbers; return 0; fi
+	for word in ${UAS_ACTIVE//,/ }; do
+		n=$(fleet_number "$word") && wanted+="$n "
 	done
+	for n in $(fleet_numbers); do
+		case "$wanted" in *" $n "*) echo "$n" ;; esac
+	done
+}
+# The UAS_ACTIVE words that name no vehicle of this fleet, for the refusal
+# that keeps a mistyped selection from being read as "no selection".
+unknown_active_words() {
+	local word
+	for word in ${UAS_ACTIVE//,/ }; do
+		fleet_number "$word" >/dev/null || printf '%s ' "$word"
+	done
+}
+# The vehicle whose mosaic the ground station paints, in this world's
+# numbers. Empty lets offboard.launch.py take the lowest active vehicle, and
+# so does a MOSAIC_UAS that names a vehicle not flying now (mosaic_note says
+# which): the ground station must come up whichever vehicles are active.
+mosaic_uas() {
+	local n
+	[ -n "${MOSAIC_UAS:-}" ] || return 0
+	n=$(fleet_number "$MOSAIC_UAS") || return 0
+	case " $(active_uas | tr '\n' ' ') " in *" $n "*) echo "$n" ;; esac
+}
+mosaic_note() {
+	local n
+	[ -n "${MOSAIC_UAS:-}" ] || return 0
+	if ! n=$(fleet_number "$MOSAIC_UAS"); then
+		echo "MOSAIC_UAS=$MOSAIC_UAS names no vehicle of this fleet; the lowest active vehicle paints the mosaic."
+	elif [ -z "$(mosaic_uas)" ]; then
+		echo "MOSAIC_UAS=$MOSAIC_UAS (uas$n) is not active; the lowest active vehicle paints the mosaic."
+	fi
 }
 
 # The airframe of one vehicle, and what it serves. The mark decides the stream

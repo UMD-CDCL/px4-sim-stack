@@ -187,6 +187,22 @@ resolve_origin
 # commands below hand it to `docker exec` as ROS_DOMAIN_ID. Unset, that exec
 # gets an empty string, which rmw reads as domain 0.
 export GROUND_DOMAIN
+if [ -n "$GROUND_DOMAIN_IGNORED" ]; then
+	warn "GROUND_DOMAIN=$GROUND_DOMAIN_IGNORED in .env is ignored: this world's ground station is"
+	warn "domain $GROUND_DOMAIN (60 + UAS_BASE). Delete the line from .env."
+fi
+# .env names vehicles by their real numbers, and the containers take this
+# world's numbers. Hand them the resolved ones, so uas3 in the file is uas13
+# in the simulator, and a vehicle that is not flying never paints the mosaic
+# (the ground station refuses to start on one). check_mode refuses a
+# selection that names no vehicle of this fleet, before anything reads it.
+if [ -n "${UAS_ACTIVE:-}" ] && [ -n "$(active_uas)" ]; then
+	UAS_ACTIVE=$(active_uas | paste -sd' ' -)
+	export UAS_ACTIVE
+fi
+MOSAIC_UAS_SETTING=${MOSAIC_UAS:-}
+MOSAIC_UAS=$(mosaic_uas)
+export MOSAIC_UAS
 # shellcheck disable=SC1091
 . ./scripts/zoom.sh
 
@@ -212,6 +228,13 @@ check_mode() {
 		*) die "uas$n has invalid role '$role' in UAS_ROLES; use search or assess." ;;
 		esac
 	done
+	local unknown
+	unknown=$(unknown_active_words)
+	if [ -n "$unknown" ]; then
+		die "UAS_ACTIVE names ${unknown% }, which is not in this fleet of $UAS_COUNT.
+    Name vehicles by their real numbers, 1 to $UAS_COUNT, or leave it empty for all:
+    ./px4sim active 1 3"
+	fi
 	if real_profiles_selected && [ "$FLEET_IS_SIMULATED" = true ]; then
 		die "COMPOSE_PROFILES ('${COMPOSE_PROFILES:-}') selects the real ground or the aircraft,
     and UAS_BASE=$UAS_BASE numbers a simulated fleet. Set UAS_BASE=0 in .env. See .env.example."
@@ -241,16 +264,14 @@ bench_mode() {
 	if [ "$1" = enable ]; then
 		[ "${2:-}" = "ENABLE BENCH MODE" ] || \
 			die "Enabling GPS-free bench mode requires the exact phrase: ENABLE BENCH MODE"
-		if grep -q '^BENCH_MODE=' .env; then
-			sed -i 's/^BENCH_MODE=.*/BENCH_MODE=true/' .env
-		else
-			printf '\nBENCH_MODE=true\n' >> .env
+		# The bench flies the UROC reference. Keep the scene it replaces, so
+		# disabling gives the operator's scene back instead of leaving UROC.
+		if [ "${BENCH_MODE:-false}" != true ] && [ "${SCENE:-}" != uroc ]; then
+			env_set BENCH_PREVIOUS_SCENE "${SCENE:-}"
 		fi
-		if grep -q '^SCENE=' .env; then
-			sed -i 's/^SCENE=.*/SCENE=uroc/' .env
-		else
-			printf 'SCENE=uroc\n' >> .env
-		fi
+		env_set BENCH_MODE true
+		env_set SCENE uroc
+		local setting
 		for setting in \
 			'BENCH_HOME_LAT=38.313294' \
 			'BENCH_HOME_LON=-76.55221' \
@@ -258,55 +279,61 @@ bench_mode() {
 			'BENCH_FIDUCIAL_LAT=38.3133004' \
 			'BENCH_FIDUCIAL_LON=-76.5522071' \
 			'BENCH_FIDUCIAL_ALT=8.1232'; do
-			key=${setting%%=*}
-			if grep -q "^${key}=" .env; then
-				sed -i "s/^${key}=.*/${setting}/" .env
-			else
-				printf '%s\n' "${setting}" >> .env
-			fi
+			env_set "${setting%%=*}" "${setting#*=}"
 		done
 		say "GPS-free BENCH MODE enabled. It is not safe for flight."
 		say "Bench reference: UROC home and fiducial; terrain: SCENE=uroc."
 		say "Restart through ./px4sim ui or ./px4sim restart, then disable before flight."
 	else
-		if grep -q '^BENCH_MODE=' .env; then
-			sed -i 's/^BENCH_MODE=.*/BENCH_MODE=false/' .env
-		else
-			printf '\nBENCH_MODE=false\n' >> .env
+		env_set BENCH_MODE false
+		if [ -n "${BENCH_PREVIOUS_SCENE:-}" ] && [ "${SCENE:-}" = uroc ]; then
+			env_set SCENE "$BENCH_PREVIOUS_SCENE"
+			say "Scene restored to '$BENCH_PREVIOUS_SCENE'."
 		fi
+		env_set BENCH_PREVIOUS_SCENE ""
 		say "GPS-free BENCH MODE disabled."
 	fi
 }
 
+# Move this machine between the simulator and the real ground station. Only
+# the world changes: the profiles, UAS_BASE, and the domain that follows it.
+# Everything that describes the mission -- the scene, the scenario, the
+# fleet, the roles, the conops, which vehicles fly and which paints the
+# mosaic -- belongs to the real fleet and carries across unchanged, so the
+# simulator rehearses exactly what the field will fly. UAS_ACTIVE and
+# MOSAIC_UAS are rewritten in the real numbers they mean in both worlds.
+# The aircraft is one vehicle and never changes world.
 mode_switch() {
-	case "${1:-}" in
-		sim)
-			[ "$FLEET_IS_SIMULATED" = false ] || die "Already in simulator mode"
-			;;
-		real)
-			[ "$FLEET_IS_SIMULATED" = true ] || die "Already in real ground-station mode"
-			;;
-		*) die "Use: ./px4sim mode sim|real" ;;
+	aircraft_selected && die "This machine is an aircraft. Its world is fixed; mode is for a ground station."
+	local mode=${1:-} profiles base word numbers="" n
+	case "$mode" in
+	sim)  [ "$FLEET_IS_SIMULATED" = false ] || die "Already in simulator mode"
+	      profiles=sim,offboard base=10 ;;
+	real) [ "$FLEET_IS_SIMULATED" = true ] || die "Already in real ground-station mode"
+	      profiles=ground base=0 ;;
+	*)    die "Use: ./px4sim mode sim|real" ;;
 	esac
-
-	local mode=$1
-	local profiles base scene scenario active
-	if [ "$mode" = sim ]; then
-		profiles=sim,offboard base=10 scene=lorton scenario=lorton_casualties active="11 13"
-	else
-		profiles=ground base=0 scene=uroc scenario=uroc_casualties active="1 3"
-	fi
 	if [ -n "$(COMPOSE_PROFILES="$ALL_PROFILES" $DC ps --status running -q 2>/dev/null)" ]; then
 		die "Stop the stack before changing mode: ./px4sim stop"
 	fi
-	sed -i \
-		-e "s/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=$profiles/" \
-		-e "s/^UAS_BASE=.*/UAS_BASE=$base/" \
-		-e "s/^SCENE=.*/SCENE=$scene/" \
-		-e "s/^SCENARIO=.*/SCENARIO=$scenario/" \
-		-e "s/^UAS_ACTIVE=.*/UAS_ACTIVE=\"$active\"/" .env
+	# Read the selections from the file, not the resolved values above.
+	local active_setting mosaic_setting
+	active_setting=$(set -a; . ./.env >/dev/null 2>&1; printf '%s' "${UAS_ACTIVE:-}")
+	mosaic_setting=$(set -a; . ./.env >/dev/null 2>&1; printf '%s' "${MOSAIC_UAS:-}")
+	for word in ${active_setting//,/ }; do
+		n=$(fleet_number "$word") && numbers+="$(real_number "$n") "
+	done
+	env_set COMPOSE_PROFILES "$profiles"
+	env_set UAS_BASE "$base"
+	grep -q '^[[:space:]]*GROUND_DOMAIN=' .env && env_set GROUND_DOMAIN "$((60 + base))"
+	[ -z "$active_setting" ] || env_set UAS_ACTIVE "${numbers% }"
+	if [ -n "$mosaic_setting" ] && n=$(fleet_number "$mosaic_setting"); then
+		env_set MOSAIC_UAS "$(real_number "$n")"
+	fi
 	say "Switched to $mode mode"
-	say "Configuration: COMPOSE_PROFILES=$profiles UAS_BASE=$base"
+	echo "  COMPOSE_PROFILES=$profiles UAS_BASE=$base, ground domain $((60 + base))"
+	echo "  kept: scene ${SCENE:-unset}, scenario ${SCENARIO:-unset}, fleet ${UAS_FLEET:-default}"
+	echo "        active ${numbers:+${numbers% }}${numbers:-all}, mosaic ${mosaic_setting:-lowest active}, conops ${CONOPS:-option1}"
 }
 
 # The ROS domain a reader answers on. The ground station joins every vehicle's
@@ -821,6 +848,10 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     bench disable       Stop the stack, then disable bench reference before flight
     mode sim|real       Switch this machine between simulator and real ground station
     conops <option>     Select option1 or option2 and restart the onboard stack
+    active [N...]       Fly only these vehicles, by real number (1 3); none flies all
+    mosaic [N|lowest]   Which vehicle paints the ground mosaic, then restart
+    mode sim|real       Move a ground station between the simulator and the field;
+                        scene, scenario, fleet and selections carry over
     fleet               Every vehicle: model, address, ports, domain, streams
     logs [opts] [svc]   Follow the logs. \`logs --since 5m $sample\` reads back.
 
@@ -978,12 +1009,18 @@ fleet_facts() {
 		capture_kinds=$(echo "$CAPTURE_KINDS" | tr ' ' ',')
 		models=$(fleet_models | paste -sd, -)
 		scenarios=$(scenario_names | paste -sd, -)
-		active=${UAS_ACTIVE:-}
+		active=$(active_uas | paste -sd, -)
+		fleet_numbers=$(fleet_numbers | paste -sd, -)
+		mosaic=${MOSAIC_UAS:-}
+		mosaic_setting=${MOSAIC_UAS_SETTING:-}
+		mosaic_choices=$({ echo lowest; active_uas; } | paste -sd, -)
 		conops=${CONOPS:-option1}
 		declared=$(printf '%s\n' "$COMPOSE_SERVICES" | paste -sd, -)
 		expected=$($DC config --services 2>/dev/null | paste -sd, -)
 	EOF
-	for n in $(active_uas); do
+	local selected
+	selected=" $(active_uas | tr '\n' ' ') "
+	for n in $(fleet_numbers); do
 		companion=$(has_service "$(companion_service "$n")" && companion_service "$n" || true)
 	# On a real ground station all vehicles share this host's native
 	# mavlink-router TCP server. Their advertised radio addresses are useful
@@ -993,8 +1030,9 @@ fleet_facts() {
 	else
 		link_host=$(uas_address "$n")
 	fi
-	printf 'vehicle n=%s sysid=%s model=%s mark=%s domain=%s tcp=%s gcs=%s foxglove=%s foxglove_url=%s address=%s link_host=%s router=uas%s companion=%s gimbal=%s streams=%s zoom=%s\n' \
-			"$n" "$n" "$(model_of "$n")" "$(mark_of "$n")" "$(uas_domain "$n")" \
+	printf 'vehicle n=%s active=%s sysid=%s model=%s mark=%s domain=%s tcp=%s gcs=%s foxglove=%s foxglove_url=%s address=%s link_host=%s router=uas%s companion=%s gimbal=%s streams=%s zoom=%s\n' \
+			"$n" "$(case "$selected" in *" $n "*) echo 1 ;; *) echo 0 ;; esac)" \
+			"$n" "$(model_of "$n")" "$(mark_of "$n")" "$(uas_domain "$n")" \
 			"$(uas_tcp_port "$n")" "$(uas_gcs_port "$n")" "$(uas_foxglove_port "$n")" \
 			"$(uas_foxglove_url "$n")" "$(uas_address "$n")" "$link_host" "$n" "$companion" "$(gimbal_stream "$n")" \
 			"$(vehicle_streams "$n" | tr ' ' ',' | sed 's/,$//')" \
@@ -1165,14 +1203,29 @@ scenario_scene() {
 	echo "$description"
 }
 
-env_write_selection() {
-	local key=$1 value=$2
-	if grep -q "^[[:space:]]*$key=" .env; then
-		sed -i "s|^[[:space:]]*$key=.*|$key=$value|" .env
-	else
-		printf '%s=%s\n' "$key" "$value" >> .env
+# The one way this script changes .env. It replaces the first line that sets
+# KEY, drops any later ones (the shell reads the last, so a duplicate is a
+# setting that silently wins), appends KEY when it is missing, and leaves
+# every other line, comment and blank as it was. The new file replaces the
+# old in one rename, keeping its owner and mode, so an interrupted write
+# leaves the old file and never half of one.
+env_set() { # KEY VALUE
+	local key=$1 value=$2 line tmp
+	case "$key" in '' | *[!A-Z0-9_]*) die "env_set: '$key' is not a .env name" ;; esac
+	case "$value" in *[\"\\\$\`\']* | *$'\n'*) die "env_set: $key cannot hold '$value'" ;; esac
+	case "$value" in *[[:space:]]*) line="$key=\"$value\"" ;; *) line="$key=$value" ;; esac
+	tmp=$(mktemp .env.XXXXXX) || die "cannot write next to .env"
+	if ! awk -v key="$key" -v line="$line" '
+		$0 ~ "^[[:space:]]*" key "=" { if (!done) print line; done = 1; next }
+		{ print }
+		END { if (!done) print line }' .env > "$tmp"; then
+		rm -f "$tmp"; die "could not rewrite .env"
 	fi
+	chmod --reference=.env "$tmp" 2>/dev/null || true
+	chown --reference=.env "$tmp" 2>/dev/null || true
+	mv -f "$tmp" .env
 }
+env_write_selection() { env_set "$@"; }
 
 push_env_selection_to_drones() {
 	[ $# -gt 0 ] && [ $(( $# % 2 )) -eq 0 ] \
@@ -1257,13 +1310,7 @@ push_env_selection_to_drones() {
 }
 
 # Put the fleet back into .env and leave every other line as it was.
-fleet_write() {
-	if grep -q '^[[:space:]]*UAS_FLEET=' .env; then
-		sed -i "s|^[[:space:]]*UAS_FLEET=.*|UAS_FLEET=\"$1\"|" .env
-	else
-		printf 'UAS_FLEET="%s"\n' "$1" >> .env
-	fi
-}
+fleet_write() { env_set UAS_FLEET "$1"; }
 
 # Add or retire one vehicle, then bring the stack to the new fleet.
 #
@@ -1372,7 +1419,7 @@ cmd=${1:-help}
 # takes every profile down whatever .env says.
 case "$cmd" in
 
-help | -h | --help | doctor | check | x11 | setup | stop | down | clean | clean-src | nuke | conops) ;;
+help | -h | --help | doctor | check | x11 | setup | stop | down | clean | clean-src | nuke | conops | mode) ;;
 *) check_mode ;;
 esac
 
@@ -1455,6 +1502,8 @@ restart|start|up|core)
 		warn "onboard.service already runs this stack. This restart reuses its container."
 	fi
 	say "Restarting: $COMPOSE_PROFILES"
+	note=$(mosaic_note)
+	[ -z "$note" ] || warn "$note"
 	echo "  fleet ${UAS_FLEET:-?}"
 	echo "  roles ${UAS_ROLES:-?}, conops ${CONOPS:-option1}"
 	if [ "$FLEET_IS_SIMULATED" = true ]; then
@@ -1934,13 +1983,31 @@ scenario-select)
 	;;
 
 active)
-	value=${1:-}
-	case "$value" in
-		*[^0-9\ ,]*) die "UAS_ACTIVE must contain vehicle numbers separated by spaces" ;;
-	esac
-	env_write_selection UAS_ACTIVE "${value// /,}"
-	say "Restarting with active vehicles: ${value:-all}"
+	# Vehicles by their real number (1 3) or this world's (11 13); the file
+	# keeps the real ones, which mean the same vehicles in both worlds. No
+	# number selects the whole fleet.
+	numbers=""
+	# shellcheck disable=SC2048
+	for word in ${*//,/ }; do
+		n=$(fleet_number "$word") || die "'$word' is not a vehicle of this fleet: $(fleet_numbers | paste -sd' ' -)"
+		numbers+="$(real_number "$n") "
+	done
+	env_set UAS_ACTIVE "${numbers% }"
+	say "Restarting with active vehicles: ${numbers:+${numbers% }}${numbers:-all}"
 	exec env -u UAS_ACTIVE "$0" restart
+	;;
+
+mosaic)
+	# Which vehicle's mosaic the ground station paints on the scene. `lowest`
+	# (or nothing) leaves it to the lowest active vehicle.
+	[ "$(world_of)" != aircraft ] || die "The aircraft paints no fleet mosaic; select it on the ground station."
+	case "${1:-lowest}" in
+	lowest) env_set MOSAIC_UAS "" ; say "The lowest active vehicle paints the mosaic" ;;
+	*) n=$(fleet_number "$1") || die "'$1' is not a vehicle of this fleet: $(fleet_numbers | paste -sd' ' -)"
+	   env_set MOSAIC_UAS "$(real_number "$n")"
+	   say "uas$n paints the mosaic" ;;
+	esac
+	exec "$0" restart
 	;;
 
 conops)

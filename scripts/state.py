@@ -100,6 +100,30 @@ def read_context(text: str) -> dict:
     return context
 
 
+def active_fleet(context: dict) -> list[dict]:
+    """The vehicles UAS_ACTIVE selects, which are the ones this reads from.
+
+    The front door states every member of the fleet, each with `active`, so
+    the console can list the whole fleet. Only the selected ones are dialled:
+    a vehicle that is not flying must cost no connection and no probe. A
+    front door older than the flag states only active vehicles.
+    """
+    return [vehicle for vehicle in context["fleet"] if vehicle.get("active", 1) == 1]
+
+
+def fleet_rows(context: dict, reported: list[dict]) -> list[dict]:
+    """One row for each member of the fleet, in fleet order."""
+    by_number = {row["number"]: row for row in reported}
+    rows = []
+    for vehicle in context["fleet"]:
+        number = vehicle.get("n")
+        if number in by_number:
+            rows.append(by_number.pop(number))
+        elif isinstance(number, int):
+            rows.append({"number": number, "link": "inactive", "active": False})
+    return rows + list(by_number.values())
+
+
 def as_list(value) -> list[str]:
     return [item for item in str(value).split(",") if item]
 
@@ -821,6 +845,8 @@ def snapshot(context: dict, containers_reader: AsyncContainers, streams: Streams
     for vehicle in vehicles:
         up, down = rates.get(vehicle["number"], (0.0, 0.0))
         vehicle["tx_kbits"], vehicle["rx_kbits"] = up, down
+        vehicle["active"] = True
+    vehicles = fleet_rows(context, vehicles)
     return {
         "at": time.time(),
         "tick": tick,
@@ -853,17 +879,18 @@ def main() -> int:
     project_dir = Path(__file__).resolve().parents[1]
     # The front door names an RTSP base where this machine's server has no API
     # to ask. See the `rtsp` fact in fleet_facts.
-    owners = stream_owners(context["fleet"])
+    flying = active_fleet(context)
+    owners = stream_owners(flying)
     base = str(context.get("rtsp", ""))
     stream_source = (ProbedStreams(base, owners, project_dir) if base else
                      Streams(str(context.get("mediamtx", "http://localhost:9997")), owners))
     streams = AsyncStreams(stream_source, STREAMS_PROBE_TIMEOUT_S if base else 2.0)
-    links = Links(context["fleet"])
+    links = Links(flying)
     container_reader = AsyncContainers(project_dir, str(context.get("compose",
                                                                       "docker compose")))
-    bridges = Bridges(context)
+    bridges = Bridges({**context, "fleet": flying})
     units = Units(as_list(context.get("units", "")))
-    traffic = TrafficMonitor(context["fleet"])
+    traffic = TrafficMonitor(flying)
 
     def tell(tick: int) -> None:
         json.dump(snapshot(context, container_reader, streams, links, bridges, units,

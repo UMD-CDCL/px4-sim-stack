@@ -29,7 +29,6 @@ import json
 import os
 import re
 import signal
-import shlex
 import subprocess
 import sys
 import threading
@@ -63,7 +62,6 @@ PANES = (SERVICE, VEHICLE, STREAM)
 SIMULATOR, GROUND, AIRCRAFT = "simulator", "ground", "aircraft"
 EVERY_WORLD = (SIMULATOR, GROUND, AIRCRAFT)
 SIM_ONLY = (SIMULATOR,)
-REAL_UAS = (1, 2, 3, 4)
 # A scene is map data. The simulator and the ground station both build and
 # select one. An aircraft reads the scene it is given.
 WITH_SCENE = (SIMULATOR, GROUND)
@@ -113,7 +111,9 @@ ACTIONS = (
     Action(STACK, "", "switch between simulator and real ground mode",
            ("mode", "{value}"),
            ask=Ask("mode", choices=("real", "sim")),
-           confirm="Change between simulator and real ground mode? The stack must be stopped first."),
+           confirm="Change to {value} mode? Scene, scenario, fleet and selections carry over."
+                   " The stack must be stopped first.",
+           refresh=True, worlds=WITH_GROUND),
     Action(STACK, "", "enable GPS-free BENCH MODE (select this menu item)",
            ("bench", "enable", "{value}"),
            ask=Ask("type ENABLE BENCH MODE", "ENABLE BENCH MODE"),
@@ -133,6 +133,11 @@ ACTIONS = (
     Action(STACK, "A", "place the targets again", ("scenario",), worlds=SIM_ONLY),
     Action(STACK, "f", "select active vehicles", ("active", "{value}"),
            worlds=EVERY_WORLD, active_select=True),
+    Action(STACK, "", "select the vehicle that paints the mosaic and restart",
+           ("mosaic", "{value}"),
+           ask=Ask("mosaic vehicle", "{mosaic}", choices_from="mosaic_choices"),
+           confirm="Paint the mosaic from {value} and restart the stack?",
+           worlds=WITH_GROUND),
     Action(STACK, "m", "select mission conops and restart",
            ("conops", "{value}"),
            ask=Ask("mission conops", "{conops}", choices=("option1", "option2")),
@@ -214,32 +219,27 @@ ACTIONS = (
 )
 
 
-def fleet_words(count: int) -> str:
-    return f"{count} vehicle" if count == 1 else f"{count} vehicles" if count else ""
+def fleet_words(count: int, active: int | None = None) -> str:
+    if not count:
+        return ""
+    whole = f"{count} vehicle" if count == 1 else f"{count} vehicles"
+    return whole if active is None or active == count else f"{active} of {whole} active"
 
 
 def strip_codes(line: str) -> str:
     return ESCAPE_CODES.sub("", line).expandtabs(8).rstrip()
 
 
-def read_env_value(path: Path, name: str) -> str | None:
-    """Read one simple .env assignment without executing the file."""
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return None
-    prefix = name + "="
-    for line in lines:
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or not stripped.startswith(prefix):
-            continue
-        raw = stripped[len(prefix):].strip()
+def settings_stamp() -> tuple:
+    """When the files the facts come from last changed."""
+    stamps = []
+    for name in (".env", ".origin.env"):
         try:
-            parts = shlex.split(raw, comments=True, posix=True)
-        except ValueError:
-            return raw.strip("\"'")
-        return " ".join(parts)
-    return None
+            stat = (FRONT_DOOR.parent / name).stat()
+            stamps.append((stat.st_mtime_ns, stat.st_size))
+        except OSError:
+            stamps.append(None)
+    return tuple(stamps)
 
 
 def cursor(shown: int) -> None:
@@ -586,6 +586,8 @@ def stream_words(path: dict) -> list[tuple[str, str]]:
 
 def vehicle_words(vehicle: dict) -> list[tuple[str, str]]:
     link = vehicle.get("link", "down")
+    if link == "inactive":
+        return [("inactive", "faint"), ("not in UAS_ACTIVE; f selects it", "faint")]
     parts = [(f"{link}", {"up": "good", "silent": "watch"}.get(link, "bad"))]
     if link == "up":
         rx = vehicle.get("rx_kbits")
@@ -707,6 +709,9 @@ class Rows:
         self.config = report.get("config") or {}
         self.fleet = {int(vehicle.get("n", 0)): vehicle
                       for vehicle in self.config.get("fleet") or []}
+        # A front door older than the flag states active vehicles only.
+        self.active = {number for number, vehicle in self.fleet.items()
+                       if vehicle.get("active", 1) == 1}
         self.services = report.get("services") or []
         self.vehicles = report.get("vehicles") or []
         self.streams = report.get("streams") or []
@@ -759,6 +764,7 @@ class Console:
         self.paint = {}
         self.refresh_when_done = False
         self.scrolled_back = 0
+        self.settings_seen = settings_stamp()
 
     # ---------------------------------------------------------------- drawing
 
@@ -825,7 +831,7 @@ class Console:
             str(config.get("scenario", "")),
             f"conops {config.get('conops')}" if config.get("conops") else "",
             identity, origin,
-            fleet_words(len(self.rows.fleet))) if word)
+            fleet_words(len(self.rows.fleet), len(self.rows.active))) if word)
         local_recording_active, local_mode = local_recording()
         recording = (str(config.get("recording", "false")).lower() == "true"
                      or local_recording_active)
@@ -1078,34 +1084,23 @@ class Console:
             return -1
 
     def select_active(self) -> str | None:
-        # A real ground station knows the radio fleet even when a vehicle is
-        # inactive, disconnected, or omitted from the latest state report.
-        # Keep those choices available so selecting UAS_ACTIVE is how a drone
-        # is brought back; simulator and aircraft choices remain report-based.
-        if self.rows.world == GROUND:
-            fleet = list(REAL_UAS)
-        else:
-            fleet = sorted(self.rows.fleet)
+        # Every member of the fleet is offered, flying or not, so selecting
+        # is how a vehicle is brought back. The ticks are the selection the
+        # front door resolved from .env; the console reads the facts again
+        # whenever .env changes, so they are the file's, not a stale copy.
+        fleet = sorted(self.rows.fleet)
         if not fleet:
             self.message = "the fleet is not known yet"
             return None
-        # The report is deliberately long-lived while the console is open.  A
-        # previous `active` value can therefore survive a restart (and is
-        # especially confusing when the command just rewrote .env).  Read the
-        # file when the selector opens; it is the source of truth for the next
-        # restart.  Fall back to the report for installations without .env.
-        configured = read_env_value(FRONT_DOOR.parent / ".env", "UAS_ACTIVE")
-        if configured is None:
-            configured = str(self.rows.config.get("active", ""))
-        active = {int(word) for word in
-                  configured.replace(",", " ").split() if word.isdigit()}
+        active = set(self.rows.active)
         chosen = 0
         try:
             while True:
                 labels = [f"[{'x' if number in active else ' '}] uas{number}"
                           for number in fleet]
                 self.draw()
-                self.overlay("active vehicles (space toggles, enter applies)", labels, chosen)
+                self.overlay("active vehicles (space toggles, enter applies, a selects all)",
+                             labels, chosen)
                 curses.doupdate()
                 key = self.screen.getch()
                 if key in (curses.KEY_UP, ord("k")):
@@ -1118,7 +1113,16 @@ class Console:
                         active.remove(number)
                     else:
                         active.add(number)
+                elif key == ord("a"):
+                    active = set(fleet)
                 elif key in (curses.KEY_ENTER, 10, 13):
+                    # An empty UAS_ACTIVE means the whole fleet, so an empty
+                    # selection would fly every vehicle. Refuse it instead.
+                    if not active:
+                        self.message = "select at least one vehicle (a selects all)"
+                        continue
+                    if active == set(fleet):
+                        return ""
                     return " ".join(str(number) for number in fleet if number in active)
                 elif key in (27, ord("q")):
                     return None
@@ -1374,7 +1378,15 @@ class Console:
 
     def once(self) -> bool:
         """Take the newest report, draw it, and act on one key."""
-        if self.refresh_when_done and not self.runner.busy:
+        # The facts come from .env, read once by the report stream. Any
+        # change to it -- a console action, another px4sim, an editor --
+        # starts the stream again, so the panes never show a world, a fleet
+        # or a selection that the next restart would not fly.
+        stamp = settings_stamp()
+        if stamp != self.settings_seen:
+            self.settings_seen = stamp
+            self.feed.restart()
+        elif self.refresh_when_done and not self.runner.busy:
             self.refresh_when_done = False
             self.feed.restart()
         report, age = self.feed.latest()
