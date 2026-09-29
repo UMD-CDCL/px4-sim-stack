@@ -5,19 +5,31 @@
 
 FROM ubuntu:24.04
 
-ARG PX4_REF=v1.17.0
-ARG GZ_DISTRO=harmonic
-ARG HOST_UID=1000
-ARG HOST_GID=1000
+# Each ARG is declared directly above the RUN that reads it. A build argument
+# reaches every later RUN as its environment, so one declared up here would
+# make a PX4 bump or another host uid reinstall the whole toolchain too.
+#
+# WHERE THINGS GO
+#   apt package for the streamer or Gazebo   the Gazebo/GStreamer RUN
+#   PX4 release                              PX4_REF (compose / .env)
+#   a new script the container runs          a COPY in the last block
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     TZ=UTC
 
+# Keep downloaded packages in the apt cache mount every apt step uses, so a
+# re-run layer installs from local .debs. docker-clean would delete them.
+ARG TARGETARCH
+RUN rm -f /etc/apt/apt.conf.d/docker-clean \
+    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' \
+         > /etc/apt/apt.conf.d/keep-cache
+
 # ---------------------------------------------------------------------------
 # Base toolchain.
 # ---------------------------------------------------------------------------
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,id=px4sim-apt-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
       bc \
       build-essential \
       ca-certificates \
@@ -44,7 +56,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # the dependency set always matches PX4_REF. --no-nuttx skips the embedded
 # cross-compiler, which SITL does not need.
 # ---------------------------------------------------------------------------
-RUN mkdir -p /tmp/px4-setup && cd /tmp/px4-setup \
+ARG PX4_REF=v1.17.0
+ARG GZ_DISTRO=harmonic
+RUN --mount=type=cache,id=px4sim-apt-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=px4sim-pip-${TARGETARCH},target=/root/.cache/pip \
+    mkdir -p /tmp/px4-setup && cd /tmp/px4-setup \
     && curl -fsSLO "https://raw.githubusercontent.com/PX4/PX4-Autopilot/${PX4_REF}/Tools/setup/ubuntu.sh" \
     && curl -fsSLO "https://raw.githubusercontent.com/PX4/PX4-Autopilot/${PX4_REF}/Tools/setup/requirements.txt" \
     && bash ubuntu.sh --no-nuttx \
@@ -54,7 +70,8 @@ RUN mkdir -p /tmp/px4-setup && cd /tmp/px4-setup \
 # Gazebo development headers and the GStreamer set the video streamer needs.
 # ubuntu.sh already added the osrfoundation apt repository.
 # ---------------------------------------------------------------------------
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,id=px4sim-apt-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
       libgz-transport13-dev \
       libgz-msgs10-dev \
       libgz-common5-dev \
@@ -88,6 +105,8 @@ RUN cmake -S /src/gz_video_streamer -B /src/gz_video_streamer/build \
 # A user whose id matches the host, so the bind-mounted PX4 build output does
 # not end up owned by root.
 # ---------------------------------------------------------------------------
+ARG HOST_UID=1000
+ARG HOST_GID=1000
 RUN if getent passwd ${HOST_UID} >/dev/null; then \
       userdel -rf "$(getent passwd ${HOST_UID} | cut -d: -f1)" || true; \
     fi \

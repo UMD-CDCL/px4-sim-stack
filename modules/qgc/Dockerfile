@@ -7,16 +7,38 @@
 # The AppImage is extracted at build time. That avoids FUSE, which a container
 # cannot use without extra privileges.
 
+# The release, fetched and unpacked in a stage of its own. It shares nothing
+# with the runtime libraries below, so a library added there keeps this
+# download, and a release bump keeps the libraries.
+FROM ubuntu:24.04 AS appimage
+ARG TARGETARCH
+RUN rm -f /etc/apt/apt.conf.d/docker-clean \
+    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' \
+         > /etc/apt/apt.conf.d/keep-cache
+RUN --mount=type=cache,id=px4sim-apt-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+ARG QGC_REF=v5.1.4
+RUN curl -fsSL -o /tmp/qgc.AppImage \
+      "https://github.com/mavlink/qgroundcontrol/releases/download/${QGC_REF}/QGroundControl-x86_64.AppImage" \
+    && chmod +x /tmp/qgc.AppImage \
+    && cd /opt && /tmp/qgc.AppImage --appimage-extract >/dev/null \
+    && mv /opt/squashfs-root /opt/qgc \
+    && rm -f /tmp/qgc.AppImage
+
 FROM ubuntu:24.04
 
-ARG QGC_REF=v5.1.4
-ARG HOST_UID=1000
-ARG HOST_GID=1000
+# Each ARG sits directly above the RUN that reads it.
+ARG TARGETARCH
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN rm -f /etc/apt/apt.conf.d/docker-clean \
+    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' \
+         > /etc/apt/apt.conf.d/keep-cache
+RUN --mount=type=cache,id=px4sim-apt-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl socat \
       libfontconfig1 libfreetype6 \
       libx11-6 libx11-xcb1 libxext6 libxfixes3 libxi6 libxrender1 \
@@ -36,14 +58,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL -o /tmp/qgc.AppImage \
-      "https://github.com/mavlink/qgroundcontrol/releases/download/${QGC_REF}/QGroundControl-x86_64.AppImage" \
-    && chmod +x /tmp/qgc.AppImage \
-    && cd /opt && /tmp/qgc.AppImage --appimage-extract >/dev/null \
-    && mv /opt/squashfs-root /opt/qgc \
-    && rm -f /tmp/qgc.AppImage
+COPY --link --from=appimage /opt/qgc /opt/qgc
 
 # The serial group lets QGroundControl reach a USB radio if you pass one in.
+ARG HOST_UID=1000
+ARG HOST_GID=1000
 RUN if getent passwd ${HOST_UID} >/dev/null; then \
       userdel -rf "$(getent passwd ${HOST_UID} | cut -d: -f1)" || true; \
     fi \
