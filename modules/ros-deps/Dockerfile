@@ -8,14 +8,14 @@
 # shared stages are built once:
 #
 #   trt ═══ yolo-deps  (same TensorRT step)  -> px4simstack/yolo-deps:$DS_TAG
-#    └─ system ── ros-core ─┬─ mcap-src/mcap (source build, copied into ros-deps)
+#    └─ system ── ros-core ─┐
 #                           │                -> px4simstack/ros-core:$DS_TAG
 #                           └─ ros-deps      -> px4simstack/ros-deps:$DS_TAG
 #   pyds (independent, copied into ros-deps)
 #
 # ros-core is what MAVROS (modules/ros-base) compiles against. Nothing added
 # to ros-deps can reach it, so an extra pip or apt package never recompiles
-# MAVROS. Source-built dependencies are their own stages copied in with
+# MAVROS. A source-built dependency is its own stage copied in with
 # `COPY --link`, so bumping one rebuilds that stage and nothing else.
 #
 # Layers are ordered by how often they change (rarest first) and weighted by
@@ -27,7 +27,7 @@
 #   T3 rare     host user, heavy pinned pip, pyds                 (stage ros-deps)
 #   T4 often    ROS / apt extras            <- ADD NEW APT PACKAGES HERE
 #   T5 often    light pip packages          <- ADD NEW PIP PACKAGES HERE
-#   T6 medium   source-built deps (COPY --link from their stages)
+#   T6 medium   source-built deps (COPY --link from their stages; none now)
 #
 # Rules that keep the cache intact:
 #   * Declare an ARG immediately above the one RUN that reads it. Every RUN
@@ -45,7 +45,7 @@
 #     (px4sim-apt-*, px4sim-pip-*), so a re-run layer reinstalls from local
 #     .debs and wheels instead of the network. docker-clean is switched off
 #     in T1 for this. The cache lives outside the image and outside layers.
-#   * Sources. Fetched in stages FROM scratch (mcap-src), which depend on
+#   * Sources. Fetched in stages FROM scratch, which depend on
 #     nothing below them, and bind-mounted into the build that uses them.
 #   * Compiler output. Source builds use a ccache mount, so a rebuilt parent
 #     recompiles only what its headers actually changed.
@@ -440,6 +440,13 @@ RUN --mount=type=cache,id=px4sim-apt-${TARGETARCH},target=/var/cache/apt,sharing
 FROM system AS ros-core
 ARG TARGETARCH
 
+# The MCAP storage plugin is installed here, in the same apt run as rosbag2,
+# so the two are always one release. It was once built from source (the
+# archived ros-tooling v0.6.0, then rosbag2 0.15.10): v0.6.0 has no lock on
+# its topic->channel map, so `ros2 bag record -a` on a graph still appearing
+# died with "Channel reference not found", and 0.15.10 fixed that but
+# loaded an old plugin into a newer core. The lock (rosbag2 #1561) is in
+# every Humble release since 0.15.10.
 # rosdep is not used: umd_uas declares roboscout_uas_extras, which is not in
 # this workspace, and rosdep stops on the unknown key. The MAVROS set is its
 # package.xml files (mavros, mavros_extras, libmavconn, mavros_msgs) minus
@@ -461,74 +468,13 @@ RUN --mount=type=cache,id=px4sim-apt-${TARGETARCH},target=/var/cache/apt,sharing
       ros-${ROS_DISTRO}-message-filters \
       ros-${ROS_DISTRO}-nav-msgs \
       ros-${ROS_DISTRO}-rosbag2-py \
+      ros-${ROS_DISTRO}-rosbag2-storage-mcap \
       ros-${ROS_DISTRO}-rosidl-runtime-py \
       ros-${ROS_DISTRO}-tf2-geometry-msgs \
       ros-${ROS_DISTRO}-tf2-ros \
       ros-${ROS_DISTRO}-visualization-msgs \
       ros-${ROS_DISTRO}-zstd-vendor \
     && rm -rf /var/lib/apt/lists/*
-
-# ===========================================================================
-# T6 source stage: the rosbag2 MCAP storage plugin.
-#
-# ROS Humble has no binary rosbag2 MCAP plugin in the configured repository.
-# Build the pinned upstream plugin here, where network access is already part
-# of the explicit `px4sim prepare` operation; all derived runtime images stay
-# offline and reuse the installed result.
-#
-# It installs into /opt/ros/${ROS_DISTRO} (so every path it embeds is the one
-# it runs from) and then exports only the files it added, which ros-deps
-# lays over its own /opt/ros with COPY --link. Bumping MCAP_STORAGE_REF
-# rebuilds this stage and that one copy -- no apt, no TensorRT, no pip.
-#
-# CHANGE HERE: MCAP_STORAGE_REF. Pattern for another source-built dependency:
-# copy this stage, give it its own ARG, and add one COPY --link in T6 below.
-# ===========================================================================
-# The source on its own, FROM scratch: it depends on nothing below it, so a
-# T1/T2 change never fetches it again, and a ref bump fetches only it.
-# BuildKit fetches the pinned commit itself and caches it by that commit.
-FROM scratch AS mcap-src
-# Pinned upstream ROS 2 storage plugin. 0.15.10 includes the MCAP metadata
-# locking fix for the dynamic-topic race that could abort
-# `ros2 bag record --all` while a simulator graph was still appearing.
-ARG MCAP_STORAGE_REF=e069b24129b6baf9b96afb1c879853fe784d56a0
-ADD https://github.com/ros2/rosbag2.git#${MCAP_STORAGE_REF} /
-
-FROM ros-core AS mcap
-ARG TARGETARCH
-ARG DS_TAG
-ENV CMAKE_C_COMPILER_LAUNCHER=ccache CMAKE_CXX_COMPILER_LAUNCHER=ccache
-RUN --network=none \
-    --mount=type=bind,from=mcap-src,target=/tmp/rosbag2_storage_mcap,rw \
-    --mount=type=cache,id=ros-ccache-mcap-${DS_TAG}-${TARGETARCH},target=/root/.cache/ccache,sharing=locked \
-    set -eux; \
-    # Humble's setup scripts read optional variables under nounset. Source the
-    # environment with nounset briefly disabled, then restore strict mode for
-    # the actual build and cleanup.
-    touch /tmp/mcap-stamp; sleep 1; \
-    set +u; . /opt/ros/${ROS_DISTRO}/setup.sh; set -u; \
-    colcon build --merge-install \
-      --base-paths /tmp/rosbag2_storage_mcap \
-      --install-base /opt/ros/${ROS_DISTRO} \
-      --build-base /tmp/rosbag2_storage_mcap-build \
-      --packages-select mcap_vendor rosbag2_storage_mcap_testdata rosbag2_test_common \
-      --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF; \
-    set +u; . /opt/ros/${ROS_DISTRO}/setup.sh; set -u; \
-    colcon build --merge-install \
-      --base-paths /tmp/rosbag2_storage_mcap \
-      --install-base /opt/ros/${ROS_DISTRO} \
-      --build-base /tmp/rosbag2_storage_mcap-build \
-      --packages-select rosbag2_storage_mcap \
-      --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF; \
-    # Export what the build added below /opt/ros, and none of the top-level
-    # setup scripts colcon rewrote: those belong to the apt install. ctime,
-    # not mtime: CMake install keeps each source file's mtime.
-    mkdir -p /out; \
-    cd /opt/ros/${ROS_DISTRO}; \
-    find . -mindepth 2 -cnewer /tmp/mcap-stamp \( -type f -o -type l \) -print0 \
-      | xargs -0 cp -a --parents -t /out; \
-    test -n "$(find /out -path '*ament_index/resource_index/packages/rosbag2_storage_mcap')"; \
-    rm -rf /tmp/rosbag2_storage_mcap-build /root/.colcon
 
 # ===========================================================================
 # ros-deps -- the runtime every ROS image derives from. Target of the
@@ -639,14 +585,13 @@ RUN --mount=type=cache,id=px4sim-pip-${TARGETARCH},target=/root/.cache/pip \
       "websockets==12.0"
 
 # ---------------------------------------------------------------------------
-# T6  source-built dependencies, one COPY --link per stage above.
-#     --link makes each copy independent of the layers under it, so a T4/T5
-#     edit reuses the built plugin, and a plugin bump re-copies only it.
+# T6  source-built dependencies: one FROM ros-core stage each (network only
+#     in FROM scratch source stages, the build itself --network=none), then
+#     one COPY --link here, so a T4/T5 edit reuses the built result. There
+#     are none now; prefer a matching apt package in T2 whenever one exists.
 # ---------------------------------------------------------------------------
-COPY --link --from=mcap /out/ /opt/ros/${ROS_DISTRO}/
-
 # Last, and cheap: prove that nothing added above undid the codec repair in
-# T1 or lost the MCAP plugin. A failure here means a T4 package pulled in a
+# T1 or lost the MCAP storage plugin. A failure here means a T4 package pulled in a
 # stripped library; move that package into T1 (before the repair).
 RUN set -eu; \
     python3 -c "import cv2"; \
