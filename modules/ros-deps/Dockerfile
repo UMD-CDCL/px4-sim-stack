@@ -1,11 +1,216 @@
-# Dependency preparation only: ./px4sim deps (requires network on cache misses).
-# Ordinary source builds derive from the resulting local image.
+# Dependency preparation only: ./px4sim prepare (requires network on cache misses).
+# Ordinary source builds (./px4sim restart) derive from the tagged local images.
+#
+# ===========================================================================
+# LAYOUT AND CACHE RULES -- read before adding anything
+# ===========================================================================
+# One Dockerfile, four targets, built together by `px4sim prepare` so the
+# shared stages are built once:
+#
+#   trt ═══ yolo-deps  (same TensorRT step)  -> px4simstack/yolo-deps:$DS_TAG
+#    └─ system ── ros-core ─┬─ mcap-src/mcap (source build, copied into ros-deps)
+#                           │                -> px4simstack/ros-core:$DS_TAG
+#                           └─ ros-deps      -> px4simstack/ros-deps:$DS_TAG
+#   pyds (independent, copied into ros-deps)
+#
+# ros-core is what MAVROS (modules/ros-base) compiles against. Nothing added
+# to ros-deps can reach it, so an extra pip or apt package never recompiles
+# MAVROS. Source-built dependencies are their own stages copied in with
+# `COPY --link`, so bumping one rebuilds that stage and nothing else.
+#
+# Layers are ordered by how often they change (rarest first) and weighted by
+# how much they cost to redo (TensorRT/cuBLAS alone is ~10 GB of downloads):
+#
+#   T0 never    DeepStream base, TensorRT for this GPU           (stage trt)
+#   T1 rare     system apt + stripped-codec repair               (stage system)
+#   T2 rare     ROS core: what MAVROS / MCAP build against        (stage ros-core)
+#   T3 rare     host user, heavy pinned pip, pyds                 (stage ros-deps)
+#   T4 often    ROS / apt extras            <- ADD NEW APT PACKAGES HERE
+#   T5 often    light pip packages          <- ADD NEW PIP PACKAGES HERE
+#   T6 medium   source-built deps (COPY --link from their stages)
+#
+# Rules that keep the cache intact:
+#   * Declare an ARG immediately above the one RUN that reads it. Every RUN
+#     after an ARG gets it as an environment variable, so a changed value
+#     misses the cache from the declaration on, whether or not a RUN uses it.
+#     (This is why the MCAP_STORAGE_REF bump used to reinstall ROS, TensorRT
+#     and pip: the ARG sat above all of them.)
+#   * Never edit a lower tier just to add a package. Add to T4/T5; fold it
+#     down into T1/T2 only when you are deliberately taking a cold rebuild.
+#   * Do not reword the trt RUN or the pyds stage. They are byte-for-byte the
+#     former yolo-deps/ros-deps text, which is what makes them cache hits.
+#
+# What survives when a lower layer DOES change:
+#   * Downloads. Every apt and pip step mounts a persistent BuildKit cache
+#     (px4sim-apt-*, px4sim-pip-*), so a re-run layer reinstalls from local
+#     .debs and wheels instead of the network. docker-clean is switched off
+#     in T1 for this. The cache lives outside the image and outside layers.
+#   * Sources. Fetched in stages FROM scratch (mcap-src), which depend on
+#     nothing below them, and bind-mounted into the build that uses them.
+#   * Compiler output. Source builds use a ccache mount, so a rebuilt parent
+#     recompiles only what its headers actually changed.
+#   These are build cache: `docker builder prune` with no filter wipes them.
+#   Prune images, or prune build cache with `--filter until=...`, instead.
+# ===========================================================================
 ARG DS_VERSION=7.1
 # What this build is tagged as. Not read here; declared so the one set of
 # build arguments serves this image and the two derived from it.
 ARG DS_TAG=
 ARG DS_IMAGE_FLAVOR=samples-multiarch
 ARG DS_IMAGE=nvcr.io/nvidia/deepstream:${DS_VERSION}-${DS_IMAGE_FLAVOR}
+
+# ===========================================================================
+# T0  trt -- the DeepStream base with the TensorRT this machine needs.
+#     Changes only with DS_VERSION or the GPU (scripts/ds-select.sh).
+#     Shared by yolo-deps and ros-deps, so it is downloaded once.
+# ===========================================================================
+FROM ${DS_IMAGE} AS trt
+
+ARG DS_VERSION
+ENV DEBIAN_FRONTEND=noninteractive
+
+# The TensorRT this machine needs, when the one in the base is not it.
+#
+# Two cases. A GPU newer than Hopper: DeepStream 7.1 ships TensorRT 10.3,
+# which stops at Hopper. On a newer card it parses the ONNX, reports
+# `Unsupported SM`, builds no engine and takes the process down, while the
+# streams keep decoding. A newer TensorRT for jammy from the CUDA repository,
+# which the x86 base already lists, fixes it. A Jetson: the generic arm64 base
+# carries 10.3.0.26 and the host runs 10.3.0.30. An engine loads only under
+# the build that made it, and 10.3.0.26 cannot build one on the Orin at all
+# (a 5 MB tactic limit). The host's own packages fix it. They come from the
+# JetPack repository, which TRT_APT_SOURCE names and this block adds.
+# TRT_APT_PUBLIC_KEY is the URL of the key that signs that repository.
+#
+# TRT_CUDA names the CUDA runtime the x86 upgrade links. A Jetson leaves it
+# empty, because its base already carries CUDA 12.6.
+#
+# Empty means the base's own TensorRT is right for this machine, which is the
+# case for every x86 GPU up to Hopper. scripts/ds-select.sh decides all four.
+ARG TRT_VERSION=
+ARG TRT_CUDA=
+ARG TRT_APT_SOURCE=
+ARG TRT_APT_PUBLIC_KEY=
+RUN if [ -n "${TRT_VERSION}" ]; then \
+        set -eux; \
+        apt-get update; \
+        apt-get install -y --no-install-recommends ca-certificates curl; \
+        if [ -n "${TRT_APT_SOURCE}" ]; then \
+            curl -fsSL "${TRT_APT_PUBLIC_KEY}" -o /etc/apt/trusted.gpg.d/tensorrt-host.asc; \
+            echo "${TRT_APT_SOURCE}" > /etc/apt/sources.list.d/tensorrt-host.list; \
+            apt-get update; \
+        fi; \
+        cuda=""; \
+        if [ -n "${TRT_CUDA}" ]; then cuda="cuda-cudart-${TRT_CUDA} libcublas-${TRT_CUDA}"; fi; \
+        apt-get install -y --no-install-recommends --allow-downgrades \
+            "libnvinfer10=${TRT_VERSION}" \
+            "libnvinfer-plugin10=${TRT_VERSION}" \
+            "libnvonnxparsers10=${TRT_VERSION}" \
+            "libnvinfer-dispatch10=${TRT_VERSION}" \
+            "libnvinfer-lean10=${TRT_VERSION}" \
+            "libnvinfer-vc-plugin10=${TRT_VERSION}" \
+            "libnvinfer-bin=${TRT_VERSION}" \
+            ${cuda}; \
+        rm -rf /var/lib/apt/lists/*; \
+        echo "TensorRT is now $(dpkg -l libnvinfer10 | awk '/^ii/ {print $3}')"; \
+    fi
+
+# ===========================================================================
+# yolo-deps -- CUDA compiler and TensorRT headers for the YOLO parser,
+# prepared independently of detector source. Target of the yolo-deps service.
+# ===========================================================================
+FROM ${DS_IMAGE} AS yolo-deps
+# One stage, exactly the former modules/yolo-deps/Dockerfile: a stage that
+# derives FROM trt gets a different cache key for the nvcc step even with
+# identical text. Its TensorRT RUN is byte-identical to the one in `trt`, so
+# BuildKit solves both as one step -- still one download, one layer.
+# KEEP THE TWO TensorRT BLOCKS IDENTICAL; if they drift, both still work, but
+# TensorRT is downloaded and stored twice.
+
+ARG DS_VERSION
+ENV DEBIAN_FRONTEND=noninteractive
+
+# The TensorRT this machine needs, when the one in the base is not it.
+#
+# Two cases. A GPU newer than Hopper: DeepStream 7.1 ships TensorRT 10.3,
+# which stops at Hopper. On a newer card it parses the ONNX, reports
+# `Unsupported SM`, builds no engine and takes the process down, while the
+# streams keep decoding. A newer TensorRT for jammy from the CUDA repository,
+# which the x86 base already lists, fixes it. A Jetson: the generic arm64 base
+# carries 10.3.0.26 and the host runs 10.3.0.30. An engine loads only under
+# the build that made it, and 10.3.0.26 cannot build one on the Orin at all
+# (a 5 MB tactic limit). The host's own packages fix it. They come from the
+# JetPack repository, which TRT_APT_SOURCE names and this block adds.
+# TRT_APT_PUBLIC_KEY is the URL of the key that signs that repository.
+#
+# TRT_CUDA names the CUDA runtime the x86 upgrade links. A Jetson leaves it
+# empty, because its base already carries CUDA 12.6.
+#
+# Empty means the base's own TensorRT is right for this machine, which is the
+# case for every x86 GPU up to Hopper. scripts/ds-select.sh decides all four.
+ARG TRT_VERSION=
+ARG TRT_CUDA=
+ARG TRT_APT_SOURCE=
+ARG TRT_APT_PUBLIC_KEY=
+RUN if [ -n "${TRT_VERSION}" ]; then \
+        set -eux; \
+        apt-get update; \
+        apt-get install -y --no-install-recommends ca-certificates curl; \
+        if [ -n "${TRT_APT_SOURCE}" ]; then \
+            curl -fsSL "${TRT_APT_PUBLIC_KEY}" -o /etc/apt/trusted.gpg.d/tensorrt-host.asc; \
+            echo "${TRT_APT_SOURCE}" > /etc/apt/sources.list.d/tensorrt-host.list; \
+            apt-get update; \
+        fi; \
+        cuda=""; \
+        if [ -n "${TRT_CUDA}" ]; then cuda="cuda-cudart-${TRT_CUDA} libcublas-${TRT_CUDA}"; fi; \
+        apt-get install -y --no-install-recommends --allow-downgrades \
+            "libnvinfer10=${TRT_VERSION}" \
+            "libnvinfer-plugin10=${TRT_VERSION}" \
+            "libnvonnxparsers10=${TRT_VERSION}" \
+            "libnvinfer-dispatch10=${TRT_VERSION}" \
+            "libnvinfer-lean10=${TRT_VERSION}" \
+            "libnvinfer-vc-plugin10=${TRT_VERSION}" \
+            "libnvinfer-bin=${TRT_VERSION}" \
+            ${cuda}; \
+        rm -rf /var/lib/apt/lists/*; \
+        echo "TensorRT is now $(dpkg -l libnvinfer10 | awk '/^ii/ {print $3}')"; \
+    fi
+
+ARG YOLO_CUDA_VERSION=12.6
+RUN set -eux; \
+    CUDA_VER="${YOLO_CUDA_VERSION}"; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends build-essential; \
+    if [ ! -x "/usr/local/cuda-${CUDA_VER}/bin/nvcc" ]; then \
+        apt-get install -y --no-install-recommends \
+            "cuda-nvcc-$(echo "${CUDA_VER}" | tr . -)" \
+            "cuda-cudart-dev-$(echo "${CUDA_VER}" | tr . -)" || true; \
+    fi; \
+    if [ ! -x "/usr/local/cuda-${CUDA_VER}/bin/nvcc" ]; then \
+        found=$(ls -d /usr/local/cuda-*/bin/nvcc 2>/dev/null | sort -V | tail -1); \
+        [ -n "${found}" ] || { echo "No CUDA compiler here and none installable. The parser cannot be built." >&2; exit 1; }; \
+        CUDA_VER=$(echo "${found}" | sed "s|.*/cuda-||; s|/bin/nvcc||"); \
+        echo "Falling back to the CUDA this base already carries: ${CUDA_VER}."; \
+    fi; \
+    if [ -n "${TRT_VERSION}" ]; then \
+        apt-get install -y --no-install-recommends --allow-downgrades \
+            "libnvinfer-headers-dev=${TRT_VERSION}" \
+            "libnvinfer-dev=${TRT_VERSION}" \
+            "libnvinfer-headers-plugin-dev=${TRT_VERSION}" \
+            "libnvinfer-plugin-dev=${TRT_VERSION}" \
+            "libnvonnxparsers-dev=${TRT_VERSION}"; \
+    fi; \
+    for lib in /usr/local/cuda-*/lib64; do \
+        [ -d "$lib" ] || continue; \
+        for versioned in "$lib"/lib*.so.[0-9]*; do \
+            plain="${versioned%%.so.*}.so"; \
+            [ -e "$plain" ] || ln -s "$(basename "$versioned")" "$plain"; \
+        done; \
+    done; \
+    mkdir -p /opt/ds-yolo; \
+    printf '%s\n' "${YOLO_CUDA_VERSION}" > /opt/ds-yolo/cuda-requested; \
+    printf '%s\n' "${CUDA_VER}" > /opt/ds-yolo/cuda-version; \
+    rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
 # The DeepStream Python bindings, on their own, so the compilers and headers
@@ -65,9 +270,16 @@ RUN set -eux; \
     fi; \
     ls -la /wheels
 
-FROM ${DS_IMAGE}
+# ===========================================================================
+# T1  system -- Ubuntu packages and the repair of what the DeepStream image
+#     strips. Nothing from the ROS repository. Changes rarely.
+#     ADD HERE only a system library that T2 (ROS core) must build against;
+#     anything else goes in T4.
+# ===========================================================================
+FROM trt AS system
 
 # An ARG before FROM reaches FROM only. Declare them again to use them below.
+ARG TARGETARCH
 ARG DS_VERSION
 # The ROS 2 distribution that belongs to this base, and the Ubuntu that carries
 # both. scripts/ds-select.sh decides; the check below refuses a pair that does
@@ -75,7 +287,6 @@ ARG DS_VERSION
 ARG ROS_DISTRO=humble
 ARG DS_CODENAME=jammy
 
-ENV DEBIAN_FRONTEND=noninteractive
 ENV ROS_DISTRO=${ROS_DISTRO}
 # What is inside, for anything that has to tell one build from another at run
 # time. The entry point compares it against the parser it finds on the model
@@ -88,18 +299,6 @@ ENV NVIDIA_VISIBLE_DEVICES=all
 # with SIGSEGV and no message. rtspsrc opens such a connection, so every RTSP
 # source died at startup. The dummy resolver skips libproxy.
 ENV GIO_USE_PROXY_RESOLVER=dummy
-
-ARG USERNAME=user
-ARG HOST_UID=1000
-ARG HOST_GID=1000
-ARG WORKSPACE_DIR=/home/user/ros2_ws
-# Pinned upstream ROS 2 storage plugin. The ROS Humble apt index ships the
-# SQLite plugin but not MCAP, so this is built once in the prepared dependency
-# image and inherited by ros-base, onboard, and offboard. 0.15.10 includes the
-# MCAP metadata locking fix for the dynamic-topic race that could abort
-# `ros2 bag record --all` while a simulator graph was still appearing.
-ARG MCAP_STORAGE_REF=e069b24129b6baf9b96afb1c879853fe784d56a0
-
 
 # ---------------------------------------------------------------------------
 # Base check. Fail here, where the message is readable.
@@ -127,39 +326,45 @@ RUN set -eu; \
     esac; \
     echo "DeepStream ${DS_VERSION} on Ubuntu $VERSION_ID, building for ROS 2 ${ROS_DISTRO}."
 
-# ---------------------------------------------------------------------------
-# ROS 2 and the packages the workspace links against.
-#
-# The list comes from the package.xml files of umd_uas and cdcl_umd_msgs, plus
-# the imports in MAVInsight, whose package.xml declares no dependency at all.
-# rosdep is not used: umd_uas declares roboscout_uas_extras, which is not in
-# this workspace, and rosdep stops on the unknown key.
-# ---------------------------------------------------------------------------
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates \
-      curl \
-      gnupg2 \
-      locales \
-    && locale-gen en_US.UTF-8 \
-    && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
-         -o /usr/share/keyrings/ros-archive-keyring.gpg \
-    && . /etc/os-release \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $VERSION_CODENAME main" \
-         > /etc/apt/sources.list.d/ros2.list \
-    && apt-get update && apt-get install -y --no-install-recommends \
+# Keep every .deb apt downloads. The base's docker-clean hook deletes them
+# after each install, which would leave the apt cache mount below empty. The
+# mount is outside the layer, so the image does not grow.
+RUN rm -f /etc/apt/apt.conf.d/docker-clean \
+    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' \
+         > /etc/apt/apt.conf.d/keep-cache
+
+# Keep a later `apt-get install` in T4 from ever moving the TensorRT that T0
+# chose for this GPU. A no-op where the base's own TensorRT is used.
+ARG TRT_VERSION=
+RUN if [ -n "${TRT_VERSION}" ]; then \
+        apt-mark hold libnvinfer10 libnvinfer-plugin10 libnvonnxparsers10 \
+            libnvinfer-dispatch10 libnvinfer-lean10 libnvinfer-vc-plugin10 \
+            libnvinfer-bin; \
+    fi
+
+# System packages. The Python ones are here, not in T4, because the codec
+# repair below is what makes python3-opencv importable, and because numpy
+# comes from them.
+RUN --mount=type=cache,id=px4sim-apt-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
       build-essential \
+      ca-certificates \
+      ccache \
       cmake \
+      curl \
       geographiclib-tools \
-      libgeographic-dev \
       git \
-      libasio-dev \
+      gnupg2 \
+      gstreamer1.0-tools \
       iproute2 \
       iputils-ping \
+      libasio-dev \
+      libgeographic-dev \
+      locales \
       nano \
-      python3-colcon-common-extensions \
+      patch \
       python3-gi \
       python3-gst-1.0 \
-      gstreamer1.0-tools \
       python3-matplotlib \
       python3-opencv \
       python3-pandas \
@@ -168,60 +373,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3-scipy \
       python3-serial \
       python3-yaml \
-      ros-${ROS_DISTRO}-cv-bridge \
-      ros-${ROS_DISTRO}-diagnostic-msgs \
-      ros-${ROS_DISTRO}-diagnostic-updater \
-      ros-${ROS_DISTRO}-domain-bridge \
-      ros-${ROS_DISTRO}-foxglove-bridge \
-      ros-${ROS_DISTRO}-foxglove-msgs \
-      ros-${ROS_DISTRO}-eigen-stl-containers \
-      ros-${ROS_DISTRO}-image-geometry \
-      ros-${ROS_DISTRO}-image-transport \
-      ros-${ROS_DISTRO}-mavlink \
-      ros-${ROS_DISTRO}-message-filters \
-      ros-${ROS_DISTRO}-nav-msgs \
-      ros-${ROS_DISTRO}-rosbag2-py \
-      ros-${ROS_DISTRO}-zstd-vendor \
-      ros-${ROS_DISTRO}-rqt-gui \
-      ros-${ROS_DISTRO}-rqt-gui-py \
-      ros-${ROS_DISTRO}-rosidl-runtime-py \
-      ros-${ROS_DISTRO}-ros-base \
-      ros-${ROS_DISTRO}-tf2-geometry-msgs \
-      ros-${ROS_DISTRO}-tf2-ros \
-      ros-${ROS_DISTRO}-vision-msgs \
-      ros-${ROS_DISTRO}-visualization-msgs \
+    && locale-gen en_US.UTF-8 \
     && geographiclib-get-geoids egm96-5 \
     && rm -rf /var/lib/apt/lists/*
-
-# ROS Humble has no binary rosbag2 MCAP plugin in the configured repository.
-# Build the pinned upstream plugin here, where network access is already part
-# of the explicit `px4sim prepare` operation; all derived runtime images stay
-# offline and reuse the installed result.
-RUN set -eux; \
-    mkdir -p /tmp/rosbag2_storage_mcap; \
-    git clone --depth 1 https://github.com/ros2/rosbag2.git \
-      /tmp/rosbag2_storage_mcap; \
-    git -C /tmp/rosbag2_storage_mcap fetch --depth 1 origin "${MCAP_STORAGE_REF}"; \
-    git -C /tmp/rosbag2_storage_mcap checkout --detach "${MCAP_STORAGE_REF}"; \
-    # Humble's setup scripts read optional variables under nounset. Source the
-    # environment with nounset briefly disabled, then restore strict mode for
-    # the actual build and cleanup.
-    set +u; . /opt/ros/${ROS_DISTRO}/setup.sh; set -u; \
-    colcon build --merge-install \
-      --base-paths /tmp/rosbag2_storage_mcap \
-      --install-base /opt/ros/${ROS_DISTRO} \
-      --build-base /tmp/rosbag2_storage_mcap-build \
-      --packages-select mcap_vendor rosbag2_storage_mcap_testdata rosbag2_test_common \
-      --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF; \
-    set +u; . /opt/ros/${ROS_DISTRO}/setup.sh; set -u; \
-    colcon build --merge-install \
-      --base-paths /tmp/rosbag2_storage_mcap \
-      --install-base /opt/ros/${ROS_DISTRO} \
-      --build-base /tmp/rosbag2_storage_mcap-build \
-      --packages-select rosbag2_storage_mcap \
-      --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF; \
-    rm -rf /tmp/rosbag2_storage_mcap /tmp/rosbag2_storage_mcap-build \
-      /root/.colcon
 
 ENV LANG=en_US.UTF-8
 
@@ -231,7 +385,8 @@ ENV LANG=en_US.UTF-8
 # the OpenCV module cannot find, repeatedly, because each restored library
 # names further ones. The import at the end fails the build if it is still
 # broken, rather than leaving a vehicle that starts and localizes nothing.
-RUN set -eu; \
+RUN --mount=type=cache,id=px4sim-apt-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    set -eu; \
     apt-get update; \
     while missing=$(ldd /usr/lib/python3/dist-packages/cv2*.so \
                     | awk '/not found/ {print $1}' | sort -u); [ -n "$missing" ]; do \
@@ -254,7 +409,8 @@ RUN set -eu; \
 # for OpenCV above. The inspects at the end fail the build while it can
 # still say why, rather than leaving a companion that starts and shows
 # nothing.
-RUN set -eu; \
+RUN --mount=type=cache,id=px4sim-apt-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    set -eu; \
     apt-get update; \
     apt-get install -y --reinstall \
       gstreamer1.0-libav \
@@ -273,52 +429,136 @@ RUN set -eu; \
       gst-inspect-1.0 "$element" >/dev/null; \
     done
 
+# ===========================================================================
+# T2  ros-core -- ROS 2 and exactly what MAVROS and the MCAP plugin compile
+#     against. Target of the ros-core service; modules/ros-base builds MAVROS
+#     from this image, so anything added here recompiles MAVROS (ccache keeps
+#     that short, but it is still a cold link).
+#     ADD HERE only a build dependency of a source-built package (MAVROS,
+#     MCAP, a new T6 stage). A runtime-only ROS package goes in T4.
+# ===========================================================================
+FROM system AS ros-core
+ARG TARGETARCH
 
-# The TensorRT this machine needs, when the one in the base is not it.
+# rosdep is not used: umd_uas declares roboscout_uas_extras, which is not in
+# this workspace, and rosdep stops on the unknown key. The MAVROS set is its
+# package.xml files (mavros, mavros_extras, libmavconn, mavros_msgs) minus
+# what ros-base already carries.
+RUN --mount=type=cache,id=px4sim-apt-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+         -o /usr/share/keyrings/ros-archive-keyring.gpg \
+    && . /etc/os-release \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $VERSION_CODENAME main" \
+         > /etc/apt/sources.list.d/ros2.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+      python3-colcon-common-extensions \
+      python3-colcon-override-check \
+      ros-${ROS_DISTRO}-ros-base \
+      ros-${ROS_DISTRO}-diagnostic-msgs \
+      ros-${ROS_DISTRO}-diagnostic-updater \
+      ros-${ROS_DISTRO}-eigen-stl-containers \
+      ros-${ROS_DISTRO}-mavlink \
+      ros-${ROS_DISTRO}-message-filters \
+      ros-${ROS_DISTRO}-nav-msgs \
+      ros-${ROS_DISTRO}-rosbag2-py \
+      ros-${ROS_DISTRO}-rosidl-runtime-py \
+      ros-${ROS_DISTRO}-tf2-geometry-msgs \
+      ros-${ROS_DISTRO}-tf2-ros \
+      ros-${ROS_DISTRO}-visualization-msgs \
+      ros-${ROS_DISTRO}-zstd-vendor \
+    && rm -rf /var/lib/apt/lists/*
+
+# ===========================================================================
+# T6 source stage: the rosbag2 MCAP storage plugin.
 #
-# Two cases. A GPU newer than Hopper: DeepStream 7.1 ships TensorRT 10.3,
-# which stops at Hopper. On a newer card it parses the ONNX, reports
-# `Unsupported SM`, builds no engine and takes the process down, while the
-# streams keep decoding. A newer TensorRT for jammy from the CUDA repository,
-# which the x86 base already lists, fixes it. A Jetson: the generic arm64 base
-# carries 10.3.0.26 and the host runs 10.3.0.30. An engine loads only under
-# the build that made it, and 10.3.0.26 cannot build one on the Orin at all
-# (a 5 MB tactic limit). The host's own packages fix it. They come from the
-# JetPack repository, which TRT_APT_SOURCE names and this block adds.
-# TRT_APT_PUBLIC_KEY is the URL of the key that signs that repository.
+# ROS Humble has no binary rosbag2 MCAP plugin in the configured repository.
+# Build the pinned upstream plugin here, where network access is already part
+# of the explicit `px4sim prepare` operation; all derived runtime images stay
+# offline and reuse the installed result.
 #
-# TRT_CUDA names the CUDA runtime the x86 upgrade links. A Jetson leaves it
-# empty, because its base already carries CUDA 12.6.
+# It installs into /opt/ros/${ROS_DISTRO} (so every path it embeds is the one
+# it runs from) and then exports only the files it added, which ros-deps
+# lays over its own /opt/ros with COPY --link. Bumping MCAP_STORAGE_REF
+# rebuilds this stage and that one copy -- no apt, no TensorRT, no pip.
 #
-# Empty means the base's own TensorRT is right for this machine, which is the
-# case for every x86 GPU up to Hopper. scripts/ds-select.sh decides all four.
-ARG TRT_VERSION=
-ARG TRT_CUDA=
-ARG TRT_APT_SOURCE=
-ARG TRT_APT_PUBLIC_KEY=
-RUN if [ -n "${TRT_VERSION}" ]; then \
-        set -eux; \
-        apt-get update; \
-        apt-get install -y --no-install-recommends ca-certificates curl; \
-        if [ -n "${TRT_APT_SOURCE}" ]; then \
-            curl -fsSL "${TRT_APT_PUBLIC_KEY}" -o /etc/apt/trusted.gpg.d/tensorrt-host.asc; \
-            echo "${TRT_APT_SOURCE}" > /etc/apt/sources.list.d/tensorrt-host.list; \
-            apt-get update; \
-        fi; \
-        cuda=""; \
-        if [ -n "${TRT_CUDA}" ]; then cuda="cuda-cudart-${TRT_CUDA} libcublas-${TRT_CUDA}"; fi; \
-        apt-get install -y --no-install-recommends --allow-downgrades \
-            "libnvinfer10=${TRT_VERSION}" \
-            "libnvinfer-plugin10=${TRT_VERSION}" \
-            "libnvonnxparsers10=${TRT_VERSION}" \
-            "libnvinfer-dispatch10=${TRT_VERSION}" \
-            "libnvinfer-lean10=${TRT_VERSION}" \
-            "libnvinfer-vc-plugin10=${TRT_VERSION}" \
-            "libnvinfer-bin=${TRT_VERSION}" \
-            ${cuda}; \
-        rm -rf /var/lib/apt/lists/*; \
-        echo "TensorRT is now $(dpkg -l libnvinfer10 | awk '/^ii/ {print $3}')"; \
-    fi
+# CHANGE HERE: MCAP_STORAGE_REF. Pattern for another source-built dependency:
+# copy this stage, give it its own ARG, and add one COPY --link in T6 below.
+# ===========================================================================
+# The source on its own, FROM scratch: it depends on nothing below it, so a
+# T1/T2 change never fetches it again, and a ref bump fetches only it.
+# BuildKit fetches the pinned commit itself and caches it by that commit.
+FROM scratch AS mcap-src
+# Pinned upstream ROS 2 storage plugin. 0.15.10 includes the MCAP metadata
+# locking fix for the dynamic-topic race that could abort
+# `ros2 bag record --all` while a simulator graph was still appearing.
+ARG MCAP_STORAGE_REF=e069b24129b6baf9b96afb1c879853fe784d56a0
+ADD https://github.com/ros2/rosbag2.git#${MCAP_STORAGE_REF} /
+
+FROM ros-core AS mcap
+ARG TARGETARCH
+ARG DS_TAG
+ENV CMAKE_C_COMPILER_LAUNCHER=ccache CMAKE_CXX_COMPILER_LAUNCHER=ccache
+RUN --network=none \
+    --mount=type=bind,from=mcap-src,target=/tmp/rosbag2_storage_mcap,rw \
+    --mount=type=cache,id=ros-ccache-mcap-${DS_TAG}-${TARGETARCH},target=/root/.cache/ccache,sharing=locked \
+    set -eux; \
+    # Humble's setup scripts read optional variables under nounset. Source the
+    # environment with nounset briefly disabled, then restore strict mode for
+    # the actual build and cleanup.
+    touch /tmp/mcap-stamp; sleep 1; \
+    set +u; . /opt/ros/${ROS_DISTRO}/setup.sh; set -u; \
+    colcon build --merge-install \
+      --base-paths /tmp/rosbag2_storage_mcap \
+      --install-base /opt/ros/${ROS_DISTRO} \
+      --build-base /tmp/rosbag2_storage_mcap-build \
+      --packages-select mcap_vendor rosbag2_storage_mcap_testdata rosbag2_test_common \
+      --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF; \
+    set +u; . /opt/ros/${ROS_DISTRO}/setup.sh; set -u; \
+    colcon build --merge-install \
+      --base-paths /tmp/rosbag2_storage_mcap \
+      --install-base /opt/ros/${ROS_DISTRO} \
+      --build-base /tmp/rosbag2_storage_mcap-build \
+      --packages-select rosbag2_storage_mcap \
+      --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF; \
+    # Export what the build added below /opt/ros, and none of the top-level
+    # setup scripts colcon rewrote: those belong to the apt install. ctime,
+    # not mtime: CMake install keeps each source file's mtime.
+    mkdir -p /out; \
+    cd /opt/ros/${ROS_DISTRO}; \
+    find . -mindepth 2 -cnewer /tmp/mcap-stamp \( -type f -o -type l \) -print0 \
+      | xargs -0 cp -a --parents -t /out; \
+    test -n "$(find /out -path '*ament_index/resource_index/packages/rosbag2_storage_mcap')"; \
+    rm -rf /tmp/rosbag2_storage_mcap-build /root/.colcon
+
+# ===========================================================================
+# ros-deps -- the runtime every ROS image derives from. Target of the
+# ros-deps service; modules/ros-base builds the workspace FROM it.
+# ===========================================================================
+FROM ros-core AS ros-deps
+ARG TARGETARCH
+
+# ---------------------------------------------------------------------------
+# T3  rare: host user, heavy pinned Python, DeepStream bindings.
+# ---------------------------------------------------------------------------
+# A user whose ids match the host, so a bind mount stays writable from both
+# sides. The home is /home/user because onboard_common_params.yaml points
+# model.dir and model.custom_lib_path at /home/user/ros2_ws.
+#
+# Ubuntu 24.04 already has a uid 1000 account named `ubuntu`, and it holds the
+# id the host user wants. Remove it first, or useradd fails the build on a
+# machine whose host uid is the usual 1000.
+ARG USERNAME=user
+ARG HOST_UID=1000
+ARG HOST_GID=1000
+ARG WORKSPACE_DIR=/home/user/ros2_ws
+RUN set -eux; \
+    if existing=$(getent passwd "${HOST_UID}" | cut -d: -f1) && [ -n "${existing}" ]; then \
+        userdel -r "${existing}" 2>/dev/null || userdel "${existing}"; \
+    fi; \
+    groupadd -f -g "${HOST_GID}" "${USERNAME}"; \
+    useradd -m -d /home/user -u "${HOST_UID}" -g "${HOST_GID}" -s /bin/bash "${USERNAME}"; \
+    mkdir -p "${WORKSPACE_DIR}/src" /models /logs /terrain /camera; \
+    chown -R "${HOST_UID}:${HOST_GID}" /home/user "${WORKSPACE_DIR}" /models /logs /terrain /camera
 
 # Ubuntu 24.04 marks the system interpreter externally managed, so every pip
 # install below refuses unless it is told the distribution's packages may move.
@@ -330,65 +570,90 @@ RUN if python3 -m pip install --help 2>/dev/null | grep -q -- --break-system-pac
         printf '[install]\nbreak-system-packages = true\n' > /etc/pip.conf; \
     fi
 
-# ---------------------------------------------------------------------------
-
-# pymap3d is what tf_loc and MAVInsight convert LLA with. folium is the mosaic
-# map export.
+# The heavy, pinned wheels (~3 GB: onnxruntime and the tensorrt wheel with its
+# bundled libraries). Kept apart from the light packages in T5 so adding a
+# small dependency never downloads these again.
 #
 # numpy stays below 2 on every base. pyds does not support numpy 2 at all, and
 # each distribution's cv_bridge and apt scipy are built against the numpy that
 # ships with it: 1.24 on 22.04, 1.26 on 24.04. So the pin is a ceiling here and
 # an exact version there, and neither one moves the distribution's own numpy.
-RUN python3 -m pip install --no-cache-dir \
+RUN --mount=type=cache,id=px4sim-pip-${TARGETARCH},target=/root/.cache/pip \
+    python3 -m pip install \
       "$([ "${ROS_DISTRO}" = humble ] && echo 'numpy==1.24.4' || echo 'numpy<2')" \
-      "pymap3d" \
-      "folium" \
-      "utm" \
       "onnxruntime==1.18.1" \
       "tensorrt==10.3.0"
 
-# The bindings from the first stage. Installing the wheel, rather than copying
+# The bindings from the pyds stage. Installing the wheel, rather than copying
 # pyds*.so into site-packages, makes a wrong artifact fail here instead of at
 # the first import.
+#
+# The check uses find_spec and not an import. pyds links against libcuda.so.1,
+# which the NVIDIA container runtime injects at run time, so a real import
+# always fails during a build even when the install is correct.
 COPY --from=pyds /wheels /tmp/wheels
-RUN set -eux; \
-    pip3 install --no-cache-dir /tmp/wheels/pyds-*.whl; \
+RUN --mount=type=cache,id=px4sim-pip-${TARGETARCH},target=/root/.cache/pip \
+    set -eux; \
+    pip3 install /tmp/wheels/pyds-*.whl; \
     rm -rf /tmp/wheels; \
     python3 -c "import importlib.util, sys; \
 spec = importlib.util.find_spec('pyds'); \
 sys.exit('pyds did not install') if spec is None else print('pyds installed:', spec.origin)"
 
-# The check uses find_spec and not an import. pyds links against libcuda.so.1,
-# which the NVIDIA container runtime injects at run time, so a real import
-# always fails during a build even when the install is correct.
+# ---------------------------------------------------------------------------
+# T4  often: ROS runtime packages and apt tools nothing compiles against.
+#     >>> ADD NEW apt / ros-${ROS_DISTRO}-* PACKAGES HERE <<<
+#     Costs one apt run from the local apt cache; T0-T3, MAVROS and MCAP
+#     stay cached.
+#     Keep the list sorted so a merge conflict is a one-line conflict.
+# ---------------------------------------------------------------------------
+RUN --mount=type=cache,id=px4sim-apt-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+      ros-${ROS_DISTRO}-cv-bridge \
+      ros-${ROS_DISTRO}-domain-bridge \
+      ros-${ROS_DISTRO}-foxglove-bridge \
+      ros-${ROS_DISTRO}-foxglove-msgs \
+      ros-${ROS_DISTRO}-image-geometry \
+      ros-${ROS_DISTRO}-image-transport \
+      ros-${ROS_DISTRO}-rqt-gui \
+      ros-${ROS_DISTRO}-rqt-gui-py \
+      ros-${ROS_DISTRO}-vision-msgs \
+    && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
-# A user whose ids match the host, so a bind mount stays writable from both
-# sides. The home is /home/user because onboard_common_params.yaml points
-# model.dir and model.custom_lib_path at /home/user/ros2_ws.
+# T5  often: light Python packages.
+#     >>> ADD NEW PIP PACKAGES HERE <<<  (pin them; a heavy wheel goes in T3)
+#     Costs seconds; nothing below T5 reruns.
 #
-# Ubuntu 24.04 already has a uid 1000 account named `ubuntu`, and it holds the
-# id the host user wants. Remove it first, or useradd fails the build on a
-# machine whose host uid is the usual 1000.
+#     pymap3d: tf_loc and MAVInsight convert LLA with it. folium: the mosaic
+#     map export. utm: tracking. websockets: verify/component/foxglove_probe.py
+#     reads the Foxglove bridge with it -- from pip rather than apt because
+#     jammy ships websockets 9.1, which passes a loop to asyncio.Lock and so
+#     cannot run on the Python 3.10 beside it.
 # ---------------------------------------------------------------------------
-RUN set -eux; \
-    if existing=$(getent passwd "${HOST_UID}" | cut -d: -f1) && [ -n "${existing}" ]; then \
-        userdel -r "${existing}" 2>/dev/null || userdel "${existing}"; \
-    fi; \
-    groupadd -f -g "${HOST_GID}" "${USERNAME}"; \
-    useradd -m -d /home/user -u "${HOST_UID}" -g "${HOST_GID}" -s /bin/bash "${USERNAME}"; \
-    mkdir -p "${WORKSPACE_DIR}/src" /models /logs /terrain /camera; \
-    chown -R "${HOST_UID}:${HOST_GID}" /home/user "${WORKSPACE_DIR}" /models /logs /terrain /camera
+RUN --mount=type=cache,id=px4sim-pip-${TARGETARCH},target=/root/.cache/pip \
+    python3 -m pip install \
+      "folium" \
+      "pymap3d" \
+      "utm" \
+      "websockets==12.0"
 
-# What verify/component/foxglove_probe.py speaks. It reads the Foxglove bridge
-# over the same protocol the panels do, which is the only way to see a layout
-# the way an operator's Foxglove sees it. Its own layer, above everything slow
-# and below the workspace, so an edit to a node never pays for it.
-# From pip rather than apt: jammy ships websockets 9.1, which passes a loop to
-# asyncio.Lock and so cannot run on the Python 3.10 beside it.
-RUN python3 -m pip install --no-cache-dir "websockets==12.0"
+# ---------------------------------------------------------------------------
+# T6  source-built dependencies, one COPY --link per stage above.
+#     --link makes each copy independent of the layers under it, so a T4/T5
+#     edit reuses the built plugin, and a plugin bump re-copies only it.
+# ---------------------------------------------------------------------------
+COPY --link --from=mcap /out/ /opt/ros/${ROS_DISTRO}/
+
+# Last, and cheap: prove that nothing added above undid the codec repair in
+# T1 or lost the MCAP plugin. A failure here means a T4 package pulled in a
+# stripped library; move that package into T1 (before the repair).
+RUN set -eu; \
+    python3 -c "import cv2"; \
+    for element in avdec_h264 avdec_h265 x264enc x265enc jpegenc; do \
+      gst-inspect-1.0 "$element" >/dev/null; \
+    done; \
+    set +u; . /opt/ros/${ROS_DISTRO}/setup.sh; set -u; \
+    ros2 pkg prefix rosbag2_storage_mcap >/dev/null
 
 USER root
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      patch python3-colcon-override-check ccache \
-    && rm -rf /var/lib/apt/lists/*

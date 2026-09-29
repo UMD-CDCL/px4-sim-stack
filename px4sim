@@ -590,7 +590,7 @@ build_stack() {
 	done
 	if [ "$needs_base" = true ]; then
 		local image
-		for image in ros-deps yolo-deps; do
+		for image in ros-core ros-deps yolo-deps; do
 			docker image inspect "px4simstack/$image:$DS_TAG" >/dev/null 2>&1 \
 				|| die "Missing local $image:$DS_TAG. Run ./px4sim prepare once with internet."
 		done
@@ -635,11 +635,13 @@ prepare_stack() {
 		docker image inspect "$parent" >/dev/null 2>&1 || docker pull "$parent"
 	done
 	if [ "${PX4SIM_PINNED_DEPS:-0}" = 1 ] \
+		&& docker image inspect "px4simstack/ros-core:$DS_TAG" >/dev/null 2>&1 \
 		&& docker image inspect "px4simstack/ros-deps:$DS_TAG" >/dev/null 2>&1 \
 		&& docker image inspect "px4simstack/yolo-deps:$DS_TAG" >/dev/null 2>&1; then
 		say "Reusing pinned local dependency images: $DS_TAG"
 	else
-		COMPOSE_PROFILES=deps $DC build ros-deps yolo-deps
+		# One build call, so the stages the three targets share are built once.
+		COMPOSE_PROFILES=deps $DC build ros-core ros-deps yolo-deps
 	fi
 	# Image-only services (for example video-router) must also be present before
 	# going offline. Downloading is confined to this explicit preparation step.

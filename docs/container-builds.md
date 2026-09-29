@@ -46,8 +46,8 @@ assembled interfaces. If a package gains compiled code, its build stage must
 copy and source its actual dependency prefixes before compilation.
 
 ROS source build instructions use `RUN --network=none`. ROS and parser
-toolchains come from tagged local `ros-deps` and `yolo-deps` images selected by
-`DS_TAG`. Those dependency images are not rebuilt by ordinary `build` or
+toolchains come from tagged local `ros-core`, `ros-deps` and `yolo-deps`
+images selected by `DS_TAG`, all three targets of `modules/ros-deps/Dockerfile`. Those dependency images are not rebuilt by ordinary `build` or
 `restart`. Changing dependency arguments, the ROS release, CUDA mapping, or
 the selected hardware accommodation requires an online `prepare`.
 
@@ -98,3 +98,39 @@ exercises real offline package builds against temporary context copies and
 checks unchanged, application, parser, and message cache boundaries. It uses
 a temporary image tag and checks ROS package discovery and native message
 type support without starting the stack.
+
+## Where a change goes, and what it costs
+
+Layers are ordered by how often they change, rarest first, and weighted by
+what they cost to redo. The frequencies are from this repository's history
+(Aug 12 - Sep 29 2026) and `docker buildx history` on the sim laptop.
+
+| Changes | What | Where it lives | Rebuilds |
+| --- | --- | --- | --- |
+| never | DeepStream base, Ubuntu, ROS distro | `DS_VERSION` via `scripts/ds-select.sh` | everything |
+| never (per GPU) | TensorRT + cuBLAS (~10 GB download) | ros-deps `trt` stage (T0) | everything |
+| never | pyds wheel, codec repair | ros-deps `pyds` stage, T1 | ros-deps up |
+| rare | system apt that ROS core builds against | ros-deps T1 `system` | ros-core, MAVROS, MCAP, ros-deps |
+| rare | ROS core / MAVROS build deps | ros-deps T2 `ros-core` | MAVROS (ccache), MCAP, ros-deps |
+| rare | MAVROS source or patch (pinned 2.14.0) | chimera-deploy submodule | `mavros` stage only |
+| rare | heavy pinned pip (numpy, onnxruntime, tensorrt) | ros-deps T3 | T3 and up (~3 GB) |
+| ~weekly | **new apt / ros-humble-\* runtime package** | **ros-deps T4** | one apt run |
+| ~weekly | **new pip package** | **ros-deps T5** | seconds |
+| ~weekly | MCAP plugin ref | ros-deps `mcap` stage (T6) | that stage + one COPY |
+| daily | umd_uas, MAVInsight, tracking_test, cdcl_umd_msgs | ros2_ws, per-package stage in ros-base | that package |
+| daily | entrypoints, calibration, scripts | modules/onboard, offboard, sim (last COPY) | one layer |
+| daily | runtime settings | compose.yaml / .env | no build |
+
+Rules:
+
+- Declare an `ARG` directly above the `RUN` that reads it. Every later `RUN`
+  receives it as an environment variable, so a changed value misses the cache
+  from the declaration on. An `MCAP_STORAGE_REF` declared above the ROS apt
+  install used to reinstall ROS, TensorRT and pip for a plugin bump.
+- Add packages to T4/T5. Fold them down into T1/T2 only when a cold rebuild
+  is being taken anyway (DeepStream or TensorRT change).
+- A vendored C++ ROS package is its own stage `FROM core` in ros-base (like
+  MAVROS) or `FROM ros-core` in ros-deps (like MCAP), copied in with
+  `COPY --link`, so nothing added to ros-deps recompiles it.
+- Do not reword the `trt` RUN or the `pyds` stage: their text is what makes
+  them cache hits for existing machines.

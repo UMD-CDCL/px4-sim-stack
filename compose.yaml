@@ -312,10 +312,27 @@ services:
   # Built, never run: DeepStream, ROS 2, MAVROS and the built ros2_ws, in one
   # image so the work happens once and one package list is maintained.
   # -------------------------------------------------------------------------
+  # The three dependency images are targets of one Dockerfile,
+  # modules/ros-deps, built together by `./px4sim prepare`, so the stages they
+  # share (the DeepStream base and its TensorRT) are built and stored once.
+  # That file says which tier a new package belongs in.
+  ros-core:
+    # What MAVROS compiles against (modules/ros-base). Never run.
+    profiles: [deps]
+    build:
+      context: ./modules/ros-deps
+      target: ros-core
+      network: host
+      args:
+        <<: [*ids, *deepstream]
+    image: px4simstack/ros-core:${DS_TAG:-7.1}
+    command: ["true"]
+
   ros-deps:
     profiles: [deps]
     build:
       context: ./modules/ros-deps
+      target: ros-deps
       network: host
       args:
         <<: [*ids, *deepstream]
@@ -325,7 +342,8 @@ services:
   yolo-deps:
     profiles: [deps]
     build:
-      context: ./modules/yolo-deps
+      context: ./modules/ros-deps
+      target: yolo-deps
       network: host
       args:
         <<: *deepstream

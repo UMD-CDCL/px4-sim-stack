@@ -1,7 +1,21 @@
-# No dependency downloads here. Prepare local parents with ./px4sim deps.
+# No dependency downloads here. Prepare local parents with ./px4sim prepare.
 # Each package is an independent branch; assembly copies only installed files.
+#
+# WHERE THINGS GO
+#   new apt / pip dependency      modules/ros-deps/Dockerfile, tiers T4 / T5
+#   new workspace package         its own `FROM deps AS <pkg>` stage below, one
+#                                 COPY --link in runtime, one context in
+#                                 compose.yaml and scripts/build-contexts.sh
+#   new vendored C++ ROS package  a stage FROM core (like mavros), so apt/pip
+#                                 additions in ros-deps never recompile it
+#   entrypoints, per-role files   modules/onboard or modules/offboard
 ARG DS_TAG=7.1
 FROM px4simstack/ros-deps:${DS_TAG} AS deps
+
+# ROS core only (modules/ros-deps, tier T2): what MAVROS compiles against.
+# ros-deps is this plus runtime extras, so adding a pip or apt package there
+# leaves this parent -- and the MAVROS build -- cached.
+FROM px4simstack/ros-core:${DS_TAG} AS core
 
 FROM px4simstack/yolo-deps:${DS_TAG} AS parser
 COPY --from=yolo_src / /src
@@ -11,9 +25,15 @@ RUN --network=none set -eux; \
     mkdir -p /out; \
     cp /src/libnvdsinfer_custom_impl_Yolo.so /out/
 
-FROM deps AS mavros
+FROM core AS mavros
+ARG TARGETARCH
+ARG DS_TAG
 ARG MAVROS_PATCH=1
+ARG ROS_BUILD_JOBS=4
+# apply.sh runs plain colcon; CMake takes the launcher from the environment.
+ENV CMAKE_C_COMPILER_LAUNCHER=ccache CMAKE_CXX_COMPILER_LAUNCHER=ccache
 RUN --network=none \
+    --mount=type=cache,id=ros-ccache-mavros-${DS_TAG}-${TARGETARCH},target=/root/.cache/ccache,sharing=locked \
     --mount=type=bind,from=mavros_patch_src,target=/tmp/chimera-deploy/remote/mavros_patch \
     --mount=type=bind,from=mavros_src,target=/tmp/chimera-deploy/submodules/mavros \
     --mount=type=bind,from=angles_src,target=/tmp/chimera-deploy/submodules/angles \
@@ -23,7 +43,7 @@ RUN --network=none \
     set -eux; \
     mkdir -p /opt/mavros/install; \
     if [ "${MAVROS_PATCH}" = 1 ] && [ "${ROS_DISTRO}" = humble ]; then \
-        MAKEFLAGS=-j4 MAVROS_PATCH_WS=/opt/mavros \
+        MAKEFLAGS="-j${ROS_BUILD_JOBS}" MAVROS_PATCH_WS=/opt/mavros \
             bash /tmp/chimera-deploy/remote/mavros_patch/apply.sh; \
     fi
 
