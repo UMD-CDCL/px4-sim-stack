@@ -319,6 +319,7 @@ if [ "${1:-launch}" = "launch" ]; then
 		truth:="${TRUTH}"
 		bench:="${BENCH_MODE:-false}"
 		container:=true
+		${ONBOARD_CAMERA:+camera:="${ONBOARD_CAMERA}"}
 		${params:+params:="${params}"}
 		"$@")
 	echo "launch: ${launch[*]}"

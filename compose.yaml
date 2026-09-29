@@ -768,6 +768,9 @@ services:
       # Optional per-aircraft override. Otherwise entrypoint.sh selects this
       # UAS_NUM's entry from UAS_ROLES, just as it does for the simulated fleet.
       ROLE: ${UAS_ROLE:-}
+      # Optional camera override: thermal or rgb. Empty uses onboard.launch.py's
+      # real-UAS3 default.
+      ONBOARD_CAMERA: ${ONBOARD_CAMERA:-}
       # The scene the ground station draws, so the vehicle casts at the
       # surface the ground casts at. The dash form keeps an empty value
       # empty, the way `ground` reads it: SCENE= on a bench leaves both
