@@ -1002,14 +1002,11 @@ fleet_facts() {
 
 recording_status() {
 	local pid active=false
-	# Each simulator recorder has a unique output path. Tracking a container PID
-	# is unsafe: ROS processes can reuse it after rosbag2 has already exited.
 	if [ -f "$RECORD_SIM_FILE" ]; then
-		# The manifest is the simulator recording lock. Do not infer state from
-		# pgrep: rosbag2 can briefly change its process command while starting or
-		# finalizing, and that used to delete the manifest before `record stop`
-		# could flush the ground bag.
-		echo true
+		# The manifest owns the session, but it is not evidence that a detached
+		# recorder survived startup. Keep it until `record stop` reconciles the
+		# bags, while reporting a failed recorder honestly to the UI and callers.
+		if sim_recorders_running; then echo true; else echo false; fi
 		return
 	fi
 	if [ -f "$RECORD_PID_FILE" ]; then
@@ -1028,6 +1025,69 @@ recording_status() {
 		rm -f "$RECORD_PID_FILE" "$RECORD_MODE_FILE"
 		echo false
 	fi
+}
+
+# Simulator recorders run in their ROS containers, so their identity is the
+# service and unique bag path in the manifest, not a host PID. These helpers
+# are the one lifecycle path used for launch health, status and clean stop.
+sim_recorder_running() { # <container> <bag dir>
+	docker exec "$1" pgrep -f "ros2 bag record.*$2" >/dev/null 2>&1
+}
+
+sim_recorders_running() {
+	local label service bag_dir container
+	[ -s "$RECORD_SIM_FILE" ] || return 1
+	while IFS=$'\t' read -r label service bag_dir; do
+		container=$(docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+			--filter "label=com.docker.compose.service=$service" -q | head -1)
+		[ -n "$container" ] && sim_recorder_running "$container" "$bag_dir" || return 1
+	done < "$RECORD_SIM_FILE"
+}
+
+signal_sim_recorders() { # <signal>
+	local signal=$1 label service bag_dir container
+	while IFS=$'\t' read -r label service bag_dir; do
+		container=$(docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+			--filter "label=com.docker.compose.service=$service" -q | head -1)
+		[ -n "$container" ] || continue
+		docker exec "$container" pkill "-$signal" -f "ros2 bag record.*${bag_dir}" 2>/dev/null || true
+	done < "$RECORD_SIM_FILE"
+}
+
+sim_recorders_stopped() {
+	local label service bag_dir container
+	while IFS=$'\t' read -r label service bag_dir; do
+		container=$(docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+			--filter "label=com.docker.compose.service=$service" -q | head -1)
+		[ -z "$container" ] || ! sim_recorder_running "$container" "$bag_dir" || return 1
+	done < "$RECORD_SIM_FILE"
+}
+
+confirm_sim_recorders_started() { # [tenths of a second]
+	local attempts=${1:-30}
+	for _ in $(seq 1 "$attempts"); do
+		sim_recorders_running || return 1
+		sleep 0.1
+	done
+}
+
+wait_for_sim_recorders_to_stop() { # [tenths of a second]
+	local attempts=${1:-100}
+	for _ in $(seq 1 "$attempts"); do
+		sim_recorders_stopped && return 0
+		sleep 0.1
+	done
+	sim_recorders_stopped
+}
+
+abort_sim_recording_start() { # <reason>
+	local reason=$1
+	signal_sim_recorders INT
+	if ! wait_for_sim_recorders_to_stop; then
+		die "$reason; the other recorders are still finalizing. Run ./px4sim record stop"
+	fi
+	rm -f "$RECORD_SIM_FILE" "$RECORD_MODE_FILE" "$RECORD_BAG_FILE"
+	die "$reason"
 }
 
 recording_mode() {
@@ -1458,7 +1518,16 @@ record)
 				--filter "label=com.docker.compose.service=offboard" -q | head -1)
 			[ -n "$ground_container" ] || die "offboard is not running; start the simulator with its ground station before recording"
 			mkdir -p "$run_dir"
-			: > "$RECORD_LOG"
+			# Establish ownership before the first detached launch. If a later
+			# launch fails, this same manifest lets the cleanup path stop every
+			# recorder that did start.
+			: > "$RECORD_SIM_FILE"
+			for index in "${!numbers[@]}"; do
+				printf 'uas%s\tonboard%s\t/recordings/%s/uas%s\n' \
+					"${numbers[$index]}" "${numbers[$index]}" "$bag_base" "${numbers[$index]}" >> "$RECORD_SIM_FILE"
+			done
+			printf 'ground\toffboard\t/recordings/%s/ground\n' "$bag_base" >> "$RECORD_SIM_FILE"
+			printf '%s\n' bags > "$RECORD_MODE_FILE"
 			for index in "${!numbers[@]}"; do
 				n=${numbers[$index]}
 				container=${containers[$index]}
@@ -1468,23 +1537,23 @@ record)
 				# shell child or host PID to leak or reuse during stop.
 				docker exec -d -u user "$container" bash -lc \
 					". /usr/local/bin/ros-env.sh; export ROS_DOMAIN_ID=$domain; exec ros2 bag record -s mcap -a -o $bag_dir > ${bag_dir}.record.log 2>&1" \
-					|| die "could not start rosbag2 for uas${n}; see $RECORD_LOG"
+					|| abort_sim_recording_start "could not launch rosbag2 for uas${n}"
 			done
 			bag_dir="/recordings/${bag_base}/ground"
 			# The ground container has its own /recordings bind mount, so the
 			# host-side mkdir alone does not create this parent inside offboard.
 			docker exec "$ground_container" mkdir -p "/recordings/${bag_base}" \
-				|| die "could not create the offboard recording directory; see $RECORD_LOG"
+				|| abort_sim_recording_start "could not create the offboard recording directory"
 			docker exec -d -u user "$ground_container" bash -lc \
 				". /usr/local/bin/ros-env.sh; exec ros2 bag record -s mcap -a -o $bag_dir > ${bag_dir}.record.log 2>&1" \
-				|| die "could not start rosbag2 for ground; see $RECORD_LOG"
-			: > "$RECORD_SIM_FILE"
-			for index in "${!numbers[@]}"; do
-				printf 'uas%s\tonboard%s\t/recordings/%s/uas%s\n' \
-					"${numbers[$index]}" "${numbers[$index]}" "$bag_base" "${numbers[$index]}" >> "$RECORD_SIM_FILE"
-			done
-			printf 'ground\toffboard\t/recordings/%s/ground\n' "$bag_base" >> "$RECORD_SIM_FILE"
-			printf '%s\n' bags > "$RECORD_MODE_FILE"
+				|| abort_sim_recording_start "could not launch rosbag2 for ground"
+			# `docker exec -d` only says the command was accepted. The MCAP plugin
+			# used to abort while the large, changing graph was discovered, so require
+			# every detached recorder to survive its startup window before reporting a
+			# usable flight record.
+			if ! confirm_sim_recorders_started; then
+				abort_sim_recording_start "a simulator recorder exited during startup; inspect $run_dir/*.record.log"
+			fi
 			say "recording ${#numbers[@]} simulated drones and ground to $run_dir"
 			exit 0
 		fi
@@ -1516,30 +1585,11 @@ record)
 	stop)
 		if [ "$(world_of)" = simulator ]; then
 			[ -s "$RECORD_SIM_FILE" ] || die "no simulator recording state exists"
-			local label service bag_dir container active=false incomplete=()
-			while IFS=$'\t' read -r label service bag_dir; do
-				container=$(docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
-					--filter "label=com.docker.compose.service=$service" -q | head -1)
-				[ -n "$container" ] || { incomplete+=("$label"); continue; }
-				docker exec "$container" pkill -INT -f "ros2 bag record.*${bag_dir}" 2>/dev/null || true
-			done < "$RECORD_SIM_FILE"
+			local label service bag_dir incomplete=()
+			signal_sim_recorders INT
 			# A SIGKILL can corrupt an MCAP. Give rosbag2 a short, bounded window to
 			# flush; if it is still running, leave the state intact for a retry.
-			for _ in {1..100}; do
-				active=false
-				while IFS=$'\t' read -r label service bag_dir; do
-					container=$(docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
-						--filter "label=com.docker.compose.service=$service" -q | head -1)
-					if [ -n "$container" ] && docker exec "$container" \
-						pgrep -f "ros2 bag record.*${bag_dir}" >/dev/null 2>&1; then
-						active=true
-						break
-					fi
-				done < "$RECORD_SIM_FILE"
-				[ "$active" = false ] && break
-				sleep 0.1
-			done
-			[ "$active" = false ] || die "rosbag2 is still finalizing; run ./px4sim record stop again"
+			wait_for_sim_recorders_to_stop || die "rosbag2 is still finalizing; run ./px4sim record stop again"
 			while IFS=$'\t' read -r label service bag_dir; do
 				# Each container has its own /logs bind mount. Companion bags land
 				# under logs/onboard; the simulated ground station lands under
@@ -1547,7 +1597,7 @@ record)
 				# recording appear missing even when it finalized correctly.
 				[ -s "logs/recordings${bag_dir#/recordings}/metadata.yaml" ] || incomplete+=("$label")
 			done < "$RECORD_SIM_FILE"
-			[ ${#incomplete[@]} -eq 0 ] || die "${incomplete[*]} did not finalize an MCAP; see $RECORD_LOG"
+			[ ${#incomplete[@]} -eq 0 ] || die "${incomplete[*]} did not finalize an MCAP; inspect their .record.log files under logs/recordings"
 			local run_dir
 			run_dir=$(dirname "$(awk -F '\t' 'NR == 1 { print $3 }' "$RECORD_SIM_FILE")")
 			rm -f "$RECORD_SIM_FILE" "$RECORD_MODE_FILE" "$RECORD_BAG_FILE"

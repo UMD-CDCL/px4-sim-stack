@@ -95,8 +95,10 @@ ARG HOST_GID=1000
 ARG WORKSPACE_DIR=/home/user/ros2_ws
 # Pinned upstream ROS 2 storage plugin. The ROS Humble apt index ships the
 # SQLite plugin but not MCAP, so this is built once in the prepared dependency
-# image and inherited by ros-base, onboard, and offboard.
-ARG MCAP_STORAGE_REF=c1c2159679921a4f4392f370172c28e7b3b01452
+# image and inherited by ros-base, onboard, and offboard. 0.15.10 includes the
+# MCAP metadata locking fix for the dynamic-topic race that could abort
+# `ros2 bag record --all` while a simulator graph was still appearing.
+ARG MCAP_STORAGE_REF=e069b24129b6baf9b96afb1c879853fe784d56a0
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +199,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # offline and reuse the installed result.
 RUN set -eux; \
     mkdir -p /tmp/rosbag2_storage_mcap; \
-    git clone --depth 1 https://github.com/ros-tooling/rosbag2_storage_mcap.git \
+    git clone --depth 1 https://github.com/ros2/rosbag2.git \
       /tmp/rosbag2_storage_mcap; \
     git -C /tmp/rosbag2_storage_mcap fetch --depth 1 origin "${MCAP_STORAGE_REF}"; \
     git -C /tmp/rosbag2_storage_mcap checkout --detach "${MCAP_STORAGE_REF}"; \
