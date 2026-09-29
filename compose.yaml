@@ -186,9 +186,6 @@ x-onboard-env: &onboard-env
   # Mission configuration follows the same fleet-slot contract as UAS_FLEET.
   UAS_ROLES: ${UAS_ROLES:-assess assess search search}
   CONOPS: ${CONOPS:-option1}
-  # Minimum detector confidence. ds_node applies this to the generated
-  # DeepStream PGIE config as the person pre-cluster threshold.
-  DS_MIN_CONFIDENCE: ${DS_MIN_CONFIDENCE:-0.4}
   ONBOARD_CAMERA: ${ONBOARD_CAMERA:-}
   # The same list the simulator renders with. cam_info needs the calibration of
   # the camera that really produced the picture, and a simulated camera's is its
