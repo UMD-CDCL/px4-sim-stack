@@ -103,9 +103,9 @@ real_number() { echo $(( $1 - UAS_BASE )); }
 # The vehicles UAS_ACTIVE selects, in this world's numbers and fleet order.
 # Empty selects the whole fleet.
 active_uas() {
-	local n word wanted=" "
-	if [ -z "${UAS_ACTIVE:-}" ]; then fleet_numbers; return 0; fi
-	for word in ${UAS_ACTIVE//,/ }; do
+	local n word wanted=" " active=${UAS_ACTIVE:-}
+	if [ -z "$active" ]; then fleet_numbers; return 0; fi
+	for word in ${active//,/ }; do
 		n=$(fleet_number "$word") && wanted+="$n "
 	done
 	for n in $(fleet_numbers); do
@@ -115,8 +115,8 @@ active_uas() {
 # The UAS_ACTIVE words that name no vehicle of this fleet, for the refusal
 # that keeps a mistyped selection from being read as "no selection".
 unknown_active_words() {
-	local word
-	for word in ${UAS_ACTIVE//,/ }; do
+	local word active=${UAS_ACTIVE:-}
+	for word in ${active//,/ }; do
 		fleet_number "$word" >/dev/null || printf '%s ' "$word"
 	done
 }
