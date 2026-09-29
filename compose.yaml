@@ -277,6 +277,7 @@ x-offboard-env: &offboard-env
   # A ground station can represent one active member of a configured fleet
   # without changing that fleet's model mapping. Empty means every member.
   UAS_ACTIVE: ${UAS_ACTIVE:-}
+  ONBOARD_CAMERA: ${ONBOARD_CAMERA:-}
   # UAS number whose mosaic is painted on the shared ground scene. Empty
   # preserves the launch file's lowest-numbered-fleet default.
   MOSAIC_UAS: ${MOSAIC_UAS:-}

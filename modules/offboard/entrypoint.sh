@@ -138,6 +138,7 @@ if [ "${1:-launch}" = "launch" ]; then
 		"${mosaic_args[@]}" \
 		bench:="${BENCH_MODE:-false}" \
 		params:="${SITE_PARAMS}" \
+		${ONBOARD_CAMERA:+camera:="${ONBOARD_CAMERA}"} \
 		"$@"
 fi
 
