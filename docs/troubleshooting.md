@@ -760,7 +760,9 @@ anything while every container still looks healthy.
 ls /dev/shm | grep -c fastrtps
 ```
 
-`./px4sim stop` releases both forms when nobody has them open. To clear them by hand:
+`./px4sim stop` releases every object whose owner is gone, in well under a
+second. It uses the lock test `fastdds shm clean` makes, and it also takes the
+mutexes an interrupted cleanup strands. To clear them by hand:
 
 ```bash
 ./px4sim stop
