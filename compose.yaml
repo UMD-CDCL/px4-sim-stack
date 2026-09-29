@@ -186,6 +186,7 @@ x-onboard-env: &onboard-env
   # Mission configuration follows the same fleet-slot contract as UAS_FLEET.
   UAS_ROLES: ${UAS_ROLES:-assess assess search search}
   CONOPS: ${CONOPS:-option1}
+  ONBOARD_CAMERA: ${ONBOARD_CAMERA:-}
   # The same list the simulator renders with. cam_info needs the calibration of
   # the camera that really produced the picture, and a simulated camera's is its
   # field of view. See modules/onboard/sim_calibration.py.

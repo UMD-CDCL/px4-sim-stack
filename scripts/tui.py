@@ -143,6 +143,11 @@ ACTIONS = (
            ask=Ask("mission conops", "{conops}", choices=("option1", "option2")),
            confirm="Change the mission conops to {value} and restart the stack?",
            refresh=True, worlds=EVERY_WORLD),
+    Action(STACK, "n", "select day/night cameras for every vehicle and restart",
+           ("camera", "{value}"),
+           ask=Ask("camera mode", "{camera_mode}", choices=("day", "night")),
+           confirm="Select {value} cameras for every vehicle and restart the stacks?",
+           refresh=True, worlds=WITH_GROUND),
     Action(STACK, "c", "select a scenario", ("scenario-select", "{value}"),
            ask=Ask("scenario", "{scenario}", choices_from="scenarios"),
            refresh=True, worlds=WITH_SCENE, push_scenario=True),
@@ -835,6 +840,7 @@ class Console:
             self.rows.world, str(config.get("scene", "")),
             str(config.get("scenario", "")),
             f"conops {config.get('conops')}" if config.get("conops") else "",
+            f"camera {config.get('camera_mode')}" if config.get("camera_mode") else "",
             identity, origin,
             fleet_words(len(self.rows.fleet), len(self.rows.active))) if word)
         local_recording_active, local_mode = local_recording()
