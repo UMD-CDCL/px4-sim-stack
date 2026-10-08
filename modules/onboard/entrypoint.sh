@@ -61,12 +61,6 @@ search|assess) ;;
 *) echo "uas${UAS_NUM} has invalid role '${ROLE}'; use search or assess." >&2; exit 1 ;;
 esac
 
-CONOPS=${CONOPS:-option1}
-case "${CONOPS}" in
-option1|option2) ;;
-*) echo "CONOPS must be option1 or option2, not '${CONOPS}'." >&2; exit 1 ;;
-esac
-
 expected_ros_domain=$((60 + UAS_NUM))
 # Compose receives the declared value from the aircraft's .env so `docker
 # inspect` and PID 1 agree.  Do not silently correct a stale deployment: ROS
@@ -314,7 +308,6 @@ if [ "${1:-launch}" = "launch" ]; then
 		uas:="${UAS_NUM}"
 		${MODEL:+model:="${MODEL}"}
 		role:="${ROLE}"
-		conops:="${CONOPS}"
 		sim:="${SIM}"
 		truth:="${TRUTH}"
 		bench:="${BENCH_MODE:-false}"

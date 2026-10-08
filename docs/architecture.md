@@ -159,9 +159,8 @@ aircraft alike.
 
 `UAS_NUM` is the whole identity. The entry point derives the system id, the
 `/uas<N>` namespace, ROS domain `60 + N` and the frame prefixes from it.
-It also selects that vehicle's entry from `UAS_ROLES` and passes the stack-wide
-`CONOPS` choice to `onboard.launch.py`. `option1` launches `simple_mission`;
-`option2` launches `chimera_mission`.
+It also selects that vehicle's entry from `UAS_ROLES`. `onboard.launch.py`
+always launches `chimera_mission`; there is no CONOPS selector.
 
 One node runs here only in simulation. `sim_ground_truth` stands in for the
 course data that a real exercise sends over the UGV bridge. The Foxglove bridge

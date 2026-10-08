@@ -39,7 +39,7 @@ on uas1. The same script, the same commands, three worlds.
 | Source | What it takes |
 |---|---|
 | `./.env` | every key. `COMPOSE_PROFILES` and `UAS_BASE` name the world |
-| the environment | `SCENE`, `SCENARIO`, `UAS_FLEET`, `UAS_ROLES`, `CONOPS`, `UAS_ACTIVE`, `UAS_STREAMS`, `AIRFRAME`, `COMPOSE_PROFILES`, `GZ_GUI`, `SIM_SPEED_FACTOR` and `VIDEO_SCALED_ENCODER` beat `.env` for one run |
+| the environment | `SCENE`, `SCENARIO`, `UAS_FLEET`, `UAS_ROLES`, `UAS_ACTIVE`, `UAS_STREAMS`, `AIRFRAME`, `COMPOSE_PROFILES`, `GZ_GUI`, `SIM_SPEED_FACTOR` and `VIDEO_SCALED_ENCODER` beat `.env` for one run |
 | `/etc/environment` | `UAS_NUM` on the aircraft, through compose. `.env` never carries it |
 | `scripts/ds-select.sh` | the DeepStream release, the image, the tag and the TensorRT, resolved on every run |
 | `.origin.env` | the coordinates of the scene and the scenario, in the simulator |
@@ -47,20 +47,18 @@ on uas1. The same script, the same commands, three worlds.
 `UAS_BASE` is not in the override list, so a world is changed in `.env` and not
 on the command line.
 
-`./px4sim conops option1|option2` writes the choice to `.env` and restarts the
-stack. The terminal UI exposes the same operation under the stack menu (`.`)
-with hotkey `m`. On the real ground station it uses the scenario selector's
-distribution path: reachable drones receive the same `.env` change and restart
-in parallel with the ground stack. In simulation it applies to the simulated
-fleet, and directly on an aircraft it applies to that machine's onboard stack.
+Every vehicle uses `chimera_mission`. The former CONOPS command, TUI selection,
+and environment setting have been removed. Existing `CONOPS` entries in local
+`.env` files have no effect and can be deleted. Vehicle roles still come from
+`UAS_ROLES` until the mission-region feature is integrated.
 
 **What it refuses.**
 
 1. A `.env` where `COMPOSE_PROFILES` and `UAS_BASE` describe different worlds.
    Every command stops, except `help`, `doctor`, `check`, `x11`, `setup`,
    `stop`, `clean`, `clean-src` and `nuke`.
-2. A `CONOPS` other than `option1` or `option2`, or a `UAS_ROLES` list that
-   does not give every vehicle either `search` or `assess`.
+2. A `UAS_ROLES` list that does not give every vehicle either `search` or
+   `assess`.
 3. On a real machine, the commands that fly the simulator: `core`, `fly`,
    `place`, `fiducial`, `reset`, `px4`, `console`, `snap`, and `uas <N> arm`,
    `takeoff`, `land` and `goto`. Each one exits 1 and prints `Nothing was

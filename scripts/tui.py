@@ -138,11 +138,6 @@ ACTIONS = (
            ask=Ask("mosaic vehicle", "{mosaic}", choices_from="mosaic_choices"),
            confirm="Paint the mosaic from {value} and restart the stack?",
            worlds=WITH_GROUND),
-    Action(STACK, "m", "select mission conops and restart",
-           ("conops", "{value}"),
-           ask=Ask("mission conops", "{conops}", choices=("option1", "option2")),
-           confirm="Change the mission conops to {value} and restart the stack?",
-           refresh=True, worlds=EVERY_WORLD),
     Action(STACK, "n", "select day/night cameras for every vehicle and restart",
            ("camera", "{value}"),
            ask=Ask("camera mode", "{camera_mode}", choices=("day", "night")),
@@ -839,7 +834,6 @@ class Console:
         told = "   ".join(word for word in (
             self.rows.world, str(config.get("scene", "")),
             str(config.get("scenario", "")),
-            f"conops {config.get('conops')}" if config.get("conops") else "",
             f"camera {config.get('camera_mode')}" if config.get("camera_mode") else "",
             identity, origin,
             fleet_words(len(self.rows.fleet), len(self.rows.active))) if word)
