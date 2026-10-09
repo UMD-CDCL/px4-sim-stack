@@ -5,8 +5,43 @@ from pathlib import Path
 
 import rclpy
 from mavros_msgs.srv import WaypointPush, WaypointSetCurrent
-from umd_uas.umd_uas_mission import UASMissionNode
+from mavros_msgs.msg import Waypoint
 from rclpy.node import Node
+
+
+def load_plan_waypoints(plan: Path):
+    """Read QGC's cached mission items without depending on a mission node."""
+    document = json.loads(plan.read_text(encoding="utf-8"))
+    if document.get("fileType") != "Plan":
+        raise ValueError("not a QGroundControl plan")
+
+    def expand(items):
+        for item in items:
+            if item.get("type") == "ComplexItem":
+                nested = item.get("TransectStyleComplexItem", {}).get("Items")
+                if not nested:
+                    raise ValueError("ComplexItem has no cached mission items")
+                yield from expand(nested)
+                continue
+            if item.get("type") != "SimpleItem" or "command" not in item:
+                raise ValueError("unsupported mission item")
+            params = item.get("params", [])
+            waypoint = Waypoint()
+            waypoint.frame = int(item.get("frame", Waypoint.FRAME_MISSION))
+            waypoint.command = int(item["command"])
+            waypoint.autocontinue = bool(item.get("autoContinue", True))
+            for index, name in enumerate(("param1", "param2", "param3", "param4",
+                                          "x_lat", "y_long", "z_alt")):
+                value = params[index] if index < len(params) else None
+                if value is None:
+                    value = float("nan") if index < 4 else 0.0
+                setattr(waypoint, name, float(value))
+            yield waypoint
+
+    waypoints = list(expand(document.get("mission", {}).get("items", [])))
+    if not waypoints:
+        raise ValueError("plan has no mission items")
+    return waypoints
 
 
 class MissionUploader(Node):
@@ -18,15 +53,16 @@ class MissionUploader(Node):
         )
 
     def upload(self, plan: Path):
-        waypoints = UASMissionNode.load_plan_waypoints(str(plan))
+        waypoints = load_plan_waypoints(plan)
         if not self._wait_for_service():
             raise RuntimeError(f"MAVROS mission/push did not appear: {self.client.srv_name}")
         request = WaypointPush.Request()
         request.start_index = 0
         request.waypoints = waypoints
         future = self.client.call_async(request)
-        while not future.done():
-            rclpy.spin_once(self, timeout_sec=0.1)
+        rclpy.spin_until_future_complete(self, future, timeout_sec=30.0)
+        if not future.done():
+            raise RuntimeError("FCU mission service timed out")
         result = future.result()
         if not result.success:
             raise RuntimeError(
@@ -40,8 +76,9 @@ class MissionUploader(Node):
         current = WaypointSetCurrent.Request()
         current.wp_seq = 0
         future = self.current_client.call_async(current)
-        while not future.done():
-            rclpy.spin_once(self, timeout_sec=0.1)
+        rclpy.spin_until_future_complete(self, future, timeout_sec=30.0)
+        if not future.done():
+            raise RuntimeError("FCU mission service timed out")
         result = future.result()
         if not result.success:
             raise RuntimeError("FCU rejected mission cursor reset")

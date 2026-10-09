@@ -803,8 +803,8 @@ def command_record(uas: Uas, args) -> int:
     TransformListener(tree, uas)
     casualties = Casualties(uas)
     origin = f"uas{args.number}_home_position"
-    camera_frame = f"d{args.number}_rgb_offset"
-    airframe = f"d{args.number}_base_link"
+    camera_frame = f"uas{args.number}_rgb_offset"
+    airframe = f"uas{args.number}_base_link"
 
     speeds = Sampled()
     uas.create_subscription(
@@ -1108,7 +1108,7 @@ def command_fiducial(uas: Uas, args) -> int:
     # The pose the shot was taken at, not the pose now. A vehicle that has
     # moved since marks a pixel the camera was not looking through.
     origin = f"uas{args.number}_home_position"
-    camera = f"d{args.number}_rgb_offset"
+    camera = f"uas{args.number}_rgb_offset"
     stamp = Time.from_msg(shot.header.stamp)
     if not uas.wait_until(
             lambda: buffer.can_transform(origin, camera, stamp),
@@ -1210,8 +1210,8 @@ def command_heading(uas: Uas, args) -> int:
     if not uas.wait_until(lambda: "compass" in heading, args.deadline, "a compass heading"):
         return 1
 
-    frames = {"airframe": f"d{args.number}_base_link",
-              "camera": f"d{args.number}_gimbal_frame"}
+    frames = {"airframe": f"uas{args.number}_base_link",
+              "camera": f"uas{args.number}_gimbal_frame"}
     origin = args.origin or f"uas{args.number}_home_position"
     print(f"compass\t{heading['compass']:.1f}")
     drawn = {}
@@ -1326,7 +1326,7 @@ def command_scene(uas: Uas, args) -> int:
     lowest, highest = drawn["up"]
     drawn_relief = highest - lowest
     # The model is built about the scene centre and placed by its pose.
-    height = model.pose.position.z + statistics.median([lowest, highest]) \
+    height = model.pose.position.z + statistics.median(drawn["height"]) \
         - statistics.median(grid)
 
     print(f"vertices\t{drawn['vertices']}")

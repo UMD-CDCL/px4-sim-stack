@@ -89,6 +89,19 @@ is_active() {
 [ ${#FLEET[@]} -ge 1 ] || die "UAS_FLEET is empty. Give one model name for each vehicle."
 [ ${#FLEET[@]} -le 9 ] || die "UAS_FLEET has ${#FLEET[@]} vehicles. The simulator numbers them 11 to 19."
 
+# Keep the lowest active vehicle on the container's terminal. With a partial
+# fleet, slot zero may be inactive; background-only startup would exit the
+# entrypoint and its EXIT trap would kill Gazebo and every vehicle.
+foreground_uas=
+for index in "${!FLEET[@]}"; do
+	number=$((UAS_BASE + index + 1))
+	if is_active "$number"; then
+		foreground_uas=$number
+		break
+	fi
+done
+[ -n "$foreground_uas" ] || die "No active vehicles selected from UAS_FLEET."
+
 radians() { awk -v deg="$1" 'BEGIN { printf "%.6f", deg * atan2(0, -1) / 180 }'; }
 
 # The mark of an airframe, which decides what it carries.
@@ -450,8 +463,8 @@ fi
 # `px4 -i <instance>` gives MAV_SYS_ID = instance + 1 and names the Gazebo model
 # <model>_<instance>, which is the whole of the identity contract.
 #
-# uas11 keeps the container's terminal, so `./px4sim console` still reaches a
-# pxh> prompt. Every other vehicle runs with -d and logs to a file.
+# The lowest active vehicle keeps the container's terminal, so `./px4sim
+# console` still reaches a pxh> prompt. The others use -d and log to a file.
 start_vehicle() {
 	local index=$1 uas_num=$2 model=$3
 	is_active "$uas_num" || return 0
@@ -491,7 +504,7 @@ start_vehicle() {
 	# directory only without -s, and with -s and no path px4-rcS cannot find the
 	# stock rcS.
 	local px4=("$BUILD_DIR/bin/px4" -i "$instance" -w "$work")
-	[ "$index" = 0 ] || px4+=(-d)
+	[ "$uas_num" = "$foreground_uas" ] || px4+=(-d)
 	px4+=(-s "${PX4_RCS:-/opt/sim/px4-rcS}" "$BUILD_DIR/etc")
 
 	if [ "${HOLD_STREAM_RATES:-1}" = "1" ] && [ -x /opt/sim/hold-stream-rates.sh ]; then
@@ -512,7 +525,7 @@ start_vehicle() {
 		children+=($!)
 	fi
 
-	if [ "$index" = 0 ]; then
+	if [ "$uas_num" = "$foreground_uas" ]; then
 		log "Starting uas$uas_num: $model, system id $uas_num, router ${MAVLINK_ROUTER_IP}:${MAVLINK_ROUTER_PORT}"
 		echo "    The pxh> console for uas$uas_num is this container's terminal."
 		echo "    Attach with: ./px4sim console      Detach with: Ctrl-P Ctrl-Q"

@@ -503,9 +503,32 @@ An empty directory produces no detections and no error worth reading. Docker
 also turns a missing bind-mount source into an empty root-owned directory, so
 one that was never created reads as one that lost its models.
 
-An engine beside the ONNX belongs to one GPU, one driver and one TensorRT
-version. Move the models to another machine and delete the `*.engine` files
-with them; the first run rebuilds each in 1 to 3 minutes and says so.
+An engine beside the ONNX is specific to its GPU and TensorRT build. After a
+host driver or firmware update, check whether the existing engines still load
+before replacing them. A driver update alone need not invalidate them. Keep
+a backup of an incompatible engine before rebuilding it from the ONNX; build
+time depends on the model and available GPU memory.
+
+System BIOS and UEFI dbx updates do not select a new model group or change
+the configured model paths. Check GPU access after reboot; rebuild model
+engines only if compatibility checks fail or their build inputs change.
+
+For a T500 host, keep `ONBOARD_MODEL_DIR` pointing at the whole
+`5g_drone/perception_models` tree and
+`ONBOARD_PARAMS_FILE=/models/local/params.yaml`. From the selected 5g_drone
+checkout, run:
+
+```bash
+python3 scripts/fetch_models.py resolve --link
+```
+
+This selects `local -> t500` and repairs the ONNX hard links in that group.
+An ONNX symlink into `shared/` can send a newly built engine there instead of
+the T500 directory. The T500 parameter file keeps the classifier at batch 2
+for its 4 GB GPU; a host driver update does not change that memory limit.
+Model-link changes need no image rebuild. Source changes use
+`./px4sim build onboard11 offboard`; dependency changes follow
+[the preparation workflow](container-builds.md).
 
 After that, check the source. `ds_node` reads the full gimbal RGB stream:
 `rgb<N>` on a v3 and `pilot<N>` on a v2. `UAS_FLEET` and `UAS1<N>_MODEL` decide

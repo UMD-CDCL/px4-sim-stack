@@ -35,6 +35,7 @@ class Probe(Node):
         self.counts = {}
         self.publishers_of = {}
         self.subscriptions_made = []
+        self.subscribed_profiles = set()
         self.topics = topics
 
     def discover(self):
@@ -52,6 +53,10 @@ class Probe(Node):
             # carries policies that no subscription may be created with.
             for endpoint in self.get_publishers_info_by_topic(topic):
                 offered = endpoint.qos_profile
+                key = (topic, offered.reliability, offered.durability)
+                if key in self.subscribed_profiles:
+                    continue
+                self.subscribed_profiles.add(key)
                 self.subscriptions_made.append(self.create_subscription(
                     message, topic, self._make_callback(topic),
                     QoSProfile(reliability=offered.reliability,
@@ -88,12 +93,16 @@ def main() -> int:
     # Counting listens out the whole window. Stopping at the first message of
     # each topic would report one message everywhere.
     end = time.monotonic() + (args.count or args.deadline)
+    next_discovery = time.monotonic()
     while time.monotonic() < end and (
             args.count or len(probe.seen) < len(args.topics)):
+        if time.monotonic() >= next_discovery:
+            probe.discover()
+            next_discovery = time.monotonic() + 0.5
         rclpy.spin_once(probe, timeout_sec=0.05)
 
     for topic in args.topics:
-        publishers = probe.publishers_of.get(topic, 0)
+        publishers = probe.count_publishers(topic)
         if args.count:
             print(f"{topic}\t{publishers}\t{probe.counts.get(topic, 0)}")
             continue

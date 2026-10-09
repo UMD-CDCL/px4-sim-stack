@@ -1,0 +1,5 @@
+/**/*:
+  ds_pipeline:
+    ros__parameters:
+      model.detector: "yolo12x-custom-1280"
+      model.sgie_template_path: "/models/local/config_infer_secondary_injury_clip_vit_l14_336_b2.txt"

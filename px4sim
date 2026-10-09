@@ -63,7 +63,7 @@ ALL_PROFILES=$(sed -n 's/^[[:space:]]*profiles:[[:space:]]*\[\(.*\)\][[:space:]]
 # select one run, so `SCENE=forest ./px4sim restart` flies another world once
 # and changes no file. The list is short on purpose: a shell that already
 # exports SCENE must not quietly change what everything else does.
-OVERRIDABLE="SCENE SCENARIO UAS_FLEET UAS_ROLES CONOPS UAS_ACTIVE UAS_STREAMS AIRFRAME ONBOARD_CAMERA COMPOSE_PROFILES
+OVERRIDABLE="SCENE SCENARIO UAS_FLEET UAS_ACTIVE UAS_STREAMS AIRFRAME ONBOARD_CAMERA COMPOSE_PROFILES
              GZ_GUI SIM_SPEED_FACTOR VIDEO_SCALED_ENCODER"
 for name in $OVERRIDABLE; do
 	if [ -n "${!name+set}" ]; then
@@ -215,19 +215,6 @@ unit_owns_stack() { [ -z "${INVOCATION_ID:-}" ] && systemctl is-active --quiet o
 # and the real fleet through the sim profiles would number a vehicle 11.
 # `start` runs this again after a profile list on the command line.
 check_mode() {
-	case "${CONOPS:-option1}" in
-	option1|option2) ;;
-	*) die "CONOPS must be option1 or option2, not '${CONOPS}'." ;;
-	esac
-	local n role
-	for n in $(fleet_numbers); do
-		role=$(role_of "$n")
-		case "$role" in
-		search|assess) ;;
-		"") die "UAS_ROLES has no entry for uas$n. Give one role per UAS_FLEET entry." ;;
-		*) die "uas$n has invalid role '$role' in UAS_ROLES; use search or assess." ;;
-		esac
-	done
 	local unknown
 	unknown=$(unknown_active_words)
 	if [ -n "$unknown" ]; then
@@ -298,7 +285,7 @@ bench_mode() {
 # Move this machine between the simulator and the real ground station. Only
 # the world changes: the profiles, UAS_BASE, and the domain that follows it.
 # Everything that describes the mission -- the scene, the scenario, the
-# fleet, the roles, the conops, which vehicles fly and which paints the
+# fleet, which vehicles fly and which paints the
 # mosaic -- belongs to the real fleet and carries across unchanged, so the
 # simulator rehearses exactly what the field will fly. UAS_ACTIVE and
 # MOSAIC_UAS are rewritten in the real numbers they mean in both worlds.
@@ -333,7 +320,7 @@ mode_switch() {
 	say "Switched to $mode mode"
 	echo "  COMPOSE_PROFILES=$profiles UAS_BASE=$base, ground domain $((60 + base))"
 	echo "  kept: scene ${SCENE:-unset}, scenario ${SCENARIO:-unset}, fleet ${UAS_FLEET:-default}"
-	echo "        active ${numbers:+${numbers% }}${numbers:-all}, mosaic ${mosaic_setting:-lowest active}, conops ${CONOPS:-option1}"
+	echo "        active ${numbers:+${numbers% }}${numbers:-all}, mosaic ${mosaic_setting:-lowest active}"
 }
 
 # The ROS domain a reader answers on. The ground station joins every vehicle's
@@ -853,8 +840,6 @@ usage() {
 		footer="  Current: fleet ${UAS_FLEET:-?}, uas$FIRST_UAS at $(uas_address "$FIRST_UAS")
            this ground station is $(ground_address), on ROS domain $GROUND_DOMAIN" ;;
 	esac
-	footer="$footer
-           roles ${UAS_ROLES:-?}, conops ${CONOPS:-option1}"
 	cat <<EOF
 ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
 
@@ -881,7 +866,6 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     bench enable PHRASE Enable GPS-free bench reference (requires exact phrase)
     bench disable       Stop the stack, then disable bench reference before flight
     mode sim|real       Switch this machine between simulator and real ground station
-    conops <option>     Select option1 or option2 and restart the onboard stack
     camera day|night    Select RGB/pilot or thermal for every vehicle and restart
     active [N...]       Fly only these vehicles, by real number (1 3); none flies all
     mosaic [N|lowest]   Which vehicle paints the ground mosaic, then restart
@@ -904,7 +888,7 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
 	                        simulator bags cover active drones and offboard;
 	                        all MCAPs finalize together under logs/recordings/
 	mission upload <N> <plan>
-	                        Validate and upload a plan through the vehicle mission node
+	                        Validate and upload a plan through MAVROS
     view [N|stream]     Play a stream. Default: uas${FIRST_UAS}'s $(default_stream "$FIRST_UAS")
     topics [N]          List a vehicle's ROS topics. Default: uas${FIRST_UAS}
     state [--watch]     Every reading the console draws, as JSON
@@ -1049,7 +1033,6 @@ fleet_facts() {
 		mosaic=${MOSAIC_UAS:-}
 		mosaic_setting=${MOSAIC_UAS_SETTING:-}
 		mosaic_choices=$({ echo lowest; active_uas; } | paste -sd, -)
-		conops=${CONOPS:-option1}
 		camera_mode=$([ "${ONBOARD_CAMERA:-}" = thermal ] && echo night || echo day)
 		declared=$(printf '%s\n' "$COMPOSE_SERVICES" | paste -sd, -)
 		expected=$($DC config --services 2>/dev/null | paste -sd, -)
@@ -1455,7 +1438,7 @@ cmd=${1:-help}
 # takes every profile down whatever .env says.
 case "$cmd" in
 
-help | -h | --help | doctor | check | x11 | setup | stop | down | clean | clean-src | nuke | conops | mode) ;;
+help | -h | --help | doctor | check | x11 | setup | stop | down | clean | clean-src | nuke | mode) ;;
 *) check_mode ;;
 esac
 
@@ -1541,7 +1524,6 @@ restart|start|up|core)
 	note=$(mosaic_note)
 	[ -z "$note" ] || warn "$note"
 	echo "  fleet ${UAS_FLEET:-?}"
-	echo "  roles ${UAS_ROLES:-?}, conops ${CONOPS:-option1}"
 	if [ "$FLEET_IS_SIMULATED" = true ]; then
 		if [ -n "${HOME_LAT:-}" ]; then
 			echo "  scene ${SCENE:-?}, scenario ${SCENARIO:-?}, origin $HOME_LAT, $HOME_LON"
@@ -1881,7 +1863,9 @@ mission)
 		domain=$(reader_domain "$reader" "$n")
 		has_service "$reader" || die "compose.yaml defines no $reader"
 		say "Uploading $plan_name to uas$n on ROS domain $domain"
-		COMPOSE_PROFILES="$ALL_PROFILES" $DC exec -T -e ROS_DOMAIN_ID="$domain" "$reader" \
+		docker cp verify/component/udp-only.xml "$(COMPOSE_PROFILES="$ALL_PROFILES" $DC ps -q "$reader"):/tmp/mission-udp-only.xml" >/dev/null
+		COMPOSE_PROFILES="$ALL_PROFILES" $DC exec -T -e ROS_DOMAIN_ID="$domain" \
+			-e FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/mission-udp-only.xml "$reader" \
 			bash -lc '. /usr/local/bin/ros-env.sh; python3 /px4sim-scripts/mission-upload.py '"$n"' /missions/'"$(printf '%q' "$plan_name")"''
 		;;
 	*) die "Usage: ./px4sim mission upload <N> <plan-file>" ;;
@@ -2044,17 +2028,6 @@ mosaic)
 	   say "uas$n paints the mosaic" ;;
 	esac
 	exec "$0" restart
-	;;
-
-conops)
-	[ $# -eq 1 ] || die "Use: ./px4sim conops option1|option2"
-	case "$1" in
-	option1|option2) ;;
-	*) die "CONOPS must be option1 or option2, not '$1'." ;;
-	esac
-	env_write_selection CONOPS "$1"
-	say "Selected mission conops '$1'"
-	push_env_selection_to_drones CONOPS "$1"
 	;;
 
 camera)
