@@ -14,6 +14,19 @@ refuses, in each of the three worlds.
 
 ## The start
 
+### `prepare` asks for `--allow=network.host`
+
+The online preparation builds use host networking. Newer Docker Compose
+versions delegate builds to Bake, which requires that permission explicitly
+on its command line. `px4sim` uses `scripts/compose-build.py` to render the
+Compose build plan and invoke Bake with `--allow=network.host` when the plan
+requests it. Local context read permissions are limited to the declared
+build contexts. Offline targets keep their configured `network: none`.
+
+Run `pxs prepare` normally; no alias change or global Docker permission
+setting is needed. Older Compose versions without `build --print` continue
+using their existing build command.
+
 ### `start` creates some of the stack, or none of it
 
 A published port is a claim on the host, and this stack is not the only thing
