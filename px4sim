@@ -888,7 +888,7 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
 	                        simulator bags cover active drones and offboard;
 	                        all MCAPs finalize together under logs/recordings/
 	mission upload <N> <plan>
-	                        Validate and upload a plan through the vehicle mission node
+	                        Validate and upload a plan through MAVROS
     view [N|stream]     Play a stream. Default: uas${FIRST_UAS}'s $(default_stream "$FIRST_UAS")
     topics [N]          List a vehicle's ROS topics. Default: uas${FIRST_UAS}
     state [--watch]     Every reading the console draws, as JSON
@@ -1863,7 +1863,9 @@ mission)
 		domain=$(reader_domain "$reader" "$n")
 		has_service "$reader" || die "compose.yaml defines no $reader"
 		say "Uploading $plan_name to uas$n on ROS domain $domain"
-		COMPOSE_PROFILES="$ALL_PROFILES" $DC exec -T -e ROS_DOMAIN_ID="$domain" "$reader" \
+		docker cp verify/component/udp-only.xml "$(COMPOSE_PROFILES="$ALL_PROFILES" $DC ps -q "$reader"):/tmp/mission-udp-only.xml" >/dev/null
+		COMPOSE_PROFILES="$ALL_PROFILES" $DC exec -T -e ROS_DOMAIN_ID="$domain" \
+			-e FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/mission-udp-only.xml "$reader" \
 			bash -lc '. /usr/local/bin/ros-env.sh; python3 /px4sim-scripts/mission-upload.py '"$n"' /missions/'"$(printf '%q' "$plan_name")"''
 		;;
 	*) die "Usage: ./px4sim mission upload <N> <plan-file>" ;;

@@ -270,7 +270,13 @@ LAYOUT_RENDERED=${LAYOUT_RENDERED:-logs/foxglove/chimera_uas$FIRST_UAS.json}
 render_layout() {
 	[ -f "$LAYOUT_TEMPLATE" ] || { printf '%s\n' "$LAYOUT_TEMPLATE"; return 1; }
 	make_bind_dirs "$(dirname "$LAYOUT_RENDERED")" >/dev/null || return 1
-	sed -e "s/uas11/uas$FIRST_UAS/g" -e "s/d11_/d${FIRST_UAS}_/g" \
-		"$LAYOUT_TEMPLATE" > "$LAYOUT_RENDERED" || return 1
+	if [ "$FLEET_IS_SIMULATED" = true ]; then
+		# One control tab and map layer set for every configured active companion.
+		python3 scripts/render-sim-layout.py "$LAYOUT_TEMPLATE" $(active_uas) \
+			> "$LAYOUT_RENDERED" || return 1
+	else
+		sed -e "s/uas11/uas$FIRST_UAS/g" -e "s/d11_/d${FIRST_UAS}_/g" \
+			"$LAYOUT_TEMPLATE" > "$LAYOUT_RENDERED" || return 1
+	fi
 	printf '%s\n' "$LAYOUT_RENDERED"
 }

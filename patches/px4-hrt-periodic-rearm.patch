@@ -1,0 +1,33 @@
+Prevent duplicate insertion when a POSIX HRT timer is rearmed during its callback.
+
+hrt_call_invoke releases the timer lock while calling the callback. A work
+queue awakened by that callback can call ScheduleOnInterval before the timer
+thread reacquires the lock. That puts the entry back in callout_queue; the
+timer thread then inserts the same intrusive-list node a second time. The
+resulting cycle or lost queue entries can stop unrelated periodic updates.
+GyroCalibration changes its interval on arm/disarm and exercises this path.
+
+Before automatically requeueing a periodic entry, remove any insertion made
+while the lock was released. sq_rem is safe for an entry absent from the
+queue. Keep the requested deadline and period, including hrt_call_delay's
+deadline override. One-shot rearming and cancellation retain their existing
+behavior because they bypass automatic periodic requeueing.
+
+This patch changes the POSIX timer implementation used by Linux SITL. It
+does not change mission logic, timer rates, or the NuttX timer implementation.
+Regression: python3 -m pytest -q verify/test_hrt_rearm.py
+
+diff --git a/platforms/posix/src/px4/common/drv_hrt.cpp b/platforms/posix/src/px4/common/drv_hrt.cpp
+--- a/platforms/posix/src/px4/common/drv_hrt.cpp
++++ b/platforms/posix/src/px4/common/drv_hrt.cpp
+@@ -459,6 +459,10 @@ hrt_call_invoke()
+ 				//PX4_INFO("call deadline set to %lu now=%lu", call->deadline,  now);
+ 			}
+ 
++			// The callback may have rearmed this entry while the timer lock
++			// was released. Remove any existing insertion before requeuing
++			// it, so an intrusive-list node is never inserted twice.
++			sq_rem(&call->link, &callout_queue);
+ 			hrt_call_enter(call);
+ 		}
+ 	}
