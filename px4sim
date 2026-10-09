@@ -613,7 +613,7 @@ build_stack() {
 	fi
 	# Compose follows the explicit ros_base service build contexts, so the base
 	# is built once and both derived images use that exact result.
-	$DC build "${SERVICES[@]}"
+	python3 ./scripts/compose-build.py "${SERVICES[@]}"
 }
 
 build_local_stack() {
@@ -624,7 +624,7 @@ build_local_stack() {
 		# prepare; sim has no ros-base, PX4-msgs, or CDCL-msgs dependency.
 		# Use prepare's network mode for cache identity; a prepared sim build is
 		# fully cached and performs no network access during restart.
-		PX4SIM_BUILD_NETWORK=host $DC build sim
+		PX4SIM_BUILD_NETWORK=host python3 ./scripts/compose-build.py sim
 		for n in $(active_uas); do services+=("onboard$n"); done
 		case ",${COMPOSE_PROFILES:-}," in
 		*,offboard,*) services+=(offboard) ;;
@@ -655,7 +655,7 @@ prepare_stack() {
 		say "Reusing pinned local dependency images: $DS_TAG"
 	else
 		# One build call, so the stages the three targets share are built once.
-		COMPOSE_PROFILES=deps $DC build ros-core ros-deps yolo-deps
+		COMPOSE_PROFILES=deps python3 ./scripts/compose-build.py ros-core ros-deps yolo-deps
 	fi
 	# Image-only services (for example video-router) must also be present before
 	# going offline. Downloading is confined to this explicit preparation step.
@@ -663,7 +663,7 @@ prepare_stack() {
 	build_stack
 	if ! aircraft_selected; then
 		# setup/genscene also need their tool image available in the field.
-		COMPOSE_PROFILES=scenegen $DC build scenegen
+		COMPOSE_PROFILES=scenegen python3 ./scripts/compose-build.py scenegen
 	fi
 }
 
