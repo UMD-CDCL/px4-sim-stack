@@ -292,6 +292,7 @@ if [ "${1:-launch}" = "launch" ]; then
 		bench:="${BENCH_MODE:-false}"
 		container:=true
 		gimbal_encoder:="${GIMBAL_ENCODER:-false}"
+		gimbal_pose_source:="${GIMBAL_POSE_SOURCE:-auto}"
 		${ONBOARD_CAMERA:+camera:="${ONBOARD_CAMERA}"}
 		${params:+params:="${params}"}
 		"$@")

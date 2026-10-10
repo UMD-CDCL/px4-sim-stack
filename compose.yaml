@@ -758,6 +758,7 @@ services:
       # empty value instead.
       UAS_NUM: ${UAS_NUM:-}
       GIMBAL_ENCODER: ${GIMBAL_ENCODER:-false}
+      GIMBAL_POSE_SOURCE: ${GIMBAL_POSE_SOURCE:-auto}
       # deploy_onboard.sh writes this as 60 + UAS_NUM (uas1..uas4 are
       # 61..64).  The entrypoint verifies it before launching ROS; an empty
       # value is retained for a laptop that interpolates inactive profiles.
