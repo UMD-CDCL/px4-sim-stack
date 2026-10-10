@@ -291,6 +291,7 @@ if [ "${1:-launch}" = "launch" ]; then
 		truth:="${TRUTH}"
 		bench:="${BENCH_MODE:-false}"
 		container:=true
+		gimbal_encoder:="${GIMBAL_ENCODER:-false}"
 		${ONBOARD_CAMERA:+camera:="${ONBOARD_CAMERA}"}
 		${params:+params:="${params}"}
 		"$@")

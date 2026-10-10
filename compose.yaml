@@ -757,6 +757,7 @@ services:
       # variable here would stop the simulator. The entry point refuses an
       # empty value instead.
       UAS_NUM: ${UAS_NUM:-}
+      GIMBAL_ENCODER: ${GIMBAL_ENCODER:-false}
       # deploy_onboard.sh writes this as 60 + UAS_NUM (uas1..uas4 are
       # 61..64).  The entrypoint verifies it before launching ROS; an empty
       # value is retained for a laptop that interpolates inactive profiles.
@@ -787,11 +788,17 @@ services:
       # mounted and not the files. The nvidia runtime mounts
       # /etc/nv_tegra_release by itself.
       - /tmp:/tmp
+      # USB control access for the scoped CP2102 runtime baud override.
+      # Host udev grants only the identified tap to the dialout group.
+      - /dev/bus/usb:/dev/bus/usb
     devices:
       # The SCF4 zoom lens by its USB identity, seen inside as /dev/lens.
       # onboard_container_params.yaml pins zoom.serial.port to that name. A
       # v2 has no lens and leaves the variable unset, which maps /dev/null.
       - ${ONBOARD_LENS_DEVICE:-/dev/null}:/dev/lens
+      - ${ONBOARD_ENCODER_DEVICE:-/dev/null}:/dev/gimbal-encoder
+    device_cgroup_rules:
+      - 'c 189:* rw'
     # The Jetson's GPU nodes are root:video and its render node root:render,
     # and the image runs as uid 1000. preflight writes RENDER_GID into .env
     # the way it writes INPUT_GID. render has no name inside the image.
