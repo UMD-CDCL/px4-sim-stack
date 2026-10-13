@@ -60,10 +60,10 @@ USER_AGENT = "px4-sim-stack-scenegen/1.0"
 DOWNLOAD_WORKERS = 8
 DOWNLOAD_RETRIES = 3
 REQUEST_TIMEOUT_S = 30
-OVERPASS_QUERY_TIMEOUT_S = 25
-OVERPASS_REQUEST_RETRIES = 2
-OVERPASS_CONNECT_TIMEOUT_S = 8
-OVERPASS_READ_TIMEOUT_S = 40
+OVERPASS_QUERY_TIMEOUT_S = 5
+OVERPASS_REQUEST_RETRIES = 1
+OVERPASS_CONNECT_TIMEOUT_S = 5
+OVERPASS_READ_TIMEOUT_S = 5
 # 2048 tiles is about 500 MB of imagery. Above that the zoom is wrong for
 # the requested side, so stop and say so instead of hammering the server.
 MAX_TILES_PER_LAYER = 2048
@@ -328,6 +328,7 @@ def _overpass_elements(frame: geo.GeoFrame, half_m: float, body: str) -> list:
     errors = []
     for url in OVERPASS_URLS:
         for attempt in range(OVERPASS_REQUEST_RETRIES):
+            print(f"      trying OSM mirror {url} (5s timeout)", flush=True)
             try:
                 reply = session.post(
                     url,
@@ -339,6 +340,7 @@ def _overpass_elements(frame: geo.GeoFrame, half_m: float, body: str) -> list:
                 return reply.json().get("elements", [])
             except Exception as error:  # noqa: BLE001 - try the next mirror
                 errors.append(f"{url} attempt {attempt + 1}: {error}")
+                print(f"      OSM mirror failed: {error}", flush=True)
                 if attempt + 1 < OVERPASS_REQUEST_RETRIES:
                     time.sleep(1.0 + attempt)
     details = "; ".join(errors)
