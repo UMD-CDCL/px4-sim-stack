@@ -1248,6 +1248,13 @@ env_set() { # KEY VALUE
 }
 env_write_selection() { env_set "$@"; }
 
+ensure_vlm_scorer() {
+	# Aircraft-only profiles never run a ground gate.
+	if $DC config --services | grep -qxE 'ground|offboard'; then
+		bash ./scripts/ensure-vlm-scorer.sh
+	fi
+}
+
 push_env_selection_to_drones() {
 	[ $# -gt 0 ] && [ $(( $# % 2 )) -eq 0 ] \
 		|| die "push_env_selection_to_drones needs KEY VALUE pairs"
@@ -1495,6 +1502,7 @@ restart|start|up|core)
 	add_fleet_profiles
 	[ "$FLEET_IS_SIMULATED" = true ] && need_sources
 	if [ "$cmd" = start ] && [ -n "$(COMPOSE_PROFILES="$ALL_PROFILES" $DC ps --status running -q 2>/dev/null)" ]; then
+		ensure_vlm_scorer
 		start_container_log
 		say "Already running; start does nothing"
 		echo "  Use ./px4sim restart to stop, rebuild, and recreate the stack."
@@ -1534,6 +1542,7 @@ restart|start|up|core)
 			warn "PX4 will fly the coordinates inside the world file. ./px4sim origin"
 		fi
 	fi
+	ensure_vlm_scorer
 	$DC up -d --no-build --pull never
 	start_container_log
 	echo
