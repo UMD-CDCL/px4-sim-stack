@@ -139,12 +139,16 @@ def cmd_create(args: argparse.Namespace) -> int:
           f"{report['relation_rings']} relation rings with {report['holes']} holes, "
           f"{dropped} outside the square)")
 
-    print("[4/4] OSM trees and woods")
-    raw_trees, raw_areas, veg_report = sources.fetch_osm_vegetation(frame, args.side)
-    trees, tree_areas = scene_model.vegetation_from_osm(
-        raw_trees, raw_areas, frame, args.side)
-    print(f"      {len(trees)} trees, {len(tree_areas)} wooded areas kept "
-          f"(of {veg_report['trees']} and {veg_report['areas']} fetched)")
+    trees, tree_areas = [], []
+    if args.with_trees:
+        print("[4/4] OSM trees and woods")
+        raw_trees, raw_areas, veg_report = sources.fetch_osm_vegetation(frame, args.side)
+        trees, tree_areas = scene_model.vegetation_from_osm(
+            raw_trees, raw_areas, frame, args.side)
+        print(f"      {len(trees)} trees, {len(tree_areas)} wooded areas kept "
+              f"(of {veg_report['trees']} and {veg_report['areas']} fetched)")
+    else:
+        print("[4/4] OSM trees and woods skipped (enable with --with-trees)")
 
     scene = scene_model.SceneSpec(
         name=args.name, center_lat=lat, center_lon=lon, side_m=args.side,
@@ -303,6 +307,8 @@ def _fetch_options(parser, *, required: bool) -> None:
                         choices=sorted(sources.IMAGERY_URL_TEMPLATES))
     parser.add_argument("--imagery-zoom", type=int, default=DEFAULT_IMAGERY_ZOOM)
     parser.add_argument("--terrain-grid", type=int, default=DEFAULT_TERRAIN_GRID)
+    parser.add_argument("--with-trees", action="store_true",
+                        help="fetch OSM trees and woods (skipped by default)")
     parser.add_argument("--casualties",
                         help="YAML list or ground-truth JSON to import as "
                              "ground-truth "

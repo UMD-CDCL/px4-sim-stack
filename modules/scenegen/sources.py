@@ -41,14 +41,9 @@ IMAGERY_URL_TEMPLATES = {
              "World_Imagery/MapServer/tile/{z}/{y}/{x}"),
 }
 ELEVATION_URL_TEMPLATE = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
-# Keep these independent public instances in order.  Scene queries cover at
-# most a few hundred metres, so a healthy instance answers in seconds; moving
-# on promptly is better than spending a minute waiting for one busy mirror.
+# Use one public instance so an unavailable service fails promptly.
 DEFAULT_OVERPASS_URLS = [
     "https://overpass-api.de/api/interpreter",
-    "https://overpass.kumi.systems/api/interpreter",
-    "https://overpass.private.coffee/api/interpreter",
-    "https://overpass.nchc.org.tw/api/interpreter",
 ]
 # Allow a deployment or an offline mirror to override the public defaults.
 # A comma-separated value keeps this usable from the scenegen container.
@@ -60,10 +55,10 @@ USER_AGENT = "px4-sim-stack-scenegen/1.0"
 DOWNLOAD_WORKERS = 8
 DOWNLOAD_RETRIES = 3
 REQUEST_TIMEOUT_S = 30
-OVERPASS_QUERY_TIMEOUT_S = 5
+OVERPASS_QUERY_TIMEOUT_S = 60
 OVERPASS_REQUEST_RETRIES = 1
-OVERPASS_CONNECT_TIMEOUT_S = 5
-OVERPASS_READ_TIMEOUT_S = 5
+OVERPASS_CONNECT_TIMEOUT_S = 20
+OVERPASS_READ_TIMEOUT_S = 60
 # 2048 tiles is about 500 MB of imagery. Above that the zoom is wrong for
 # the requested side, so stop and say so instead of hammering the server.
 MAX_TILES_PER_LAYER = 2048
@@ -328,7 +323,9 @@ def _overpass_elements(frame: geo.GeoFrame, half_m: float, body: str) -> list:
     errors = []
     for url in OVERPASS_URLS:
         for attempt in range(OVERPASS_REQUEST_RETRIES):
-            print(f"      trying OSM mirror {url} (5s timeout)", flush=True)
+            print(f"      trying OSM mirror {url} "
+                  f"({OVERPASS_CONNECT_TIMEOUT_S}s connect, "
+                  f"{OVERPASS_READ_TIMEOUT_S}s read timeout)", flush=True)
             try:
                 reply = session.post(
                     url,
