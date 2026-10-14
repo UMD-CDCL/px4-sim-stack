@@ -279,6 +279,9 @@ x-offboard-env: &offboard-env
   # UAS number whose mosaic is painted on the shared ground scene. Empty
   # preserves the launch file's lowest-numbered-fleet default.
   MOSAIC_UAS: ${MOSAIC_UAS:-}
+  # The casualty image VLM gate: off, shadow or on (5g_drone
+  # scripts/vlm_gate/README.md). offboard.launch.py reads it; off is today.
+  VLM_GATE: ${VLM_GATE:-off}
   # The first vehicle is UAS_BASE + 1. Every entry point derives its
   # identifiers from it, so the host and the container have to read the
   # same number: scripts/fleet.sh holds the same default.

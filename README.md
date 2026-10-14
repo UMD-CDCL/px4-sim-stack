@@ -214,6 +214,13 @@ The real fleet, `N` 1 to 9, with `UAS_BASE=0`:
 
 ## Daily commands
 
+In `./px4sim ui`, press `v` in the Stack menu to select the UGV casualty image
+VLM filter `on` or `off`, like the `n` day/night selector. The choice is saved
+in `.env` and restarts the local stack; the header shows the selected setting.
+The same action is available as `./px4sim vlm-filter on|off`. The host VLM scorer
+must be running to score images; scorer failures pass images through. In the
+Vehicle and Stream menus, `v` continues to play the selected camera.
+
 `./px4sim help` is the one truthful list, and it names the world this machine
 is. These work in all three worlds:
 

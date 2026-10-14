@@ -143,6 +143,11 @@ ACTIONS = (
            ask=Ask("camera mode", "{camera_mode}", choices=("day", "night")),
            confirm="Select {value} cameras for every vehicle and restart the stacks?",
            refresh=True, worlds=WITH_GROUND),
+    Action(STACK, "v", "select UGV casualty image VLM filter on/off and restart",
+           ("vlm-filter", "{value}"),
+           ask=Ask("VLM filter", "{vlm_gate}", choices=("on", "off")),
+           confirm="Set the UGV VLM filter to {value} and restart the local stack?",
+           refresh=True, worlds=WITH_GROUND),
     Action(STACK, "c", "select a scenario", ("scenario-select", "{value}"),
            ask=Ask("scenario", "{scenario}", choices_from="scenarios"),
            refresh=True, worlds=WITH_SCENE, push_scenario=True),
@@ -835,6 +840,7 @@ class Console:
             self.rows.world, str(config.get("scene", "")),
             str(config.get("scenario", "")),
             f"camera {config.get('camera_mode')}" if config.get("camera_mode") else "",
+            f"VLM filter {config.get('vlm_gate', 'off')}" if config.get("world") != AIRCRAFT else "",
             identity, origin,
             fleet_words(len(self.rows.fleet), len(self.rows.active))) if word)
         local_recording_active, local_mode = local_recording()
