@@ -867,7 +867,7 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     bench disable       Stop the stack, then disable bench reference before flight
     mode sim|real       Switch this machine between simulator and real ground station
     camera day|night    Select RGB/pilot or thermal for every vehicle and restart
-    vlm-filter on|off   Select casualty image filtering for the UGV and restart
+    vlm-filter off|shadow|on  Select casualty image filtering for the UGV and restart
     active [N...]       Fly only these vehicles, by real number (1 3); none flies all
     mosaic [N|lowest]   Which vehicle paints the ground mosaic, then restart
     mode sim|real       Move a ground station between the simulator and the field;
@@ -2043,10 +2043,10 @@ mosaic)
 
 vlm-filter)
 	[ "$(world_of)" != aircraft ] || die "Select the UGV VLM filter on the ground station."
-	[ $# -eq 1 ] || die "Use: ./px4sim vlm-filter on|off"
+	[ $# -eq 1 ] || die "Use: ./px4sim vlm-filter off|shadow|on"
 	case "$1" in
-	on|off) ;;
-	*) die "VLM filter must be on or off, not '$1'." ;;
+	off|shadow|on) ;;
+	*) die "VLM filter must be off, shadow or on, not '$1'." ;;
 	esac
 	env_write_selection VLM_GATE "$1"
 	say "Selected UGV casualty image VLM filter: $1"

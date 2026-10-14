@@ -215,9 +215,10 @@ The real fleet, `N` 1 to 9, with `UAS_BASE=0`:
 ## Daily commands
 
 In `./px4sim ui`, select the UGV casualty image VLM filter entry in the Stack
-menu to choose `on` or `off`. The choice is saved
+menu to choose `off`, `shadow` or `on`. The choice is saved
 in `.env` and restarts the local stack; the header shows the selected setting.
-The same action is available as `./px4sim vlm-filter on|off`. With filtering
+The same action is available as `./px4sim vlm-filter off|shadow|on`. Shadow mode
+records the filter decisions while forwarding every image and clip. With filtering
 `on` or in `shadow` mode, `start` and `restart` launch the installed host scorer
 in tmux session `vlm_gate` and wait up to 60 seconds for readiness. Install its
 venv and weights first, following `5g_drone/scripts/vlm_gate/README.md`.
