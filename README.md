@@ -214,8 +214,8 @@ The real fleet, `N` 1 to 9, with `UAS_BASE=0`:
 
 ## Daily commands
 
-In `./px4sim ui`, press `v` in the Stack menu to select the UGV casualty image
-VLM filter `on` or `off`, like the `n` day/night selector. The choice is saved
+In `./px4sim ui`, select the UGV casualty image VLM filter entry in the Stack
+menu to choose `on` or `off`. The choice is saved
 in `.env` and restarts the local stack; the header shows the selected setting.
 The same action is available as `./px4sim vlm-filter on|off`. The host VLM scorer
 must be running to score images; scorer failures pass images through. In the

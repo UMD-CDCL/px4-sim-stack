@@ -143,7 +143,7 @@ ACTIONS = (
            ask=Ask("camera mode", "{camera_mode}", choices=("day", "night")),
            confirm="Select {value} cameras for every vehicle and restart the stacks?",
            refresh=True, worlds=WITH_GROUND),
-    Action(STACK, "v", "select UGV casualty image VLM filter on/off and restart",
+    Action(STACK, "", "select UGV casualty image VLM filter on/off and restart",
            ("vlm-filter", "{value}"),
            ask=Ask("VLM filter", "{vlm_gate}", choices=("on", "off")),
            confirm="Set the UGV VLM filter to {value} and restart the local stack?",
