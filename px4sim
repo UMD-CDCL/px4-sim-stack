@@ -1637,9 +1637,10 @@ record)
 			say "recording ${#numbers[@]} simulated drones and ground to $run_dir"
 			exit 0
 		fi
+		local bag_suffix
 		case "$(world_of)" in
-			aircraft) recorder="$HOME/chimera-deploy/remote/remote_record_all.sh" ;;
-			ground) recorder="$HOME/chimera-deploy/local/local_record_all.sh" ;;
+			aircraft) recorder="$HOME/chimera-deploy/remote/remote_record_all.sh"; bag_suffix="-air-d${UAS_NUM}" ;;
+			ground) recorder="$HOME/chimera-deploy/local/local_record_all.sh"; bag_suffix="-ground" ;;
 			*) die "recording is supported on ground and aircraft machines" ;;
 		 esac
 		[ -x "$recorder" ] || die "recorder is not executable: $recorder"
@@ -1648,6 +1649,7 @@ record)
 		# location. record_all_common.sh uses these same two variables.
 		local bag_root=${BAG_ROOT:-$HOME/ros2_ws}
 		local bag_name=${BAG_NAME:-rosbag2_$(date +%Y_%m_%d-%H_%M_%S)}
+		bag_name+="$bag_suffix"
 		printf '%s\n' "$bag_root/$bag_name" > "$RECORD_BAG_FILE"
 		if [ "$action" = bags ]; then
 			BAG_ROOT="$bag_root" BAG_NAME="$bag_name" RECORD_VIDEO=0 setsid "$recorder" </dev/null >"$RECORD_LOG" 2>&1 &
