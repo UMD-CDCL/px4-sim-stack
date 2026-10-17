@@ -223,31 +223,11 @@ for index in "${!FLEET[@]}"; do
 	rm -rf "$rendered"
 	mkdir -p "$rendered"
 
-	# shellcheck disable=SC2207
-	framings=($(gimbal_framings_deg "$model" || true))
-	configured=${GIMBAL_HFOV[$index]:-${GIMBAL_HFOV[0]}}
-	if [ ${#framings[@]} -gt 0 ]; then
-		if [ "$configured" != "${framings[0]}" ]; then
-			warn "uas$uas_num renders its gimbal camera at ${framings[0]} degrees, the widest framing, not the $configured degrees UAS_GIMBAL_HFOV_DEG names. A v3 takes its gimbal field of view from UAS_ZOOM_PRESETS."
-		fi
-		GIMBAL_HFOV_RAD=$(radians "${framings[0]}")
-		# A framing the table does not name renders at the widest, which makes
-		# it a duplicate. The streamer keeps only the framings narrower than
-		# the one it bound to, so a duplicate is simply never chosen.
-		GIMBAL_HFOV_2_RAD=$(radians "${framings[1]:-${framings[0]}}")
-		GIMBAL_HFOV_3_RAD=$(radians "${framings[2]:-${framings[0]}}")
-	else
-		GIMBAL_HFOV_RAD=$(radians "$configured")
-		GIMBAL_HFOV_2_RAD=$GIMBAL_HFOV_RAD
-		GIMBAL_HFOV_3_RAD=$GIMBAL_HFOV_RAD
-	fi
-	THERMAL_HFOV_RAD=$(radians "${THERMAL_HFOV[$index]:-${THERMAL_HFOV[0]}}")
-	DOWN_HFOV_RAD=$(radians "${DOWN_HFOV[$index]:-${DOWN_HFOV[0]}}")
-	UAS_NUM=$uas_num
-	export GIMBAL_HFOV_RAD GIMBAL_HFOV_2_RAD GIMBAL_HFOV_3_RAD
-	export THERMAL_HFOV_RAD DOWN_HFOV_RAD UAS_NUM
-	envsubst '${GIMBAL_HFOV_RAD} ${GIMBAL_HFOV_2_RAD} ${GIMBAL_HFOV_3_RAD} ${THERMAL_HFOV_RAD} ${DOWN_HFOV_RAD} ${UAS_NUM}' \
-		< "$template" > "$rendered/model.sdf"
+	python3 /opt/sim/sim-camera.py --model "$template" --uas "$uas_num" \
+		--calibrations /real-calibrations --output "$rendered" \
+		--gimbal "${GIMBAL_HFOV[$index]:-${GIMBAL_HFOV[0]}}" \
+		--thermal "${THERMAL_HFOV[$index]:-${THERMAL_HFOV[0]}}" \
+		--down "${DOWN_HFOV[$index]:-${DOWN_HFOV[0]}}" --presets "$UAS_ZOOM_PRESETS"
 	printf '<?xml version="1.0"?>\n<model><name>uas%s</name><version>1.0</version>\n<sdf version="1.9">model.sdf</sdf>\n<description>%s for uas%s, rendered by the sim entrypoint.</description>\n</model>\n' \
 		"$uas_num" "$model" "$uas_num" > "$rendered/model.config"
 
@@ -342,7 +322,7 @@ for index in "${!FLEET[@]}"; do
 	# The same three fields of view the model was rendered with, so the
 	# streamer, the cameras and the calibration all describe one lens.
 	# shellcheck disable=SC2207
-	framings=($(gimbal_framings_deg "$model" || true))
+	framings=($(UAS_ZOOM_PRESETS=$(cat "$MERGED/models/uas$UAS_NUM/zoom-presets") gimbal_framings_deg "$model" || true))
 	if [ ${#framings[@]} -gt 0 ]; then
 		gimbal_hfov_rad=$(radians "${framings[0]}")
 	else
@@ -439,7 +419,7 @@ for index in "${!FLEET[@]}"; do
 	echo "    Log: logs/px4/uas$uas_num/lens.log"
 	( python3 /opt/sim/scf4_emulator.py \
 		--uas "$uas_num" --port "$port" \
-		--presets "$UAS_ZOOM_PRESETS" --steps "$UAS_ZOOM_STEPS" \
+		--presets "$(cat "$MERGED/models/uas$uas_num/zoom-presets")" --steps "$UAS_ZOOM_STEPS" \
 		--travel "$UAS_ZOOM_TRAVEL" --datum "$UAS_ZOOM_DATUM" \
 		| gz_zoom_publisher --topic "/uas${uas_num}/camera/zoom" \
 		) >> "$LOG_DIR/uas$uas_num/lens.log" 2>&1 &

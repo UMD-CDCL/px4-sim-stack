@@ -1,0 +1,47 @@
+Publish gimbal attitude from each fresh sensor sample, limited to 50 Hz.
+
+--- a/src/modules/simulation/gz_bridge/GZGimbal.cpp
++++ b/src/modules/simulation/gz_bridge/GZGimbal.cpp
+@@ -91,7 +91,6 @@
+ 	if (_mnt_mode_out == 2) {
+ 		// We have a Mavlink gimbal capable of sending messages
+ 		publishDeviceInfo();
+-		publishDeviceAttitude();
+ 	}
+ 
+ 	pthread_mutex_unlock(&_node_mutex);
+@@ -124,6 +123,15 @@
+ 	_gimbal_rate[0] = rate(0);
+ 	_gimbal_rate[1] = rate(1);
+ 	_gimbal_rate[2] = rate(2);
++
++	// Publish at the sensor callback, so the report does not wait for Run().
++	const uint64_t sample_time = (uint64_t)IMU_data.header().stamp().sec() * 1000000ULL
++				    + IMU_data.header().stamp().nsec() / 1000;
++
++	if (_mnt_mode_out == 2 && sample_time / 20000 > _last_attitude_publish / 20000) {
++		_last_attitude_publish = sample_time;
++		publishDeviceAttitude();
++	}
+ 
+ 	pthread_mutex_unlock(&_node_mutex);
+ }
+@@ -264,7 +272,7 @@
+ 	gimbal_att.delta_yaw = matrix::Eulerf(q_vehicle).psi();
+ 	gimbal_att.delta_yaw_velocity = NAN;
+ 	gimbal_att.failure_flags = 0;
+-	gimbal_att.timestamp = hrt_absolute_time();
++	gimbal_att.timestamp = _last_attitude_publish;
+ 
+ 	_gimbal_device_attitude_status_pub.publish(gimbal_att);
+ }
+--- a/src/modules/simulation/gz_bridge/GZGimbal.hpp
++++ b/src/modules/simulation/gz_bridge/GZGimbal.hpp
+@@ -79,6 +79,7 @@
+ 
+ 	// Camera attitude in the earth frame, from the gimbal IMU.
+ 	matrix::Quatf _q_gimbal = matrix::Quatf(1.0f, 0.0f, 0.0f, 0.0f);
++	uint64_t _last_attitude_publish{0};
+ 	// Airframe attitude in the earth frame, from the last estimate.
+ 	matrix::Quatf _q_vehicle = matrix::Quatf(1.0f, 0.0f, 0.0f, 0.0f);
+ 	// The last commanded attitude, in the frame its own lock flags declare.

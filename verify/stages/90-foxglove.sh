@@ -75,9 +75,9 @@ fi
 # The live view. The camera reaches the ground as a stream, and the ground's
 # own viewer turns it back into the topic the Image panel reads: a viewer that
 # started before the stream did used to die there and leave the panel waiting.
-verdict=$(printf '%s\n' "$seen" | awk -F'\t' -v t="/uas$lead/image" '$1 == t { print $3 }')
+verdict=$(printf '%s\n' "$seen" | awk -F'\t' -v t="/uas$(real_number "$lead")/image" '$1 == t { print $3 }')
 expect_eq "the Image panel's live view carries frames" data "${verdict:-absent}"
-verdict=$(printf '%s\n' "$seen" | awk -F'\t' -v t="/uas$lead/camera/camera_info" '$1 == t { print $3 }')
+verdict=$(printf '%s\n' "$seen" | awk -F'\t' -v t="/uas$(real_number "$lead")/camera/camera_info" '$1 == t { print $3 }')
 expect_eq "the live view is calibrated, so the boxes land on it" data "${verdict:-absent}"
 
 # The ground, drawn the right way round. The model's own bytes say which way
@@ -112,7 +112,7 @@ if [ -z "${SCENARIO:-}" ]; then
 fi
 
 # The rings around the known targets, read back as the Map panel parses them.
-rings="/viz/uas$lead/scoring/target_rings"
+rings="/viz/uas$(real_number "$lead")/scoring/target_rings"
 drawn_rings=$(./px4sim foxglove "$reader" "$rings" --show "$rings" \
 	--seconds "${FOXGLOVE_SECONDS:-15}" 2>/dev/null | sed -n '/^{/,$p')
 if [ -z "$drawn_rings" ]; then
@@ -131,7 +131,7 @@ fi
 # wrong. A kind that did not happen this run has an empty layer, which is an
 # answer rather than a fault.
 for kind in true_positives false_positives missed_localizations; do
-	layer="/viz/uas$lead/scoring/$kind"
+	layer="/viz/uas$(real_number "$lead")/scoring/$kind"
 	body=$(./px4sim foxglove "$reader" "$layer" --show "$layer" \
 		--seconds "${FOXGLOVE_SECONDS:-15}" 2>/dev/null | sed -n '/^{/,$p')
 	if [ -z "$body" ]; then

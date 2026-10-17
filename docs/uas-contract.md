@@ -4,28 +4,22 @@ What a simulated drone must present so that 5g_drone and MAVInsight cannot tell
 it from a Chimera airframe. The simulator satisfies this contract. The flight
 code does not accommodate the simulator.
 
-`N` is the UAS number. A real vehicle is 1 to 9. Its simulated counterpart is
-the same number plus ten, so `N` is 11 to 19 here. A simulator can then fly
-beside the fleet and take no system id, MAVLink port, DDS domain or address from
-it.
+The simulator uses the real vehicle number for ROS topics and frames. Transport identifiers keep their existing offset. Thus, onboard11 publishes /uas1 on domain 71 and reads rgb11. The UI selects either sim mode or real mode.
 
-Models follow the real counterpart: uas11 and uas12 are Chimera v3, uas13 and
-uas14 are v2. The calibration and the tuning come from the real vehicle's own
-parameter file, so uas11 is a simulated uas1 and carries uas1's lens. Frames,
-namespaces and stream names use the simulated number.
+`N` is the transport number. `R` is the real counterpart number, `N - 10` in simulation.
 
 ## 1. Identity
 
 | Property | Value |
 |---|---|
 | MAVLink system id | `N` (11 to 19) |
-| ROS namespace | `/uas${N}` |
+| ROS namespace | `/uas${R}` |
 | ROS domain, vehicle | `60 + N` (71 to 79) |
 | ROS domain, ground | `70` in the simulator, `60` fielded |
 | Air domain, telemetry and commands | `99` |
 | Air domain, imagery | `69` |
-| TF body frame prefix | `d${N}_` |
-| TF world frame prefix | `uas${N}_` |
+| TF body frame prefix | `uas${R}_` |
+| TF world frame prefix | `uas${R}_` |
 
 PX4 sets the system id from the instance, so `px4 -i $((N-1))` gives
 `MAV_SYS_ID = N`. For uas11 that is instance 10, which leaves instances 0 to 8
@@ -100,6 +94,8 @@ fielded QGroundControl stays native. That file holds one
 vehicle needs one more.
 
 ## 3. Video
+
+The camera generator reads each real counterpart's calibration. Gazebo and ROS use the same focal lengths and principal point. Ogre2 lacks the Brown distortion render pass, so both use zero distortion. A camera without real calibration uses the configured simulated field of view. The onboard camera publishes calibration for both v2 and v3 vehicles. The ground bridge forwards it.
 
 Streams are H.265, CBR, payload type 96. Each camera serves a full stream and a
 low-rate stream. The low-rate stream crosses the radio link.

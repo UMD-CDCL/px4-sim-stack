@@ -15,7 +15,7 @@ fi
 # The bridges take a moment to forward what the vehicle latched, and a stage
 # that asks first reads an empty graph.
 waited=0
-until [ "$(./px4sim probe ground "/uas$lead/camera/camera_info" 2>/dev/null | cut -f3)" = data ]; do
+until [ "$(./px4sim probe ground "/uas$(real_number "$lead")/camera/camera_info" 2>/dev/null | cut -f3)" = data ]; do
 	if [ "$waited" -ge "${GROUND_READY_S:-180}" ]; then
 		fail "the ground receives uas$lead after ${waited}s"
 		return 0
@@ -25,7 +25,7 @@ until [ "$(./px4sim probe ground "/uas$lead/camera/camera_info" 2>/dev/null | cu
 done
 
 for topic in camera/camera_info position status; do
-	verdict=$(./px4sim probe ground "/uas$lead/$topic" 2>/dev/null | cut -f3)
+	verdict=$(./px4sim probe ground "/uas$(real_number "$lead")/$topic" 2>/dev/null | cut -f3)
 	expect_eq "the ground receives $topic" data "$verdict"
 done
 

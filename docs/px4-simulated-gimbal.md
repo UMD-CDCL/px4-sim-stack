@@ -282,6 +282,8 @@ the airframe through any maneuver. On top of that, the
 GIMBAL_DEVICE_ATTITUDE_STATUS stream runs at the profile default, one report
 every few seconds, so the frame tree is seconds stale.
 
+The gimbal work loop and MAVLink stream run at 50 Hz. The sensor callback publishes a fresh sample once per 20 ms interval. The report carries the sensor timestamp. This removes the extra wait for the work loop without an artificial timing offset. See `patches/px4-gzgimbal-sample-time.patch`.
+
 `patches/px4-gzgimbal-rate.patch` raises the cycle to 50 Hz, and `px4-rcS`
 streams the report at 50 Hz to match. With both in place the joints follow a
 streamed setpoint within 20 ms, and the frame tree can trust the report as the

@@ -111,7 +111,7 @@ fi
 uas gimbal "-$depression" --yaw 0 >/dev/null
 for preset in wide mid narrow; do
 	if lens "$preset"; then
-		seen=$(./px4sim probe "$lead" "/uas$lead/camera/camera_info" 2>/dev/null | cut -f3)
+		seen=$(./px4sim probe "$lead" "/uas$(real_number "$lead")/camera/camera_info" 2>/dev/null | cut -f3)
 		expect_eq "the $preset framing publishes a calibration" data "${seen:-absent}"
 	else
 		fail "the $preset framing publishes a calibration"
@@ -176,9 +176,9 @@ fi
 # marks visibly trailed the picture.
 uas gimbal "-$depression" --yaw 0 >/dev/null
 counts=$(./px4sim probe "$lead" --count 8 \
-	"/viz/uas$lead/scoring/targets" \
-	"/uas$lead/scoring/verdicts" \
-	"/viz/uas$lead/scoring/annotations" 2>/dev/null)
+	"/viz/uas$(real_number "$lead")/scoring/targets" \
+	"/uas$(real_number "$lead")/scoring/verdicts" \
+	"/viz/uas$(real_number "$lead")/scoring/annotations" 2>/dev/null)
 marks=$(printf '%s' "$counts" | awk -F'\t' '/viz.*scoring\/targets/ { print $3 }')
 judged=$(printf '%s' "$counts" | awk -F'\t' '/^\/uas[0-9]*\/scoring\/verdicts/{ print $3 }')
 boxes=$(printf '%s' "$counts" | awk -F'\t' '/scoring\/annotations/  { print $3 }')
@@ -205,11 +205,11 @@ note "verdicts ${judged:-0}, boxes ${boxes:-0}, marks ${marks:-0} in 8s"
 # and the boxes both used to hang until a timeout swept them.
 uas gimbal -5 >/dev/null
 empty=$(./px4sim probe "$lead" --count 4 \
-	"/viz/uas$lead/scoring/verdicts" 2>/dev/null | awk -F'\t' '{ print $3 }')
+	"/viz/uas$(real_number "$lead")/scoring/verdicts" 2>/dev/null | awk -F'\t' '{ print $3 }')
 still=$(./px4sim uas "$lead" published --topic scoring/verdicts 2>/dev/null | tail -1)
 uas gimbal "-$depression" >/dev/null
 back=$(./px4sim probe "$lead" --count 6 \
-	"/viz/uas$lead/scoring/annotations" 2>/dev/null | awk -F'\t' '{ print $3 }')
+	"/viz/uas$(real_number "$lead")/scoring/annotations" 2>/dev/null | awk -F'\t' '{ print $3 }')
 expect_eq "the marks come back when the camera does" True \
 	"$(python3 -c "print(${back:-0} > 0)")"
 

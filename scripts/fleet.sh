@@ -272,7 +272,7 @@ render_layout() {
 	make_bind_dirs "$(dirname "$LAYOUT_RENDERED")" >/dev/null || return 1
 	if [ "$FLEET_IS_SIMULATED" = true ]; then
 		# One control tab and map layer set for every configured active companion.
-		python3 scripts/render-sim-layout.py "$LAYOUT_TEMPLATE" $(active_uas) \
+		python3 scripts/render-sim-layout.py "$LAYOUT_TEMPLATE" $(active_uas | while read -r n; do real_number "$n"; done) \
 			> "$LAYOUT_RENDERED" || return 1
 	else
 		sed -e "s/uas11/uas$FIRST_UAS/g" -e "s/d11_/d${FIRST_UAS}_/g" \

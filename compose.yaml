@@ -188,6 +188,7 @@ x-onboard-env: &onboard-env
   # the camera that really produced the picture, and a simulated camera's is its
   # field of view. See modules/onboard/sim_calibration.py.
   UAS_GIMBAL_HFOV_DEG: ${UAS_GIMBAL_HFOV_DEG:-56.06 56.06 85.25 25.98}
+  UAS_DOWN_HFOV_DEG: ${UAS_DOWN_HFOV_DEG:-25.98 25.98 25.98 25.98}
   # The framing table. scripts/zoom.sh holds the same values as its own
   # defaults, so leaving these out is not an error: it is the host and the
   # container quietly reading two different tables. They were absent, and
@@ -476,6 +477,8 @@ services:
     volumes:
       - ./src/PX4-Autopilot:/px4
       - ./modules/sim/scenes:/scenes
+      - ${ROS2_WS_DIR:-../ros2_ws}/src/5g_drone/config/camera_calibration_files:/real-calibrations:ro
+      - ./scripts/sim-camera.py:/opt/sim/sim-camera.py:ro
       # Real-aircraft parity overlays are mounted so changing them does not
       # rebuild the simulator or the PX4 toolchain image.
       - ./modules/sim/params:/opt/sim/params:ro
@@ -658,6 +661,9 @@ services:
       - ./missions:/missions:ro
       - ./scripts:/px4sim-scripts:ro
       - ./modules/sim/scenes:/scenes:ro
+      - ${ROS2_WS_DIR:-../ros2_ws}/src/5g_drone/config/camera_calibration_files:/real-calibrations:ro
+      - ./scripts/sim-camera.py:/usr/local/bin/sim-camera.py:ro
+      - ./modules/onboard/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./modules/onboard/sim-entrypoint.sh:/usr/local/bin/sim-entrypoint.sh:ro
     profiles: [onboard11]
     environment:
@@ -683,6 +689,9 @@ services:
       - ./missions:/missions:ro
       - ./scripts:/px4sim-scripts:ro
       - ./modules/sim/scenes:/scenes:ro
+      - ${ROS2_WS_DIR:-../ros2_ws}/src/5g_drone/config/camera_calibration_files:/real-calibrations:ro
+      - ./scripts/sim-camera.py:/usr/local/bin/sim-camera.py:ro
+      - ./modules/onboard/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./modules/onboard/sim-entrypoint.sh:/usr/local/bin/sim-entrypoint.sh:ro
     profiles: [onboard12]
     environment:
@@ -706,6 +715,9 @@ services:
       - ./missions:/missions:ro
       - ./scripts:/px4sim-scripts:ro
       - ./modules/sim/scenes:/scenes:ro
+      - ${ROS2_WS_DIR:-../ros2_ws}/src/5g_drone/config/camera_calibration_files:/real-calibrations:ro
+      - ./scripts/sim-camera.py:/usr/local/bin/sim-camera.py:ro
+      - ./modules/onboard/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./modules/onboard/sim-entrypoint.sh:/usr/local/bin/sim-entrypoint.sh:ro
     profiles: [onboard13]
     environment:
@@ -729,6 +741,9 @@ services:
       - ./missions:/missions:ro
       - ./scripts:/px4sim-scripts:ro
       - ./modules/sim/scenes:/scenes:ro
+      - ${ROS2_WS_DIR:-../ros2_ws}/src/5g_drone/config/camera_calibration_files:/real-calibrations:ro
+      - ./scripts/sim-camera.py:/usr/local/bin/sim-camera.py:ro
+      - ./modules/onboard/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./modules/onboard/sim-entrypoint.sh:/usr/local/bin/sim-entrypoint.sh:ro
     profiles: [onboard14]
     environment:

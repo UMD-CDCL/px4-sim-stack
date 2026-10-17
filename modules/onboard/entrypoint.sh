@@ -134,37 +134,28 @@ if [ "${SIM}" = true ]; then
 	# shellcheck disable=SC1091
 	. /usr/local/bin/zoom.sh
 
-	# The aircraft calibrates at the preview size: uas1_params.yaml names
-	# uas1-mid-640x360-d1.yaml. The detector reports its boxes in that space and a
-	# panel draws the preview, so a calibration at the full sensor size puts every
-	# annotation a factor of three from the thing it marks.
-	calibrate() {   # <field of view, degrees> <name> <output file>
-		python3 /usr/local/bin/sim_calibration.py \
-			--model "/scenes/models/${AIRFRAME}/model.sdf" \
-			--sensor gimbal_camera \
-			--hfov-deg "$1" --name "$2" \
-			--width "${CAMERA_PREVIEW_WIDTH:-640}" \
-			--height "${CAMERA_PREVIEW_HEIGHT:-360}" \
-			--out "$3"
-	}
+	read -r -a _thermal_hfov <<< "${UAS_THERMAL_HFOV_DEG:-29.75 29.75 31.03 29.75}"
+	read -r -a _down_hfov <<< "${UAS_DOWN_HFOV_DEG:-25.98 25.98 25.98 25.98}"
+	python3 /usr/local/bin/sim-camera.py --model "/scenes/models/${AIRFRAME}/model.sdf" \
+		--uas "$UAS_NUM" --calibrations /real-calibrations --output "$CAMERA_DIR" \
+		--gimbal "$CAMERA_HFOV_DEG" \
+		--thermal "${_thermal_hfov[$SLOT]:-${_thermal_hfov[0]}}" \
+		--down "${_down_hfov[$SLOT]:-${_down_hfov[0]}}" --presets "$UAS_ZOOM_PRESETS"
+	ROS_UAS_NUM=$((UAS_NUM - UAS_BASE))
+	LENS_PARAMS="${CAMERA_DIR}/lens.yaml"
+	printf '/uas%s:\n  cam_info:\n    ros__parameters:\n      calibration_file: "%s/gimbal.yaml"\n  thermal_cam_info:\n    ros__parameters:\n      calibration_file: "%s/thermal.yaml"\n' \
+		"$ROS_UAS_NUM" "$CAMERA_DIR" "$CAMERA_DIR" > "$LENS_PARAMS"
 
 	# A v3 carries a zoom lens, and each framing is its own optic: the simulator
 	# renders a camera for each one, so each one has its own intrinsics. The zoom
 	# node publishes the current framing's CameraInfo, so it needs all of them.
 	#
-	# The parameters that point at these files, and at the emulated controller,
-	# are written beside them and loaded last. They are simulator values -- a
-	# framing table of 1x, 3x and 10x, and a lens on a TCP port -- and a simulated
-	# uas11 loads the real uas1_params.yaml, so they must not be in it.
+	# Exact selectors override the real calibration paths. Motor settings still
+	# come from the real vehicle file.
 	if [ "${MODEL}" = v3 ]; then
 		LENS_PARAMS="${CAMERA_DIR}/lens.yaml"
 		ZOOM_SERIAL_HOST=${ZOOM_SERIAL_HOST:-sim}
 		{
-			echo "# Written by modules/onboard/entrypoint.sh from scripts/zoom.sh."
-			echo "# The simulated lens: which framings it reaches, where they put"
-			echo "# the motors, and where the controller answers. Loaded last, so"
-			echo "# it beats the aircraft's own values for the same node."
-			echo "/**/*:"
 			echo "  zoom:"
 			echo "    ros__parameters:"
 			echo "      # An emulated SCF4 in the sim container, in place of the"
@@ -176,28 +167,15 @@ if [ "${SIM}" = true ]; then
 			echo "      # follow the focus axis and a sweep would find a peak that"
 			echo "      # means nothing -- and leave the framing off its preset."
 			echo '      zoom.autofocus.topic.image: ""'
-			for _axis in zoom focus; do
-				printf '      zoom.home.%s: %s\n' "${_axis}" "$(zoom_datum "${_axis}")"
-				printf '      zoom.limits.%s: [%s]\n' "${_axis}" "$(zoom_travel "${_axis}")"
-			done
 			for _preset in $(zoom_presets_widest_first); do
-				printf '      zoom.presets.%s: [%s]\n' "${_preset}" "$(zoom_steps "${_preset}")"
 				printf '      zoom.camera_info.calibration.%s: "%s/gimbal-%s.yaml"\n' \
 					"${_preset}" "${CAMERA_DIR}" "${_preset}"
 			done
 			if _boot=$(zoom_preset_of_slot "${SLOT}"); then
 				printf '      zoom.boot.preset: "%s"\n' "${_boot}"
 			fi
-		} > "${LENS_PARAMS}"
+		} >> "${LENS_PARAMS}"
 
-		for _preset in $(zoom_presets_widest_first); do
-			calibrate "$(zoom_hfov_deg "${_preset}")" "${_preset}" \
-				"${CAMERA_DIR}/gimbal-${_preset}.yaml"
-		done
-		echo "lens: $(echo "${UAS_ZOOM_PRESETS}" | tr ' ' ',') on socket://${ZOOM_SERIAL_HOST}:$(zoom_port "${UAS_NUM}")"
-	else
-		# One fixed lens, one calibration, published by cam_info.
-		calibrate "${CAMERA_HFOV_DEG}" simulated "${CAMERA_DIR}/gimbal.yaml"
 	fi
 
 	# site-params.sh writes the known fiducial LLA for every projection node,

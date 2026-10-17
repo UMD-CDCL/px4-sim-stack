@@ -1889,7 +1889,7 @@ mission)
 		docker cp verify/component/udp-only.xml "$(COMPOSE_PROFILES="$ALL_PROFILES" $DC ps -q "$reader"):/tmp/mission-udp-only.xml" >/dev/null
 		COMPOSE_PROFILES="$ALL_PROFILES" $DC exec -T -e ROS_DOMAIN_ID="$domain" \
 			-e FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/mission-udp-only.xml "$reader" \
-			bash -lc '. /usr/local/bin/ros-env.sh; python3 /px4sim-scripts/mission-upload.py '"$n"' /missions/'"$(printf '%q' "$plan_name")"''
+			bash -lc '. /usr/local/bin/ros-env.sh; python3 /px4sim-scripts/mission-upload.py '"$(real_number "$n")"' /missions/'"$(printf '%q' "$plan_name")"''
 		;;
 	*) die "Usage: ./px4sim mission upload <N> <plan-file>" ;;
 	esac
@@ -1981,7 +1981,7 @@ fleet)
 		printf '    mavlink   system id %s   udp %s to the ground station   tcp://localhost:%s\n' \
 			"$n" "$(uas_gcs_port "$n")" "$(uas_tcp_port "$n")"
 		printf '    ros       domain %s   namespace /uas%s   frames d%s_ and uas%s_\n' \
-			"$(uas_domain "$n")" "$n" "$n" "$n"
+			"$(uas_domain "$n")" "$(real_number "$n")" "$(real_number "$n")" "$(real_number "$n")"
 		if ! has_service "$(companion_service "$n")"; then
 			printf '    foxglove  none. compose.yaml defines no %s\n' "$(companion_service "$n")"
 			printf '    compose   uas%s alone, with no companion\n' "$n"
@@ -2199,7 +2199,7 @@ fly)
 	timeout 60 $DC exec -T "$(companion_service "$n")" bash -lc '
 		. /usr/local/bin/ros-env.sh
 		exec ros2 topic pub --once -w 1 "$1" std_msgs/msg/Float32 "{data: -361.0}"
-		' _ "/uas$n/reassert_gimbal_cmd" >/dev/null 2>&1 || true
+		' _ "/uas$(real_number "$n")/reassert_gimbal_cmd" >/dev/null 2>&1 || true
 
 	if timeout 300 ./px4sim uas "$n" takeoff "$height" >/dev/null 2>&1; then
 		say "uas$n is flying at $height m, from a fresh world"
@@ -2261,8 +2261,8 @@ capture)
 	docker exec -e ROS_DOMAIN_ID="$(reader_domain "$reader" "$n")" "$container" bash -lc '
 		. /usr/local/bin/ros-env.sh
 		exec timeout 10 ros2 topic pub --once -w 1 "$1" std_msgs/msg/Bool "{data: true}"' \
-		_ "/uas$n/${kind}_capture_cmd" >/dev/null \
-		&& echo "  asked for $kind on /uas$n/${kind}_capture_cmd" \
+		_ "/uas$(real_number "$n")/${kind}_capture_cmd" >/dev/null \
+		&& echo "  asked for $kind on /uas$(real_number "$n")/${kind}_capture_cmd" \
 		|| die "nothing accepted the $kind capture command"
 	;;
 
@@ -2288,21 +2288,13 @@ zoom)
 	vehicle_reader "$n"
 	docker cp verify/component/zoom.py "$container:/tmp/zoom.py" >/dev/null
 	docker cp verify/component/udp-only.xml "$container:/tmp/udp-only.xml" >/dev/null
-	# scripts/zoom.sh holds the SIMULATED lens. A real lens takes its framings
-	# from its own calibration files, so on the aircraft the framing name is the
-	# whole answer, and zoom.py prints the degrees the vehicle reports. 0.0 is
-	# that tool's documented "do not check" value.
-	if [ "$FLEET_IS_SIMULATED" = true ]; then
-		say "asking uas$n for the $preset framing, $hfov degrees"
-	else
-		say "asking uas$n for the $preset framing"
-		hfov=0.0
-	fi
+	# The calibration determines the field of view for this vehicle.
+	say "asking uas$n for the $preset framing"
 	docker exec -e ROS_DOMAIN_ID="$domain" \
 		-e FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/udp-only.xml "$container" bash -lc '
 		set -e
 		. /usr/local/bin/ros-env.sh
-		exec python3 /tmp/zoom.py "$@"' _ "$n" "$preset" --hfov "$hfov" \
+		exec python3 /tmp/zoom.py "$@"' _ "$(real_number "$n")" "$preset" --hfov 0.0 \
 		|| die "uas$n is not at the $preset framing."
 	;;
 
@@ -2360,14 +2352,14 @@ uas|probe|foxglove)
 		case "$argument" in -*) ;; *) named_a_topic=true ;; esac
 	done
 	if [ "$cmd" = probe ] && [ "$named_a_topic" = false ]; then
-		set -- "/uas$n/state" "/uas$n/global_position/global" \
-			"/uas$n/home_position/fix" "/uas$n/camera/camera_info" \
-			"/uas$n/gimbal_control/device/attitude_status" \
-			"/uas$n/gimbal_lidar_50m" "/uas$n/target_detections" \
-			"/uas$n/target_locations" "/uas$n/camera_fov" \
-			"/uas$n/ground_projection"
+		set -- "/uas$(real_number "$n")/state" "/uas$(real_number "$n")/global_position/global" \
+			"/uas$(real_number "$n")/home_position/fix" "/uas$(real_number "$n")/camera/camera_info" \
+			"/uas$(real_number "$n")/gimbal_control/device/attitude_status" \
+			"/uas$(real_number "$n")/gimbal_lidar_50m" "/uas$(real_number "$n")/target_detections" \
+			"/uas$(real_number "$n")/target_locations" "/uas$(real_number "$n")/camera_fov" \
+			"/uas$(real_number "$n")/ground_projection"
 	fi
-	[ "$cmd" = uas ] && set -- "$n" "$@"
+	[ "$cmd" = uas ] && set -- "$(real_number "$n")" "$@"
 	docker cp verify/component/uas.py "$container:/tmp/uas.py" >/dev/null
 	docker cp verify/component/graph_probe.py "$container:/tmp/graph_probe.py" >/dev/null
 	docker cp verify/component/foxglove_probe.py "$container:/tmp/foxglove_probe.py" >/dev/null
