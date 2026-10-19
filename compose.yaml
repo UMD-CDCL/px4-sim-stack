@@ -30,6 +30,15 @@ x-x11-env: &x11-env
   XAUTHORITY: /tmp/.docker.xauth
   QT_X11_NO_MITSHM: "1"
 
+# Share the native mission folder with both QGroundControl services.
+# Fail if the source folder is missing.
+x-qgc-missions: &qgc-missions
+  type: bind
+  source: ${QGC_MISSIONS_DIR:-${HOME}/Documents/QGroundControl/Missions}
+  target: /home/dev/Documents/QGroundControl/Missions
+  bind:
+    create_host_path: false
+
 # What the three ROS images are built from. DeepStream 7.1 on Ubuntu 22.04
 # with ROS 2 Humble, everywhere, because that is what the aircraft is and
 # because cdcl_umd_msgs does not decode across a distribution change.
@@ -982,7 +991,7 @@ services:
       - /dev/bus/usb:/dev/bus/usb
       - qgc-config:/home/dev/.config
       - ./logs/qgc:/home/dev/Documents/QGroundControl
-      - ./missions:/home/dev/Documents/QGroundControl/Missions
+      - *qgc-missions
       - /tmp/.X11-unix:/tmp/.X11-unix
       - ${XAUTH_FILE:-./.xauth}:/tmp/.docker.xauth
     networks:
@@ -1019,6 +1028,7 @@ services:
       - ./src/qgroundcontrol:/qgc
       - qgc-config:/home/dev/.config
       - qgc-dev-ccache:/home/dev/.ccache
+      - *qgc-missions
       - /tmp/.X11-unix:/tmp/.X11-unix
       - ${XAUTH_FILE:-./.xauth}:/tmp/.docker.xauth
     networks:
