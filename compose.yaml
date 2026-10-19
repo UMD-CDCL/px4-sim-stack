@@ -982,6 +982,7 @@ services:
       - /dev/bus/usb:/dev/bus/usb
       - qgc-config:/home/dev/.config
       - ./logs/qgc:/home/dev/Documents/QGroundControl
+      - ./missions:/home/dev/Documents/QGroundControl/Missions
       - /tmp/.X11-unix:/tmp/.X11-unix
       - ${XAUTH_FILE:-./.xauth}:/tmp/.docker.xauth
     networks:
