@@ -30,7 +30,52 @@
   "placed_east_m": 0,
   "placed_north_m": 0
  },
- "buildings": [],
+ "buildings": [
+  {
+   "length_m": 5.53,
+   "width_m": 3.18,
+   "yaw_deg": 49.9,
+   "height_m": 2.5,
+   "height_source": "manual",
+   "name": "",
+   "map_height_m": null,
+   "map_height_source": "",
+   "outline_m": [],
+   "holes_m": [],
+   "extruded": false,
+   "levels": [
+    6
+   ],
+   "source": "manual",
+   "model_uri": null,
+   "enabled": true,
+   "id": "b_manual_1",
+   "east_m": 4.89,
+   "north_m": 52.21
+  },
+  {
+   "length_m": 5.53,
+   "width_m": 3.18,
+   "yaw_deg": 49.9,
+   "height_m": 5,
+   "height_source": "manual",
+   "name": "",
+   "map_height_m": null,
+   "map_height_source": "",
+   "outline_m": [],
+   "holes_m": [],
+   "extruded": false,
+   "levels": [
+    5
+   ],
+   "source": "manual",
+   "model_uri": null,
+   "enabled": true,
+   "id": "b_manual_2",
+   "east_m": 4.91,
+   "north_m": 52.21
+  }
+ ],
  "vehicles": [],
  "targets": [
   {
@@ -50,7 +95,7 @@
    "name": "casualty_2",
    "east_m": 4.93,
    "north_m": 50.11,
-   "agl_m": 0,
+   "agl_m": 2,
    "on_building": true,
    "yaw_deg": null,
    "model_uri": null,
