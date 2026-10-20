@@ -179,10 +179,10 @@ section on what crosses the radio link says what it does not rebuild, and why.
 
 ### qgc
 
-QGroundControl, extracted from the released AppImage. The container seeds its
-settings on first start, so the vehicle and the video appear without a visit to
-the settings pages. Use the `qgc-dev` profile for a Qt toolchain and a source
-tree.
+QGroundControl 5.1.4 with the Chimera mission planner. The simulator and the
+desktop launcher use the same runtime image and host settings, document folder,
+and map cache. The simulator keeps its own network address. `./px4sim build qgc`
+builds the custom source, exports the Qt runtime, and updates the image.
 
 ## The data paths
 

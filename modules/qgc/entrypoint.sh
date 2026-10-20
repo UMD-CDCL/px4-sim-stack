@@ -72,15 +72,13 @@ seed_settings "$HOME/.config/QGroundControl.org/QGroundControl.ini"
 # Do not use `set --` here: this script ends with `exec AppRun "$@"`, and
 # rewriting the positional parameters would hand QGroundControl the loop
 # variables as command line arguments.
-router=${VIDEO_ROUTER_HOST:-video-router}
-for port in 8554 1935; do
-	socat "TCP4-LISTEN:${port},fork,reuseaddr,bind=127.0.0.1" \
-	      "TCP4:${router}:${port}" >/dev/null 2>&1 &
-done
-echo "Loopback forwards up: localhost:8554 and localhost:1935 reach the video router."
+if [ -n "${VIDEO_ROUTER_HOST:-}" ]; then
+	for port in 8554 1935; do
+		socat "TCP4-LISTEN:${port},fork,reuseaddr,bind=127.0.0.1" \
+		      "TCP4:${VIDEO_ROUTER_HOST}:${port}" >/dev/null 2>&1 &
+	done
+fi
 
-echo "QGroundControl listens for MAVLink on UDP $LISTEN_PORT."
-echo "The MAVLink hub pushes telemetry there, so the vehicle appears on its own."
-echo "Video source: $VIDEO_URL"
+echo "QGroundControl settings: $HOME/.config/QGroundControl/QGroundControl.ini"
 
-exec /opt/qgc/AppRun "$@"
+exec "${QGC_EXECUTABLE:-/opt/qgc/AppRun}" "$@"

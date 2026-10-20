@@ -612,27 +612,42 @@ docker run --rm px4simstack/ros-base:$(./scripts/ds-select.sh --tag) \
 
 ## QGroundControl
 
-### The released build
+### The Chimera build
 
-The default `qgc` container runs the official AppImage. Change the version in
-`.env` and rebuild:
+The desktop launcher and the simulator `qgc` service use
+`px4simstack/qgc:chimera-5.1.4`. Both mount the host QGC settings, document
+folder, and map cache at their original paths. The runtime uses the standard
+`QGroundControl` application name, so both read the same settings file.
+The simulator keeps its own network address and video-router forwarding.
 
-```bash
-# .env
-QGC_REF=v5.1.0
-```
-
-```bash
-./px4sim restart
-```
-
-The container seeds `QGroundControl.ini` on first start, so the vehicle
-autoconnects and the video source is already the gimbal stream. It never
-overwrites a file you already have. To start over:
+Rebuild the custom source and runtime image without starting QGC:
 
 ```bash
-docker volume rm px4simstack_qgc-config
+./px4sim build qgc
 ```
+
+The build uses `../qgroundcontrol-5.1.4` and the installed
+`qgc-planner-build:5.1.4` toolchain image. Qt 6.11.1 and the cached source
+dependencies must exist under the host home directory. The build exports Qt
+and the application through CMake into `build/runtime`. The final runtime
+image includes those files and needs no SDK or source mounts at launch.
+Its base is the prepared `px4simstack/qgc:v5.1.4` runtime image.
+
+`QGC_SOURCE_DIR`, `QGC_BUILD_IMAGE`, `QGC_RUNTIME_DIR`, `QGC_RUNTIME_BASE`,
+and `QGC_IMAGE` override these local defaults. Set `QGC_UDP_PORT` to the
+automatic UDP link in the shared settings. The taskbar on this host uses
+14401. The simulator routers send to that port without changing the settings.
+The existing video selection also stays in the shared settings.
+
+Install the shared desktop launcher:
+
+```bash
+install -m755 modules/qgc/launcher.sh ~/.local/bin/qgroundcontrol
+```
+
+The existing taskbar entry already calls that path. Restart QGC to use a new
+image. The simulator uses the image on its next start. Close one instance
+before starting the other, because both write the same settings file.
 
 ### Building your own
 

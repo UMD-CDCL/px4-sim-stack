@@ -598,10 +598,18 @@ build_stack() {
 	add_fleet_profiles
 	resolve_services "$@"
 	local needs_base=false svc
+	local needs_qgc=false
 	[ ${#SERVICES[@]} -eq 0 ] && needs_base=true
+	if [ ${#SERVICES[@]} -eq 0 ] && [ "$FLEET_IS_SIMULATED" = true ]; then
+		needs_qgc=true
+	fi
 	for svc in "${SERVICES[@]}"; do
 		case "$svc" in onboard* | offboard | ground | ros-base) needs_base=true ;; esac
+		[ "$svc" != qgc ] || needs_qgc=true
 	done
+	if [ "$needs_qgc" = true ]; then
+		./modules/qgc/package-custom.sh
+	fi
 	if [ "$needs_base" = true ]; then
 		local image
 		for image in ros-core ros-deps yolo-deps; do
@@ -984,7 +992,7 @@ EOF
 	cat <<EOF
 
   ${BOLD}MAVLink${OFF}     udp://<gcs>:$(uas_gcs_port "$FIRST_UAS") upwards   the ground station endpoint, from GCS_ADDRESS
-              udp://<qgc>:14550         QGroundControl autoconnect, from QGC_ADDRESS
+              udp://<qgc>:${QGC_UDP_PORT:-14550}         QGroundControl, from QGC_ADDRESS
               udp://127.0.0.1:14402     the 5g_drone companion, inside the vehicle
               tcp://localhost:$(uas_tcp_port "$FIRST_UAS") upwards   MAVSDK, pymavlink
   ${BOLD}Video${OFF}       rtsp://localhost:${RTSP_HOST_PORT:-8554}/rgb<N>      v3 gimbal camera, 1920x1080

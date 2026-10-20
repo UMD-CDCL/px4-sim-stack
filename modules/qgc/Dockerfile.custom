@@ -1,0 +1,21 @@
+ARG QGC_RUNTIME_BASE=px4simstack/qgc:v5.1.4
+FROM ${QGC_RUNTIME_BASE}
+
+USER root
+ARG HOST_HOME=/home/user
+ARG HOST_UID=1000
+ARG HOST_GID=1000
+RUN rm -rf /opt/qgc
+COPY --from=qgc_runtime / /opt/qgc/
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY QGroundControl.ini /opt/qgc/QGroundControl.ini
+RUN chmod +x /usr/local/bin/entrypoint.sh
+RUN install -d -o ${HOST_UID} -g ${HOST_GID} \
+    ${HOST_HOME} ${HOST_HOME}/.config ${HOST_HOME}/.cache \
+    ${HOST_HOME}/.local/share ${HOST_HOME}/Documents/QGroundControl
+
+USER ${HOST_UID}:${HOST_GID}
+WORKDIR ${HOST_HOME}
+ENV HOME=${HOST_HOME} \
+    QGC_EXECUTABLE=/opt/qgc/bin/QGroundControl
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

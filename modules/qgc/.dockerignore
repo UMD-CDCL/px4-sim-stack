@@ -1,5 +1,6 @@
 *
 !Dockerfile
 !Dockerfile.dev
+!Dockerfile.custom
 !entrypoint.sh
 !QGroundControl.ini

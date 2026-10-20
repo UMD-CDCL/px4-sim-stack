@@ -18,8 +18,7 @@
 # Everything the contract fixes is unchanged: port 14550 + UAS_NUM for the ground
 # station, 14402 for the companion, TCP 5760 for tools, and AllowSrcSysIn on
 # both filtered endpoints. The entrypoint appends one more endpoint when
-# QGC_ADDRESS is set, because QGroundControl autoconnects on 14550 and nothing
-# else in this stack pushes there.
+# QGC_ADDRESS is set. QGC_UDP_PORT selects its listening port, default 14550.
 
 [General]
 TcpServerPort = 5760

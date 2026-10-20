@@ -16,6 +16,7 @@ PX4_UPLINK_PORT=${PX4_UPLINK_PORT:-14545}
 GCS_ADDRESS=${GCS_ADDRESS:-10.200.142.160}
 ONBOARD_ADDRESS=${ONBOARD_ADDRESS:-127.0.0.1}
 QGC_ADDRESS=${QGC_ADDRESS:-}
+QGC_UDP_PORT=${QGC_UDP_PORT:-14550}
 TEMPLATE=/opt/mavlink-router/main.conf.template
 CONF=/tmp/mavlink-router.conf
 
@@ -57,13 +58,11 @@ fi
 if [ -n "$QGC_ADDRESS" ]; then
 	cat >> "$CONF" <<-EOF
 
-		# QGroundControl autoconnects by listening on 14550, so push to it. Every
-		# vehicle pushes to the same instance, which is how one ground station
-		# shows a fleet. Not on the aircraft, and not part of the contract.
+		# All vehicles send to the shared QGroundControl listening port.
 		[UdpEndpoint qgc]
 		Mode = Normal
 		Address = $QGC_ADDRESS
-		Port = 14550
+		Port = $QGC_UDP_PORT
 	EOF
 fi
 

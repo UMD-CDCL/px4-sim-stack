@@ -96,8 +96,9 @@ x-mavlink-router-env: &mavlink-router-env
   # is this host, so a ground mavlink-router listening on 14561 to 14569 picks
   # the fleet up exactly as it does in the field.
   GCS_ADDRESS: ${GCS_ADDRESS:-${SIMNET_PREFIX:-10.200.142}.210}
-  # QGroundControl autoconnects on 14550. Empty removes that endpoint.
+  # Shared desktop settings can use a different listening port.
   QGC_ADDRESS: ${QGC_ADDRESS:-${SIMNET_PREFIX:-10.200.142}.224}
+  QGC_UDP_PORT: ${QGC_UDP_PORT:-14550}
   KEEPALIVE: ${KEEPALIVE:-1}
 
 # Mounted by the simulated companions and the aircraft alike. A merge key
@@ -947,20 +948,24 @@ services:
     restart: unless-stopped
 
   # -------------------------------------------------------------------------
-  # qgc - QGroundControl, the released build. Use the qgc-dev profile to build
-  # your own from source.
+  # qgc - the same Chimera runtime and host files as the desktop launcher.
   # -------------------------------------------------------------------------
   qgc:
     profiles: [sim]
     build:
       context: ./modules/qgc
       network: ${PX4SIM_BUILD_NETWORK:-none}
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.custom
+      additional_contexts:
+        qgc_runtime: ${QGC_RUNTIME_DIR:-../qgroundcontrol-5.1.4/build/runtime}
       args:
         <<: *ids
-        QGC_REF: ${QGC_REF:-v5.0.8}
-    image: px4simstack/qgc:${QGC_REF:-v5.0.8}
+        HOST_HOME: ${HOME}
+        QGC_RUNTIME_BASE: ${QGC_RUNTIME_BASE:-px4simstack/qgc:v5.1.4}
+    image: ${QGC_IMAGE:-px4simstack/qgc:chimera-5.1.4}
     hostname: qgc
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    working_dir: ${HOME}
     runtime: nvidia
     # Keep the legacy runtime for older Compose/NVIDIA setups, and explicitly
     # request all GPUs for newer Docker Compose implementations.
@@ -968,6 +973,13 @@ services:
     ipc: host
     environment:
       <<: [*gpu-env, *x11-env]
+      HOME: ${HOME}
+      XDG_CONFIG_HOME: ${HOME}/.config
+      XDG_CACHE_HOME: ${HOME}/.cache
+      VIDEO_ROUTER_HOST: video-router
+      QGC_UDP_PORT: ${QGC_UDP_PORT:-14550}
+      PULSE_SERVER: unix:/run/host-user/pulse/native
+      SPEECHD_ADDRESS: unix_socket:/run/host-user/speech-dispatcher/speechd.sock
       # The stream QGC shows. The image defaults to a name no vehicle serves
       # any more, and the fleet numbers its streams. uas11's gimbal camera is
       # rgb11 on a v3 and pilot11 on a v2.
@@ -981,16 +993,21 @@ services:
     # to 1, joystick input.
     device_cgroup_rules:
       - "c 13:* rmw"
+      - "c 166:* rwm"
+      - "c 188:* rwm"
       # Allow QGC and future peripherals to open every USB device on the host.
       - "c 189:* rmw"
     group_add:
       - "${INPUT_GID:-107}"
+      - dialout
+      - video
     volumes:
-      - /dev/input:/dev/input
-      - /dev/bus/usb:/dev/bus/usb
-      - qgc-config:/home/dev/.config
-      - ./logs/qgc:/home/dev/Documents/QGroundControl
-      - *qgc-missions
+      - /dev:/dev
+      - /run/udev:/run/udev:ro
+      - ${XDG_RUNTIME_DIR:-/run/user/${HOST_UID:-1000}}:/run/host-user:ro
+      - ${HOME}/.config/QGroundControl:${HOME}/.config/QGroundControl
+      - ${HOME}/Documents/QGroundControl:${HOME}/Documents/QGroundControl
+      - ${HOME}/.cache/QGCMapCache300:${HOME}/.cache/QGCMapCache300
       - /tmp/.X11-unix:/tmp/.X11-unix
       - ${XAUTH_FILE:-./.xauth}:/tmp/.docker.xauth
     networks:

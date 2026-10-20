@@ -51,7 +51,7 @@ most parts.
 | `onboard11` to `onboard14` | The companion computer: MAVROS, `ds_node`, MAVInsight | from `UAS_FLEET` |
 | `offboard` | The simulated ground station for the whole fleet, plus its `ground-router` | `offboard` |
 | `video-router` | MediaMTX. Every camera enters here and leaves as RTSP | `sim`, `offboard` |
-| `qgc` | QGroundControl v5.0.8, released build | `sim` |
+| `qgc` | QGroundControl 5.1.4 with the Chimera mission planner | `sim` |
 | `ground` | The real ground station on t500: the offboard image on the host network, beside the native mavlink-router and lcam | `ground` |
 | `onboard` | The aircraft: the companion image on the host network, beside the native mavlink-router and rcam | `aircraft` |
 | `scenegen` | Builds a scene from map data. Runs on demand and exits | `scenegen` |
@@ -459,7 +459,7 @@ fault.
 | The zoom preset a v3 lens flies at | `UAS_ZOOM=` in `.env` | [docs/development.md](docs/development.md) |
 | PX4 itself | Edit `src/PX4-Autopilot`, then restart `sim` | [docs/development.md](docs/development.md) |
 | The flight code | Edit the tree at `ROS2_WS_DIR`, then rebuild | [docs/development.md](docs/development.md) |
-| QGroundControl itself | `./scripts/bootstrap.sh qgc`, then the `qgc-dev` profile | [docs/development.md](docs/development.md) |
+| QGroundControl itself | Edit `../qgroundcontrol-5.1.4`, then `./px4sim build qgc` | [docs/development.md](docs/development.md) |
 | A scene from map data | `./px4sim genscene --help` | [modules/scenegen/README.md](modules/scenegen/README.md) |
 
 ## Versions, and why
