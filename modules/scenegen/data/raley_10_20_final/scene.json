@@ -50,8 +50,30 @@
    "model_uri": null,
    "enabled": true,
    "id": "b_manual_1",
-   "east_m": 4.93,
-   "north_m": 51.82
+   "east_m": 4.99,
+   "north_m": 51.78
+  },
+  {
+   "length_m": 6.31,
+   "width_m": 3.28,
+   "yaw_deg": 51.3,
+   "height_m": 5,
+   "height_source": "manual",
+   "name": "",
+   "map_height_m": null,
+   "map_height_source": "",
+   "outline_m": [],
+   "holes_m": [],
+   "extruded": false,
+   "levels": [
+    2
+   ],
+   "source": "manual",
+   "model_uri": null,
+   "enabled": true,
+   "id": "b_manual_2",
+   "east_m": 5,
+   "north_m": 51.8
   }
  ],
  "vehicles": [],
@@ -71,7 +93,7 @@
   {
    "id": "t_import_2",
    "name": "casualty_2",
-   "east_m": 4.89,
+   "east_m": 4.94,
    "north_m": 50.11,
    "agl_m": 2,
    "on_building": false,
