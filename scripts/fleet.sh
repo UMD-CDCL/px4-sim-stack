@@ -121,7 +121,7 @@ unknown_active_words() {
 	done
 }
 # The vehicle whose mosaic the ground station paints, in this world's
-# numbers. Empty lets offboard.launch.py take the lowest active vehicle, and
+# numbers. Empty lets offboard.launch.py stack all active mosaics, and
 # so does a MOSAIC_UAS that names a vehicle not flying now (mosaic_note says
 # which): the ground station must come up whichever vehicles are active.
 mosaic_uas() {
@@ -134,9 +134,9 @@ mosaic_note() {
 	local n
 	[ -n "${MOSAIC_UAS:-}" ] || return 0
 	if ! n=$(fleet_number "$MOSAIC_UAS"); then
-		echo "MOSAIC_UAS=$MOSAIC_UAS names no vehicle of this fleet; the lowest active vehicle paints the mosaic."
+		echo "MOSAIC_UAS=$MOSAIC_UAS names no vehicle of this fleet; the ground stacks all active mosaics."
 	elif [ -z "$(mosaic_uas)" ]; then
-		echo "MOSAIC_UAS=$MOSAIC_UAS (uas$n) is not active; the lowest active vehicle paints the mosaic."
+		echo "MOSAIC_UAS=$MOSAIC_UAS (uas$n) is not active; the ground stacks all active mosaics."
 	fi
 }
 

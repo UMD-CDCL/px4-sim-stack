@@ -286,8 +286,7 @@ x-offboard-env: &offboard-env
   # without changing that fleet's model mapping. Empty means every member.
   UAS_ACTIVE: ${UAS_ACTIVE:-}
   ONBOARD_CAMERA: ${ONBOARD_CAMERA:-}
-  # UAS number whose mosaic is painted on the shared ground scene. Empty
-  # preserves the launch file's lowest-numbered-fleet default.
+  # Empty stacks all active mosaics on the ground, with UAS4 on top.
   MOSAIC_UAS: ${MOSAIC_UAS:-}
   # The casualty image VLM gate: off, shadow or on (5g_drone
   # scripts/vlm_gate/README.md). offboard.launch.py reads it; off is today.

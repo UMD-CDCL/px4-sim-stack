@@ -320,7 +320,7 @@ mode_switch() {
 	say "Switched to $mode mode"
 	echo "  COMPOSE_PROFILES=$profiles UAS_BASE=$base, ground domain $((60 + base))"
 	echo "  kept: scene ${SCENE:-unset}, scenario ${SCENARIO:-unset}, fleet ${UAS_FLEET:-default}"
-	echo "        active ${numbers:+${numbers% }}${numbers:-all}, mosaic ${mosaic_setting:-lowest active}"
+	echo "        active ${numbers:+${numbers% }}${numbers:-all}, mosaic ${mosaic_setting:-all}"
 }
 
 # The ROS domain a reader answers on. The ground station joins every vehicle's
@@ -874,7 +874,7 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     camera day|night    Select RGB/pilot or thermal for every vehicle and restart
     vlm-filter off|shadow|on  Select casualty image filtering for the UGV and restart
     active [N...]       Fly only these vehicles, by real number (1 3); none flies all
-    mosaic [N|lowest]   Which vehicle paints the ground mosaic, then restart
+    mosaic [all|N]      Stack all mosaics or select one, then restart
     mode sim|real       Move a ground station between the simulator and the field;
                         scene, scenario, fleet and selections carry over
     fleet               Every vehicle: model, address, ports, domain, streams
@@ -1038,7 +1038,7 @@ fleet_facts() {
 		fleet_numbers=$(fleet_numbers | paste -sd, -)
 		mosaic=${MOSAIC_UAS:-}
 		mosaic_setting=${MOSAIC_UAS_SETTING:-}
-		mosaic_choices=$({ echo lowest; active_uas; } | paste -sd, -)
+		mosaic_choices=$({ echo all; active_uas; } | paste -sd, -)
 		camera_mode=$([ "${ONBOARD_CAMERA:-}" = thermal ] && echo night || echo day)
 		vlm_gate=${VLM_GATE:-off}
 		declared=$(printf '%s\n' "$COMPOSE_SERVICES" | paste -sd, -)
@@ -2041,11 +2041,10 @@ active)
 	;;
 
 mosaic)
-	# Which vehicle's mosaic the ground station paints on the scene. `lowest`
-	# (or nothing) leaves it to the lowest active vehicle.
+	# Empty selects the full mosaic stack on the ground.
 	[ "$(world_of)" != aircraft ] || die "The aircraft paints no fleet mosaic; select it on the ground station."
-	case "${1:-lowest}" in
-	lowest) env_set MOSAIC_UAS "" ; say "The lowest active vehicle paints the mosaic" ;;
+	case "${1:-all}" in
+	all|lowest) env_set MOSAIC_UAS "" ; say "The ground stacks all active mosaics" ;;
 	*) n=$(fleet_number "$1") || die "'$1' is not a vehicle of this fleet: $(fleet_numbers | paste -sd' ' -)"
 	   env_set MOSAIC_UAS "$(real_number "$n")"
 	   say "uas$n paints the mosaic" ;;
