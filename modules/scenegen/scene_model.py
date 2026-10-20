@@ -100,12 +100,11 @@ class Building:
     outline_m: list = field(default_factory=list)   # [[east, north], ...] closed
     holes_m: list = field(default_factory=list)     # inner rings, same shape
     # A floor building is horizontal surfaces alone: no walls, and it
-    # never reaches the ground. levels holds those surfaces in scene z,
-    # meters above the origin altitude, the same z the surface file and
-    # the world use. Empty means one level, the roof at height_m over the
-    # ground under the footprint, which is every scene from before floors.
+    # never reaches the ground. levels holds heights above the ground
+    # under the footprint. Empty means one level, the roof at height_m
+    # above that ground, which is every scene from before floors.
     extruded: bool = True
-    levels: list = field(default_factory=list)      # [scene z, ...]
+    levels: list = field(default_factory=list)      # [height above ground, ...]
     source: str = "osm"
     model_uri: str | None = None  # a higher-detail stand-in replaces the box
     enabled: bool = True
@@ -513,14 +512,11 @@ def placed_footprint(building: Building) -> tuple[list, list]:
 def building_levels(building: Building, base_z: float) -> list[float]:
     """The building's horizontal surfaces, scene z, lowest first.
 
-    base_z is the ground under the footprint, which the roof of an
-    extruded building stands on. A building that states its own levels
-    ignores it: a floor hangs at the altitude it names, whatever the
-    terrain does under it.
+    base_z is the ground under the footprint. Both explicit levels and
+    the default roof height are relative to that ground.
     """
-    if building.levels:
-        return sorted({float(z) for z in building.levels})
-    return [base_z + building.height_m]
+    heights = building.levels or [building.height_m]
+    return sorted({base_z + float(height) for height in heights})
 
 
 def vegetation_from_osm(raw_trees: list, raw_areas: list, frame,

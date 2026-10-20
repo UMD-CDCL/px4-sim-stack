@@ -234,8 +234,8 @@ floors over the terrain.
 `extruded` true is a box, and `height_m` gives its one level, the roof
 over the ground under the footprint. A building with `extruded` false is
 a set of floors, and `levels` gives the altitude of each slab. A level
-altitude is scene z: meters above the scene origin, not meters above the
-ground under it. This is the same z the surface file and the world use.
+altitude is meters above the ground under the footprint. The build adds
+the terrain height to get scene z for the surface file and the world.
 
 A building from before floors has neither field. It loads as an extruded
 building with one level, and it builds as it did before.

@@ -941,8 +941,8 @@ function buildingPanel(b, ref) {
       textField("level altitudes m, comma separated", b.levels.join(", "),
                 v => { b.levels = parseLevels(v); },
                 { refresh: true, placeholder: "8, 16, 24" }),
-      note(`A level is one horizontal surface at that altitude above the
-            scene origin, not above the ground under it. The building gets
+      note(`A level is one horizontal surface at that height above the
+            ground under the footprint. The building gets
             no walls and never touches the terrain.`));
   fields.push(
     modelUriField(b, "model uri (empty = the generated mesh)",

@@ -660,9 +660,11 @@ def test_building_defaults() -> None:
                                  length_m=10.0, width_m=10.0, yaw_deg=0.0,
                                  height_m=6.0, extruded=False,
                                  levels=[16.0, 4.0, 4.0])
-    check("stated levels ignore the ground, sort and lose duplicates",
-          scene_model.building_levels(floor, 3.0) == [4.0, 16.0],
+    check("stated levels add the ground, sort and lose duplicates",
+          scene_model.building_levels(floor, 3.0) == [7.0, 19.0],
           str(scene_model.building_levels(floor, 3.0)))
+    check("stated levels add ground below the scene origin",
+          scene_model.building_levels(floor, -3.0) == [1.0, 13.0])
     older = json.loads(scene_model.SceneSpec(
         name="older", center_lat=CENTER_LAT, center_lon=CENTER_LON,
         side_m=SIDE_M, origin_alt_m=ORIGIN_ALT, buildings=[plain]).to_json())
