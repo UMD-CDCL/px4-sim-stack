@@ -1005,9 +1005,9 @@ services:
       - /dev:/dev
       - /run/udev:/run/udev:ro
       - ${XDG_RUNTIME_DIR:-/run/user/${HOST_UID:-1000}}:/run/host-user:ro
-      - ${HOME}/.config/QGroundControl:${HOME}/.config/QGroundControl
-      - ${HOME}/Documents/QGroundControl:${HOME}/Documents/QGroundControl
-      - ${HOME}/.cache/QGCMapCache300:${HOME}/.cache/QGCMapCache300
+      - ${HOME}:${HOME}
+      - /media:/media
+      - /mnt:/mnt
       - /tmp/.X11-unix:/tmp/.X11-unix
       - ${XAUTH_FILE:-./.xauth}:/tmp/.docker.xauth
     networks:

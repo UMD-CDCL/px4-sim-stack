@@ -19,8 +19,6 @@ xauth nlist "${DISPLAY:-:0}" 2>/dev/null \
     | xauth -f "$XAUTH" nmerge - 2>/dev/null || true
 chmod 644 "$XAUTH"
 
-USER_NAME=$(id -un)
-
 ARGS=(
     --rm
     --user "$(id -u):$(id -g)"
@@ -38,11 +36,7 @@ ARGS=(
     -e QT_X11_NO_MITSHM=1
     -v /tmp/.X11-unix:/tmp/.X11-unix:rw
     -v "$XAUTH:/tmp/.qgc-xauth:ro"
-    # The real settings, not a copy, so a change made here is a change made
-    # everywhere - including for a native QGroundControl on the same machine.
-    -v "$HOME/.config/QGroundControl:/home/$USER_NAME/.config/QGroundControl:rw"
-    -v "$HOME/Documents/QGroundControl:/home/$USER_NAME/Documents/QGroundControl:rw"
-    -v "$HOME/.cache/QGCMapCache300:/home/$USER_NAME/.cache/QGCMapCache300:rw"
+    -v "$HOME:$HOME:rw"
     # Serial radios, autopilots and joysticks are hotplugged, so bind /dev
     # wholesale rather than naming devices that may not exist at launch.
     # udev's database goes with it so Qt can enumerate them.
@@ -64,10 +58,9 @@ for grp in video dialout plugdev input; do
     [[ -n "$gid" ]] && ARGS+=( --group-add "$gid" )
 done
 
-# QGroundControl 4 stored settings under the organisation "QGroundControl.org".
-# Carry it through when it exists, so an older config is not stranded.
-[[ -d "$HOME/.config/QGroundControl.org" ]] && ARGS+=(
-    -v "$HOME/.config/QGroundControl.org:/home/$USER_NAME/.config/QGroundControl.org:rw" )
+for directory in /media /mnt /run/media; do
+    [[ -d "$directory" ]] && ARGS+=( -v "$directory:$directory:rw" )
+done
 
 # NVIDIA GL. Without this the container has no NVIDIA userspace driver, GLX
 # falls back to software and the map crawls. DRIVER_CAPABILITIES must include

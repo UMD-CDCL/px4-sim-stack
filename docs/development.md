@@ -615,9 +615,13 @@ docker run --rm px4simstack/ros-base:$(./scripts/ds-select.sh --tag) \
 ### The Chimera build
 
 The desktop launcher and the simulator `qgc` service use
-`px4simstack/qgc:chimera-5.1.4`. Both mount the host QGC settings, document
-folder, and map cache at their original paths. The runtime uses the standard
-`QGroundControl` application name, so both read the same settings file.
+`px4simstack/qgc:chimera-5.1.4`.
+The desktop launcher and simulator share the complete host home directory at its
+original path. This includes QGC settings, parameters, plans, offline maps,
+logs, downloads, cache, and local application data. Both expose /media and /mnt.
+The desktop launcher also exposes /run/media when it exists.
+The runtime uses the standard `QGroundControl` application name, so both read
+the same settings file.
 The simulator keeps its own network address and video-router forwarding.
 
 Rebuild the custom source and runtime image without starting QGC:
