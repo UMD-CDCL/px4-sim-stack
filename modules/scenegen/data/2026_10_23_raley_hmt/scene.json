@@ -1,0 +1,337 @@
+{
+ "name": "2026_10_23_raley_hmt",
+ "center_lat": 38.26307790166667,
+ "center_lon": -76.779398665,
+ "side_m": 200,
+ "origin_alt_m": 4.24,
+ "imagery": {
+  "source": "google",
+  "zoom": 19,
+  "file": "satellite.jpg",
+  "width_px": 853,
+  "height_px": 857,
+  "m_per_px": 0.2344,
+  "origin_px": 38483003,
+  "origin_py": 51646503
+ },
+ "elevation": {
+  "grid_n": 128,
+  "side_m": 200,
+  "zoom": 15,
+  "row0": "south",
+  "origin_alt_m": 4.24,
+  "min_m": 0.58,
+  "max_m": 5.54
+ },
+ "fiducial": {
+  "east_m": 0,
+  "north_m": 0,
+  "diameter_m": 0.5,
+  "placed_east_m": 0,
+  "placed_north_m": 0
+ },
+ "buildings": [
+  {
+   "length_m": 5.13,
+   "width_m": 1.34,
+   "yaw_deg": 56.5,
+   "height_m": 2.5,
+   "height_source": "manual",
+   "name": "",
+   "map_height_m": null,
+   "map_height_source": "",
+   "outline_m": [],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "manual",
+   "model_uri": null,
+   "enabled": true,
+   "id": "b_manual_1",
+   "east_m": -35.3,
+   "north_m": 56.65
+  }
+ ],
+ "vehicles": [],
+ "targets": [
+  {
+   "id": "t_import_1",
+   "name": "casualty_1",
+   "east_m": -32.73,
+   "north_m": 32.46,
+   "agl_m": 0,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "import"
+  },
+  {
+   "id": "t_import_2",
+   "name": "casualty_2",
+   "east_m": -29.86,
+   "north_m": 35.15,
+   "agl_m": 0,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "import"
+  },
+  {
+   "id": "t_import_3",
+   "name": "casualty_3",
+   "east_m": -26.12,
+   "north_m": 30.83,
+   "agl_m": 0,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "import"
+  },
+  {
+   "id": "t_import_4",
+   "name": "casualty_4",
+   "east_m": -19.87,
+   "north_m": 28.14,
+   "agl_m": 0,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "import"
+  },
+  {
+   "id": "t_import_5",
+   "name": "casualty_5",
+   "east_m": -16.21,
+   "north_m": 33.39,
+   "agl_m": 0,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "import"
+  },
+  {
+   "id": "t_import_6",
+   "name": "casualty_6",
+   "east_m": -18.27,
+   "north_m": 53.17,
+   "agl_m": 0,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "import"
+  },
+  {
+   "id": "t_import_7",
+   "name": "casualty_7",
+   "east_m": 12.69,
+   "north_m": 36.12,
+   "agl_m": 0,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "import"
+  },
+  {
+   "id": "t_import_8",
+   "name": "casualty_10",
+   "east_m": 14.09,
+   "north_m": 34.2,
+   "agl_m": 0,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "import"
+  },
+  {
+   "id": "t_import_9",
+   "name": "casualty_11",
+   "east_m": 12.19,
+   "north_m": 33.53,
+   "agl_m": 0,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "import"
+  },
+  {
+   "id": "t_import_10",
+   "name": "casualty_12",
+   "east_m": -14.62,
+   "north_m": 20.68,
+   "agl_m": 0,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "import"
+  },
+  {
+   "id": "t_import_11",
+   "name": "casualty_8",
+   "east_m": -27.59,
+   "north_m": 72.19,
+   "agl_m": 0,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "import"
+  },
+  {
+   "id": "t_import_12",
+   "name": "casualty_9",
+   "east_m": -36.58,
+   "north_m": 54.45,
+   "agl_m": 0,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "import"
+  }
+ ],
+ "trees": [],
+ "tree_areas": [],
+ "flatten_zones": [],
+ "geofences": [
+  {
+   "id": "gf_import_1",
+   "polygon_m": [
+    [
+     -21.71,
+     -37.45
+    ],
+    [
+     -28.3,
+     -33.41
+    ],
+    [
+     -35.33,
+     -29.53
+    ],
+    [
+     -46.01,
+     -23.5
+    ],
+    [
+     -53.49,
+     -19.03
+    ],
+    [
+     -49.09,
+     88.84
+    ],
+    [
+     30.6,
+     43.13
+    ]
+   ],
+   "enabled": true,
+   "source": "import"
+  }
+ ],
+ "exclusion_zones": [
+  {
+   "id": "ez_import_1",
+   "polygon_m": [
+    [
+     -36.36,
+     20.99
+    ],
+    [
+     -39.77,
+     21.57
+    ],
+    [
+     -39.97,
+     24.88
+    ],
+    [
+     -35.74,
+     24.92
+    ]
+   ],
+   "enabled": true,
+   "source": "import"
+  },
+  {
+   "id": "ez_import_2",
+   "polygon_m": [
+    [
+     -32.06,
+     25.12
+    ],
+    [
+     -28.3,
+     25.39
+    ],
+    [
+     -27.78,
+     22.65
+    ],
+    [
+     -32.24,
+     22.52
+    ]
+   ],
+   "enabled": true,
+   "source": "import"
+  },
+  {
+   "id": "ez_import_3",
+   "polygon_m": [
+    [
+     2.35,
+     18.76
+    ],
+    [
+     -1.11,
+     21.47
+    ],
+    [
+     0.11,
+     24.98
+    ],
+    [
+     4.86,
+     23.47
+    ]
+   ],
+   "enabled": true,
+   "source": "import"
+  },
+  {
+   "id": "ez_import_4",
+   "polygon_m": [
+    [
+     0.14,
+     54.79
+    ],
+    [
+     -1.52,
+     53.03
+    ],
+    [
+     -6.72,
+     56.43
+    ],
+    [
+     -4.68,
+     58.92
+    ]
+   ],
+   "enabled": true,
+   "source": "import"
+  }
+ ],
+ "format": "scenegen-scene/1"
+}
