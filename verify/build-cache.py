@@ -87,7 +87,10 @@ def main():
             build("restored inputs", set())
             subprocess.run([
                 "docker", "run", "--rm", "--network", "none", "--entrypoint", "bash", image,
-                "-ec", ". /usr/local/bin/ros-env.sh; "
+                "-ec", "test -w \"$HOME\"; test -w \"$HOME/ros2_ws\"; "
+                "test \"$(stat -c %u /home)\" = 0; "
+                "test \"$(stat -c %u \"$HOME/ros2_ws/install\")\" = 0; "
+                ". /usr/local/bin/ros-env.sh; "
                 "for p in cdcl_umd_msgs mavinsight umd_uas mavros; do ros2 pkg prefix $p; done; "
                 "python3 -c 'import umd_uas, mavinsight, models; "
                 "from rosidl_generator_py import import_type_support; "

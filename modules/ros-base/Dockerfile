@@ -100,10 +100,18 @@ RUN --network=none \
        --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
                     -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
+# Empty directories supply ownership without mounting the assembled ROS tree.
+FROM scratch AS home-parent
+WORKDIR /home
+
+FROM home-parent AS user-home
+WORKDIR /home/user/ros2_ws
+
 FROM deps AS runtime
 ARG HOST_UID=1000
 ARG HOST_GID=1000
 ARG USERNAME=user
+WORKDIR /home/user/ros2_ws
 # Each prefix is isolated. The root colcon setup utilities discover the union
 # of installed package markers and order runtime dependencies when sourced.
 COPY --link --from=mavros /opt/mavros/install/ /opt/mavros/install/
@@ -114,11 +122,9 @@ COPY --link --from=tracking_test /home/user/ros2_ws/install/ /home/user/ros2_ws/
 COPY --link --from=umd_uas /home/user/ros2_ws/install/ /home/user/ros2_ws/install/
 COPY --link site-params.sh ros-env.sh /usr/local/bin/
 
-# COPY --link can recreate destination path components as root. Restore the
-# runtime user's ownership of its home and working directory so ROS and nodes
-# can create per-run state and relative diagnostic outputs. Keep install/owned
-# by root: it contains the image's immutable built artifacts.
-RUN chown "${HOST_UID}:${HOST_GID}" /home/user /home/user/ros2_ws
+# Set directory ownership in a separate layer. Installed files stay root-owned.
+COPY --link --chown=${HOST_UID}:${HOST_GID} --from=user-home /home/user/ /home/user/
+# Keep the parent directory owned by root.
+COPY --link --from=home-parent /home/ /home/
 
 USER ${USERNAME}
-WORKDIR /home/user/ros2_ws

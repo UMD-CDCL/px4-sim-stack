@@ -15,8 +15,7 @@ FROM ros_base
 ARG USERNAME=user
 
 USER root
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+COPY --link --chmod=755 entrypoint.sh /usr/local/bin/entrypoint.sh
 
 USER ${USERNAME}
 EXPOSE 8765/tcp

@@ -650,12 +650,6 @@ prepare_stack() {
 	add_fleet_profiles
 	export YOLO_CUDA_VERSION PX4SIM_BUILD_NETWORK=host
 	YOLO_CUDA_VERSION=$(bash ./scripts/build-contexts.sh)
-	# BuildKit's intermediate cache alone does not guarantee a FROM image is
-	# resolvable offline. Retain the external parents in the local image store.
-	local parent
-	for parent in "$DS_IMAGE" ubuntu:24.04 debian:bookworm-slim; do
-		docker image inspect "$parent" >/dev/null 2>&1 || docker pull "$parent"
-	done
 	if [ "${PX4SIM_PINNED_DEPS:-0}" = 1 ] \
 		&& docker image inspect "px4simstack/ros-core:$DS_TAG" >/dev/null 2>&1 \
 		&& docker image inspect "px4simstack/ros-deps:$DS_TAG" >/dev/null 2>&1 \
@@ -665,6 +659,13 @@ prepare_stack() {
 		# One build call, so the stages the three targets share are built once.
 		COMPOSE_PROFILES=deps python3 ./scripts/compose-build.py ros-core ros-deps yolo-deps
 	fi
+	# Let BuildKit extract dependency parents before Docker retains their tags.
+	# Pre-pulling can leave engine-unpacked layers marked blob-only in BuildKit,
+	# which repeats containerd checks during later cache lookups.
+	local parent
+	for parent in "$DS_IMAGE" ubuntu:24.04 debian:bookworm-slim; do
+		docker image inspect "$parent" >/dev/null 2>&1 || docker pull "$parent"
+	done
 	# Image-only services (for example video-router) must also be present before
 	# going offline. Downloading is confined to this explicit preparation step.
 	$DC pull --ignore-buildable
