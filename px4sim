@@ -1699,6 +1699,8 @@ record)
 		local bag_name=${BAG_NAME:-rosbag2_$(date +%Y_%m_%d-%H_%M_%S)}
 		bag_name+="$bag_suffix"
 		printf '%s\n' "$bag_root/$bag_name" > "$RECORD_BAG_FILE"
+		RECORD_STREAMS=$(local_streams)
+		export RECORD_STREAMS
 		if [ "$action" = bags ]; then
 			BAG_ROOT="$bag_root" BAG_NAME="$bag_name" RECORD_VIDEO=0 setsid python3 scripts/record-session.py "$record_container" "$recorder" </dev/null >"$RECORD_LOG" 2>&1 &
 		else
