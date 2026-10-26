@@ -880,6 +880,7 @@ ${BOLD}px4sim${OFF} - PX4, Gazebo and the Chimera flight code in containers
     bench disable       Stop the stack, then disable bench reference before flight
     mode sim|real       Switch this machine between simulator and real ground station
     camera day|night    Select RGB/pilot or thermal for every vehicle and restart
+                        ds_node uses the selected camera's model and confidence
     vlm-filter off|shadow|on  Select casualty image filtering for the UGV and restart
     active [N...]       Fly only these vehicles, by real number (1 3); none flies all
     mosaic [all|N]      Stack all mosaics or select one, then restart
