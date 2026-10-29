@@ -1122,7 +1122,8 @@ stop_native_recording() {
 		done
 		[ "$(recording_status)" = false ] || return 1
 	fi
-	if [ -n "$bag_location" ] && [ -f "$bag_location/recording-status.json" ]; then
+	if [ -n "$bag_location" ]; then
+		[ -f "$bag_location/recording-status.json" ] || { say "recording result is missing; inspect logs/recording.log"; return 1; }
 		python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); print(s["summary"]); sys.exit(0 if s["complete"] else 1)' \
 			"$bag_location/recording-status.json" || return 1
 	fi

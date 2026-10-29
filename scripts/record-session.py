@@ -130,6 +130,9 @@ def main():
     if state:
         print(f"[INFO] Recording {state['summary']}: {directory}", flush=True)
         return 0 if state["complete"] else 1
+    if directory is not None:
+        print(f"[ERROR] Recording did not create its output directory: {directory}", flush=True)
+        return 1
     return 0
 
 
