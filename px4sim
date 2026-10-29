@@ -683,6 +683,11 @@ stop_stack() {
 		stop_native_recording || die "recording is still finalizing; stack left running"
 	fi
 	stop_container_log
+	if [ "${FLEET_IS_SIMULATED:-true}" = false ]; then
+		local daemon_domain=${GROUND_DOMAIN:-0}
+		if aircraft_selected; then daemon_domain=$(uas_domain "$UAS_NUM"); fi
+		ROS_DOMAIN_ID="$daemon_domain" bash -c 'source /opt/ros/humble/setup.bash; ros2 daemon stop' >/dev/null 2>&1 || true
+	fi
 	if unit_owns_stack; then
 		warn "onboard.service stays active with no container. It starts the stack again"
 		warn "at the next boot, or now with: sudo systemctl restart onboard"
@@ -711,7 +716,7 @@ stop_stack() {
 # once per file, took half a minute on an Orin, and looked hung enough to be
 # cancelled, which left the stack down and the files in place.
 release_dds_shm() {
-	local lock base name status freed=0 stuck=0
+	local lock base name status freed=0 stuck=0 busy=0
 	local -A seen=()
 	local -a locks
 	for lock in /dev/shm/fastrtps_*_el /dev/shm/fastrtps_*_sl; do
@@ -729,6 +734,7 @@ release_dds_shm() {
 		status=0
 		"${locks[@]}" "$@" 2>/dev/null || status=$?
 		if [ "$status" -eq 75 ]; then
+			busy=$((busy + 1))
 			continue
 		elif [ "$status" -eq 0 ] || sudo -n "${locks[@]}" "$@" 2>/dev/null; then
 			freed=$((freed + 1))
@@ -736,10 +742,7 @@ release_dds_shm() {
 			stuck=$((stuck + 1))
 		fi
 	done
-	# Whatever has no lock file left. A cleanup cut short, such as a cancelled
-	# run of the old fuser loop, strands port mutexes this way. A live object
-	# always has its lock beside it; the minute of age covers one being created
-	# right now by a process outside the stack.
+	# The stack is stopped. Remove orphan data and mutexes without an age delay.
 	while IFS= read -r -d '' name; do
 		base=${name#/dev/shm/}
 		base=/dev/shm/${base#sem.}
@@ -751,11 +754,12 @@ release_dds_shm() {
 			stuck=$((stuck + 1))
 		fi
 	done < <(find /dev/shm -maxdepth 1 \( -name 'fastrtps_*' -o -name 'sem.fastrtps_*' \) \
-		! -name '*_el' ! -name '*_sl' -mmin +1 -print0 2>/dev/null)
+		! -name '*_el' ! -name '*_sl' -print0 2>/dev/null)
 	[ "$freed" -eq 0 ] || echo "  released $freed stale Fast DDS shared memory objects"
-	[ "$stuck" -eq 0 ] || warn "could not remove $stuck stale Fast DDS objects another user owns; rerun with sudo"
-	# The checks above end false on a clean stop. `set -e` callers such as
-	# `start` must still go on to build and bring the stack back up.
+	if [ "$stuck" -ne 0 ] || [ "$busy" -ne 0 ]; then
+		warn "DDS cleanup incomplete: $stuck objects could not be removed, $busy objects still have live locks"
+		return 1
+	fi
 	return 0
 }
 
@@ -1122,11 +1126,7 @@ stop_native_recording() {
 		done
 		[ "$(recording_status)" = false ] || return 1
 	fi
-	if [ -n "$bag_location" ]; then
-		[ -f "$bag_location/recording-status.json" ] || { say "recording result is missing; inspect logs/recording.log"; return 1; }
-		python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); print(s["summary"]); sys.exit(0 if s["complete"] else 1)' \
-			"$bag_location/recording-status.json" || return 1
-	fi
+
 	rm -f "$RECORD_PID_FILE" "$RECORD_MODE_FILE" "$RECORD_BAG_FILE"
 	if [ -n "$bag_location" ]; then
 		if [ "$record_mode" = all ]; then
@@ -1571,6 +1571,11 @@ restart|start|up|core)
 			|| die "Missing local image $image. Run ./px4sim prepare with internet."
 	done <<< "$required_images"
 	stop_stack
+	if [ "$FLEET_IS_SIMULATED" = false ]; then
+		say "Preparing native recording"
+		bash -c 'set +u; source /opt/ros/humble/setup.bash; exec "$1" --prepare' _ \
+			"$HOME/chimera-deploy/remote/safe_rosbag_record.sh" || die "could not prepare native recording"
+	fi
 	if [ "$rebuild" = true ]; then
 		say "Building offline: $COMPOSE_PROFILES"
 		build_local_stack
@@ -1701,20 +1706,14 @@ record)
 		[ -n "$record_container" ] || die "$record_service is not running; start it before recording"
 		[ -x "$recorder" ] || die "recorder is not executable: $recorder"
 		mkdir -p "$(dirname "$RECORD_LOG")"
+		[ ! -L "$RECORD_LOG" ] || rm -- "$RECORD_LOG"
 		# Pin the recorder's generated directory so stop can report the exact
 		# location. record_all_common.sh uses these same two variables.
 		local bag_root=${BAG_ROOT:-$HOME/ros2_ws}
 		local bag_name=${BAG_NAME:-rosbag2_$(date +%Y_%m_%d-%H_%M_%S)}
 		bag_name+="$bag_suffix"
 		[ ! -e "$bag_root/$bag_name" ] || die "recording directory already exists: $bag_root/$bag_name"
-		# Prepare the private ROS library before a detached recorder can report success.
-		bash -c 'set +u; source /opt/ros/humble/setup.bash; exec "$1" --prepare' _ \
-			"$HOME/chimera-deploy/remote/safe_rosbag_record.sh" || die "could not prepare safe rosbag transport"
-		RECORD_LOG="$bag_root/$bag_name.recording.log"
-		if [ -f logs/recording.log ] && [ ! -L logs/recording.log ]; then
-			mv logs/recording.log "logs/recording-before-$(date +%Y%m%dT%H%M%S).log"
-		fi
-		ln -sfn "$RECORD_LOG" logs/recording.log
+
 		printf '%s\n' "$bag_root/$bag_name" > "$RECORD_BAG_FILE"
 		if aircraft_selected; then RECORD_STREAMS=$(local_streams)
 		else RECORD_STREAMS=$(for n in $(active_uas); do vehicle_streams "$n"; done); fi

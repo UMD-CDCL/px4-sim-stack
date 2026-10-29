@@ -855,11 +855,8 @@ def snapshot(context: dict, containers_reader: AsyncContainers, streams: Streams
             os.kill(pid, 0)
             live_context["recording"] = True
             live_context["recording_mode"] = Path(str(context["recording_mode_file"])).read_text().strip()
-            directory = Path(Path(str(context["recording_bag_file"])).read_text().strip())
-            health = json.loads((directory / "recording-status.json").read_text())
-            live_context["recording_health"] = health["summary"] if time.time() - health["updated"] < 10 else "status is stale"
         except (OSError, ValueError, KeyError):
-            live_context.setdefault("recording_health", "starting recorders")
+            pass
     return {
         "at": time.time(),
         "tick": tick,
