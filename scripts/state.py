@@ -847,10 +847,23 @@ def snapshot(context: dict, containers_reader: AsyncContainers, streams: Streams
         vehicle["tx_kbits"], vehicle["rx_kbits"] = up, down
         vehicle["active"] = True
     vehicles = fleet_rows(context, vehicles)
+    live_context = dict(context)
+    if context.get("world") in ("ground", "aircraft"):
+        live_context["recording"] = False
+        try:
+            pid = int(Path(str(context["recording_pid_file"])).read_text().strip())
+            os.kill(pid, 0)
+            live_context["recording"] = True
+            live_context["recording_mode"] = Path(str(context["recording_mode_file"])).read_text().strip()
+            directory = Path(Path(str(context["recording_bag_file"])).read_text().strip())
+            health = json.loads((directory / "recording-status.json").read_text())
+            live_context["recording_health"] = health["summary"] if time.time() - health["updated"] < 10 else "status is stale"
+        except (OSError, ValueError, KeyError):
+            live_context.setdefault("recording_health", "starting recorders")
     return {
         "at": time.time(),
         "tick": tick,
-        "config": context,
+        "config": live_context,
         "services": service_rows(context, found, services_error),
         "services_error": services_error,
         "streams": streams.read(tick),

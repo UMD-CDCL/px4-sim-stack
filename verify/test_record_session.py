@@ -6,11 +6,15 @@ import signal
 import subprocess
 import sys
 import time
+import importlib.util
 
 import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SPEC = importlib.util.spec_from_file_location("record_session", ROOT / "scripts/record-session.py")
+MODULE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(MODULE)
 
 
 def wait_for(predicate, timeout=15):
@@ -20,6 +24,22 @@ def wait_for(predicate, timeout=15):
             return
         time.sleep(0.05)
     raise AssertionError("recording session did not reach the expected state")
+
+
+def test_truncated_bag_is_not_reported_as_saved(tmp_path):
+    (tmp_path / "metadata.yaml").touch()
+    (tmp_path / "test.mcap").write_bytes(b"truncated MCAP data")
+    (tmp_path / "video-pilot.ts").write_bytes(b"video")
+    health = MODULE.recording_health(tmp_path, final=True)
+    assert not health["complete"]
+    assert not health["finalized"]
+
+
+def test_record_all_requires_video_but_bag_only_does_not(tmp_path):
+    (tmp_path / "metadata.yaml").touch()
+    (tmp_path / "test.mcap").write_bytes(b"\x89MCAP0\r\n" * 2)
+    assert MODULE.recording_health(tmp_path, video=False, final=True)["complete"]
+    assert not MODULE.recording_health(tmp_path, video=True, final=True)["complete"]
 
 
 @pytest.fixture
@@ -57,7 +77,8 @@ if not video and stopped:
 ''')
     recorder.chmod(0o755)
     env = dict(os.environ, PATH=f"{tmp_path}:{os.environ['PATH']}",
-               SESSION_TEST_DIR=str(tmp_path), CONTAINER_STOPPED=str(tmp_path / "container-stopped"))
+               SESSION_TEST_DIR=str(tmp_path), CONTAINER_STOPPED=str(tmp_path / "container-stopped"),
+               PX4SIM_RECORD_STOP_GRACE="2")
     process = subprocess.Popen(
         [sys.executable, str(ROOT / "scripts/record-session.py"), "original-container-id", str(recorder)],
         env=env, start_new_session=True)

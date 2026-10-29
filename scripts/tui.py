@@ -51,6 +51,7 @@ FRONT_DOOR = Path(__file__).resolve().parents[1] / "px4sim"
 RECORD_PID_FILE = FRONT_DOOR.parent / "logs/.px4sim-record.pid"
 RECORD_MODE_FILE = FRONT_DOOR.parent / "logs/.px4sim-record.mode"
 RECORD_SIM_FILE = FRONT_DOOR.parent / "logs/.px4sim-sim-record.tsv"
+RECORD_BAG_FILE = FRONT_DOOR.parent / "logs/.px4sim-record.bag"
 UI_LOG_FILE = FRONT_DOOR.parent / "logs/px4sim-ui.log"
 
 STACK, SERVICE, VEHICLE, STREAM = "stack", "service", "vehicle", "stream"
@@ -415,6 +416,10 @@ class UiLog:
             active = local_recording()[0]
             if not active:
                 return None
+            if RECORD_BAG_FILE.is_file():
+                directory = Path(RECORD_BAG_FILE.read_text().strip())
+                if directory.is_dir():
+                    return directory / "px4sim-ui.log"
             bags = [p.parent for p in FRONT_DOOR.parent.glob("logs/**/metadata.yaml")]
             return max(bags, key=lambda p: p.stat().st_mtime) / "px4sim-ui.log" if bags else None
         except OSError:
@@ -874,7 +879,8 @@ class Console:
             self.rule(3)
             return
         if recording:
-            self.put(1, 1, f"● RECORDING: {mode}", "bad", width - 1)
+            health = str(config.get("recording_health", ""))
+            self.put(1, 1, f"● RECORDING: {mode}  {health}", "bad", width - 1)
             self.put(2, 1, f"{state}    {line}", "watch" if self.message else style,
                      width - len(card) - 4)
         else:

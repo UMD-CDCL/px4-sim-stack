@@ -1034,6 +1034,9 @@ fleet_facts() {
 		bench_mode=${BENCH_MODE:-false}
 		recording=$(recording_status)
 		recording_mode=$(recording_mode)
+		recording_bag_file=$PWD/$RECORD_BAG_FILE
+		recording_pid_file=$PWD/$RECORD_PID_FILE
+		recording_mode_file=$PWD/$RECORD_MODE_FILE
 		units=$(native_units | tr ' ' ',' | sed 's/,$//')
 		compose=$DC
 		ground_domain=$GROUND_DOMAIN
@@ -1113,11 +1116,15 @@ stop_native_recording() {
 		# descendants, with bounded escalation. Do not kill that supervisor
 		# before it finishes cleaning its separate recorder process group.
 		kill -INT "$pid" 2>/dev/null || true
-		for _ in {1..150}; do
+		for _ in {1..450}; do
 			[ "$(recording_status)" = false ] && break
 			sleep 0.1
 		done
 		[ "$(recording_status)" = false ] || return 1
+	fi
+	if [ -n "$bag_location" ] && [ -f "$bag_location/recording-status.json" ]; then
+		python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); print(s["summary"]); sys.exit(0 if s["complete"] else 1)' \
+			"$bag_location/recording-status.json" || return 1
 	fi
 	rm -f "$RECORD_PID_FILE" "$RECORD_MODE_FILE" "$RECORD_BAG_FILE"
 	if [ -n "$bag_location" ]; then
@@ -1698,20 +1705,32 @@ record)
 		local bag_root=${BAG_ROOT:-$HOME/ros2_ws}
 		local bag_name=${BAG_NAME:-rosbag2_$(date +%Y_%m_%d-%H_%M_%S)}
 		bag_name+="$bag_suffix"
+		[ ! -e "$bag_root/$bag_name" ] || die "recording directory already exists: $bag_root/$bag_name"
+		# Prepare the private ROS library before a detached recorder can report success.
+		bash -c 'set +u; source /opt/ros/humble/setup.bash; exec "$1" --prepare' _ \
+			"$HOME/chimera-deploy/remote/safe_rosbag_record.sh" || die "could not prepare safe rosbag transport"
+		RECORD_LOG="$bag_root/$bag_name.recording.log"
+		if [ -f logs/recording.log ] && [ ! -L logs/recording.log ]; then
+			mv logs/recording.log "logs/recording-before-$(date +%Y%m%dT%H%M%S).log"
+		fi
+		ln -sfn "$RECORD_LOG" logs/recording.log
 		printf '%s\n' "$bag_root/$bag_name" > "$RECORD_BAG_FILE"
-		RECORD_STREAMS=$(local_streams)
+		if aircraft_selected; then RECORD_STREAMS=$(local_streams)
+		else RECORD_STREAMS=$(for n in $(active_uas); do vehicle_streams "$n"; done); fi
 		export RECORD_STREAMS
+		local record_domain=$GROUND_DOMAIN
+		if aircraft_selected; then record_domain=$(uas_domain "$UAS_NUM"); fi
 		if [ "$action" = bags ]; then
-			BAG_ROOT="$bag_root" BAG_NAME="$bag_name" RECORD_VIDEO=0 setsid python3 scripts/record-session.py "$record_container" "$recorder" </dev/null >"$RECORD_LOG" 2>&1 &
+			ROS_DOMAIN_ID="$record_domain" BAG_ROOT="$bag_root" BAG_NAME="$bag_name" RECORD_VIDEO=0 setsid python3 scripts/record-session.py "$record_container" "$recorder" </dev/null >"$RECORD_LOG" 2>&1 &
 		else
-			BAG_ROOT="$bag_root" BAG_NAME="$bag_name" RECORD_VIDEO=1 setsid python3 scripts/record-session.py "$record_container" "$recorder" </dev/null >"$RECORD_LOG" 2>&1 &
+			ROS_DOMAIN_ID="$record_domain" BAG_ROOT="$bag_root" BAG_NAME="$bag_name" RECORD_VIDEO=1 setsid python3 scripts/record-session.py "$record_container" "$recorder" </dev/null >"$RECORD_LOG" 2>&1 &
 		fi
 		echo $! > "$RECORD_PID_FILE"
 		printf '%s\n' "$([ "$action" = bags ] && echo bags || echo all)" > "$RECORD_MODE_FILE"
 		if [ "$action" = bags ]; then
-			say "recording ROS bags only; bag location: $bag_root/$bag_name"
+			say "starting ROS bag recording; bag location: $bag_root/$bag_name"
 		else
-			say "recording ROS bags and raw video; bag and video location: $bag_root/$bag_name"
+			say "starting ROS bag and video recording; location: $bag_root/$bag_name"
 		fi
 		;;
 	stop)
