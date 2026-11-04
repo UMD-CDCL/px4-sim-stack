@@ -8,6 +8,18 @@ runner="${ROS2_WS_DIR:-../ros2_ws}/src/5g_drone/scripts/vlm_gate/run_server.sh"
 gate_dir=${VLM_GATE_DIR:-$HOME/vlm_gate}
 model=${VLM_GATE_MODEL:-$gate_dir/models/Qwen3-VL-2B-Instruct}
 
+# A new process cannot repair a driver that requires a host reboot.
+# Older drivers can lack this query, so retain the HTTP check in that case.
+if command -v nvidia-smi >/dev/null; then
+  recovery=$(nvidia-smi --query-gpu=gpu_recovery_action --format=csv,noheader 2>/dev/null) || recovery=
+  case "$recovery" in
+    *Reboot*)
+      echo 'NVIDIA GPU recovery requires a laptop reboot. Restart the laptop before starting the VLM scorer.' >&2
+      exit 1
+      ;;
+  esac
+fi
+
 healthy() {
   python3 - <<'PY' >/dev/null 2>&1
 import json
@@ -16,6 +28,7 @@ http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 with http.open('http://127.0.0.1:8770/health', timeout=1) as response:
     health = json.load(response)
 assert health.get('model') and health.get('device') and health.get('prompts') == 4
+assert health.get('ready') is True
 PY
 }
 
