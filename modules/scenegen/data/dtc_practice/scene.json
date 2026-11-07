@@ -1,0 +1,248 @@
+{
+ "name": "dtc_practice",
+ "center_lat": 30.575834135,
+ "center_lon": -96.352535627,
+ "side_m": 200,
+ "origin_alt_m": 82.19,
+ "imagery": {
+  "source": "google",
+  "zoom": 19,
+  "file": "satellite.jpg",
+  "width_px": 778,
+  "height_px": 782,
+  "m_per_px": 0.2571,
+  "origin_px": 31185646,
+  "origin_py": 55125892
+ },
+ "elevation": {
+  "grid_n": 128,
+  "side_m": 200,
+  "zoom": 15,
+  "row0": "south",
+  "origin_alt_m": 82.19,
+  "min_m": 77.01,
+  "max_m": 86.77
+ },
+ "fiducial": {
+  "east_m": 0,
+  "north_m": 0,
+  "diameter_m": 0.5,
+  "placed_east_m": 0,
+  "placed_north_m": 0
+ },
+ "buildings": [
+  {
+   "id": "b_way_871549557",
+   "east_m": 113.27,
+   "north_m": -71.96,
+   "length_m": 26.55,
+   "width_m": 15.21,
+   "yaw_deg": -41.74,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     98.31,
+     -68.79
+    ],
+    [
+     108.86,
+     -57.92
+    ],
+    [
+     127.9,
+     -74.81
+    ],
+    [
+     118.12,
+     -86.47
+    ],
+    [
+     98.31,
+     -68.79
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549558",
+   "east_m": 59.23,
+   "north_m": -68.42,
+   "length_m": 24.9,
+   "width_m": 12.95,
+   "yaw_deg": 47.75,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     46.21,
+     -73.41
+    ],
+    [
+     62.81,
+     -54.85
+    ],
+    [
+     71.94,
+     -64.06
+    ],
+    [
+     55.08,
+     -81.47
+    ],
+    [
+     46.21,
+     -73.41
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549559",
+   "east_m": 78.3,
+   "north_m": -93.57,
+   "length_m": 12.01,
+   "width_m": 7.33,
+   "yaw_deg": 43.44,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     71.42,
+     -95.04
+    ],
+    [
+     79.53,
+     -87.49
+    ],
+    [
+     85.19,
+     -92.1
+    ],
+    [
+     77.21,
+     -99.65
+    ],
+    [
+     71.42,
+     -95.04
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": true
+  },
+  {
+   "id": "b_way_871553104",
+   "east_m": -75.63,
+   "north_m": 132.58,
+   "length_m": 52.71,
+   "width_m": 46.85,
+   "yaw_deg": -21.96,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "ESTI Prop 80",
+   "outline_m": [
+    [
+     -59.95,
+     101
+    ],
+    [
+     -60.2,
+     118.66
+    ],
+    [
+     -56.08,
+     133.27
+    ],
+    [
+     -54.03,
+     149.13
+    ],
+    [
+     -89.53,
+     161.17
+    ],
+    [
+     -97.26,
+     146.06
+    ],
+    [
+     -104.2,
+     130.96
+    ],
+    [
+     -108.83,
+     120.72
+    ],
+    [
+     -59.95,
+     101
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  }
+ ],
+ "vehicles": [],
+ "targets": [
+  {
+   "id": "t_import_1",
+   "name": "casualty_01",
+   "east_m": 0.0,
+   "north_m": 0.0,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "import"
+  },
+  {
+   "id": "t_import_2",
+   "name": "casualty_02",
+   "east_m": 6.51,
+   "north_m": -7.06,
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "import"
+  }
+ ],
+ "trees": [],
+ "tree_areas": [],
+ "flatten_zones": [],
+ "geofences": [],
+ "exclusion_zones": [],
+ "format": "scenegen-scene/1"
+}
