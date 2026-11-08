@@ -573,9 +573,9 @@
    "enabled": false
   },
   {
-   "length_m": 25,
-   "width_m": 5.42,
-   "yaw_deg": 49.9,
+   "length_m": 24.31,
+   "width_m": 4.87,
+   "yaw_deg": 48,
    "height_m": 8,
    "height_source": "manual",
    "name": "",
@@ -592,8 +592,8 @@
    "model_uri": null,
    "enabled": true,
    "id": "b_manual_871549571",
-   "east_m": 22.23,
-   "north_m": 84.8
+   "east_m": 22.46,
+   "north_m": 84.98
   }
  ],
  "vehicles": [],
