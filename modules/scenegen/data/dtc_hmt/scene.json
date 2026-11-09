@@ -1,0 +1,1280 @@
+{
+ "name": "dtc_hmt",
+ "center_lat": 30.57507002,
+ "center_lon": -96.350465062,
+ "side_m": 500,
+ "origin_alt_m": 89.94,
+ "imagery": {
+  "source": "google",
+  "zoom": 19,
+  "file": "satellite.jpg",
+  "width_px": 1944,
+  "height_px": 1954,
+  "m_per_px": 0.2571,
+  "origin_px": 31185835,
+  "origin_py": 55125637
+ },
+ "elevation": {
+  "grid_n": 128,
+  "side_m": 500,
+  "zoom": 15,
+  "row0": "south",
+  "origin_alt_m": 89.94,
+  "min_m": 78.39,
+  "max_m": 98.39
+ },
+ "fiducial": {
+  "east_m": 0,
+  "north_m": 0,
+  "diameter_m": 0.5,
+  "placed_east_m": 0,
+  "placed_north_m": 0
+ },
+ "buildings": [
+  {
+   "id": "b_way_552022981",
+   "east_m": -23.09,
+   "north_m": -73.64,
+   "length_m": 41.05,
+   "width_m": 30.72,
+   "yaw_deg": 46.82,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "TEEX-ESTI (FTS) Rescue Training Facility",
+   "outline_m": [
+    [
+     -48.33,
+     -78.09
+    ],
+    [
+     -25.56,
+     -98.69
+    ],
+    [
+     2.15,
+     -69.18
+    ],
+    [
+     -20.89,
+     -48.85
+    ],
+    [
+     -48.33,
+     -78.09
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549538",
+   "east_m": 117.03,
+   "north_m": 262.01,
+   "length_m": 14.87,
+   "width_m": 10.55,
+   "yaw_deg": -81.48,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     110.73,
+     268.48
+    ],
+    [
+     121.15,
+     270.14
+    ],
+    [
+     123.21,
+     256.18
+    ],
+    [
+     112.92,
+     253.88
+    ],
+    [
+     110.73,
+     268.48
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549541",
+   "east_m": 75.82,
+   "north_m": 228.5,
+   "length_m": 12.94,
+   "width_m": 9.29,
+   "yaw_deg": 10.21,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "ESTI Technical Equipment Storage",
+   "outline_m": [
+    [
+     68.99,
+     231.99
+    ],
+    [
+     81.34,
+     233.65
+    ],
+    [
+     83.01,
+     225.07
+    ],
+    [
+     70.27,
+     222.78
+    ],
+    [
+     68.99,
+     231.99
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549542",
+   "east_m": 103.09,
+   "north_m": 231.19,
+   "length_m": 19.37,
+   "width_m": 11.15,
+   "yaw_deg": 8.91,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "ESTI Haz Mat Technician Shop",
+   "outline_m": [
+    [
+     92.66,
+     235.2
+    ],
+    [
+     111.7,
+     237.62
+    ],
+    [
+     113.11,
+     229.82
+    ],
+    [
+     106.42,
+     228.28
+    ],
+    [
+     106.68,
+     226.1
+    ],
+    [
+     94.45,
+     224.19
+    ],
+    [
+     92.66,
+     235.2
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549543",
+   "east_m": 96.2,
+   "north_m": 150.89,
+   "length_m": 25.54,
+   "width_m": 15.18,
+   "yaw_deg": 9.28,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     82.49,
+     156.22
+    ],
+    [
+     107.58,
+     160.44
+    ],
+    [
+     110.02,
+     145.46
+    ],
+    [
+     84.81,
+     141.36
+    ],
+    [
+     82.49,
+     156.22
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549544",
+   "east_m": 36.27,
+   "north_m": 105.61,
+   "length_m": 30.76,
+   "width_m": 17.49,
+   "yaw_deg": 52.51,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "Rescue/Disaster City Warehouse",
+   "outline_m": [
+    [
+     38.88,
+     122.41
+    ],
+    [
+     49.3,
+     115
+    ],
+    [
+     36.56,
+     97.84
+    ],
+    [
+     39.27,
+     95.15
+    ],
+    [
+     33.87,
+     88.11
+    ],
+    [
+     19.97,
+     98.73
+    ],
+    [
+     38.88,
+     122.41
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549545",
+   "east_m": 35.31,
+   "north_m": 209.75,
+   "length_m": 9.17,
+   "width_m": 7.98,
+   "yaw_deg": -43.18,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     34.89,
+     215.61
+    ],
+    [
+     41.07,
+     209.72
+    ],
+    [
+     35.92,
+     203.7
+    ],
+    [
+     29.23,
+     209.97
+    ],
+    [
+     34.89,
+     215.61
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549546",
+   "east_m": -34.64,
+   "north_m": 121.36,
+   "length_m": 7.6,
+   "width_m": 5.95,
+   "yaw_deg": 83.19,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     -37.15,
+     125.48
+    ],
+    [
+     -31.36,
+     124.6
+    ],
+    [
+     -32,
+     118.32
+    ],
+    [
+     -38.05,
+     117.93
+    ],
+    [
+     -37.15,
+     125.48
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549547",
+   "east_m": -81.72,
+   "north_m": 133.87,
+   "length_m": 8.13,
+   "width_m": 7.31,
+   "yaw_deg": 66.57,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     -83.46,
+     139.05
+    ],
+    [
+     -77.16,
+     135.34
+    ],
+    [
+     -79.99,
+     128.69
+    ],
+    [
+     -86.67,
+     131.64
+    ],
+    [
+     -83.46,
+     139.05
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549548",
+   "east_m": -69.24,
+   "north_m": 160.27,
+   "length_m": 7.08,
+   "width_m": 6.35,
+   "yaw_deg": 83.7,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     -72,
+     164.14
+    ],
+    [
+     -65.7,
+     163.38
+    ],
+    [
+     -66.48,
+     156.98
+    ],
+    [
+     -72.78,
+     157.1
+    ],
+    [
+     -72,
+     164.14
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549549",
+   "east_m": -30.41,
+   "north_m": 156.14,
+   "length_m": 7.23,
+   "width_m": 6.92,
+   "yaw_deg": -5.1,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     -33.29,
+     159.8
+    ],
+    [
+     -26.73,
+     159.29
+    ],
+    [
+     -27.11,
+     152.37
+    ],
+    [
+     -34.32,
+     153.01
+    ],
+    [
+     -33.29,
+     159.8
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549550",
+   "east_m": 10.9,
+   "north_m": 151.35,
+   "length_m": 7.8,
+   "width_m": 7,
+   "yaw_deg": 81.33,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     8.01,
+     155.57
+    ],
+    [
+     14.95,
+     154.67
+    ],
+    [
+     13.8,
+     147.5
+    ],
+    [
+     6.86,
+     148.02
+    ],
+    [
+     8.01,
+     155.57
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549551",
+   "east_m": 54.9,
+   "north_m": -24.15,
+   "length_m": 19.19,
+   "width_m": 11.14,
+   "yaw_deg": -31.1,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     49.56,
+     -14.43
+    ],
+    [
+     65.9,
+     -24.28
+    ],
+    [
+     60.24,
+     -33.88
+    ],
+    [
+     44.29,
+     -24.15
+    ],
+    [
+     49.56,
+     -14.43
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549552",
+   "east_m": 6.2,
+   "north_m": -58.81,
+   "length_m": 11.23,
+   "width_m": 7.03,
+   "yaw_deg": -40.06,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     0.03,
+     -57.43
+    ],
+    [
+     4.02,
+     -52.7
+    ],
+    [
+     12.76,
+     -59.74
+    ],
+    [
+     7.62,
+     -64.6
+    ],
+    [
+     0.03,
+     -57.43
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549553",
+   "east_m": -49.8,
+   "north_m": -16.15,
+   "length_m": 23.03,
+   "width_m": 18.99,
+   "yaw_deg": 49.15,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     -49.37,
+     -1.5
+    ],
+    [
+     -35.08,
+     -13.65
+    ],
+    [
+     -50.14,
+     -31.07
+    ],
+    [
+     -64.29,
+     -18.39
+    ],
+    [
+     -49.37,
+     -1.5
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549554",
+   "east_m": -27.42,
+   "north_m": 18.73,
+   "length_m": 15.27,
+   "width_m": 12.48,
+   "yaw_deg": -41.46,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     -37.27,
+     19.11
+    ],
+    [
+     -29.17,
+     27.82
+    ],
+    [
+     -17.85,
+     18.6
+    ],
+    [
+     -25.83,
+     9
+    ],
+    [
+     -37.27,
+     19.11
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549555",
+   "east_m": -51.27,
+   "north_m": 50.78,
+   "length_m": 19.34,
+   "width_m": 16.17,
+   "yaw_deg": 47.08,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     -50.39,
+     63.02
+    ],
+    [
+     -63.78,
+     49.2
+    ],
+    [
+     -51.94,
+     38.19
+    ],
+    [
+     -38.95,
+     52.53
+    ],
+    [
+     -50.39,
+     63.02
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549556",
+   "east_m": -62.62,
+   "north_m": 64.11,
+   "length_m": 16,
+   "width_m": 7.73,
+   "yaw_deg": 45.54,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     -70.98,
+     61.11
+    ],
+    [
+     -59.66,
+     72.24
+    ],
+    [
+     -54.26,
+     67.11
+    ],
+    [
+     -65.06,
+     56.11
+    ],
+    [
+     -70.98,
+     61.11
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549557",
+   "east_m": -85.35,
+   "north_m": 12.76,
+   "length_m": 26.55,
+   "width_m": 15.21,
+   "yaw_deg": -41.74,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     -100.31,
+     15.92
+    ],
+    [
+     -89.76,
+     26.79
+    ],
+    [
+     -70.72,
+     9.9
+    ],
+    [
+     -80.51,
+     -1.75
+    ],
+    [
+     -100.31,
+     15.92
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549558",
+   "east_m": -139.39,
+   "north_m": 16.3,
+   "length_m": 24.9,
+   "width_m": 12.95,
+   "yaw_deg": 47.75,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     -152.41,
+     11.31
+    ],
+    [
+     -135.82,
+     29.87
+    ],
+    [
+     -126.68,
+     20.65
+    ],
+    [
+     -143.54,
+     3.25
+    ],
+    [
+     -152.41,
+     11.31
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549559",
+   "east_m": -120.32,
+   "north_m": -8.85,
+   "length_m": 12.01,
+   "width_m": 7.33,
+   "yaw_deg": 43.44,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     -127.2,
+     -10.32
+    ],
+    [
+     -119.1,
+     -2.77
+    ],
+    [
+     -113.44,
+     -7.39
+    ],
+    [
+     -121.41,
+     -14.93
+    ],
+    [
+     -127.2,
+     -10.32
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549560",
+   "east_m": -90.4,
+   "north_m": -82.53,
+   "length_m": 8.89,
+   "width_m": 6.35,
+   "yaw_deg": -43.7,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     -95.81,
+     -81.75
+    ],
+    [
+     -90.79,
+     -77.78
+    ],
+    [
+     -85.26,
+     -83.04
+    ],
+    [
+     -89.38,
+     -87.89
+    ],
+    [
+     -95.81,
+     -81.75
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549562",
+   "east_m": -124.26,
+   "north_m": -118.06,
+   "length_m": 8.62,
+   "width_m": 6.71,
+   "yaw_deg": -45.15,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     -129.26,
+     -116.95
+    ],
+    [
+     -125.02,
+     -113.25
+    ],
+    [
+     -118.84,
+     -118.75
+    ],
+    [
+     -123.6,
+     -123.48
+    ],
+    [
+     -129.26,
+     -116.95
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871549563",
+   "east_m": -164.58,
+   "north_m": -78.74,
+   "length_m": 9.26,
+   "width_m": 7.26,
+   "yaw_deg": -43.76,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "",
+   "outline_m": [
+    [
+     -165.41,
+     -72.92
+    ],
+    [
+     -159.23,
+     -79.19
+    ],
+    [
+     -163.74,
+     -84.57
+    ],
+    [
+     -170.29,
+     -78.29
+    ],
+    [
+     -165.41,
+     -72.92
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "id": "b_way_871553104",
+   "east_m": -274.25,
+   "north_m": 217.3,
+   "length_m": 52.71,
+   "width_m": 46.85,
+   "yaw_deg": -21.96,
+   "height_m": 6,
+   "height_source": "default",
+   "map_height_m": 6,
+   "map_height_source": "default",
+   "name": "ESTI Prop 80",
+   "outline_m": [
+    [
+     -258.57,
+     185.72
+    ],
+    [
+     -258.82,
+     203.38
+    ],
+    [
+     -254.7,
+     217.98
+    ],
+    [
+     -252.65,
+     233.85
+    ],
+    [
+     -288.15,
+     245.89
+    ],
+    [
+     -295.87,
+     230.78
+    ],
+    [
+     -302.82,
+     215.68
+    ],
+    [
+     -307.45,
+     205.43
+    ],
+    [
+     -258.57,
+     185.72
+    ]
+   ],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "osm",
+   "model_uri": null,
+   "enabled": false
+  },
+  {
+   "length_m": 7.87,
+   "width_m": 4.6,
+   "yaw_deg": -40.1,
+   "height_m": 4,
+   "height_source": "manual",
+   "name": "",
+   "map_height_m": null,
+   "map_height_source": "",
+   "outline_m": [],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "manual",
+   "model_uri": null,
+   "enabled": true,
+   "id": "b_manual_871553105",
+   "east_m": -48.39,
+   "north_m": 59.12
+  },
+  {
+   "length_m": 7.64,
+   "width_m": 8.63,
+   "yaw_deg": -39.3,
+   "height_m": 3,
+   "height_source": "manual",
+   "name": "",
+   "map_height_m": null,
+   "map_height_source": "",
+   "outline_m": [],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "manual",
+   "model_uri": null,
+   "enabled": true,
+   "id": "b_manual_871553106",
+   "east_m": -30.78,
+   "north_m": 20.22
+  },
+  {
+   "length_m": 2.92,
+   "width_m": 6.54,
+   "yaw_deg": -39.3,
+   "height_m": 3,
+   "height_source": "manual",
+   "name": "",
+   "map_height_m": null,
+   "map_height_source": "",
+   "outline_m": [],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "manual",
+   "model_uri": null,
+   "enabled": true,
+   "id": "b_manual_871553107",
+   "east_m": -21.75,
+   "north_m": 17.91
+  },
+  {
+   "length_m": 11.02,
+   "width_m": 5.49,
+   "yaw_deg": 47,
+   "height_m": 3,
+   "height_source": "manual",
+   "name": "",
+   "map_height_m": null,
+   "map_height_source": "",
+   "outline_m": [],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "manual",
+   "model_uri": null,
+   "enabled": true,
+   "id": "b_manual_871553108",
+   "east_m": -118.1,
+   "north_m": -7.77
+  },
+  {
+   "length_m": 2.5,
+   "width_m": 2.5,
+   "yaw_deg": 48.5,
+   "height_m": 6,
+   "height_source": "manual",
+   "name": "",
+   "map_height_m": null,
+   "map_height_source": "",
+   "outline_m": [],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "manual",
+   "model_uri": null,
+   "enabled": true,
+   "id": "b_manual_871553109",
+   "east_m": -111.1,
+   "north_m": 8.04
+  },
+  {
+   "length_m": 2.5,
+   "width_m": 2.5,
+   "yaw_deg": 48.5,
+   "height_m": 6,
+   "height_source": "manual",
+   "name": "",
+   "map_height_m": null,
+   "map_height_source": "",
+   "outline_m": [],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "manual",
+   "model_uri": null,
+   "enabled": true,
+   "id": "b_manual_871553110",
+   "east_m": -130.73,
+   "north_m": -15.18
+  },
+  {
+   "length_m": 2.5,
+   "width_m": 2.5,
+   "yaw_deg": 48.5,
+   "height_m": 6,
+   "height_source": "manual",
+   "name": "",
+   "map_height_m": null,
+   "map_height_source": "",
+   "outline_m": [],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "manual",
+   "model_uri": null,
+   "enabled": true,
+   "id": "b_manual_871553111",
+   "east_m": -110.33,
+   "north_m": -34.76
+  },
+  {
+   "length_m": 2.5,
+   "width_m": 2.5,
+   "yaw_deg": 48.5,
+   "height_m": 6,
+   "height_source": "manual",
+   "name": "",
+   "map_height_m": null,
+   "map_height_source": "",
+   "outline_m": [],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "manual",
+   "model_uri": null,
+   "enabled": true,
+   "id": "b_manual_871553112",
+   "east_m": -88.87,
+   "north_m": -13.73
+  },
+  {
+   "length_m": 14,
+   "width_m": 10,
+   "yaw_deg": -42,
+   "height_m": 2,
+   "height_source": "manual",
+   "name": "",
+   "map_height_m": null,
+   "map_height_source": "",
+   "outline_m": [],
+   "holes_m": [],
+   "extruded": true,
+   "levels": [],
+   "source": "manual",
+   "model_uri": null,
+   "enabled": true,
+   "id": "b_manual_871553113",
+   "east_m": -51.73,
+   "north_m": 50.16
+  }
+ ],
+ "vehicles": [],
+ "targets": [],
+ "trees": [],
+ "tree_areas": [],
+ "flatten_zones": [],
+ "geofences": [],
+ "exclusion_zones": [],
+ "format": "scenegen-scene/1"
+}
