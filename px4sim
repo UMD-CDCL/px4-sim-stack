@@ -1299,13 +1299,17 @@ env_set() { # KEY VALUE
 }
 env_write_selection() { env_set "$@"; }
 
-ensure_vlm_scorer() {
+ensure_vlm_scorer() { # [the px4sim command]
 	# A per-start result, passed into the ground watchdog through Compose.
 	export VLM_SCORER_STARTUP_ISSUE=""
+	# restart replaces a running scorer, so it runs the scorer code now on disk.
+	# start reuses it.
+	local args=()
+	[ "${1:-}" != restart ] || args=(--restart)
 	# Aircraft-only profiles never run a ground gate.
 	if $DC config --services | grep -qxE 'ground|offboard'; then
 		local scorer_status=0
-		bash ./scripts/ensure-vlm-scorer.sh || scorer_status=$?
+		bash ./scripts/ensure-vlm-scorer.sh "${args[@]}" || scorer_status=$?
 		if [ "$scorer_status" -ne 0 ]; then
 			case "$scorer_status" in
 			20) VLM_SCORER_STARTUP_ISSUE=setup_gpu_reboot ;;
@@ -1612,7 +1616,7 @@ restart|start|up|core)
 			warn "PX4 will fly the coordinates inside the world file. ./px4sim origin"
 		fi
 	fi
-	ensure_vlm_scorer
+	ensure_vlm_scorer "$cmd"
 	$DC up -d --no-build --pull never
 	start_container_log
 	echo

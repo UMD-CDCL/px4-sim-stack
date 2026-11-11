@@ -219,8 +219,14 @@ menu to choose `off`, `shadow` or `on`. The choice is saved
 in `.env` and restarts the local stack; the header shows the selected setting.
 The same action is available as `./px4sim vlm-filter off|shadow|on`. Shadow mode
 records the filter decisions while forwarding every image and clip. With filtering
-`on` or in `shadow` mode, `start` and `restart` launch the installed host scorer
-supervisor in tmux session `vlm_gate` without waiting for model readiness.
+`on` or in `shadow` mode, `start` launches the installed host scorer supervisor
+in tmux session `vlm_gate` if none runs, without waiting for model readiness.
+`restart` (also the UI's rebuild key, `vlm-filter` and every chimera-deploy sync)
+stops that session first, so the scorer runs the scorer code now on disk. It then
+waits up to 60 seconds for the new scorer to answer ready before it starts the
+containers, because the gate checks the scorer only once at its startup. A scorer
+not ready by then does not stop the restart. A scorer started outside session
+`vlm_gate` cannot be replaced: `restart` names it and reuses it.
 Missing scorer dependencies, scorer setup failures, and GPU recovery warnings
 do not prevent the ground stack from starting. The gate reports degraded health
 and passes images unscored until scoring is available. Install the scorer's
@@ -234,8 +240,8 @@ A successful gate health report clears the startup hint. Loading failures,
 slow loading and hangs share query-level errors unless startup identified a
 specific cause; the indicator directs the operator to scorer logs rather than
 guessing which occurred.
-The scorer stays running when filtering is off or the stack stops; it can be
-reused on the next start. Scorer failures during a run pass images through. In the
+The scorer stays running when filtering is off or the stack stops; the next
+`start` reuses it. Scorer failures during a run pass images through. In the
 Vehicle and Stream menus, `v` continues to play the selected camera.
 
 `./px4sim help` is the one truthful list, and it names the world this machine
