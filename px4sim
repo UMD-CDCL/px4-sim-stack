@@ -1302,7 +1302,10 @@ env_write_selection() { env_set "$@"; }
 ensure_vlm_scorer() {
 	# Aircraft-only profiles never run a ground gate.
 	if $DC config --services | grep -qxE 'ground|offboard'; then
-		bash ./scripts/ensure-vlm-scorer.sh
+		if ! bash ./scripts/ensure-vlm-scorer.sh; then
+			warn "VLM scorer unavailable; continuing ground startup."
+			warn "The VLM gate will report degraded health and pass images unscored until scoring succeeds."
+		fi
 	fi
 }
 

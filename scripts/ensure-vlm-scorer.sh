@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Keep the host GPU scorer available before starting an enabled ground gate.
+# Start the host scorer supervisor without waiting for model readiness.
+# The caller treats setup failures as warnings so ground startup can continue.
 set -euo pipefail
 
 case "${VLM_GATE:-off}" in on|shadow) ;; *) exit 0 ;; esac
@@ -44,14 +45,5 @@ if ! tmux has-session -t '=vlm_gate' 2>/dev/null; then
   tmux new-session -d -s vlm_gate env "VLM_GATE_DIR=$gate_dir" \
     "VLM_GATE_MODEL=$model" "$(realpath "$runner")"
 fi
-echo 'Waiting for the VLM scorer (up to 60 seconds)'
-deadline=$((SECONDS + 60))
-while (( SECONDS < deadline )); do
-  if healthy; then
-    echo 'VLM scorer ready at http://127.0.0.1:8770'
-    exit 0
-  fi
-  sleep 1
-done
-echo "VLM scorer not ready; inspect $gate_dir/logs/scorer_$(date +%F).log or tmux attach -t vlm_gate." >&2
-exit 1
+echo 'VLM scorer supervisor is running in tmux session vlm_gate; continuing without waiting for readiness.'
+echo 'The supervisor retries exited scorer processes after 5 seconds. The gate reports degraded health until a successful health check or image query.'

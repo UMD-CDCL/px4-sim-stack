@@ -220,8 +220,13 @@ in `.env` and restarts the local stack; the header shows the selected setting.
 The same action is available as `./px4sim vlm-filter off|shadow|on`. Shadow mode
 records the filter decisions while forwarding every image and clip. With filtering
 `on` or in `shadow` mode, `start` and `restart` launch the installed host scorer
-in tmux session `vlm_gate` and wait up to 60 seconds for readiness. Install its
-venv and weights first, following `5g_drone/scripts/vlm_gate/README.md`.
+supervisor in tmux session `vlm_gate` without waiting for model readiness.
+Missing scorer dependencies, scorer setup failures, and GPU recovery warnings
+do not prevent the ground stack from starting. The gate reports degraded health
+and passes images unscored until scoring is available. Install the scorer's
+venv and weights following `5g_drone/scripts/vlm_gate/README.md`.
+The supervisor retries a scorer that exits, including a startup failure, after
+five seconds; it cannot repair missing dependencies or a GPU requiring reboot.
 The scorer stays running when filtering is off or the stack stops; it can be
 reused on the next start. Scorer failures during a run pass images through. In the
 Vehicle and Stream menus, `v` continues to play the selected camera.
