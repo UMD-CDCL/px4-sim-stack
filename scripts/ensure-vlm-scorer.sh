@@ -16,7 +16,7 @@ if command -v nvidia-smi >/dev/null; then
   case "$recovery" in
     *Reboot*)
       echo 'NVIDIA GPU recovery requires a laptop reboot. Restart the laptop before starting the VLM scorer.' >&2
-      exit 1
+      exit 20
       ;;
   esac
 fi
@@ -34,16 +34,19 @@ PY
 }
 
 healthy && exit 0
-command -v tmux >/dev/null || { echo 'VLM scorer needs tmux on the host.' >&2; exit 1; }
+command -v tmux >/dev/null || { echo 'VLM scorer needs tmux on the host.' >&2; exit 21; }
 [[ -x "$runner" && -x "$gate_dir/venv/bin/python" && -d "$model" ]] || {
   echo "VLM scorer installation missing. See $runner's sibling README.md." >&2
-  exit 1
+  exit 22
 }
 if ! tmux has-session -t '=vlm_gate' 2>/dev/null; then
   echo 'Starting the host VLM scorer in tmux session vlm_gate'
   # Pass arguments separately so paths and model overrides survive spaces.
-  tmux new-session -d -s vlm_gate env "VLM_GATE_DIR=$gate_dir" \
-    "VLM_GATE_MODEL=$model" "$(realpath "$runner")"
+  if ! tmux new-session -d -s vlm_gate env "VLM_GATE_DIR=$gate_dir" \
+      "VLM_GATE_MODEL=$model" "$(realpath "$runner")"; then
+    echo 'VLM scorer supervisor failed to start; check host tmux/session permissions.' >&2
+    exit 23
+  fi
 fi
 echo 'VLM scorer supervisor is running in tmux session vlm_gate; continuing without waiting for readiness.'
 echo 'The supervisor retries exited scorer processes after 5 seconds. The gate reports degraded health until a successful health check or image query.'

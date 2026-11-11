@@ -34,7 +34,7 @@ def scorer():
 
 
 def run(tmp_path, scorer, recovery='None', mode='on', query_status=0,
-        installed=False, existing_supervisor=False, tmux_failure=False):
+        installed=False, existing_supervisor=False, tmux_failure=False, missing_tmux=False):
     binary = tmp_path / 'nvidia-smi'
     binary.write_text(f"#!/bin/sh\nprintf '%s\\n' '{recovery}'\nexit {query_status}\n")
     binary.chmod(0o755)
@@ -55,16 +55,20 @@ def run(tmp_path, scorer, recovery='None', mode='on', query_status=0,
         f'if [ "$1" = has-session ]; then exit {0 if existing_supervisor else 1}; fi\n'
         f'exit {1 if tmux_failure else 0}\n')
     tmux.chmod(0o755)
+    if missing_tmux:
+        tmux.unlink()
+        (tmp_path / 'python3').symlink_to('/usr/bin/python3')
     # The script uses a private HTTP port so this test cannot touch the real scorer.
     script = SCRIPT.read_text().replace('127.0.0.1:8770', f'127.0.0.1:{scorer[1]}')
-    env = dict(os.environ, PATH=str(tmp_path) + os.pathsep + os.environ['PATH'],
+    env = dict(os.environ, PATH=(str(tmp_path) if missing_tmux else
+                               str(tmp_path) + os.pathsep + os.environ['PATH']),
                VLM_GATE=mode, VLM_GATE_DIR=str(tmp_path / 'absent'), ROS2_WS_DIR=str(tmp_path))
-    return subprocess.run(['bash', '-c', script], env=env, capture_output=True, text=True, timeout=5)
+    return subprocess.run(['/bin/bash', '-c', script], env=env, capture_output=True, text=True, timeout=5)
 
 
 def test_reboot_requirement_rejects_even_a_live_http_scorer(tmp_path, scorer):
     result = run(tmp_path, scorer, recovery='Reboot')
-    assert result.returncode == 1
+    assert result.returncode == 20
     assert 'requires a laptop reboot' in result.stderr
 
 
@@ -74,7 +78,7 @@ def test_healthy_device_allows_startup(tmp_path, scorer):
 
 def test_metadata_without_a_device_check_is_not_ready(tmp_path, scorer):
     del scorer[0]['ready']
-    assert run(tmp_path, scorer).returncode == 1
+    assert run(tmp_path, scorer).returncode == 22
 
 
 def test_older_driver_uses_the_device_health_check(tmp_path, scorer):
@@ -98,12 +102,21 @@ def test_unready_scorer_starts_or_reuses_supervisor_without_waiting(tmp_path, sc
 
 def test_supervisor_launch_failure_is_reported(tmp_path, scorer):
     scorer[0]['ready'] = False
-    assert run(tmp_path, scorer, installed=True, tmux_failure=True).returncode != 0
+    assert run(tmp_path, scorer, installed=True, tmux_failure=True).returncode == 23
+
+
+def test_missing_tmux_has_a_specific_setup_code(tmp_path, scorer):
+    scorer[0]['ready'] = False
+    result = run(tmp_path, scorer, installed=True, missing_tmux=True)
+    assert result.returncode == 21
+    assert 'needs tmux' in result.stderr
 
 
 @pytest.mark.parametrize('services', ['ground', 'offboard'])
-@pytest.mark.parametrize('failure', [1, 23])
-def test_scorer_setup_failure_cannot_abort_ground_startup(tmp_path, services, failure):
+@pytest.mark.parametrize('failure,issue', [
+    (1, 'setup_failed'), (20, 'setup_gpu_reboot'), (21, 'setup_tmux_missing'),
+    (22, 'setup_installation_missing'), (23, 'setup_supervisor_failed')])
+def test_scorer_setup_failure_cannot_abort_ground_startup(tmp_path, services, failure, issue):
     # Run the actual helper under the front door's errexit setting, without
     # executing the front door's Docker/configuration startup side effects.
     frontdoor = (SCRIPT.parents[1] / 'px4sim').read_text()
@@ -116,12 +129,12 @@ def test_scorer_setup_failure_cannot_abort_ground_startup(tmp_path, services, fa
               'warn() { printf "%s\\n" "$*"; }\n'
               f'compose() {{ printf "%s\\n" {shlex.quote(services)}; }}\n'
               'DC=compose\n' + function +
-              '\nensure_vlm_scorer\nprintf "START_CONTAINERS\\n"\n')
+              '\nensure_vlm_scorer\nprintf "START_CONTAINERS:%s\\n" "$VLM_SCORER_STARTUP_ISSUE"\n')
     result = subprocess.run(['bash', '-c', script], cwd=tmp_path,
                             capture_output=True, text=True, timeout=5)
     assert result.returncode == 0, result.stderr
     assert 'VLM scorer unavailable; continuing ground startup.' in result.stdout
-    assert 'START_CONTAINERS' in result.stdout
+    assert f'START_CONTAINERS:{issue}' in result.stdout
 
 
 def test_aircraft_only_startup_does_not_attempt_scorer(tmp_path):
@@ -131,7 +144,15 @@ def test_aircraft_only_startup_does_not_attempt_scorer(tmp_path):
     script = ('set -euo pipefail\n'
               'warn() { exit 99; }\n'
               'compose() { printf "onboard\\n"; }\n'
-              'DC=compose\n' + function + '\nensure_vlm_scorer\n')
+              'DC=compose\nexport VLM_SCORER_STARTUP_ISSUE=setup_gpu_reboot\n' + function +
+              '\nensure_vlm_scorer\ntest -z "$VLM_SCORER_STARTUP_ISSUE"\n')
     result = subprocess.run(['bash', '-c', script], cwd=tmp_path,
                             capture_output=True, text=True, timeout=5)
     assert result.returncode == 0, result.stderr
+
+
+def test_compose_passes_setup_hint_to_both_ground_services():
+    import yaml
+    config = yaml.safe_load((SCRIPT.parents[1] / 'compose.yaml').read_text())
+    for service in ['ground', 'offboard']:
+        assert config['services'][service]['environment']['VLM_SCORER_STARTUP_ISSUE'] == '${VLM_SCORER_STARTUP_ISSUE:-}'

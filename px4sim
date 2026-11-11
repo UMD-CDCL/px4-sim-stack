@@ -1300,9 +1300,20 @@ env_set() { # KEY VALUE
 env_write_selection() { env_set "$@"; }
 
 ensure_vlm_scorer() {
+	# A per-start result, passed into the ground watchdog through Compose.
+	export VLM_SCORER_STARTUP_ISSUE=""
 	# Aircraft-only profiles never run a ground gate.
 	if $DC config --services | grep -qxE 'ground|offboard'; then
-		if ! bash ./scripts/ensure-vlm-scorer.sh; then
+		local scorer_status=0
+		bash ./scripts/ensure-vlm-scorer.sh || scorer_status=$?
+		if [ "$scorer_status" -ne 0 ]; then
+			case "$scorer_status" in
+			20) VLM_SCORER_STARTUP_ISSUE=setup_gpu_reboot ;;
+			21) VLM_SCORER_STARTUP_ISSUE=setup_tmux_missing ;;
+			22) VLM_SCORER_STARTUP_ISSUE=setup_installation_missing ;;
+			23) VLM_SCORER_STARTUP_ISSUE=setup_supervisor_failed ;;
+			*)  VLM_SCORER_STARTUP_ISSUE=setup_failed ;;
+			esac
 			warn "VLM scorer unavailable; continuing ground startup."
 			warn "The VLM gate will report degraded health and pass images unscored until scoring succeeds."
 		fi

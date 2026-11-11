@@ -292,6 +292,8 @@ x-offboard-env: &offboard-env
   # The casualty image VLM gate: off, shadow or on (5g_drone
   # scripts/vlm_gate/README.md). offboard.launch.py reads it; off is today.
   VLM_GATE: ${VLM_GATE:-off}
+  # Derived by px4sim for this start; the watchdog shows the known cause and remedy.
+  VLM_SCORER_STARTUP_ISSUE: ${VLM_SCORER_STARTUP_ISSUE:-}
   # The first vehicle is UAS_BASE + 1. Every entry point derives its
   # identifiers from it, so the host and the container have to read the
   # same number: scripts/fleet.sh holds the same default.

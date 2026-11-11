@@ -227,6 +227,13 @@ and passes images unscored until scoring is available. Install the scorer's
 venv and weights following `5g_drone/scripts/vlm_gate/README.md`.
 The supervisor retries a scorer that exits, including a startup failure, after
 five seconds; it cannot repair missing dependencies or a GPU requiring reboot.
+Known setup errors are passed to the ground watchdog through the generated
+`VLM_SCORER_STARTUP_ISSUE` environment value, so Foxglove shows the cause and
+recommended recovery action. This is a per-start result, not a user setting.
+A successful gate health report clears the startup hint. Loading failures,
+slow loading and hangs share query-level errors unless startup identified a
+specific cause; the indicator directs the operator to scorer logs rather than
+guessing which occurred.
 The scorer stays running when filtering is off or the stack stops; it can be
 reused on the next start. Scorer failures during a run pass images through. In the
 Vehicle and Stream menus, `v` continues to play the selected camera.
