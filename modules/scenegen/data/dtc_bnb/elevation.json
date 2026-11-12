@@ -1,0 +1,9 @@
+{
+ "grid_n": 128,
+ "side_m": 100.0,
+ "zoom": 15,
+ "row0": "south",
+ "origin_alt_m": 91.47,
+ "min_m": 91.08,
+ "max_m": 92.14
+}

@@ -1,0 +1,91 @@
+{
+ "name": "dtc_bnb",
+ "center_lat": 30.5741444,
+ "center_lon": -96.2858192,
+ "side_m": 100,
+ "origin_alt_m": 91.47,
+ "imagery": {
+  "source": "google",
+  "zoom": 19,
+  "file": "satellite.jpg",
+  "width_px": 390,
+  "height_px": 391,
+  "m_per_px": 0.2571,
+  "origin_px": 31210714,
+  "origin_py": 55126819
+ },
+ "elevation": {
+  "grid_n": 128,
+  "side_m": 100,
+  "zoom": 15,
+  "row0": "south",
+  "origin_alt_m": 91.47,
+  "min_m": 91.08,
+  "max_m": 92.14
+ },
+ "fiducial": {
+  "east_m": 0,
+  "north_m": 0,
+  "diameter_m": 0.5,
+  "placed_east_m": 0,
+  "placed_north_m": 0
+ },
+ "buildings": [],
+ "vehicles": [],
+ "targets": [
+  {
+   "name": "casualty_m1",
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual",
+   "id": "t_manual_1",
+   "east_m": -7.64,
+   "north_m": -7.71
+  },
+  {
+   "name": "casualty_m2",
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual",
+   "id": "t_manual_2",
+   "east_m": -7.02,
+   "north_m": -6.69
+  },
+  {
+   "name": "casualty_m3",
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual",
+   "id": "t_manual_3",
+   "east_m": -7.25,
+   "north_m": 4.78
+  },
+  {
+   "name": "casualty_m4",
+   "agl_m": null,
+   "on_building": true,
+   "yaw_deg": null,
+   "model_uri": null,
+   "enabled": true,
+   "source": "manual",
+   "id": "t_manual_4",
+   "east_m": -8.07,
+   "north_m": 4.04
+  }
+ ],
+ "trees": [],
+ "tree_areas": [],
+ "flatten_zones": [],
+ "geofences": [],
+ "exclusion_zones": [],
+ "format": "scenegen-scene/1"
+}
