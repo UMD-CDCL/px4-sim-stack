@@ -2116,13 +2116,14 @@ vlm-filter)
 camera)
 	[ $# -eq 1 ] || die "Use: ./px4sim camera day|night"
 	case "$1" in
-	day) camera=rgb ;;
-	night) camera=thermal ;;
+	day) camera=rgb; vlm_gate=on ;;
+	night) camera=thermal; vlm_gate=off ;;
 	*) die "Camera mode must be day or night, not '$1'." ;;
 	esac
 	env_write_selection ONBOARD_CAMERA "$camera"
-	say "Selected $1 camera mode ($camera) for every vehicle"
-	push_env_selection_to_drones ONBOARD_CAMERA "$camera"
+	env_write_selection VLM_GATE "$vlm_gate"
+	say "Selected $1 camera mode ($camera), VLM gate $vlm_gate, for every vehicle"
+	push_env_selection_to_drones ONBOARD_CAMERA "$camera" VLM_GATE "$vlm_gate"
 	;;
 
 scenario)
